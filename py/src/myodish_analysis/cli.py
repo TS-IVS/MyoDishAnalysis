@@ -126,6 +126,64 @@ def main(argv=None):
     return 0
 
 
+def watch_main(argv=None):
+    """mda-watch: analyse new recordings of a folder (see myodish_analysis.watch)."""
+    from . import __version__
+    from .watch import watch
+    ap = argparse.ArgumentParser(
+        prog="mda-watch", formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Analyse new MyoDish recordings (.mdd) of a folder and its subfolders: every contraction of the "
+                    "whole recording, summary per time bin, stimulation protocols; index and report in the results "
+                    "folder. Recordings analysed with another version, other options or changed core code are "
+                    "analysed again (--reanalyze outdated). Same as MyoDishAnalysisWatch.m.",
+        epilog="Examples:\n  mda-watch /data/myodish/raw /data/myodish/results --rocker-filter\n"
+               "  mda-watch raw results --from-date 2026-10-01 --dry-run\n"
+               "  mda-watch raw results --interval 24          (one pass every 24 h, Ctrl+C stops)\n"
+               "Daily by the operating system: cron (Linux/macOS), launchd (macOS) or the Windows task scheduler.")
+    ap.add_argument("--version", action="version", version=f"MyoDishAnalysis (Python) {__version__}")
+    ap.add_argument("raw", help="folder with the recordings (subfolders are searched)")
+    ap.add_argument("results", help="results folder (index mda_index.csv, results per recording, reports/)")
+    ap.add_argument("--interval", type=float, default=0, help="hours between passes (default 0 = one pass)")
+    ap.add_argument("--reanalyze", choices=["outdated", "new", "all"], default="outdated",
+                    help="outdated (default): new, changed and outdated recordings; new: only new and changed; all")
+    ap.add_argument("--retry-errors", action="store_true", help="analyse recordings with errors again")
+    ap.add_argument("--from-date", help="only recordings modified on/after this date (yyyy-mm-dd, dd.mm.yyyy, yymmdd)")
+    ap.add_argument("--filter", help="regular expression on the path relative to the raw folder")
+    ap.add_argument("--max-files", type=int, help="at most this number of recordings per pass")
+    ap.add_argument("--dry-run", action="store_true", help="only list what would be analysed")
+    ap.add_argument("--min-age", type=float, default=10, help="minutes since the last change (default 10)")
+    ap.add_argument("--incomplete-after", type=float, default=30,
+                    help="hours after which a recording without 'Recording stopped' is analysed (default 30)")
+    ap.add_argument("--bin-minutes", type=float, default=60, help="time bin of the summary in min (default 60)")
+    ap.add_argument("--no-protocols", action="store_true", help="no analysis of the stimulation protocols")
+    ap.add_argument("--rocker", choices=["any", "stopped", "moving"])
+    ap.add_argument("--beats", choices=["all", "stimulated"])
+    ap.add_argument("--threshold", type=float, nargs="+", help="detection threshold (uN), one value or one per channel")
+    ap.add_argument("--rocker-filter", action="store_true", help="remove the periodic rocker artifact")
+    ap.add_argument("--set", nargs="+", default=[], metavar="NAME=VALUE", help="further analysis options")
+    ap.add_argument("--quiet", action="store_true")
+    a = ap.parse_args(argv)
+    kw = {}
+    if a.rocker:
+        kw["rocker"] = a.rocker
+    if a.beats:
+        kw["beats"] = a.beats
+    if a.threshold is not None:
+        kw["threshold"] = a.threshold[0] if len(a.threshold) == 1 else a.threshold
+    if a.rocker_filter:
+        kw["rockerFilter"] = True
+    for s in a.set:
+        if "=" not in s:
+            ap.error(f"--set: NAME=VALUE expected, not '{s}'")
+        k, v = s.split("=", 1)
+        kw[k] = [_value(x) for x in v.split(",")] if "," in v else _value(v)
+    watch(a.raw, a.results, interval=a.interval, reanalyze=a.reanalyze, retry_errors=a.retry_errors,
+          from_date=a.from_date, filter=a.filter, max_files=a.max_files, dry_run=a.dry_run,
+          min_file_age_minutes=a.min_age, incomplete_after_hours=a.incomplete_after, bin_minutes=a.bin_minutes,
+          protocols=not a.no_protocols, quiet=a.quiet, **kw)
+    return 0
+
+
 def selftest_main():
     from .selftest import main as m
     m()

@@ -54,4 +54,4 @@ jobs:
       - uses: matlab-actions/setup-matlab@v2
       - uses: matlab-actions/run-command@v2
         with:
-          command: addpath(pwd); assert(mda_test(), 'mda_test failed')
+          command: addpath(pwd); assert(mda_test(), 'mda_test failed'); assert(mda_testWatch(), 'mda_testWatch failed')

@@ -64,7 +64,7 @@ analysisDate = datestr(now, 'yyyy-mm-dd HH:MM:SS');
 if isfield(info, 'analysisDate'), analysisDate = info.analysisDate; end
 infoVals = [{info.file; num2str(info.samplingRate); info.samplingRateSource; num2str(info.nChannelsInFile); ...
     sprintf('%.3f', info.totalSeconds); startStr; analysisDate; ...
-    'MyoDishAnalysis 1.0.0-beta.1 (MATLAB, T. Seidel, FAU Erlangen-Nuernberg)'; strjoin(info.notes, ' | ')}; vals];
+    ['MyoDishAnalysis ' mda_version() ' (MATLAB, T. Seidel, FAU Erlangen-Nuernberg)']; strjoin(info.notes, ' | ')}; vals];
 % zero force (Offset) and Calibration entries of the log file, per channel (first and last value)
 logKeys = {}; logVals = {};
 if isfield(info, 'offsetLog')

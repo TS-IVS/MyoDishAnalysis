@@ -96,6 +96,7 @@ def read_header(mdd_file, opts=None):
     L = read_log(H.logFile)
     H.recordingStart = L.startDatenum
     H.programVersion = L.programVersion
+    H.recordingStopped = L.recordingStopped  # True / False / None (2026-10-08)
     H.offsetLog = L.offsetEvents
     H.calibrationLog = L.calibrationEvents
     H.rockerSpeedLog = L.rockerSpeedEvents
@@ -453,7 +454,7 @@ def read_log(log_file):
     L = Struct(samplingRate=math.nan, recordingDuration=math.nan, nChannelsController=math.nan,
                singleChannelMode=None, extendedSensorModeEvents=np.zeros((0, 2)), startDatenum=math.nan,
                programVersion="", offsetEvents=np.zeros((0, 3)), calibrationEvents=np.zeros((0, 3)),
-               rockerSpeedEvents=np.zeros((0, 2)))
+               rockerSpeedEvents=np.zeros((0, 2)), recordingStopped=None)
     txt = read_log_text(log_file)
     if txt is None:
         return L
@@ -461,6 +462,11 @@ def read_log(log_file):
     nValid = 0
     tStart = tStop = tStartPar = tStopPar = math.nan
     sysStart = sysStartPar = sysFirst = ""
+    # 2026-10-08: state of the last 'Recording' entry (1 started, 0 stopped) for this file (name in the entry), for
+    # the main recording and for parallel recordings
+    own = os.path.splitext(os.path.basename(log_file))[0]
+    own = (own[:-4] if own.endswith("_log") else own).lower() + ".mdd"
+    lastOwn = lastMain = lastPar = None
     tFirst = math.nan
     ext, offs, cal, rck = [], [], [], []  # last column: line number
     lineStart = lineStartPar = math.nan
@@ -498,6 +504,14 @@ def read_log(log_file):
                     tStopPar = tsec
                 else:
                     tStop = tsec
+            st = 1 if "started" in lv else (0 if "stopped" in lv else None)
+            if st is not None:
+                if own in lv:
+                    lastOwn = st
+                if par:
+                    lastPar = st
+                else:
+                    lastMain = st
         elif lc == "event" and "extended sensor mode" in lv:
             ext.append([tsec, float("off" not in lv), i])
         elif lc in ("offset", "calibration"):
@@ -528,6 +542,10 @@ def read_log(log_file):
             tMaxPar = max(tMaxPar, tsec)
     if nValid == 0:
         return L
+    for last in (lastOwn, lastMain, lastPar):
+        if last is not None:
+            L.recordingStopped = last == 0
+            break
     # entries of the main recording have priority over 'parallel recording' entries (schedule files)
     if math.isnan(tStart) and math.isnan(tStop):
         tStart = tStartPar; tStop = tStopPar; sysStart = sysStartPar

@@ -34,6 +34,7 @@ all = ["PySide6>=6.5", "pyqtgraph>=0.13.3", "pytest>=7"]
 [project.scripts]
 mda = "myodish_analysis.cli:main"
 mda-test = "myodish_analysis.cli:selftest_main"
+mda-watch = "myodish_analysis.cli:watch_main"
 
 [project.gui-scripts]
 mda-gui = "myodish_analysis.gui:main"

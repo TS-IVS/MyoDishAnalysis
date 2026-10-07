@@ -38,7 +38,9 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               offsetLog / calibrationLog ([time channel value] of the 'Offset' / 'Calibration' entries of the log;
 %               time -Inf = logged before the recording start), calibrationApplied, extendedSensorFactor,
 %               rockerSpeedLog ([time rpm]), rockerSource ('status channel' or 'log'), rockerLogIntervals
-%               ([from to] in s with rocker speed > 0 according to the log file)
+%               ([from to] in s with rocker speed > 0 according to the log file), recordingStopped (1 = the log
+%               file ends with 'Recording stopped' for this file, 0 = recording still running or aborted, NaN = no
+%               'Recording' entries; used by MyoDishAnalysisWatch to skip recordings that are still running)
 %   data:       t (1 x n, s; centre of the averaged raw samples, first raw sample = 0 s), dt,
 %               force (numel(dataChannels) x n, uN), rockerOn (1 x n logical),
 %               stim (struct with fields time, channel, current, currentReached, external, isExtraPulse,
@@ -87,6 +89,7 @@ H.notes = {};
 L = readLog(H.logFile);
 H.recordingStart = L.startDatenum;
 H.programVersion = L.programVersion;
+H.recordingStopped = L.recordingStopped; %1 / 0 / NaN (2026-10-08)
 H.offsetLog = L.offsetEvents;          %[time channel value]: sensor signal without load ('Offset' entries)
 H.calibrationLog = L.calibrationEvents; %[time channel value]: 'Calibration' entries (AU per mN)
 H.rockerSpeedLog = L.rockerSpeedEvents; %[time rpm]: 'rockerSpeed' entries (0 = stop)
@@ -447,7 +450,8 @@ function L = readLog(logFile)
 % the facts needed from the MyoDish log file (lines: systemTime;dataLogTime_ms;channel;code;value)
 L = struct('samplingRate',nan,'recordingDuration',nan,'nChannelsController',nan,'singleChannelMode',[], ...
     'extendedSensorModeEvents',zeros(0,2),'startDatenum',nan,'programVersion','', ...
-    'offsetEvents',zeros(0,3),'calibrationEvents',zeros(0,3),'rockerSpeedEvents',zeros(0,2));
+    'offsetEvents',zeros(0,3),'calibrationEvents',zeros(0,3),'rockerSpeedEvents',zeros(0,2), ...
+    'recordingStopped',nan);
 if ~exist(logFile,'file'), return; end
 % MyoDish logs are UTF-16 little endian (with byte order mark); converted copies may be UTF-8
 fid = fopen(logFile, 'r');
@@ -468,6 +472,11 @@ sysStart = ''; sysStartPar = ''; sysFirst = ''; tFirst = nan;
 ext = zeros(0,3); offs = zeros(0,4); cal = zeros(0,4); rck = zeros(0,3);  %last column: line number
 lineStart = nan; lineStartPar = nan;
 tMax = -inf; tMaxPar = -inf;                        %latest dataLogTime since the chosen start line
+% 2026-10-08: state of the last 'Recording' entry (1 started, 0 stopped) for this file (name in the entry), for the
+% main recording and for parallel recordings
+[~, ownName] = fileparts(logFile);
+ownName = lower([regexprep(ownName, '_log$', '') '.mdd']);
+lastOwn = nan; lastMain = nan; lastPar = nan;
 for i = 1:numel(lines)
     f = strsplit(lines{i}, ';');
     if numel(f) < 5, continue; end
@@ -495,6 +504,12 @@ for i = 1:numel(lines)
             end
         elseif contains(value,'stopped','IgnoreCase',true)
             if par, tStopPar = tsec; else, tStop = tsec; end
+        end
+        st = nan;
+        if contains(value,'started','IgnoreCase',true), st = 1; elseif contains(value,'stopped','IgnoreCase',true), st = 0; end
+        if ~isnan(st)
+            if contains(lower(value), ownName), lastOwn = st; end
+            if par, lastPar = st; else, lastMain = st; end
         end
     elseif strcmpi(code,'Event') && contains(value,'extended sensor mode','IgnoreCase',true)
         ext(end+1,:) = [tsec, double(~contains(value,'off','IgnoreCase',true)), i]; %#ok<AGROW>
@@ -525,6 +540,13 @@ for i = 1:numel(lines)
     if ~isnan(lineStartPar), tMaxPar = max(tMaxPar, tsec); end
 end
 if nValid == 0, return; end
+if ~isnan(lastOwn)
+    L.recordingStopped = double(lastOwn == 0);
+elseif ~isnan(lastMain)
+    L.recordingStopped = double(lastMain == 0);
+elseif ~isnan(lastPar)
+    L.recordingStopped = double(lastPar == 0);
+end
 % entries of the main recording have priority over 'parallel recording' entries (schedule files)
 if isnan(tStart) && isnan(tStop)
     tStart = tStartPar; tStop = tStopPar; sysStart = sysStartPar;
