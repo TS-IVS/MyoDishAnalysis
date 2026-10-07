@@ -8,7 +8,8 @@ function opts = mda_options(varargin)
 % Names are not case sensitive. Unknown names raise an error (typos are not silently ignored).
 %
 % DETECTION OF CONTRACTIONS
-%   'threshold'        'auto' (default) or a number [uN]: minimum prominence of a contraction peak
+%   'threshold'        'auto' (default) or a number [uN]: minimum prominence of a contraction peak; MyoDishAnalysis
+%                      also takes one value per channel (NaN = auto for that channel)
 %   'relThreshold'     auto threshold: at most this fraction of the typical contraction amplitude (default 0.3)
 %   'minThreshold'     auto threshold: never lower than this [uN] (default 30)
 %   'minBeatInterval'  minimum time between two contraction peaks [s] (default 0.15, i.e. up to ~6.7 Hz)
@@ -132,9 +133,14 @@ while i <= numel(args)
 end
 
 % checks
-if ischar(opts.threshold) || isstring(opts.threshold)
-    if ~strcmpi(opts.threshold,'auto'), error('mda_options: ''threshold'' must be ''auto'' or a number.'); end
+thr0 = opts.threshold;
+if isempty(thr0) || ((ischar(thr0) || isstring(thr0)) && strlength(strtrim(string(thr0))) == 0)
     opts.threshold = 'auto';
+elseif ischar(thr0) || isstring(thr0)
+    if ~strcmpi(thr0,'auto'), error('mda_options: ''threshold'' must be ''auto'' or a number.'); end
+    opts.threshold = 'auto';
+elseif ~isnumeric(opts.threshold) || any(opts.threshold(:) <= 0)
+    error('mda_options: ''threshold'' must be ''auto'', a positive number or one number per channel (NaN = auto).');
 end
 opts.beats = lower(char(opts.beats));
 if ~ismember(opts.beats,{'all','stimulated'}), error('mda_options: ''beats'' must be ''all'' or ''stimulated''.'); end

@@ -15,6 +15,10 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %    rocker at rest). Drag in the overview (or type From/To and press Load) to load a time window.
 %    Mouse wheel over the overview or the force plot: zoom the time axis (shift + wheel: move); double-click:
 %    whole file / whole loaded window. The zoomed overview is re-read in more detail.
+%    Arrow keys (click into a plot first): left / right = move the time axis by half its length, shift + left / right
+%    = extend it by half its length on that side, up / down = zoom in / out. Mouse pointer over the overview: its
+%    time axis; otherwise the force plot: beyond the loaded window, the loaded window follows (read again; blue
+%    window in the overview) and the overview moves along when the window leaves its zoomed part.
 % 2. The force plot shows the loaded window (force - zero force, if the zero force is known): detected contractions
 %    (red = selected, grey = excluded by the filters, black x = excluded by you), stimuli (blue ticks), rocker moving
 %    (grey background). The stimulus plot below shows the current of every stimulus pulse (mA; green = extra pulse,
@@ -26,7 +30,11 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 % 3. The table shows mean and SD of the selected contractions; the lower plot shows one parameter (list 'Lower plot') per
 %    contraction over time. 'Export this channel' writes all contractions of the range (column 'included')
 %    and the summary to .xlsx or .csv. 'All channels -> file' analyses the range in all channels with the
-%    same settings (without your manual exclusions).
+%    same settings (without your manual exclusions). The detection threshold is set per channel (auto or manual).
+%    'Overlay contractions': mean beat of the selected contractions (aligned at the stimulus or the peak) or the time
+%    course of the range (t = 0 at the first stimulus); other channels of the same range by checkboxes; colour, line
+%    width, line style and SD / SEM / range band per group; editable title, axis labels and legend; 'Edit figure ...'
+%    = copy with the MATLAB plot tools.
 %
 % 4. '+ EP recording ...': an electrophysiological recording made in parallel with LabChart (.mat export, e.g. sharp
 %    electrode: voltage + stimulation channel) is aligned to the stimuli of the .mdd file (mda_readEPRecording:
@@ -42,7 +50,8 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %
 % Parameter definitions: mda_parameters / README. Command line version: MyoDishAnalysis.
 % Requires MATLAB R2019b or newer, no toolboxes.
-% Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05 (EP recordings 2026-10-06, protocols 2026-10-07)
+% Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05 (EP recordings 2026-10-06, protocols 2026-10-07;
+% threshold per channel, arrow keys, overlay of channels / styles / bands 2026-10-07)
 
 if nargin < 1, mddFile = ''; end
 if nargin < 2, metadata = []; end
@@ -53,6 +62,7 @@ ch = 1;
 range = [nan nan];
 manualOff = zeros(0,1);            %t_peak of the contractions excluded by the user
 zeroUser = nan(1, 8);              %zero force per channel entered by the user (NaN = 'Offset' of the log file)
+thrUser = nan(1, 8);               %detection threshold per channel entered by the user (NaN = auto)
 Lbl = [];                          %labels per channel (table, see mda_labels)
 relTime = false;                   %time axes of the loaded window: 0 = start of the window (display only)
 hLblFig = [];
@@ -62,6 +72,12 @@ comView = []; comRow = [];         %rows of LE shown in the comment window, sele
 hiT = nan;                         %time of the comment last jumped to (highlighted)
 ovG = [];                          %overlay: one group per added selection (segments around the contractions)
 hOv = [];                          %overlay window and its controls
+ovNextColor = 0;                   %overlay: number of groups added (default colour of the next group)
+ovLineStyles = {'-', '--', ':', '-.'}; ovLineNames = {'solid', 'dashed', 'dotted', 'dash-dot'};
+ovBands = {'none', 'SD', 'SEM', 'range'};
+ovBandNames = {'no band', 'band: mean +- SD', 'band: mean +- SEM', 'band: range (min - max)'};
+ovLegendNames = {'top right', 'top left', 'bottom right', 'bottom left', 'off'};
+ovLegendLoc = {'northeast', 'northwest', 'southeast', 'southwest', ''};
 lastDir = '';                      %folder of the last saved figure / exported data
 altPt = [nan nan];                 %force plot: position of the last right click (x = s, y = displayed force)
 hTr = []; trFiles = []; trData = []; trCache = [];   %trend window: handles, files (concatenated), contractions, cache
@@ -101,7 +117,7 @@ tmr = [];                          %timer: reads the detailed overview after zoo
 % ------------------------------------------------------------------ figure and controls
 fig = figure('Name', 'MyoDishAnalysis', 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
     'Position', [40 40 1450 880], 'MenuBar', 'none', 'ToolBar', 'figure', 'WindowButtonDownFcn', @onMouseDown, ...
-    'WindowScrollWheelFcn', @onScroll, 'DeleteFcn', @onClose);
+    'WindowScrollWheelFcn', @onScroll, 'WindowKeyPressFcn', @onKey, 'DeleteFcn', @onClose);
 movegui(fig, 'onscreen');
 dflt = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
 
@@ -181,9 +197,14 @@ uicontrol(bg, dflt{:}, 'Style', 'radiobutton', 'String', 'click = exclude / incl
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Labels ...', 'Position', [0.03 0.835 0.46 0.04], 'Callback', @onLabels, ...
     'TooltipString', 'labels per channel: setupID, sliceID, species, sampleID, groups, treatment, days in culture, analyst ...');
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Range = loaded window', 'Position', [0.51 0.835 0.46 0.04], 'Callback', @onWholeWindow);
-uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', ['Detection threshold (' mu 'N)'], 'HorizontalAlignment', 'left', 'Position', [0.03 0.79 0.5 0.03]);
-hThrMode = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'auto','manual'}, 'Position', [0.52 0.795 0.22 0.035], 'Callback', @onThreshold);
-hThr = uicontrol(pnl, dflt{:}, 'Style', 'edit', 'String', '', 'Position', [0.76 0.795 0.21 0.035], 'Callback', @onThresholdValue);
+thrTip = ['minimum prominence of a contraction peak, per channel: auto or a manual value for the selected channel ' ...
+    '(kept when you switch channels; also used for All channels, Protocols and Trend)'];
+uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', ['Threshold, this ch. (' mu 'N)'], 'HorizontalAlignment', 'left', 'Position', [0.03 0.79 0.5 0.03], ...
+    'TooltipString', thrTip);
+hThrMode = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'auto','manual'}, 'Position', [0.52 0.795 0.22 0.035], 'Callback', @onThreshold, ...
+    'TooltipString', thrTip);
+hThr = uicontrol(pnl, dflt{:}, 'Style', 'edit', 'String', '', 'Position', [0.76 0.795 0.21 0.035], 'Callback', @onThresholdValue, ...
+    'TooltipString', thrTip);
 uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', ['Zero force (' mu 'N)'], 'HorizontalAlignment', 'left', 'Position', [0.03 0.75 0.5 0.03], ...
     'TooltipString', 'sensor signal without load; diastolic force = diastolic signal - zero force. Empty = Offset entry of the log file');
 hZero = uicontrol(pnl, dflt{:}, 'Style', 'edit', 'String', '', 'Position', [0.52 0.755 0.22 0.035], 'Callback', @onZero, ...
@@ -200,7 +221,8 @@ hCounts = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlig
 hTable = uitable(pnl, 'Units', 'normalized', 'Position', [0.03 0.215 0.94 0.27], 'RowName', [], ...
     'ColumnName', {'parameter','mean','SD','n','unit'}, 'ColumnWidth', {108, 66, 60, 38, 42}, 'FontSize', 9);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Overlay contractions', 'Position', [0.03 0.165 0.46 0.04], 'Callback', @onOverlay, ...
-    'TooltipString', 'overlay of the selected contractions; press again (or Add in the overlay window) to add another selection as a new group');
+    'TooltipString', ['overlay of the selected contractions (mean beat or time course); press again (or Add in the overlay window) to add ' ...
+    'another selection as a new group; other channels of the same range: Channels ... in the overlay window']);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Show table', 'Position', [0.51 0.165 0.46 0.04], 'Callback', @onShowTable);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Export this channel ...', 'Position', [0.03 0.12 0.46 0.04], 'Callback', @onExport);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'All channels -> file ...', 'Position', [0.51 0.12 0.46 0.04], 'Callback', @onAllChannels);
@@ -210,9 +232,12 @@ hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.
 
 % functions for scripts / tests: api = fig.UserData; api.setRange([t1 t2]); api.toggleAt(t);
 % [contractions, summary] = api.results();  api.epRecording(matFile) (show; '' = remove);  EP = api.epRecordingData();
+% api.overlayChannels([1 2 3]) (overlay of the analysed range in these channels); [groups, h] = api.overlay();
+% api.key('rightarrow', {'shift'}) (arrow key as typed in the force plot)
 fig.UserData = struct('setRange', @apiSetRange, 'toggleAt', @toggleContraction, 'results', @apiResults, ...
     'setLabels', @apiSetLabels, 'labels', @apiLabels, 'zeroAt', @apiZeroAt, ...
-    'epRecording', @openEP, 'epRecordingData', @apiEP);
+    'epRecording', @openEP, 'epRecordingData', @apiEP, ...
+    'overlayChannels', @setOverlayChannels, 'overlay', @apiOverlay, 'key', @apiKey);
 
 emptyPlots();
 if ~isempty(mddFile)
@@ -246,7 +271,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         catch ME
             status(['Error: ' ME.message]); return;
         end
-        S = []; O = []; B = []; C = []; manualOff = zeros(0,1); zeroUser = nan(1, 8); Od = []; ovXL = [];
+        S = []; O = []; B = []; C = []; manualOff = zeros(0,1); zeroUser = nan(1, 8); thrUser = nan(1, 8); Od = []; ovXL = [];
+        hThrMode.Value = 1; hThr.String = '';
         rfCtx = []; rfCache = {}; rfF0 = [];
         if ~isempty(EP), EP = []; showEP(false); end     %the EP recording belongs to the previous file
         [~, n, e] = fileparts(H.file);
@@ -338,13 +364,15 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if isempty(H), return; end
         ch = H.dataChannels(hCh.Value);
         manualOff = zeros(0,1);
+        showThreshold();
         plotOverview();
         if ~isempty(S), analyze(false); end
     end
 
+    % detection threshold per channel (2026-10-07): auto or a manual value for each channel
     function onThreshold(~, ~)
         if hThrMode.Value == 1
-            opts.threshold = 'auto';
+            thrUser(ch) = nan;
             if ~isempty(S), analyze(false); end
         else
             onThresholdValue();
@@ -354,12 +382,27 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function onThresholdValue(~, ~)
         v = str2double(hThr.String);
         if isnan(v) || v <= 0
-            if ~isnumeric(opts.threshold), hThrMode.Value = 1; end   %display = the threshold actually used
+            if isnan(thrUser(ch)), hThrMode.Value = 1; end  %display = the threshold actually used
             status('Threshold: enter a positive number (uN).'); return;
         end
         hThrMode.Value = 2;
-        opts.threshold = v;
+        thrUser(ch) = v;
         if ~isempty(S), analyze(false); end
+    end
+
+    function showThreshold()
+        % threshold controls of the selected channel (auto: value shown after the detection)
+        if isnan(thrUser(ch))
+            hThrMode.Value = 1; hThr.String = '';
+        else
+            hThrMode.Value = 2; hThr.String = sprintf('%g', thrUser(ch));
+        end
+    end
+
+    function th = thrOf(chs)
+        % thresholds of channels chs for the analysis functions: 'auto' or one value per channel (NaN = auto)
+        th = thrUser(chs);
+        if all(isnan(th)), th = 'auto'; end
     end
 
     function onRockerFilter(~, ~)
@@ -424,81 +467,232 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         refresh(false);
     end
 
-    % ---------------------------------------------------------------- overlay of contractions (several selections)
+    % ---------------------------------------------------------------- overlay of contractions (several selections / channels)
+    % 2026-10-07: other channels of the same range (checkboxes), time course of the range (t = 0 at the first stimulus),
+    % colour, line width, line style and band (SD / SEM / range) per group, editable title, axis labels and legend,
+    % editable copy of the figure
     function onOverlay(~, ~)
         % opens the overlay window with the current selection, or adds the current selection as a new group
         if ~isempty(hOv) && isvalid(hOv.fig)
             if addOverlayGroup(), drawOverlay(); end
             figure(hOv.fig); return;
         end
-        ovG = [];
+        ovG = []; ovNextColor = 0;
         if ~addOverlayGroup(), return; end
+        openOverlayWindow();
+    end
+
+    function openOverlayWindow()
         f2 = figure('Name', 'MyoDishAnalysis: overlay', 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
-            'Position', [160 120 1100 620], 'DeleteFcn', @(~,~) clearOverlayState());
+            'Position', [140 90 1200 720], 'DeleteFcn', @(~,~) clearOverlayState());
+        movegui(f2, 'onscreen');
         d = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
-        axO = axes(f2, 'Position', [0.07 0.1 0.62 0.82]); box(axO, 'on');
-        uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Groups (one per added selection):', 'HorizontalAlignment', 'left', 'Position', [0.72 0.92 0.27 0.04]);
-        lb = uicontrol(f2, d{:}, 'Style', 'listbox', 'String', {}, 'Position', [0.72 0.6 0.27 0.32], 'FontSize', 9);
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Add current selection', 'Position', [0.72 0.54 0.27 0.05], ...
+        axO = axes(f2, 'Position', [0.07 0.2 0.6 0.74]); box(axO, 'on');
+        uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Groups (one per added selection or channel):', 'HorizontalAlignment', 'left', ...
+            'Position', [0.7 0.945 0.29 0.035]);
+        lb = uicontrol(f2, d{:}, 'Style', 'listbox', 'String', {}, 'Position', [0.7 0.7 0.29 0.245], 'FontSize', 9, ...
+            'Callback', @(~,~) showGroupStyle());
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Add current selection', 'Position', [0.7 0.645 0.14 0.045], ...
             'Callback', @(~,~) addAndDraw(), 'TooltipString', 'contractions selected in the main window (channel, range, filters, exclusions)');
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Remove group', 'Position', [0.72 0.48 0.13 0.05], 'Callback', @(~,~) removeGroup());
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Clear all', 'Position', [0.86 0.48 0.13 0.05], 'Callback', @(~,~) clearGroups());
-        al = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', {'align at the stimulus (t = 0)', 'align at the peak (t = 0)'}, ...
-            'Position', [0.72 0.41 0.27 0.05], 'Callback', @(~,~) drawOverlay());
-        c1 = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'single contractions', 'Value', 1, 'Position', [0.72 0.355 0.27 0.04], 'Callback', @(~,~) drawOverlay());
-        c2 = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'subtract diastolic force (developed force)', 'Value', 1, 'Position', [0.72 0.31 0.27 0.04], 'Callback', @(~,~) drawOverlay());
-        c3 = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'normalize (amplitude = 1)', 'Value', 0, 'Position', [0.72 0.265 0.27 0.04], 'Callback', @(~,~) drawOverlay());
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [0.72 0.19 0.13 0.05], 'Callback', @(~,~) saveOverlayFigure(), ...
-            'TooltipString', '.png / .jpg / .tif / .fig');
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Export data ...', 'Position', [0.86 0.19 0.13 0.05], 'Callback', @(~,~) exportOverlay(), ...
-            'TooltipString', 'mean, SD, n and all single traces of every group: .xlsx / .csv / .txt');
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Channels (same range) ...', 'Position', [0.85 0.645 0.14 0.045], ...
+            'Callback', @(~,~) chooseChannels(), 'TooltipString', ['channels for the analysed range of the main window (checkboxes): ' ...
+            'same settings and filters, threshold and zero force of each channel; manual exclusions only in the channel of the main window']);
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Remove group', 'Position', [0.7 0.595 0.14 0.045], 'Callback', @(~,~) removeGroup());
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Clear all', 'Position', [0.85 0.595 0.14 0.045], 'Callback', @(~,~) clearGroups());
+        al = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', {'mean beat: align at the stimulus (t = 0)', ...
+            'mean beat: align at the peak (t = 0)', 'time course of the range: t = 0 at the first stimulus'}, ...
+            'Position', [0.7 0.545 0.29 0.04], 'Callback', @(~,~) drawOverlay(), 'TooltipString', ...
+            'time course: force of the whole range of each group, t = 0 at its first stimulus (the channels are not stimulated at the same time)');
+        c1 = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'single contractions', 'Value', 1, 'Position', [0.7 0.505 0.29 0.035], ...
+            'Callback', @(~,~) drawOverlay());
+        c2 = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'subtract diastolic force (developed force)', 'Value', 1, ...
+            'Position', [0.7 0.47 0.29 0.035], 'Callback', @(~,~) drawOverlay());
+        c3 = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'normalize (amplitude = 1)', 'Value', 0, 'Position', [0.7 0.435 0.29 0.035], ...
+            'Callback', @(~,~) drawOverlay());
+        pG = uipanel(f2, 'Position', [0.7 0.215 0.29 0.21], 'Title', 'Selected group: legend, line, band', 'BackgroundColor', 'w', 'FontSize', 9);
+        uicontrol(pG, d{:}, 'Style', 'text', 'String', 'legend', 'HorizontalAlignment', 'left', 'Position', [0.03 0.72 0.18 0.17]);
+        gName = uicontrol(pG, d{:}, 'Style', 'edit', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.21 0.74 0.76 0.18], ...
+            'Callback', @(s,~) setGroupStyle('name', s.String), 'TooltipString', 'legend text of the group (empty = automatic)');
+        uicontrol(pG, d{:}, 'Style', 'pushbutton', 'String', 'colour ...', 'Position', [0.03 0.51 0.26 0.18], 'Callback', @(~,~) pickGroupColor());
+        uicontrol(pG, d{:}, 'Style', 'text', 'String', 'width', 'HorizontalAlignment', 'right', 'Position', [0.3 0.49 0.13 0.17]);
+        gWidth = uicontrol(pG, d{:}, 'Style', 'edit', 'String', '2', 'Position', [0.44 0.51 0.13 0.18], ...
+            'Callback', @(s,~) setGroupStyle('width', str2double(s.String)), 'TooltipString', 'line width of the mean (points)');
+        gLine = uicontrol(pG, d{:}, 'Style', 'popupmenu', 'String', ovLineNames, 'Position', [0.6 0.51 0.37 0.18], ...
+            'Callback', @(s,~) setGroupStyle('style', ovLineStyles{s.Value}));
+        gBand = uicontrol(pG, d{:}, 'Style', 'popupmenu', 'String', ovBandNames, 'Position', [0.03 0.28 0.94 0.18], ...
+            'Callback', @(s,~) setGroupStyle('band', ovBands{s.Value}), 'TooltipString', 'transparent band around the mean (mean beat)');
+        uicontrol(pG, d{:}, 'Style', 'pushbutton', 'String', 'line and band for all groups', 'Position', [0.03 0.05 0.94 0.18], ...
+            'Callback', @(~,~) styleToAll(), 'TooltipString', 'width, line style and band of the selected group for all groups (colours and legends stay)');
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [0.7 0.155 0.093 0.045], ...
+            'Callback', @(~,~) saveOverlayFigure(), 'TooltipString', '.png / .jpg / .tif / .fig');
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Export data ...', 'Position', [0.798 0.155 0.093 0.045], ...
+            'Callback', @(~,~) exportOverlay(), 'TooltipString', ...
+            'mean, SD, SEM, min, max, n and all single traces of every group (time course: the traces): .xlsx / .csv / .txt');
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Edit figure ...', 'Position', [0.896 0.155 0.094 0.045], ...
+            'Callback', @(~,~) editOverlayFigure(), 'TooltipString', ...
+            'copy of the plot as a normal MATLAB figure: edit everything (texts, lines, axes, legend) with the plot tools, save from its menu');
+        % texts of the figure (empty = automatic)
+        uicontrol(f2, d{:}, 'Style', 'text', 'String', 'title', 'HorizontalAlignment', 'right', 'Position', [0.005 0.083 0.04 0.03]);
+        eT = uicontrol(f2, d{:}, 'Style', 'edit', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.05 0.085 0.4 0.038], ...
+            'Callback', @(~,~) drawOverlay(), 'TooltipString', 'title of the plot (empty = automatic)');
+        uicontrol(f2, d{:}, 'Style', 'text', 'String', 'legend', 'HorizontalAlignment', 'right', 'Position', [0.455 0.083 0.05 0.03]);
+        eL = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', ovLegendNames, 'Position', [0.51 0.087 0.16 0.038], ...
+            'Callback', @(~,~) drawOverlay(), 'TooltipString', 'position of the legend');
+        uicontrol(f2, d{:}, 'Style', 'text', 'String', 'x axis', 'HorizontalAlignment', 'right', 'Position', [0.005 0.033 0.04 0.03]);
+        eX = uicontrol(f2, d{:}, 'Style', 'edit', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.05 0.035 0.29 0.038], ...
+            'Callback', @(~,~) drawOverlay(), 'TooltipString', 'label of the x axis (empty = automatic)');
+        uicontrol(f2, d{:}, 'Style', 'text', 'String', 'y axis', 'HorizontalAlignment', 'right', 'Position', [0.345 0.033 0.04 0.03]);
+        eY = uicontrol(f2, d{:}, 'Style', 'edit', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.39 0.035 0.28 0.038], ...
+            'Callback', @(~,~) drawOverlay(), 'TooltipString', 'label of the y axis (empty = automatic)');
         mo = uimenu(f2, 'Text', 'Save / Export');
         uimenu(mo, 'Text', 'Save overlay figure (.png / .jpg / .tif / .fig) ...', 'MenuSelectedFcn', @(~,~) saveOverlayFigure());
         uimenu(mo, 'Text', 'Export overlay data (.xlsx / .csv / .txt) ...', 'MenuSelectedFcn', @(~,~) exportOverlay());
-        tx = uicontrol(f2, d{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.72 0.02 0.27 0.16], 'FontSize', 9);
-        hOv = struct('fig', f2, 'axO', axO, 'lb', lb, 'al', al, 'single', c1, 'base', c2, 'norm', c3, 'tx', tx);
+        uimenu(mo, 'Text', 'Edit figure (copy with the MATLAB plot tools) ...', 'MenuSelectedFcn', @(~,~) editOverlayFigure());
+        tx = uicontrol(f2, d{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.7 0.01 0.29 0.135], 'FontSize', 9);
+        hOv = struct('fig', f2, 'axO', axO, 'lb', lb, 'al', al, 'single', c1, 'base', c2, 'norm', c3, 'tx', tx, ...
+            'gName', gName, 'gWidth', gWidth, 'gLine', gLine, 'gBand', gBand, 'title', eT, 'xlab', eX, 'ylab', eY, 'legend', eL);
         drawOverlay();
     end
 
     function ok = addOverlayGroup()
-        % current selection of the main window --> new overlay group (segments of the filtered signal around the peaks)
+        % current selection of the main window --> new overlay group
         ok = false;
         if isempty(B) || isempty(C), status('Load a time window first.'); return; end
         sel = find(selected());
         if isempty(sel), status('No contraction selected.'); return; end
-        key = sprintf('%d|%.4f|%.4f|%d|%.6f', ch, range(1), range(2), numel(sel), sum(B.t_peak(sel)));
+        ok = addGroupOf(B, C, ch, sel);
+    end
+
+    function ok = addGroupOf(Bx, Cx, chX, sel)
+        % new overlay group of channel chX: segments of the filtered signal around the selected contractions
+        % (peak - 1 s ... peak + 1.6 s) and the force of the analysed range (time course, t = 0 at its first stimulus)
+        ok = true;
+        key = sprintf('%d|%.4f|%.4f|%d|%.6f', chX, range(1), range(2), numel(sel), sum(Bx.t_peak(sel)));
         if ~isempty(ovG) && any(strcmp({ovG.key}, key))
-            status('This selection is already in the overlay.'); ok = true; return;
+            status('This selection is already in the overlay.'); return;
         end
-        pre = round(1.0 / S.dt); post = round(1.6 / S.dt);   %stored: peak - 1 s ... peak + 1.6 s
-        [~, loc] = ismember(B.t_peak(sel), C.peakTimes);
-        idx = C.iPeaks(loc); idx = idx(:);
-        n = numel(sel); N = numel(C.f);
+        pre = round(1.0 / S.dt); post = round(1.6 / S.dt);
+        [~, loc] = ismember(Bx.t_peak(sel), Cx.peakTimes);
+        idx = Cx.iPeaks(loc); idx = idx(:);
+        n = numel(sel); N = numel(Cx.f);
         seg = nan(n, pre + post + 1);
         for k = 1:n
             a = idx(k) - pre; b = idx(k) + post;
             ia = max(1, a); ib = min(N, b);
-            seg(k, (ia - a + 1):(ib - a + 1)) = C.f(ia:ib);
+            seg(k, (ia - a + 1):(ib - a + 1)) = Cx.f(ia:ib);
         end
         G.key = key;
         G.seg = seg; G.dt = S.dt; G.pre = pre;
-        G.stimRel = reshape(B.t_stim(sel), [], 1) - reshape(C.peakTimes(loc), [], 1);   %stimulus relative to the peak (NaN: none)
-        G.dia = reshape(B.diastolicSignal(sel), [], 1);
-        G.amp = reshape(B.amplitude(sel), [], 1);
-        G.zero = C.zeroForce;
-        G.pp = median(B.peakToPeakInterval(sel), 'omitnan');
-        lab = sprintf('Ch %d, %s - %s, n = %d', ch, fmtClock(range(1), H.totalSeconds >= 3600, true), ...
+        G.stimRel = reshape(Bx.t_stim(sel), [], 1) - reshape(Cx.peakTimes(loc), [], 1);   %stimulus relative to the peak (NaN: none)
+        G.dia = reshape(Bx.diastolicSignal(sel), [], 1);
+        G.amp = reshape(Bx.amplitude(sel), [], 1);
+        G.zero = Cx.zeroForce;
+        G.pp = median(Bx.peakToPeakInterval(sel), 'omitnan');
+        G.ch = chX; G.range = range;
+        st = Cx.stimTimes(Cx.stimTimes >= range(1) & Cx.stimTimes <= range(2));
+        G.noStim = isempty(st);
+        if G.noStim, G.t0 = range(1); else, G.t0 = st(1); end
+        inR = Cx.t >= range(1) & Cx.t <= range(2);
+        G.trT = reshape(Cx.t(inR), 1, []) - G.t0; G.trY = reshape(Cx.f(inR), 1, []);
+        lab = sprintf('Ch %d, %s - %s, n = %d', chX, fmtClock(range(1), H.totalSeconds >= 3600, true), ...
             fmtClock(range(2), H.totalSeconds >= 3600, true), n);
-        r = find(Lbl.channel == ch, 1);
+        r = find(Lbl.channel == chX, 1);
         if ~isempty(r)
             for nm = {'treatment','sliceID'}
                 if ismember(nm{1}, Lbl.Properties.VariableNames) && ~isempty(Lbl.(nm{1}){r}), lab = [lab ', ' Lbl.(nm{1}){r}]; end %#ok<AGROW>
             end
         end
         G.label = lab;
+        ovNextColor = ovNextColor + 1;                     %default colours in the order of adding (stay when groups are removed)
+        cols = lines(7);
+        G.color = cols(mod(ovNextColor - 1, 7) + 1, :);
+        G.width = 2; G.style = '-'; G.band = 'none'; G.name = '';
         if isempty(ovG), ovG = G; else, ovG(end+1) = G; end
-        ok = true;
         status(sprintf('Overlay: group %d added (%s).', numel(ovG), lab));
+    end
+
+    function chooseChannels()
+        % checkboxes: channels with a group for the analysed range of the main window (ticked = added, unticked = removed)
+        if isempty(S) || isempty(H), status('Load a time window first.'); return; end
+        chs = reshape(S.dataChannels, 1, []);
+        nC = numel(chs);
+        have = false(1, nC);
+        for k = 1:nC, have(k) = ~isempty(groupsOf(chs(k))); end
+        hrs = H.totalSeconds >= 3600;
+        dlg = dialog('Name', 'Overlay: channels', 'Units', 'pixels', 'Position', [300 300 360 112 + 24 * nC]);
+        uicontrol(dlg, 'Style', 'text', 'Units', 'pixels', 'Position', [10 62 + 24 * nC 340 42], 'HorizontalAlignment', 'left', ...
+            'String', sprintf('Channels for the analysed range %s - %s (same settings; manual exclusions only in channel %d):', ...
+            fmtClock(range(1), hrs, true), fmtClock(range(2), hrs, true), ch));
+        cb = gobjects(1, nC);
+        for k = 1:nC
+            cb(k) = uicontrol(dlg, 'Style', 'checkbox', 'Units', 'pixels', 'Position', [20 52 + 24 * (nC - k) 320 22], ...
+                'String', sprintf('Channel %d', chs(k)), 'Value', have(k));
+        end
+        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [170 12 80 28], 'String', 'OK', 'Callback', @(s,~) closeDialog(s, true));
+        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [260 12 80 28], 'String', 'Cancel', 'Callback', @(s,~) closeDialog(s, false));
+        uiwait(dlg);
+        if ~isvalid(dlg), return; end                       %closed with the window button
+        okD = isequal(dlg.UserData, true);
+        want = chs([cb.Value] == 1);
+        delete(dlg);
+        if okD, setOverlayChannels(want); end
+    end
+
+    function setOverlayChannels(want)
+        % groups of the analysed range of the main window: exactly the channels want (groups of other channels of this
+        % range removed); the channel of the main window with its selection, the others analysed with the same settings
+        if isempty(S) || isempty(B), status('Load a time window first.'); return; end
+        if isempty(hOv) || ~isvalid(hOv.fig), ovG = []; ovNextColor = 0; end
+        chs = reshape(S.dataChannels, 1, []);
+        want = chs(ismember(chs, want));
+        for c = chs(~ismember(chs, want))
+            k = groupsOf(c);
+            if ~isempty(k), ovG(k) = []; end
+        end
+        notes = {};
+        for c = want
+            if ~isempty(groupsOf(c)), continue; end
+            if c == ch
+                sel = find(selected());
+                Bx = B; Cx = C;
+            else
+                status(sprintf('Overlay: analysing channel %d ...', c)); drawnow;
+                try
+                    [Bx, Cx] = analyzeOther(c);
+                catch ME
+                    notes{end+1} = sprintf('channel %d: %s', c, ME.message); continue; %#ok<AGROW>
+                end
+                s = Bx.included & Bx.t_peak >= range(1) & Bx.t_peak <= range(2);
+                if refExclude, s = s & ~deviatingOf(Bx, Cx); end
+                sel = find(s);
+            end
+            if isempty(sel), notes{end+1} = sprintf('channel %d: no contraction selected', c); continue; end %#ok<AGROW>
+            addGroupOf(Bx, Cx, c, sel);
+        end
+        if isempty(hOv) || ~isvalid(hOv.fig)
+            if isempty(ovG), status(strjoin([{'Overlay: no group.'}, notes], ' ')); return; end
+            openOverlayWindow();
+        else
+            drawOverlay();
+        end
+        if ~isempty(notes), status(['Overlay: ' strjoin(notes, '; ')]); end
+    end
+
+    function [Bx, Cx] = analyzeOther(c)
+        % channel c of the loaded window with the settings of the main window (threshold and zero force of channel c)
+        optsC = opts;
+        optsC.zeroForce = zeroUser(c);
+        optsC.threshold = thrOf(c);
+        Sa = S;
+        if opts.rockerFilter, Sa = rockerFiltered(optsC, c); end
+        [Bx, Cx] = mda_analyzeChannel(Sa, c, [], optsC);
+    end
+
+    function k = groupsOf(c)
+        % overlay groups of channel c for the analysed range of the main window
+        k = [];
+        if isempty(ovG), return; end
+        k = find([ovG.ch] == c & arrayfun(@(G) all(abs(G.range - range) < 1e-6), ovG));
     end
 
     function addAndDraw()
@@ -514,7 +708,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function clearGroups()
-        ovG = [];
+        ovG = []; ovNextColor = 0;
         if ~isempty(hOv) && isvalid(hOv.fig), hOv.lb.Value = 1; drawOverlay(); end
     end
 
@@ -522,9 +716,62 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         ovG = []; hOv = [];
     end
 
+    function g = selectedGroup()
+        g = min(max(1, hOv.lb.Value), numel(ovG));
+    end
+
+    function showGroupStyle()
+        % controls of the selected group (legend text, line width, line style, band)
+        if isempty(hOv) || ~isvalid(hOv.fig), return; end
+        h = [hOv.gName hOv.gWidth hOv.gLine hOv.gBand];
+        if isempty(ovG), set(h, 'Enable', 'off'); hOv.gName.String = ''; return; end
+        set(h, 'Enable', 'on');
+        g = selectedGroup();
+        hOv.gName.String = legendName(g);
+        hOv.gWidth.String = sprintf('%g', ovG(g).width);
+        hOv.gLine.Value = find(strcmp(ovLineStyles, ovG(g).style), 1);
+        hOv.gBand.Value = find(strcmp(ovBands, ovG(g).band), 1);
+    end
+
+    function setGroupStyle(field, value)
+        if isempty(ovG) || isempty(hOv) || ~isvalid(hOv.fig), return; end
+        g = selectedGroup();
+        switch field
+            case 'width'
+                if ~isscalar(value) || ~isfinite(value) || value <= 0
+                    showGroupStyle(); status('Line width: enter a positive number.'); return;
+                end
+            case 'name'
+                value = strtrim(char(value));
+                if strcmp(value, sprintf('%d: %s', g, ovG(g).label)), value = ''; end   %automatic text
+        end
+        ovG(g).(field) = value;
+        drawOverlay();
+    end
+
+    function pickGroupColor()
+        if isempty(ovG) || isempty(hOv) || ~isvalid(hOv.fig), return; end
+        c = uisetcolor(ovG(selectedGroup()).color, 'Colour of the group');
+        if numel(c) == 3, setGroupStyle('color', c); end
+    end
+
+    function styleToAll()
+        if isempty(ovG) || isempty(hOv) || ~isvalid(hOv.fig), return; end
+        G = ovG(selectedGroup());
+        for g = 1:numel(ovG)
+            ovG(g).width = G.width; ovG(g).style = G.style; ovG(g).band = G.band;
+        end
+        drawOverlay();
+    end
+
+    function s = legendName(g)
+        s = ovG(g).name;
+        if isempty(s), s = sprintf('%d: %s', g, ovG(g).label); end
+    end
+
     function [xg, M, SD, nn, Yall] = overlayCurves(G)
         % traces of one group on a common time grid (alignment, baseline, normalization as chosen in the window)
-        alignStim = hOv.al.Value == 1;
+        alignStim = hOv.al.Value ~= 2;
         x0 = ((1:size(G.seg, 2)) - G.pre - 1) * G.dt;          %time relative to the peak
         Y = G.seg;
         if hOv.base.Value
@@ -549,102 +796,208 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         M(nn < 0.5 * numel(v)) = nan; SD(nn < 0.5 * numel(v)) = nan;
     end
 
+    function [x, y] = overlayTrace(G)
+        % time course of the range of one group (t = 0 at its first stimulus; baseline and normalization as chosen:
+        % median diastolic force / amplitude of its contractions)
+        x = G.trT; y = G.trY;
+        if isempty(x), return; end
+        if hOv.base.Value
+            y = y - median(G.dia, 'omitnan');
+        elseif ~isnan(G.zero)
+            y = y - G.zero;
+        end
+        if hOv.norm.Value, y = y / median(G.amp, 'omitnan'); end
+    end
+
+    function [xl, yl, tt] = overlayTexts(mode)
+        % axis labels and title: the texts typed in the window, otherwise automatic
+        xs = {'time from the stimulus (s)', 'time from the peak (s)', 'time from the first stimulus of the range (s)'};
+        xl = xs{mode};
+        if hOv.norm.Value
+            yl = 'force / amplitude';
+        elseif hOv.base.Value
+            yl = ['force - diastolic force (' mu 'N)'];
+        else
+            yl = ['force - zero force (' mu 'N)'];
+        end
+        if mode == 3
+            tt = 'force of the analysed range of each group';
+        elseif hOv.single.Value
+            tt = 'thick: mean of each group; thin: single contractions';
+        else
+            tt = 'mean of each group';
+        end
+        if ~isempty(strtrim(hOv.xlab.String)), xl = hOv.xlab.String; end
+        if ~isempty(strtrim(hOv.ylab.String)), yl = hOv.ylab.String; end
+        if ~isempty(strtrim(hOv.title.String)), tt = hOv.title.String; end
+    end
+
     function drawOverlay()
         if isempty(hOv) || ~isvalid(hOv.fig), return; end
-        axO = hOv.axO; cla(axO); hold(axO, 'on'); legend(axO, 'off');
+        axO = hOv.axO;
+        delete(findall(axO, 'Type', 'patch')); delete(findall(axO, 'Type', 'constantline'));   %hidden handles: not deleted by cla
+        cla(axO); hold(axO, 'on'); legend(axO, 'off');
         hOv.lb.String = {};
         if isempty(ovG)
             title(axO, 'no group: select contractions in the main window and press "Add current selection"', 'FontWeight', 'normal');
-            hOv.tx.String = ''; return;
+            hOv.tx.String = ''; showGroupStyle(); return;
         end
-        alignStim = hOv.al.Value == 1;
-        cols = lines(max(7, numel(ovG)));
+        mode = hOv.al.Value;                               %1 = stimulus, 2 = peak, 3 = time course of the range
         hm = gobjects(0); names = {}; info = {};
+        xr = [inf -inf];
         for g = 1:numel(ovG)
-            [xg, M, ~, ~, Yall] = overlayCurves(ovG(g));
-            col = cols(mod(g - 1, size(cols, 1)) + 1, :);
+            G = ovG(g);
+            col = G.color;
+            if mode == 3
+                [x, y] = overlayTrace(G);
+                if isempty(x), continue; end
+                hm(end+1) = plot(axO, x, y, 'Color', col, 'LineWidth', G.width, 'LineStyle', G.style); %#ok<AGROW>
+                names{end+1} = legendName(g); %#ok<AGROW>
+                xr = [min(xr(1), x(1)), max(xr(2), x(end))];
+                if G.noStim, info{end+1} = sprintf('group %d: no stimulus in the range, t = 0 at its start', g); end %#ok<AGROW>
+                continue;
+            end
+            [xg, M, SD, nn, Yall] = overlayCurves(G);
             if hOv.single.Value && ~isempty(Yall)
                 plot(axO, xg, Yall', 'Color', 0.35 * col + 0.65, 'LineWidth', 0.5, 'HitTest', 'off');
             end
             if ~isempty(Yall)
-                hm(end+1) = plot(axO, xg, M, 'Color', col, 'LineWidth', 2); %#ok<AGROW>
-                names{end+1} = sprintf('%d: %s', g, ovG(g).label); %#ok<AGROW>
+                [lo, hi] = overlayBand(G.band, M, SD, nn, Yall);
+                if ~isempty(lo), bandPatch(axO, xg, lo, hi, col); end
+                hm(end+1) = plot(axO, xg, M, 'Color', col, 'LineWidth', G.width, 'LineStyle', G.style); %#ok<AGROW>
+                names{end+1} = legendName(g); %#ok<AGROW>
             end
-            nNo = size(ovG(g).seg, 1) - size(Yall, 1);
+            nNo = size(G.seg, 1) - size(Yall, 1);
             if nNo > 0, info{end+1} = sprintf('group %d: %d contraction(s) without stimulus not shown', g, nNo); end %#ok<AGROW>
         end
         hOv.lb.String = arrayfun(@(g) sprintf('%d: %s', g, ovG(g).label), 1:numel(ovG), 'UniformOutput', false);
-        L = median([ovG.pp], 'omitnan'); if isnan(L), L = 1; end
-        if alignStim
-            xlim(axO, [-0.1, min(1.5, max(0.3, 0.95 * L))]);
+        hOv.lb.Value = selectedGroup();
+        if mode == 3
+            if all(isfinite(xr)) && xr(2) > xr(1), xlim(axO, xr); end
             xline(axO, 0, '--', 'Color', [0 0.3 1], 'HandleVisibility', 'off');
-            xlabel(axO, 'time from the stimulus (s)');
+            info = [{'time course: one trace per group (bands and single contractions: mean beat only)'}, info];
         else
-            xlim(axO, [-min(0.4, 0.45 * L), min(1.5, 0.9 * L)]);
-            xlabel(axO, 'time from the peak (s)');
+            L = median([ovG.pp], 'omitnan'); if isnan(L), L = 1; end
+            if mode == 1
+                xlim(axO, [-0.1, min(1.5, max(0.3, 0.95 * L))]);
+                xline(axO, 0, '--', 'Color', [0 0.3 1], 'HandleVisibility', 'off');
+            else
+                xlim(axO, [-min(0.4, 0.45 * L), min(1.5, 0.9 * L)]);
+            end
         end
-        if hOv.norm.Value
-            ylabel(axO, 'force / amplitude');
-        elseif hOv.base.Value
-            ylabel(axO, ['force - diastolic force (' mu 'N)']);
-        else
-            ylabel(axO, ['force - zero force (' mu 'N)']);
-        end
-        if ~isempty(hm), legend(axO, hm, names, 'Location', 'northeast', 'Interpreter', 'none', 'FontSize', 8); end
+        [xs, ys, ts] = overlayTexts(mode);
+        xlabel(axO, xs); ylabel(axO, ys);
+        loc = ovLegendLoc{hOv.legend.Value};
+        if ~isempty(hm) && ~isempty(loc), legend(axO, hm, names, 'Location', loc, 'Interpreter', 'none', 'FontSize', 8); end
         grid(axO, 'on');
-        % y limits from the data in the visible time range (also after normalizing or after zooming with the mouse)
+        % y limits from the data in the visible time range (lines and bands; also after normalizing or zooming)
         xl = xlim(axO); lo = inf; hi = -inf;
-        for hL = reshape(findobj(axO, 'Type', 'line'), 1, [])
-            in = hL.XData >= xl(1) & hL.XData <= xl(2);
-            lo = min([lo, hL.YData(in)]); hi = max([hi, hL.YData(in)]);
+        for hL = reshape([findobj(axO, 'Type', 'line'); findall(axO, 'Type', 'patch')], 1, [])
+            xd = hL.XData(:); yd = hL.YData(:);
+            in = xd >= xl(1) & xd <= xl(2);
+            lo = min([lo; yd(in)]); hi = max([hi; yd(in)]);
         end
         if isfinite(lo) && isfinite(hi) && hi > lo
             ylim(axO, [lo hi] + [-0.05 0.08] * (hi - lo));
         else
             ylim(axO, 'auto');
         end
-        title(axO, 'thick: mean of each group; thin: single contractions', 'FontWeight', 'normal', 'FontSize', 9);
+        if isempty(strtrim(hOv.title.String))
+            title(axO, ts, 'FontWeight', 'normal', 'FontSize', 9, 'Interpreter', 'none');
+        else
+            title(axO, ts, 'FontWeight', 'bold', 'FontSize', 12, 'Interpreter', 'none');
+        end
         if isempty(info), info = {'all contractions shown'}; end
         hOv.tx.String = info;
+        showGroupStyle();
     end
 
     function exportOverlay()
-        % mean, SD, n of every group on a common time grid + all single traces (one table per group)
+        % mean beat: mean, SD, SEM, min, max, n of every group on a common time grid + all single traces (one table per
+        % group); time course: the traces of all groups on a common grid; sheet 'groups' with labels and settings
         if isempty(ovG) || isempty(hOv) || ~isvalid(hOv.fig), return; end
         file = askFile('data', 'overlay');
         if isempty(file), return; end
+        mode = hOv.al.Value;
         dt = min([ovG.dt]);
-        cur = cell(1, numel(ovG)); xmin = inf; xmax = -inf;
-        for g = 1:numel(ovG)
-            [xg, M, SD, nn, Yall] = overlayCurves(ovG(g));
-            cur{g} = {xg, M, SD, nn, Yall};
-            if ~isempty(xg), xmin = min(xmin, xg(1)); xmax = max(xmax, xg(end)); end
-        end
-        tt = (round(xmin / dt) : round(xmax / dt))' * dt;
-        if hOv.al.Value == 1, tn = 't_from_stimulus_s'; else, tn = 't_from_peak_s'; end
-        Tm = table(tt, 'VariableNames', {tn});
+        nG = numel(ovG);
         names = {'means'}; tabs = {[]};
-        grp = cell(numel(ovG), 1); nG = zeros(numel(ovG), 1);
-        for g = 1:numel(ovG)
-            xg = cur{g}{1};
-            if isempty(xg)
-                m = nan(size(tt)); sd = m; nk = m;
-            else
-                m = interp1(xg, cur{g}{2}, tt); sd = interp1(xg, cur{g}{3}, tt); nk = interp1(xg, cur{g}{4}, tt, 'nearest');
-                Tg = array2table([xg(:) cur{g}{5}'], 'VariableNames', [{tn}, arrayfun(@(k) sprintf('c%d', k), 1:size(cur{g}{5}, 1), 'UniformOutput', false)]);
-                names{end+1} = sprintf('g%d_traces', g); tabs{end+1} = Tg; %#ok<AGROW>
+        nTr = zeros(nG, 1);
+        if mode == 3
+            cur = cell(1, nG); xmin = inf; xmax = -inf;
+            for g = 1:nG
+                [x, y] = overlayTrace(ovG(g)); cur{g} = {x, y};
+                if ~isempty(x), xmin = min(xmin, x(1)); xmax = max(xmax, x(end)); end
             end
-            Tm.(sprintf('g%d_mean', g)) = m(:); Tm.(sprintf('g%d_SD', g)) = sd(:); Tm.(sprintf('g%d_n', g)) = nk(:);
-            grp{g} = ovG(g).label; nG(g) = size(cur{g}{5}, 1);
+            if ~isfinite(xmin), xmin = 0; xmax = 0; end
+            tt = (round(xmin / dt) : round(xmax / dt))' * dt;
+            Tm = table(tt, 'VariableNames', {'t_from_first_stimulus_s'});
+            for g = 1:nG
+                if numel(cur{g}{1}) < 2, y = nan(size(tt)); else, y = interp1(cur{g}{1}, cur{g}{2}, tt); end
+                Tm.(sprintf('g%d', g)) = y(:);
+                nTr(g) = double(~isempty(cur{g}{1}));
+            end
+            names{1} = 'traces';
+        else
+            cur = cell(1, nG); xmin = inf; xmax = -inf;
+            for g = 1:nG
+                [xg, M, SD, nn, Yall] = overlayCurves(ovG(g));
+                cur{g} = {xg, M, SD, nn, Yall};
+                if ~isempty(xg), xmin = min(xmin, xg(1)); xmax = max(xmax, xg(end)); end
+            end
+            tt = (round(xmin / dt) : round(xmax / dt))' * dt;
+            if mode == 1, tn = 't_from_stimulus_s'; else, tn = 't_from_peak_s'; end
+            Tm = table(tt, 'VariableNames', {tn});
+            for g = 1:nG
+                xg = cur{g}{1};
+                if isempty(xg)
+                    m = nan(size(tt)); sd = m; nk = m; se = m; mn = m; mx = m;
+                else
+                    Yall = cur{g}{5};
+                    [mn0, mx0] = overlayBand('range', cur{g}{2}, cur{g}{3}, cur{g}{4}, Yall);
+                    if isempty(mn0), mn0 = nan(size(xg)); mx0 = mn0; end
+                    m = interp1(xg, cur{g}{2}, tt); sd = interp1(xg, cur{g}{3}, tt); nk = interp1(xg, cur{g}{4}, tt, 'nearest');
+                    se = sd ./ sqrt(max(nk, 1)); mn = interp1(xg, mn0, tt); mx = interp1(xg, mx0, tt);
+                    Tg = array2table([xg(:) Yall'], 'VariableNames', [{tn}, arrayfun(@(k) sprintf('c%d', k), 1:size(Yall, 1), 'UniformOutput', false)]);
+                    names{end+1} = sprintf('g%d_traces', g); tabs{end+1} = Tg; %#ok<AGROW>
+                end
+                Tm.(sprintf('g%d_mean', g)) = m(:); Tm.(sprintf('g%d_SD', g)) = sd(:); Tm.(sprintf('g%d_n', g)) = nk(:);
+                Tm.(sprintf('g%d_SEM', g)) = se(:); Tm.(sprintf('g%d_min', g)) = mn(:); Tm.(sprintf('g%d_max', g)) = mx(:);
+                nTr(g) = size(cur{g}{5}, 1);
+            end
         end
         tabs{1} = Tm;
-        if hOv.al.Value == 1, a = 'aligned at the stimulus (t = 0)'; else, a = 'aligned at the peak (t = 0)'; end
+        als = {'aligned at the stimulus (t = 0)', 'aligned at the peak (t = 0)', 'time course of the range, t = 0 at the first stimulus'};
         if hOv.base.Value, b = 'diastolic force subtracted'; else, b = 'zero force subtracted (if known)'; end
         if hOv.norm.Value, u = 'normalized to the amplitude'; else, u = 'uN'; end
-        Tgrp = table((1:numel(ovG))', grp, nG, repmat({a}, numel(ovG), 1), repmat({b}, numel(ovG), 1), repmat({u}, numel(ovG), 1), ...
-            'VariableNames', {'group', 'label', 'nTraces', 'alignment', 'baseline', 'unit'});
+        rg = reshape([ovG.range], 2, [])';
+        Tgrp = table((1:nG)', {ovG.label}', arrayfun(@legendName, (1:nG)', 'UniformOutput', false), [ovG.ch]', rg(:,1), rg(:,2), ...
+            [ovG.t0]', nTr, repmat(als(mode), nG, 1), repmat({b}, nG, 1), repmat({u}, nG, 1), {ovG.band}', ...
+            'VariableNames', {'group', 'label', 'legend', 'channel', 'from_s', 'to_s', 'firstStimulus_s', 'nTraces', 'alignment', ...
+            'baseline', 'unit', 'band'});
         names{end+1} = 'groups'; tabs{end+1} = Tgrp;
         writeTables(file, names, tabs);
+    end
+
+    function a = copyOverlayAxes(f2)
+        % the overlay plot (with legend) in figure f2
+        lg = hOv.axO.Legend;
+        if ~isempty(lg) && isvalid(lg)
+            c = copyobj([lg hOv.axO], f2); a = c(2);
+        else
+            a = copyobj(hOv.axO, f2);
+        end
+        a.Units = 'normalized'; a.Position = [0.1 0.11 0.86 0.82];
+    end
+
+    function editOverlayFigure()
+        % copy of the overlay plot as a normal MATLAB figure: titles, axes, lines and legend editable with the plot tools
+        if isempty(hOv) || ~isvalid(hOv.fig) || isempty(ovG), return; end
+        f2 = figure('Name', 'MyoDishAnalysis: overlay (editable copy)', 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
+            'Position', [180 120 900 620], 'MenuBar', 'figure', 'ToolBar', 'figure');
+        copyOverlayAxes(f2);
+        try plotedit(f2, 'on'); catch, end
+        status('Editable copy of the overlay: double-click a text, line, axis or the legend to edit it; File > Save As saves it.');
     end
 
     % ---------------------------------------------------------------- trend: rolling average over long periods / several files
@@ -847,6 +1200,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % options of the main window; zero force: open file = value of the main window, other files = log file
         oT = opts;
         if strcmp(Fk.file, H.file), oT.zeroForce = zeroUser(chans); else, oT.zeroForce = nan; end
+        oT.threshold = thrOf(chans);                   %threshold per channel: also for the other files of the series
         if sMode == 3, oT.rocker = 'stopped'; end      %rocker stops: only contractions with the rocker at rest
     end
 
@@ -1248,13 +1602,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if isempty(file), return; end
         f2 = figure('Visible', 'off', 'Color', 'w', 'Units', 'pixels', 'Position', [50 50 900 620]);
         try
-            lg = hOv.axO.Legend;
-            if ~isempty(lg) && isvalid(lg)
-                c = copyobj([lg hOv.axO], f2); a = c(2);
-            else
-                a = copyobj(hOv.axO, f2);
-            end
-            a.Units = 'normalized'; a.Position = [0.1 0.11 0.86 0.82];
+            copyOverlayAxes(f2);
             saveFigureFile(f2, file);
             status(['Saved: ' file]);
         catch ME
@@ -1397,6 +1745,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         try
             optsAll = opts;
             optsAll.zeroForce = zeroUser(H.dataChannels);    %NaN = Offset of the log file
+            optsAll.threshold = thrOf(H.dataChannels);       %NaN = auto
             MyoDishAnalysis(H.file, [], range(1), range(2), optsAll, 'output', fullfile(pn, fn), 'quiet', true, 'metadata', Lbl);
             status(sprintf('All channels written to %s (same settings, manual exclusions not applied).', fn));
         catch ME
@@ -1491,6 +1840,63 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         else
             xlim(axMain, xl);
         end
+    end
+
+    % ---------------------------------------------------------------- keyboard: navigation on the time axis (2026-10-07)
+    function onKey(~, evt)
+        % left / right arrow: move the time axis by half its length; shift: extend it by half its length on that side;
+        % up / down arrow: zoom in / out. Mouse over the overview: the overview; otherwise the force plot (beyond the
+        % loaded window the loaded window follows and is read again)
+        if isempty(H) || ~any(strcmp(evt.Key, {'leftarrow', 'rightarrow', 'uparrow', 'downarrow'})), return; end
+        co = fig.CurrentObject;                            %arrow keys of edit fields and lists stay theirs
+        if ~isempty(co) && isprop(co, 'Style') && any(strcmp(co.Style, {'edit', 'popupmenu', 'listbox', 'slider'})), return; end
+        ext = any(strcmp(evt.Modifier, 'shift'));
+        if ~isempty(O) && inAxes(axOv)
+            lim = [0 O.totalSeconds];
+            xl = navStep(xlim(axOv), evt.Key, ext, lim, 5);
+            if diff(xl) >= 0.999 * diff(lim), ovXL = []; else, ovXL = xl; end
+            plotOverview();
+            scheduleDetail();
+            return;
+        end
+        if isempty(S), return; end
+        xl = navStep(xlim(axMain), evt.Key, ext, [0 H.totalSeconds], 0.3);
+        navigateTo(xl);
+    end
+
+    function navigateTo(xl)
+        % show time axis xl in the force plot; outside the loaded window the loaded window follows (same length; longer
+        % if xl is longer) and is read again
+        L = [S.fromSeconds S.toSeconds];
+        tol = 1e-6 * max(1, diff(L));
+        if xl(1) >= L(1) - tol && xl(2) <= L(2) + tol
+            xlim(axMain, [max(xl(1), L(1)), min(xl(2), L(2))]);
+            return;
+        end
+        if diff(xl) <= diff(L)
+            d = 0;
+            if xl(2) > L(2), d = xl(2) - L(2); elseif xl(1) < L(1), d = xl(1) - L(1); end
+            w = L + d;
+        else
+            w = [min(xl(1), L(1)), max(xl(2), L(2))];
+        end
+        w = [max(0, w(1)), min(H.totalSeconds, w(2))];
+        if diff(w) > 4 * 3600, status('Window longer than 4 h: use the command line version (MyoDishAnalysis) for long ranges.'); return; end
+        if abs(w(1) - L(1)) < tol && abs(w(2) - L(2)) < tol, return; end   %start / end of the file
+        followOverview(w);
+        hFrom.String = sprintf('%.3f', w(1)); hTo.String = sprintf('%.3f', w(2));
+        onLoad();
+        if ~isempty(S), xlim(axMain, [max(xl(1), S.fromSeconds), min(xl(2), S.toSeconds)]); end
+    end
+
+    function followOverview(w)
+        % zoomed overview: move it along when the loaded window w leaves the visible part
+        if isempty(O) || isempty(ovXL) || (w(1) >= ovXL(1) && w(2) <= ovXL(2)), return; end
+        span = max(diff(ovXL), 1.25 * diff(w));
+        if w(2) > ovXL(1) + span, a = w(2) + 0.1 * span - span; else, a = min(ovXL(1), w(1) - 0.1 * span); end
+        a = min(max(a, 0), O.totalSeconds - span);
+        if span >= 0.999 * O.totalSeconds, ovXL = []; else, ovXL = [a, a + span]; end
+        scheduleDetail();
     end
 
     function scheduleDetail()
@@ -1658,6 +2064,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         prBt = {'all', 'stimulated'};
         prO = opts;
         prO.zeroForce = zeroUser(prChs);                %NaN = Offset of the log file
+        prO.threshold = thrOf(prChs);                   %NaN = auto
         hPr.tx.String = 'Analysing ...'; drawnow;
         try
             [prT, prS, prI] = MyoDishAnalysis(H.file, prChs, [], [], prO, 'protocol', prP, 'rocker', prRk{hPr.pRk.Value}, ...
@@ -1970,6 +2377,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         try
             optsC = opts;
             optsC.zeroForce = zeroUser(ch);                 %NaN = Offset of the log file
+            optsC.threshold = thrOf(ch);
             Sa = S;
             if opts.rockerFilter
                 [Sa, rfMsg] = rockerFiltered(optsC);
@@ -1998,16 +2406,17 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         status(msg);
     end
 
-    function [Sa, msg] = rockerFiltered(optsC)
-        % S with the rocker artifact of the current channel subtracted; estimated with +-60 s context (windows
-        % < 10 min), cached per channel and detection options
+    function [Sa, msg] = rockerFiltered(optsC, chX)
+        % S with the rocker artifact of channel chX (default: the current channel) subtracted; estimated with +-60 s
+        % context (windows < 10 min), cached per channel and detection options
+        if nargin < 2, chX = ch; end
         Sa = S; msg = '';
         if ~any(S.rockerOn)
             msg = 'Rocker filter: the rocker does not move in this window.'; return;
         end
-        row = find(S.dataChannels == ch, 1);
-        key = [sprintf('%d|', ch) jsonencode(rmfield(optsC, {'zeroForce', 'rocker', 'beats', 'referenceBeat'}))];
-        hit = numel(rfCache) >= ch && ~isempty(rfCache{ch}) && strcmp(rfCache{ch}.key, key);
+        row = find(S.dataChannels == chX, 1);
+        key = [sprintf('%d|', chX) jsonencode(rmfield(optsC, {'zeroForce', 'rocker', 'beats', 'referenceBeat'}))];
+        hit = numel(rfCache) >= chX && ~isempty(rfCache{chX}) && strcmp(rfCache{chX}.key, key);
         if ~hit
             status('Rocker filter: estimating the rocker artifact ...'); drawnow;
             if isempty(rfCtx)
@@ -2017,13 +2426,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                     rfCtx = S;
                 end
             end
-            S1 = struct('t', S.t, 'force', S.force(row, :), 'dataChannels', ch, 'rockerOn', S.rockerOn, 'dt', S.dt);
+            S1 = struct('t', S.t, 'force', S.force(row, :), 'dataChannels', chX, 'rockerOn', S.rockerOn, 'dt', S.dt);
             if isempty(optsC.rockerFrequency) && ~isempty(rfF0), optsC.rockerFrequency = rfF0; end   %same for all channels
-            [S1, R] = mda_rockerFilter(S1, ch, optsC, rfCtx);
+            [S1, R] = mda_rockerFilter(S1, chX, optsC, rfCtx);
             if isempty(rfF0) && ~isempty(R.f0table), rfF0 = R.f0table; end
-            rfCache{ch} = struct('key', key, 'art', S1.rockerArtifact, 'R', R);
+            rfCache{chX} = struct('key', key, 'art', S1.rockerArtifact, 'R', R);
         end
-        E = rfCache{ch};
+        E = rfCache{chX};
         Sa.rockerArtifact = zeros(size(S.force));
         Sa.rockerFiltered = false(1, numel(S.dataChannels));
         Sa.rockerFilterInfo = cell(1, numel(S.dataChannels));
@@ -2041,10 +2450,14 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function d = deviating()
+        d = deviatingOf(B, C);
+    end
+
+    function d = deviatingOf(Bx, Cx)
         % contractions that deviate from the reference beat by more than refThr SD (false without reference)
-        d = false(height(B), 1);
-        if isempty(C) || ~isfield(C, 'referenceBeat') || isempty(C.referenceBeat), return; end
-        a = B.refMaxDeviation_SD > refThr; nrm = B.refMaxDeviationNorm_SD > refThr;   %NaN --> false
+        d = false(height(Bx), 1);
+        if isempty(Cx) || ~isfield(Cx, 'referenceBeat') || isempty(Cx.referenceBeat), return; end
+        a = Bx.refMaxDeviation_SD > refThr; nrm = Bx.refMaxDeviationNorm_SD > refThr;   %NaN --> false
         switch refWhich
             case 1, d = a;
             case 2, d = nrm;
@@ -2965,6 +3378,16 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if ~isempty(B), updateSummary(); end
     end
 
+    function [G, h] = apiOverlay()
+        G = ovG; h = hOv;
+    end
+
+    function apiKey(key, modifier)
+        if nargin < 2, modifier = {}; end
+        fig.CurrentObject = axMain;
+        onKey(fig, struct('Key', key, 'Modifier', {modifier}));
+    end
+
     function [T, Sm] = apiResults()
         T = []; Sm = [];
         if isempty(B), return; end
@@ -2975,6 +3398,70 @@ end
 
 
 % =====================================================================================================
+function closeDialog(src, ok)
+% OK / Cancel of a modal dialog: result in UserData, uiresume
+f = ancestor(src, 'figure');
+f.UserData = ok;
+uiresume(f);
+end
+
+
+function [lo, hi] = overlayBand(band, M, SD, nn, Yall)
+% band around the mean of an overlay group: 'SD', 'SEM' (SD / sqrt(n)), 'range' (min - max of the traces); empty for
+% 'none' or fewer than 2 traces
+lo = []; hi = [];
+if size(Yall, 1) < 2, return; end
+switch band
+    case 'SD'
+        lo = M - SD; hi = M + SD;
+    case 'SEM'
+        se = SD ./ sqrt(max(nn, 1));
+        lo = M - se; hi = M + se;
+    case 'range'
+        lo = min(Yall, [], 1); hi = max(Yall, [], 1);
+        lo(isnan(M)) = nan; hi(isnan(M)) = nan;
+end
+end
+
+
+function bandPatch(ax, x, lo, hi, col)
+% transparent band lo ... hi (one patch per run of finite values)
+ok = isfinite(lo) & isfinite(hi);
+d = diff([false ok false]);
+a = find(d == 1); b = find(d == -1) - 1;
+for k = 1:numel(a)
+    i = a(k):b(k);
+    if numel(i) < 2, continue; end
+    patch(ax, [x(i) fliplr(x(i))], [lo(i) fliplr(hi(i))], col, 'FaceAlpha', 0.2, 'EdgeColor', 'none', ...
+        'HitTest', 'off', 'HandleVisibility', 'off');
+end
+end
+
+
+function xn = navStep(xl, key, ext, lim, minSpan)
+% time axis after an arrow key: left / right = move by half the span, with ext (shift) = extend by half the span on
+% that side; up / down = zoom in / out around the centre (span / 2, x 2); limited to lim and >= minSpan
+w = diff(xl);
+switch key
+    case 'leftarrow'
+        if ext, xn = [xl(1) - 0.5 * w, xl(2)]; else, xn = xl - 0.5 * w; end
+    case 'rightarrow'
+        if ext, xn = [xl(1), xl(2) + 0.5 * w]; else, xn = xl + 0.5 * w; end
+    case 'uparrow'
+        xn = mean(xl) + [-0.25 0.25] * w;
+    otherwise
+        xn = mean(xl) + [-1 1] * w;
+end
+span = min(max(diff(xn), minSpan), diff(lim));
+if ext
+    xn = [max(xn(1), lim(1)), min(xn(2), lim(2))];
+else
+    a = min(max(mean(xn) - span / 2, lim(1)), lim(2) - span);
+    xn = [a, a + span];
+end
+end
+
+
 function s = fmtNum(x, digits)
 % compact number for the summary table: integers above 1000, otherwise significant digits
 if isnan(x)
@@ -3040,14 +3527,15 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       '', ...
       'Force plot: red = selected contractions, grey = excluded by the filters (rocker / stimulated only), x = excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.', ...
       'Cursor in the force plot: "drag = select time range" or "click = exclude / include contraction". Zoom/pan: mouse wheel or figure toolbar (switch the tool off afterwards).', ...
+      'Arrow keys (click into a plot first): left / right = move the time axis by half its length, shift + left / right = extend it by half its length on that side, up / down = zoom in / out. Mouse pointer over the overview: its time axis; otherwise the force plot - beyond the loaded window the loaded window follows (read again, blue in the overview) and a zoomed overview moves along.', ...
       '', ...
-      'Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak. Press again (or Add current selection in the overlay window) to add another selection as a new group.', ...
+      'Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak, or the time course of the analysed range (t = 0 at the first stimulus of each group). Press again (or Add current selection in the overlay window) to add another selection as a new group; Channels (same range) ...: tick channels to add them for the analysed range (same settings, threshold and zero force of each channel). Per group (list): legend text, colour, line width, line style and a transparent band (mean +- SD, +- SEM or range). Title, axis labels and legend position are editable below the plot (empty = automatic); Edit figure ... opens a copy with the MATLAB plot tools.', ...
       '', ...
       'Save / Export (menu or right click on a plot): plots as .png / .jpg / .tif / .fig, plotted data (visible time range) as .xlsx / .csv / .txt; overview: picture only.', ...
       '', ...
       'Labels ...: labels per channel (setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, treatment, concentration, concentrationUnit, daysInCulture, cultureStart, comment, analyst) - columns of the exported tables; saved as <name>_labels.csv next to the .mdd file and loaded automatically.', ...
       '', ...
-      'Detection: peaks with a prominence >= threshold (auto: 0.3 x typical amplitude, >= 30 uN). A contraction within 25 ms ... min(stimulus interval, 1 s) after a stimulus of the channel is "stimulated", otherwise "extra".', ...
+      'Detection: peaks with a prominence >= threshold (auto: 0.3 x typical amplitude, >= 30 uN; per channel: auto or a manual value, kept when you switch channels and used for All channels, Protocols and Trend). A contraction within 25 ms ... min(stimulus interval, 1 s) after a stimulus of the channel is "stimulated", otherwise "extra".', ...
       '', ...
       'Reference beat (right click in the force plot): the mean shape (+- SD) of the selected contractions becomes the reference of the channel. Every contraction is compared with it, aligned at the stimulus (default; a changed latency counts, contractions without stimulus at the 50 % upstroke) or at the 50 % upstroke (shape only; reference window): refCorrelation (shape correlation), refRMSDeviation_SD (overall) and refMaxDeviation_SD (largest local deviation) in SD of the reference, each also normalized (...Norm: both scaled to amplitude 1 = shape only). Deviating contractions (> x SD) are circled magenta, counted in the table and can be excluded (reference window). Save/load a reference to apply it to other files. Every parameter is also given relative to the mean of the reference contractions (column %ref in the table; <parameter>_pctRef in tables, lower plot, trend and exports; diastolic force: difference in uN, _dRef).', ...
       '', ...

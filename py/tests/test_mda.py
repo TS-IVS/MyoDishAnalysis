@@ -291,6 +291,34 @@ def test_protocol_results_examples():
     r = res("example7_pigVentricle.mdd", 1, protocol="PRP")
     assert (r["PRP15_pause_s"], r["PRP30_pause_s"], r["PRP60_pause_s"]) == (15, 30, 60)
     assert 115 < r["PRP15_pct"] < 125 and np.isnan(r["FFR_1Hz_pct"])
+    r = res("example8_rabbitVentricle_EP.mdd", 1, protocol="RP", rocker="any")
+    assert r["S2shortest_ms"] < r["refPeriodNoPeak_ms"] < r["S2longest_ms"]
+
+
+@pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
+def test_threshold_per_channel():
+    f = os.path.join(EX, "example3_humanVentricle.mdd")
+    _, _, i1 = mda.myodish_analysis(f, [1, 2, 3], 0, 60, quiet=True)
+    _, _, i2 = mda.myodish_analysis(f, [1, 2, 3], 0, 60, quiet=True, threshold=[np.nan, 500, np.nan])
+    t1, t2 = i1["thresholds"]["threshold_uN"].to_numpy(), i2["thresholds"]["threshold_uN"].to_numpy()
+    assert t2[1] == 500 and t2[0] == t1[0] and t2[2] == t1[2]  # NaN = auto
+    with pytest.raises(ValueError):
+        mda.myodish_analysis(f, [1, 2, 3], 0, 60, quiet=True, threshold=[300, 400])
+    with pytest.raises(ValueError):
+        mda.options(threshold=-1)
+    assert mda.options(threshold="").threshold == "auto"
+
+
+def test_nav_step():
+    pytest.importorskip("pyqtgraph")
+    from myodish_analysis.gui.timeaxis import nav_step
+    assert nav_step([10, 20], "right", False, (0, 100), 0.3) == [15, 25]
+    assert nav_step([10, 20], "left", True, (0, 100), 0.3) == [5, 20]
+    assert nav_step([10, 20], "up", False, (0, 100), 0.3) == [12.5, 17.5]
+    assert nav_step([10, 20], "down", False, (0, 100), 0.3) == [5, 25]
+    assert nav_step([0, 10], "down", False, (0, 100), 0.3) == [0, 20]  # zoom out at the start of the file
+    assert nav_step([90, 100], "right", False, (0, 100), 0.3) == [90, 100]
+    assert nav_step([2, 4], "left", True, (0, 100), 0.3) == [1, 4]
 
 
 # ------------------------------------------------------------------------------------------------ command line / GUI
@@ -317,3 +345,62 @@ def test_gui_starts_without_file():
     w.deleteLater()  # delete the Qt objects now, not at interpreter exit (pyqtgraph items crash there on macOS)
     app.processEvents()
     QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+
+
+@pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
+def test_gui_threshold_keys_overlay():
+    pytest.importorskip("PySide6")
+    pytest.importorskip("pyqtgraph")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtCore, QtWidgets
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    from myodish_analysis.gui.main_window import MainWindow
+    w = MainWindow(os.path.join(EX, "example3_humanVentricle.mdd"))
+    try:
+        w.eFrom.setText("0")
+        w.eTo.setText("60")
+        w.on_load()
+        # threshold per channel
+        w.cThr.setCurrentIndex(1)
+        w.eThr.setText("400")
+        w.on_threshold_value()
+        assert w.C.threshold == 400 and w.C.thresholdMode == "manual"
+        w.cCh.setCurrentIndex(1)
+        w.on_channel()
+        assert w.C.thresholdMode == "auto" and w.cThr.currentIndex() == 0
+        w.cCh.setCurrentIndex(0)
+        w.on_channel()
+        th = w.thr_of([1, 2])
+        assert w.C.threshold == 400 and w.eThr.text() == "400" and th[0] == 400 and math.isnan(th[1])
+        # arrow keys: move (loaded window follows), extend, zoom
+        w.on_key("right", False)
+        assert (w.S.fromSeconds, w.S.toSeconds) == (30, 90)
+        w.on_key("right", True)
+        assert (w.S.fromSeconds, w.S.toSeconds) == (30, 120)
+        w.on_key("up", False)
+        assert list(w.pMain.vb.viewRange()[0]) == [52.5, 97.5] and w.S.toSeconds == 120
+        # overlay: channels of the same range, styles, bands, time course, export tables
+        w.overlay_channels([1, 3])
+        ov = w.win_overlay
+        assert [G["ch"] for G in ov.groups] == [1, 3]
+        ov.lb.setCurrentRow(1)
+        ov.set_group_style("band", "SEM")
+        ov.set_group_style("style", "--")
+        ov.set_group_style("name", "test")
+        K = ov.content()
+        assert [it["kind"] for it in K["items"]] == ["single", "line", "single", "band", "line"]
+        assert K["items"][-1]["name"] == "test" and K["items"][-1]["style"] == "--"
+        names, tabs = ov.export_tables()
+        assert names[0] == "means" and "g2_SEM" in tabs[0].columns and tabs[-1]["legend"].tolist()[1] == "test"
+        ov.al.setCurrentIndex(2)
+        names, tabs = ov.export_tables()
+        assert names[0] == "traces" and list(tabs[0].columns) == ["t_from_first_stimulus_s", "g1", "g2"]
+        assert ov.mpl_figure().axes[0].get_xlabel() == "time from the first stimulus of the range (s)"
+        w.overlay_channels([3])
+        assert [G["ch"] for G in ov.groups] == [3]
+        ov.close()
+    finally:
+        w.close()
+        w.deleteLater()
+        app.processEvents()
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)

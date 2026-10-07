@@ -28,9 +28,23 @@ MATLAB and Python versions have the same version number and give the same result
   in % of 0.5 Hz (FFR); current thresholds at 10 / 50 / 95 / 99 % of the maximum amplitude and the lowest captured
   current (ST); refractory periods "no separate peak" and "no response at all" from the S2 response (subtraction of
   the scaled S1 template, noise level from pseudo-S2 as in GetRefractoryPeriod) (RP); post-rest potentiation at the
-  pauses nearest to 15 / 30 / 60 s (PRP).
+  pauses nearest to 15 / 30 / 60 s (PRP). RP also gives the shortest and longest analysed S2 interval
+  (`S2shortest_ms`, `S2longest_ms`), so that a refractory period below the tested range ("not reached", NaN) can be
+  reported as < `S2shortest_ms`.
 - GUI (MATLAB and Python): window **Protocols ...**: editable protocol list, channels, rocker selection, grouping,
   plot of a parameter against the quantity (mean ± SD / SEM), result table, figure and data export.
+
+- GUI (MATLAB and Python, 2026-10-07):
+  - Detection threshold per channel (*auto* or a manual value for each channel, kept when switching channels; used
+    for All channels, Protocols and Trend). `MyoDishAnalysis` / `myodish_analysis` accept one threshold per channel
+    (`'threshold',[NaN 300 ...]`, NaN = auto; command line `--threshold t1 t2 ...`).
+  - Arrow keys: ← / → move the time axis by half its length, shift + ← / → extend it, ↑ / ↓ zoom; over the overview
+    its time axis, otherwise the force plot (the loaded window follows and is read again; the zoomed overview moves
+    along).
+  - Overlay window: other channels for the same range by checkboxes; time course of the range (t = 0 at the first
+    stimulus of each group); colour, line width, line style and band (SD / SEM / range) per group; editable legend
+    texts, title, axis labels and legend position; **Edit figure ...** (MATLAB plot tools / matplotlib figure
+    options); export with SEM, min and max.
 
 ### Changed
 - Diastolic minimum (F_dia) after a stimulation pause (stimulus interval ≥ 2.5 s and ≥ 1.5 × the interval before):

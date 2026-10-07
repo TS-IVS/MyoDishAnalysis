@@ -20,8 +20,8 @@ OPTIONS (keywords)
   metadata=m              labels per channel (dict, DataFrame or .csv/.xlsx file), see labels.py
   showFigures=True        plot the signal with the detected contractions (matplotlib; ranges <= 30 min, <= 16)
   quiet=True              no messages
-  rocker='stopped', beats='stimulated', threshold=300, zeroForce=[z1, z2, ...], rockerFilter=True,
-  referenceBeat=R and all other options of options()
+  rocker='stopped', beats='stimulated', threshold=300 (or [t1, t2, ...] per channel, NaN = auto),
+  zeroForce=[z1, z2, ...], rockerFilter=True, referenceBeat=R and all other options of options()
   protocol='FFR'          analyse stimulation protocols found in the log file (find_protocols) instead of from_s / to_s:
                           a type ('FFR', 'RP', 'ST', 'PRP', 'PD', 'rockerSpeed'), 'all', row numbers (0-based) of
                           find_protocols(file), or a DataFrame like its output (e.g. corrected from / to). Range labels
@@ -140,6 +140,16 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     else:
         raise ValueError(f"zeroForce: one value for all channels or one value per channel ({len(channels)}) "
                          "expected.")
+    # detection threshold per channel ('auto', one value, or one value per channel; NaN = auto)
+    th = opts.threshold
+    if isinstance(th, str) or np.size(th) == 1:
+        thr_of = lambda c: th  # noqa: E731
+    elif np.size(th) == len(channels):
+        tarr = np.ravel(np.asarray(th, dtype=float))
+        thr_of = lambda c: float(tarr[c])  # noqa: E731
+    else:
+        raise ValueError(f"threshold: 'auto', one value for all channels or one value per channel ({len(channels)}) "
+                         "expected.")
     if not labels:
         labels = [f"range{r + 1}" for r in range(nR)]
     labels = [labels] if isinstance(labels, str) else list(labels)
@@ -186,6 +196,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
             for c, ch in enumerate(channels):
                 optsC = Struct(opts)
                 optsC.zeroForce = zero_of(c)
+                optsC.threshold = thr_of(c)
                 Bq, Cq = analyze_channel(S, ch, sub, optsC)
                 Bc[c][q] = Bq
                 lastB[c] = Bq
@@ -217,7 +228,10 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
                     if gb == "s2interval":  # S2 response: traces of the whole range
                         if Sres is None:
                             Sres = read_mdd(H, max(0.0, ranges[r, 0] - 2), ranges[r, 1] + 2, opts)
-                        _, Cx = analyze_channel(Sres, ch, ranges[r], opts)
+                        optsC = Struct(opts)
+                        optsC.zeroForce = zero_of(c)
+                        optsC.threshold = thr_of(c)
+                        _, Cx = analyze_channel(Sres, ch, ranges[r], optsC)
                         trace = dict(t=Cx.t, f=Cx.f, tR=Sres.t, rockerOn=Sres.rockerOn)
                     Rr = protocol_results(groupByR[r], T, Z, trace, opts)
                     resRows.append(dict({"range": labels[r], "channel": ch, "from": float(ranges[r, 0]),

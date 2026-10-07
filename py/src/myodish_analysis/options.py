@@ -8,7 +8,8 @@ Names are the same as in the MATLAB version and not case sensitive (relthreshold
 an error (typos are not silently ignored).
 
 DETECTION OF CONTRACTIONS
-  threshold        'auto' (default) or a number [uN]: minimum prominence of a contraction peak
+  threshold        'auto' (default) or a number [uN]: minimum prominence of a contraction peak; myodish_analysis
+                   also takes one value per channel (NaN = auto for that channel)
   relThreshold     auto threshold: at most this fraction of the typical contraction amplitude (default 0.3)
   minThreshold     auto threshold: never lower than this [uN] (default 30)
   minBeatInterval  minimum time between two contraction peaks [s] (default 0.15, i.e. up to ~6.7 Hz)
@@ -65,6 +66,8 @@ TS 2026-10-06 (port of mda_options.m, TS 2026-10-05; rockerSource, pauseDiastole
 from __future__ import annotations
 
 import numbers
+
+import numpy as np
 
 from ._matlab import Struct, mround
 
@@ -125,10 +128,18 @@ def options(base=None, **changes):
             raise ValueError(f"options: unknown option '{key}'. Valid options: {', '.join(NAMES)}, noFiltering.")
         opts[name] = val
     # checks
-    if isinstance(opts.threshold, str):
+    if _is_empty(opts.threshold) or (isinstance(opts.threshold, str) and not opts.threshold.strip()):
+        opts.threshold = "auto"
+    elif isinstance(opts.threshold, str):
         if opts.threshold.lower() != "auto":
             raise ValueError("options: 'threshold' must be 'auto' or a number.")
         opts.threshold = "auto"
+    else:
+        th = np.asarray(opts.threshold, dtype=float)
+        if np.any(th <= 0):
+            raise ValueError("options: 'threshold' must be 'auto', a positive number or one number per channel "
+                             "(NaN = auto).")
+        opts.threshold = float(th.ravel()[0]) if th.size == 1 else th.ravel()
     opts.beats = str(opts.beats).lower()
     if opts.beats not in ("all", "stimulated"):
         raise ValueError("options: 'beats' must be 'all' or 'stimulated'.")

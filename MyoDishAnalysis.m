@@ -38,7 +38,8 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %   'quiet', tf         no messages (default false)
 %   'rocker', 'stopped' only contractions while the rocker is at rest are included ('any' (default), 'moving')
 %   'beats', 'stimulated'  only stimulated contractions are included (default 'all')
-%   'threshold', x      minimum peak prominence in uN (default 'auto')
+%   'threshold', x      minimum peak prominence in uN (default 'auto'), one value for all channels or one value per
+%                       channel (NaN = auto for that channel)
 %   'zeroForce', z      sensor signal without load (uN) for diastolicForce = F_dia - zeroForce, one value per
 %                       channel or one for all (default: 'Offset' entry of each channel in the log file)
 %   'rockerFilter', tf  remove the periodic rocker artifact while the rocker moves (default false; see
@@ -172,6 +173,15 @@ elseif numel(zf) == numel(channels)
 else
     error('zeroForce: one value for all channels or one value per channel (%d) expected.', numel(channels));
 end
+% detection threshold per channel ('auto', one value, or one value per channel; NaN = auto)
+th = opts.threshold;
+if ischar(th) || isscalar(th)
+    thrOfChannel = @(c) th;
+elseif numel(th) == numel(channels)
+    thrOfChannel = @(c) th(c);
+else
+    error('threshold: ''auto'', one value for all channels or one value per channel (%d) expected.', numel(channels));
+end
 if isempty(labels), labels = arrayfun(@(r) sprintf('range%d', r), 1:nR, 'UniformOutput', false); end
 if numel(labels) ~= nR, error('Number of labels (%d) ~= number of ranges (%d).', numel(labels), nR); end
 if ~quiet
@@ -214,6 +224,7 @@ for r = 1:nR
         for c = 1:numel(channels)
             optsC = opts;
             optsC.zeroForce = zeroOfChannel(c);
+            optsC.threshold = thrOfChannel(c);
             [Bq, Cq] = mda_analyzeChannel(S, channels(c), sub, optsC);
             Bc{c,q} = Bq;
             lastB{c} = Bq; lastC{c} = Cq;           %control figure (single chunk)
@@ -242,7 +253,8 @@ for r = 1:nR
                 trace = [];
                 if strcmp(gb, 's2interval')            %S2 response: traces of the whole range
                     if isempty(Sres), Sres = mda_readMdd(H, max(0, ranges(r,1) - 2), ranges(r,2) + 2, opts); end
-                    [~, Cx] = mda_analyzeChannel(Sres, channels(c), ranges(r,:), opts);
+                    optsC = opts; optsC.zeroForce = zeroOfChannel(c); optsC.threshold = thrOfChannel(c);
+                    [~, Cx] = mda_analyzeChannel(Sres, channels(c), ranges(r,:), optsC);
                     trace = struct('t', Cx.t, 'f', Cx.f, 'tR', Sres.t, 'rockerOn', Sres.rockerOn);
                 end
                 Rr = mda_protocolResults(groupByR{r}, T, Z, trace, opts);

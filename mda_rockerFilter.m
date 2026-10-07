@@ -48,6 +48,12 @@ if ~isfield(S, 'rockerArtifact') || ~isequal(size(S.rockerArtifact), size(S.forc
     S.rockerFilterInfo = cell(1, nRow);
 end
 o0 = opts; o0.rockerFilter = false; o0.rocker = 'any'; o0.beats = 'all'; o0.zeroForce = nan;
+thrV = [];                                          %one threshold per channel (MyoDishAnalysis; NaN = auto)
+if isnumeric(opts.threshold) && numel(opts.threshold) > 1
+    if numel(opts.threshold) ~= numel(channels), error('mda_rockerFilter: one threshold per channel expected.'); end
+    thrV = opts.threshold(:)'; o0.threshold = 'auto';
+end
+oOf = @(chX) setThreshold(o0, thrV, channels, chX);  %options of the contraction masks of channel chX
 P = constants();
 R = repmat(emptyR(), 1, numel(channels));
 for c = 1:numel(channels), R(c).channel = channels(c); end
@@ -107,7 +113,7 @@ if any(needEstimate), need(:) = true; end
 MA = cell(1, nX); MB = cell(1, nX);
 for k = find(need(:))'
     try
-        [B0, C0] = mda_analyzeChannel(Sctx, Sctx.dataChannels(k), [], o0);
+        [B0, C0] = mda_analyzeChannel(Sctx, Sctx.dataChannels(k), [], oOf(Sctx.dataChannels(k)));
         if numel(C0.stimTimes) >= 3, MA{k} = firstMask(B0, C0); end
         MB{k} = secondMask(B0, C0);
     catch
@@ -163,7 +169,7 @@ for c = 1:numel(channels)
     if I.score > 0
         Sx = Sctx;
         Sx.force(rowX, :) = (x - evalArtifact(I, t, runT, f0run, P))';
-        [B1, C1] = mda_analyzeChannel(Sx, ch, [], o0);
+        [B1, C1] = mda_analyzeChannel(Sx, ch, [], oOf(ch));
         I2 = fitArtifact(t, x, runT, gi, f0run, secondMask(B1, C1), P);
         if I2.score >= I.score, I = I2; R(c).pass = 2; end
     end
@@ -521,4 +527,10 @@ n = max(2, ceil((t(end) - t(1)) / step) + 1);
 kn = linspace(t(1), t(end), n);
 h = kn(2) - kn(1);
 H = max(0, 1 - abs(t(:) - kn) / h);
+end
+
+
+function o = setThreshold(o, thrV, channels, chX)
+% options with the threshold of channel chX (per-channel thresholds thrV of MyoDishAnalysis; others: as in o)
+if ~isempty(thrV) && any(channels == chX), o.threshold = thrV(find(channels == chX, 1)); end
 end

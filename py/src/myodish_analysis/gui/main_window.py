@@ -5,12 +5,18 @@
 0. Comments ...: searchable list of the comments of the log file; double-click (or Go to) loads the data around it.
 1. Overview: min/max envelope of the selected channel (green = rocker at rest). Drag = load a time window; mouse wheel
    = zoom (shift + wheel: move), double-click = whole file; the zoomed part is re-read in more detail.
+   Arrow keys: left / right = move the time axis by half its length, shift + left / right = extend it on that side,
+   up / down = zoom in / out; mouse over the overview: its time axis, otherwise the force plot (beyond the loaded
+   window the loaded window follows and is read again; the zoomed overview moves along).
 2. Force plot: force - zero force; red = selected contractions, grey = excluded by the filters, x = excluded by you,
    blue ticks = stimuli, grey background = rocker moving, yellow = analysed range, purple = comments.
    Cursor mode 'drag = select time range' or 'click = exclude / include contraction'. Wheel = zoom the time axis,
    shift + wheel = move, double-click = whole loaded window. Right click: zero force, reference beat, save / export.
 3. Stimulus plot (current per pulse, interval to the previous pulse), table (mean, SD, n of the selected contractions,
-   extra / missed beats) and lower plot (one parameter per contraction).
+   extra / missed beats) and lower plot (one parameter per contraction). Detection threshold per channel (auto or
+   manual). Overlay contractions: mean beat (stimulus / peak) or time course of the range (t = 0 at the first
+   stimulus), other channels of the same range by checkboxes, colour / width / line style / SD-SEM-range band per
+   group, editable title, axis labels and legend, editable matplotlib copy (overlay.py).
 4. + EP recording ...: LabChart .mat export aligned to the stimuli; AP parameters per contraction.
 5. Protocols ...: stimulation protocols found in the log file ('start ... protocol' / 'end ... protocol'): contractions
    grouped by pacing frequency, S2 interval, stimulus current, rest interval, pulse duration or rocker speed; summary
@@ -49,7 +55,7 @@ from ..rocker_filter import rocker_filter
 from ..summarize import summarize
 from ..write_results import write_results
 from ..zero_force import zero_force
-from .timeaxis import fmt_clock, fmt_duration, fmt_num
+from .timeaxis import fmt_clock, fmt_duration, fmt_num, nav_step
 from .widgets import (BLUE, GREEN, GREY, MAGENTA, PURPLE, RED, ElidedLabel, PlotArea, TwinPlot, rects, rot_labels, runs, set_title, time_plot,
                       vlines)
 
@@ -80,6 +86,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.range = [math.nan, math.nan]
         self.manual_off = []                # t_peak of the contractions excluded by the user
         self.zero_user = {}                 # zero force per channel entered by the user (missing / NaN = log file)
+        self.thr_user = {}                  # detection threshold per channel entered by the user (missing = auto)
         self.Lbl = None                     # labels per channel (DataFrame)
         self.rel_time = False
         self.LE = None                      # log entries
@@ -108,6 +115,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ov_timer.setSingleShot(True)
         self._ov_timer.timeout.connect(self._load_detail)
         self._build_ui()
+        QtWidgets.QApplication.instance().installEventFilter(self)  # arrow keys: navigation on the time axis
         self.empty_plots()
         if mdd_file:
             self.open_file(str(mdd_file))
@@ -270,12 +278,18 @@ class MainWindow(QtWidgets.QMainWindow):
         h.addWidget(btn("Range = loaded window", self.on_whole_window))
         pv.addLayout(h)
         g = QtWidgets.QGridLayout()
-        g.addWidget(QtWidgets.QLabel(f"Detection threshold ({MU}N)"), 0, 0)
+        thr_tip = ("minimum prominence of a contraction peak, per channel: auto or a manual value for the selected "
+                   "channel (kept when you switch channels; also used for All channels, Protocols and Trend)")
+        lt = QtWidgets.QLabel(f"Threshold, this ch. ({MU}N)")
+        lt.setToolTip(thr_tip)
+        g.addWidget(lt, 0, 0)
         self.cThr = QtWidgets.QComboBox()
+        self.cThr.setToolTip(thr_tip)
         self.cThr.addItems(["auto", "manual"])
         self.cThr.activated.connect(self.on_threshold)
         g.addWidget(self.cThr, 0, 1)
         self.eThr = QtWidgets.QLineEdit("")
+        self.eThr.setToolTip(thr_tip)
         self.eThr.setMaximumWidth(70)
         self.eThr.editingFinished.connect(self.on_threshold_value)
         g.addWidget(self.eThr, 0, 2)
@@ -326,8 +340,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tbl.setFont(f)
         pv.addWidget(self.tbl, 1)
         grid = QtWidgets.QGridLayout()
-        grid.addWidget(btn("Overlay contractions", self.on_overlay, "overlay of the selected contractions; press again "
-                           "(or Add in the overlay window) to add another selection as a new group"), 0, 0)
+        grid.addWidget(btn("Overlay contractions", self.on_overlay, "overlay of the selected contractions (mean beat "
+                           "or time course); press again (or Add in the overlay window) to add another selection as a "
+                           "new group; other channels of the same range: Channels ... in the overlay window"), 0, 0)
         grid.addWidget(btn("Show table", self.on_show_table), 0, 1)
         grid.addWidget(btn("Export this channel ...", self.on_export), 1, 0)
         grid.addWidget(btn("All channels -> file ...", self.on_all_channels), 1, 1)
@@ -367,6 +382,15 @@ class MainWindow(QtWidgets.QMainWindow):
         ch = self.ch if ch is None else ch
         return self.zero_user.get(ch, math.nan)
 
+    def thr_of(self, chs=None):
+        """thresholds of channels chs for the analysis functions: 'auto' or one value per channel (NaN = auto);
+        a single channel (int / None = selected channel): 'auto' or the value"""
+        if chs is None or isinstance(chs, (int, np.integer)):
+            v = self.thr_user.get(self.ch if chs is None else int(chs), math.nan)
+            return "auto" if math.isnan(v) else v
+        th = [self.thr_user.get(int(c), math.nan) for c in chs]
+        return "auto" if all(math.isnan(v) for v in th) else th
+
     def _err(self, prefix, e):
         self.status(f"{prefix}{e}")
         if os.environ.get("MDA_DEBUG"):
@@ -388,6 +412,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.S = self.O = self.B = self.C = None
         self.manual_off = []
         self.zero_user = {}
+        self.thr_user = {}
+        self.cThr.setCurrentIndex(0)
+        self.eThr.setText("")
         self.Od = None
         self.ovXL = None
         self.rf_ctx = None
@@ -509,37 +536,49 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.ch = int(self.H.dataChannels[self.cCh.currentIndex()])
         self.manual_off = []
+        self.show_threshold()
         self.plot_overview()
         if self.S is not None:
             self.analyze(False)
 
     # =================================================================================================== settings
+    # detection threshold per channel (2026-10-07): auto or a manual value for each channel
     def on_threshold(self, *_):
         if self.cThr.currentIndex() == 0:
-            self.opts.threshold = "auto"
+            self.thr_user.pop(self.ch, None)
             if self.S is not None:
                 self.analyze(False)
         else:
             self.on_threshold_value()
+
+    def show_threshold(self):
+        """threshold controls of the selected channel (auto: value shown after the detection)"""
+        v = self.thr_user.get(self.ch, math.nan)
+        if math.isnan(v):
+            self.cThr.setCurrentIndex(0)
+            self.eThr.setText("")
+        else:
+            self.cThr.setCurrentIndex(1)
+            self.eThr.setText(f"{v:g}")
 
     def on_threshold_value(self):
         try:
             v = float(self.eThr.text())
         except ValueError:
             v = math.nan
+        cur = self.thr_user.get(self.ch, math.nan)
         if math.isnan(v) or v <= 0:
-            if isinstance(self.opts.threshold, str):
+            if math.isnan(cur):
                 self.cThr.setCurrentIndex(0)
             self.status("Threshold: enter a positive number (uN).")
             return
-        if not isinstance(self.opts.threshold, str) and abs(self.opts.threshold - v) < 1e-12 and \
-                self.cThr.currentIndex() == 1:
+        if not math.isnan(cur) and abs(cur - v) < 1e-12 and self.cThr.currentIndex() == 1:
             return
-        if isinstance(self.opts.threshold, str) and self.C is not None and abs(self.C.threshold - v) < 0.5 and \
+        if math.isnan(cur) and self.C is not None and abs(self.C.threshold - v) < 0.5 and \
                 self.cThr.currentIndex() == 0:
             return  # editing finished without a change (auto value shown)
         self.cThr.setCurrentIndex(1)
-        self.opts.threshold = v
+        self.thr_user[self.ch] = v
         if self.S is not None:
             self.analyze(False)
 
@@ -615,6 +654,7 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             optsC = Struct(self.opts)
             optsC.zeroForce = self.zero_of()
+            optsC.threshold = self.thr_of()
             Sa = self.S
             if self.opts.rockerFilter:
                 Sa, rf_msg = self.rocker_filtered(optsC)
@@ -650,17 +690,18 @@ class MainWindow(QtWidgets.QMainWindow):
             msg += " " + rf_msg
         self.status(msg)
 
-    def rocker_filtered(self, optsC):
-        """S with the rocker artifact of the current channel subtracted; estimated with +-60 s context (windows <
-        10 min), cached per channel and detection options."""
+    def rocker_filtered(self, optsC, ch=None):
+        """S with the rocker artifact of channel ch (default: the current channel) subtracted; estimated with +-60 s
+        context (windows < 10 min), cached per channel and detection options."""
+        ch = self.ch if ch is None else int(ch)
         S = self.S
         if not np.any(S.rockerOn):
             return S, "Rocker filter: the rocker does not move in this window."
         dc = [int(c) for c in S.dataChannels]
-        row = dc.index(self.ch)
+        row = dc.index(ch)
         key = json.dumps({k: (v if not isinstance(v, np.ndarray) else v.tolist()) for k, v in optsC.items()
                           if k not in ("zeroForce", "rocker", "beats", "referenceBeat")}, default=str)
-        E = self.rf_cache.get(self.ch)
+        E = self.rf_cache.get(ch)
         if E is None or E["key"] != key:
             self.status("Rocker filter: estimating the rocker artifact ...")
             if self.rf_ctx is None:
@@ -669,17 +710,17 @@ class MainWindow(QtWidgets.QMainWindow):
                                            min(self.H.totalSeconds, S.toSeconds + 60), self.opts)
                 else:
                     self.rf_ctx = S
-            S1 = Struct(t=S.t, force=S.force[row:row + 1].copy(), dataChannels=np.array([self.ch]), rockerOn=S.rockerOn,
+            S1 = Struct(t=S.t, force=S.force[row:row + 1].copy(), dataChannels=np.array([ch]), rockerOn=S.rockerOn,
                         dt=S.dt)
             o = Struct(optsC)
             if o.rockerFrequency is None and self.rf_f0 is not None:
                 o.rockerFrequency = self.rf_f0  # same for all channels
-            S1, R = rocker_filter(S1, self.ch, o, self.rf_ctx)
+            S1, R = rocker_filter(S1, ch, o, self.rf_ctx)
             R = R[0]
             if self.rf_f0 is None and R.f0table.shape[0]:
                 self.rf_f0 = R.f0table
             E = {"key": key, "art": S1.rockerArtifact[0].copy(), "R": R}
-            self.rf_cache[self.ch] = E
+            self.rf_cache[ch] = E
         Sa = S.copy()
         Sa.force = S.force.copy()
         Sa.force[row] = S.force[row] - E["art"]
@@ -703,13 +744,16 @@ class MainWindow(QtWidgets.QMainWindow):
         return m
 
     def deviating(self):
+        return self.deviating_of(self.B, self.C)
+
+    def deviating_of(self, B, C):
         """contractions that deviate from the reference beat by more than ref_thr SD (False without reference)."""
-        n = len(self.B)
-        if self.C is None or self.C.get("referenceBeat") is None:
+        n = len(B)
+        if C is None or C.get("referenceBeat") is None:
             return np.zeros(n, bool)
         with np.errstate(invalid="ignore"):
-            a = self.B["refMaxDeviation_SD"].to_numpy(float) > self.ref_thr
-            nrm = self.B["refMaxDeviationNorm_SD"].to_numpy(float) > self.ref_thr
+            a = B["refMaxDeviation_SD"].to_numpy(float) > self.ref_thr
+            nrm = B["refMaxDeviationNorm_SD"].to_numpy(float) > self.ref_thr
         return a if self.ref_which == 1 else (nrm if self.ref_which == 2 else a | nrm)
 
     def selected(self):
@@ -1191,6 +1235,94 @@ class MainWindow(QtWidgets.QMainWindow):
         set_title(p, f"Channel {self.ch}, {ws}, time in {unit}, {'force - zero force' if has_zero else 'sensor signal'}"
                   "   (green = rocker at rest, blue = loaded window, purple = comments)")
 
+    # =================================================================================================== keyboard
+    _NAV_KEYS = {QtCore.Qt.Key.Key_Left: "left", QtCore.Qt.Key.Key_Right: "right", QtCore.Qt.Key.Key_Up: "up",
+                 QtCore.Qt.Key.Key_Down: "down"}
+    _KEEP_KEYS = (QtWidgets.QLineEdit, QtWidgets.QAbstractSpinBox, QtWidgets.QComboBox, QtWidgets.QAbstractItemView,
+                  QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit, QtWidgets.QAbstractSlider)
+
+    def eventFilter(self, obj, ev):
+        """arrow keys in this window (not in edit fields, lists and combo boxes): navigation on the time axis"""
+        try:
+            if ev.type() == QtCore.QEvent.Type.KeyPress and ev.key() in self._NAV_KEYS and \
+                    isinstance(obj, QtWidgets.QWidget) and obj.window() is self and \
+                    not isinstance(QtWidgets.QApplication.focusWidget(), self._KEEP_KEYS):
+                ext = bool(ev.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier)
+                if self.on_key(self._NAV_KEYS[ev.key()], ext):
+                    return True
+        except RuntimeError:  # window being deleted
+            return False
+        return super().eventFilter(obj, ev)
+
+    def _mouse_over(self, plot, view):
+        pos = view.mapFromGlobal(QtGui.QCursor.pos())
+        if not view.rect().contains(pos):
+            return False
+        return plot.vb.sceneBoundingRect().contains(view.mapToScene(pos))
+
+    def on_key(self, key, ext):
+        """left / right arrow: move the time axis by half its length; ext (shift): extend it by half its length on
+        that side; up / down: zoom in / out. Mouse over the overview: the overview; otherwise the force plot (beyond
+        the loaded window the loaded window follows and is read again). Returns True if the key was used."""
+        if self.H is None:
+            return False
+        if self.O is not None and self._mouse_over(self.pOv, self.glTop):
+            lim = (0.0, float(self.O.totalSeconds))
+            a, b = nav_step(self.pOv.vb.viewRange()[0], key, ext, lim, 5)
+            self.ovXL = None if (b - a) >= 0.999 * (lim[1] - lim[0]) else (a, b)
+            self.plot_overview()
+            self._ov_timer.start(400)
+            return True
+        if self.S is None:
+            return False
+        self.navigate_to(nav_step(self.pMain.vb.viewRange()[0], key, ext, (0.0, float(self.H.totalSeconds)), 0.3))
+        return True
+
+    def navigate_to(self, xl):
+        """show time axis xl in the force plot; outside the loaded window the loaded window follows (same length;
+        longer if xl is longer) and is read again"""
+        L = (float(self.S.fromSeconds), float(self.S.toSeconds))
+        tol = 1e-6 * max(1.0, L[1] - L[0])
+        if xl[0] >= L[0] - tol and xl[1] <= L[1] + tol:
+            self.pMain.vb.setXRange(max(xl[0], L[0]), min(xl[1], L[1]), padding=0)
+            return
+        if xl[1] - xl[0] <= L[1] - L[0]:
+            d = 0.0
+            if xl[1] > L[1]:
+                d = xl[1] - L[1]
+            elif xl[0] < L[0]:
+                d = xl[0] - L[0]
+            w = [L[0] + d, L[1] + d]
+        else:
+            w = [min(xl[0], L[0]), max(xl[1], L[1])]
+        w = [max(0.0, w[0]), min(float(self.H.totalSeconds), w[1])]
+        if w[1] - w[0] > 4 * 3600:
+            self.status("Window longer than 4 h: use the command line version (mda) for long ranges.")
+            return
+        if abs(w[0] - L[0]) < tol and abs(w[1] - L[1]) < tol:
+            return  # start / end of the file
+        self._follow_overview(w)
+        self.eFrom.setText(f"{w[0]:.3f}")
+        self.eTo.setText(f"{w[1]:.3f}")
+        self.on_load()
+        if self.S is not None:
+            self.pMain.vb.setXRange(max(xl[0], self.S.fromSeconds), min(xl[1], self.S.toSeconds), padding=0)
+
+    def _follow_overview(self, w):
+        """zoomed overview: move it along when the loaded window w leaves the visible part"""
+        ov = self.ovXL
+        if self.O is None or ov is None or (w[0] >= ov[0] and w[1] <= ov[1]):
+            return
+        T = float(self.O.totalSeconds)
+        span = max(ov[1] - ov[0], 1.25 * (w[1] - w[0]))
+        if w[1] > ov[0] + span:
+            a = w[1] + 0.1 * span - span
+        else:
+            a = min(ov[0], w[0] - 0.1 * span)
+        a = min(max(a, 0.0), T - span)
+        self.ovXL = None if span >= 0.999 * T else (a, a + span)
+        self._ov_timer.start(400)
+
     # =================================================================================================== mouse
     def _wheel_main(self, x0, n, mods):
         if self.S is None:
@@ -1431,6 +1563,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.win_overlay.show()
         self.win_overlay.draw()
 
+    def overlay_channels(self, chs):
+        """overlay of the analysed range in channels chs (opens the overlay window; scripts / tests)"""
+        from .overlay import OverlayWindow
+        if self.win_overlay is None or not self.win_overlay.isVisible():
+            self.win_overlay = OverlayWindow(self)
+        self.win_overlay.set_channels(chs)
+        self.win_overlay.show()
+        self.win_overlay.raise_()
+
+    def analyze_other(self, c):
+        """channel c of the loaded window with the settings of the main window (threshold and zero force of channel
+        c)"""
+        optsC = Struct(self.opts)
+        optsC.zeroForce = self.zero_of(c)
+        optsC.threshold = self.thr_of(c)
+        Sa = self.S
+        if self.opts.rockerFilter:
+            Sa, _ = self.rocker_filtered(optsC, c)
+        return analyze_channel(Sa, c, None, optsC)
+
     def on_trend(self):
         if self.H is None:
             self.status("Open a file first.")
@@ -1523,6 +1675,10 @@ class MainWindow(QtWidgets.QMainWindow):
             except RuntimeError:
                 pass
         self._tables = []
+        try:
+            QtWidgets.QApplication.instance().removeEventFilter(self)
+        except RuntimeError:
+            pass
         super().closeEvent(ev)
 
     def on_help(self):
@@ -1574,6 +1730,7 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             o = dict(self.opts)
             o["zeroForce"] = [self.zero_of(int(c)) for c in self.H.dataChannels]  # NaN = Offset of the log file
+            o["threshold"] = self.thr_of([int(c) for c in self.H.dataChannels])  # NaN = auto
             myodish_analysis(self.H.file, None, self.range[0], self.range[1], output=fn, quiet=True,
                                  metadata=self.Lbl, **o)
             self.status(f"All channels written to {os.path.basename(fn)} (same settings, manual exclusions not applied).")

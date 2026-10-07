@@ -56,6 +56,11 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    overview, or type From/To (seconds) and press **Load**, to load a time window.
    **Mouse wheel** over the overview: zoom the time axis (shift + wheel: move; double-click: whole file); the zoomed
    part is re-read in more detail (useful for 24-h recordings).
+   **Arrow keys** (click into a plot first; MATLAB: not while the toolbar zoom / pan is active): ← / → move the time
+   axis by half its length, shift + ← / → extend it by half its length on that side, ↑ / ↓ zoom in / out. With the
+   mouse pointer over the overview they move its zoomed time axis; otherwise the force plot: beyond the loaded window,
+   the loaded window follows (same length, longer when extended; read again, blue window in the overview) and a zoomed
+   overview moves along. The analysed range is then the new loaded window.
 2. **Force plot**: force − zero force (if the zero force is known, see "Zero force"; otherwise the sensor signal).
    Red = selected contractions, grey = excluded by the filters, x = excluded by you,
    blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.
@@ -64,6 +69,9 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    zoom/pan also works (switch the tool off again to use the mouse modes). Time axis in h:mm:ss or m:ss (decimals
    when zoomed in below ~10 s); checkbox *time axis: 0 = start of the loaded window* shows the time relative to the
    window start (display only: From/To, tables and exports keep the time in the file, in s).
+   **Threshold, this ch.**: detection threshold of the selected channel, *auto* or a manual value (µN); kept per
+   channel when you switch channels and used for All channels, Protocols and Trend (command line: one value per
+   channel, `'threshold',[NaN 300 NaN ...]`, NaN = auto).
    **Right click → Set as zero force**: the y value of the mouse pointer becomes the zero force of the channel
    (e.g. right-click on the baseline of an empty chamber); "Zero force from the log file" restores the Offset.
    Checkbox **remove rocker artifact (periodic)**: see "Rocker artifact" below; light grey = signal before the
@@ -101,16 +109,25 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    (one sheet per table), `.csv` or `.txt` (one file per table): force signal (force − zero force), contractions
    with their status, stimuli, comments; stimulus pulses (current, interval); the plotted parameter. The overview
    (whole file) can only be saved as a picture. The overlay window has its own **Save figure** / **Export data**
-   (mean, SD, n and all single traces of every group).
+   (mean, SD, SEM, min, max, n and all single traces of every group; time course: the traces) and **Edit figure ...**.
 6. **Export this channel**: all contractions of the range (column `included`) + summary → `.xlsx` / `.csv`.
    **All channels → file**: the same range and settings in all channels (without manual exclusions;
    computed with the command-line function, i.e. the automatic threshold may differ slightly from the GUI,
    which uses the loaded window).
    **Overlay contractions**: the selected contractions and their mean in an overlay window, aligned at the stimulus
-   (default; stimulus = time 0) or at the peak; baseline = diastolic force (developed force) or zero force; optional
-   normalization to the amplitude. Several selections can be compared: press the button again (or **Add current
-   selection** in the overlay window) after selecting another range / channel / filter → one colour per group.
-   **Export mean curves** writes mean, SD and n of every group (.csv).
+   (default; stimulus = time 0) or at the peak, or the **time course** of the analysed range (t = 0 at the first
+   stimulus of each group, since the channels are not stimulated at the same time); baseline = diastolic force
+   (developed force) or zero force; optional normalization to the amplitude. Several selections can be compared:
+   press the button again (or **Add current selection** in the overlay window) after selecting another range /
+   channel / filter → one colour per group. **Channels (same range) ...**: checkboxes of all channels; ticked
+   channels are added for the analysed range of the main window (same settings and filters, threshold and zero force
+   of each channel; manual exclusions only in the channel of the main window), unticked ones removed.
+   Per group (select it in the list): **legend** text, **colour**, line **width**, line style (solid / dashed /
+   dotted / dash-dot) and a transparent **band** (mean ± SD, ± SEM or range min–max); *line and band for all groups*
+   copies the settings. Below the plot: **title**, **x axis**, **y axis** (empty = automatic) and the **legend**
+   position (or off). **Edit figure ...** opens a copy of the plot for free editing (MATLAB: normal figure with the
+   plot tools, e.g. double-click a text or line; Python: matplotlib window, toolbar button *Edit axis, curve and image
+   parameters*) and saving in other formats.
 7. **+ EP recording ...**: an electrophysiological recording made in parallel with LabChart (`.mat` export; e.g.
    sharp electrode: voltage channel + stimulation channel; default file: same name as the `.mdd` file) is aligned to
    the stimuli of the `.mdd` file and shown below the plots with the same time axis (the window grows downwards;
@@ -274,6 +291,7 @@ P = mda_protocols(file)                                              % protocols
   | RP | `refPeriodNoPeak_ms` | S2 interval below which there is no separate contraction peak (< 50 % of the S2 with a peak) |
   | | `refPeriodNoResponse_ms` | S2 interval below which there is no response at all (median S2 response < noise level) |
   | | `…Step_ms`, `S2noiseLevel_pct`, `amplitudeS1_uN`, `nS2`, `nTemplateBeats` | distance of the two S2 intervals around the transition (uncertainty ≈ ± step/2), noise level, ... |
+  | | `S2shortest_ms`, `S2longest_ms` | shortest / longest analysed S2 interval: a transition that is *not reached* (NaN, note) lies below `S2shortest_ms` (e.g. a slice that still gives a separate S2 contraction at the shortest S2 interval of the protocol), one *already at the longest interval* above `S2longest_ms` |
   | PRP | `PRP15_pct`, `PRP30_pct`, `PRP60_pct` (+ `_pause_s`) | amplitude in % of the steady reference after the pause nearest to 15 / 30 / 60 s (pause = stimulus interval − steady interval) |
 
   S2 response (as in GetRefractoryPeriod): the mean S1 contraction (S1 interval before and after, rocker at rest) is

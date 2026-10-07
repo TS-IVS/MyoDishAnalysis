@@ -34,6 +34,7 @@ for w = which(:)'
             R = runCLI(R, 'ranges', mdd, [3 6], [60 400], [120 460], {'labels', {'a', 'b'}, 'rocker', 'stopped', 'beats', 'stimulated'});
             R = runCLI(R, 'rocker', mdd, [], 0, inf, {'rockerFilter', true});
             R = runCLI(R, 'thr', mdd, 6, 100, 300, {'threshold', 300, 'downsampling', 1, 'medianFilterMs', 20, 'meanFilterMs', 10});
+            R = runCLI(R, 'thrCh', mdd, [1 3 6], 100, 300, {'threshold', [NaN 300 NaN]});   %threshold per channel (NaN = auto)
             R = readerCheck(R, mdd, 100, 160);
         case 'ex3ref'  % reference beat (channel 6, 0-120 s, 0.5 Hz) applied to the whole force-frequency protocol
             mdd = fullfile(dataDir, 'example3_humanVentricle.mdd');
@@ -57,6 +58,7 @@ for w = which(:)'
             mdd = fullfile(dataDir, 'example6_ratVentricle.mdd');
             R = runCLI(R, 'all', mdd, [], 0, inf, {});
             R = runCLI(R, 'rocker', mdd, [1 4 6], 0, 745, {'rockerFilter', true});
+            R = runCLI(R, 'rockerThr', mdd, [1 4 6], 0, 745, {'rockerFilter', true, 'threshold', [NaN 200 NaN]});
             R = readerCheck(R, mdd, 1030, 1090);
         case 'ex7'     % pig ventricle, post-rest potentiation
             mdd = fullfile(dataDir, 'example7_pigVentricle.mdd');

@@ -50,6 +50,28 @@ def time_ticks(xl, tmax):
     return ticks, labels, unit
 
 
+def nav_step(xl, key, ext, lim, min_span):
+    """time axis after an arrow key ('left', 'right', 'up', 'down'): left / right = move by half the span, with ext
+    (shift) = extend by half the span on that side; up / down = zoom in / out around the centre (span / 2, x 2);
+    limited to lim and >= min_span (navStep of MyoDishAnalysisGUI.m)."""
+    a, b = float(xl[0]), float(xl[1])
+    w = b - a
+    c = (a + b) / 2
+    if key == "left":
+        xn = [a - 0.5 * w, b] if ext else [a - 0.5 * w, b - 0.5 * w]
+    elif key == "right":
+        xn = [a, b + 0.5 * w] if ext else [a + 0.5 * w, b + 0.5 * w]
+    elif key == "up":
+        xn = [c - 0.25 * w, c + 0.25 * w]
+    else:
+        xn = [c - w, c + w]
+    span = min(max(xn[1] - xn[0], min_span), lim[1] - lim[0])
+    if ext:
+        return [max(xn[0], lim[0]), min(xn[1], lim[1])]
+    a = min(max((xn[0] + xn[1]) / 2 - span / 2, lim[0]), lim[1] - span)
+    return [a, a + span]
+
+
 def fmt_num(x, digits):
     """compact number for the summary table: integers above 1000, otherwise significant digits."""
     if x is None or (isinstance(x, float) and math.isnan(x)):

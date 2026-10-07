@@ -96,8 +96,10 @@ def analyze_channel(S, channel, range_=None, opts=None):
     isMax, P = islocalmax(f)
     cand = np.flatnonzero(isMax)
     prom = P[cand]
-    if not isinstance(opts.threshold, str):
-        thr = float(opts.threshold)
+    if not isinstance(opts.threshold, str) and np.size(opts.threshold) > 1:
+        raise ValueError("analyze_channel: one threshold per channel (several channels: myodish_analysis).")
+    if not isinstance(opts.threshold, str) and not math.isnan(float(np.ravel(opts.threshold)[0])):
+        thr = float(np.ravel(opts.threshold)[0])  # NaN = auto (per-channel thresholds of myodish_analysis)
         thrMode = "manual"
         typAmp = math.nan
     else:

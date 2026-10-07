@@ -105,7 +105,10 @@ end
 [isMax, P] = islocalmax(f);
 cand = find(isMax);
 prom = P(cand);
-if isnumeric(opts.threshold)
+if isnumeric(opts.threshold) && numel(opts.threshold) > 1
+    error('mda_analyzeChannel: one threshold per channel (several channels: MyoDishAnalysis).');
+end
+if isnumeric(opts.threshold) && ~isnan(opts.threshold)  %NaN = auto (per-channel thresholds of MyoDishAnalysis)
     thr = opts.threshold;
     thrMode = 'manual';
     typAmp = nan;

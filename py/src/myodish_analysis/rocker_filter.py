@@ -76,6 +76,20 @@ def rocker_filter(S, channels, opts, Sctx=None):
         S.rockerFilterInfo = list(S.rockerFilterInfo)
     o0 = Struct(opts)
     o0.rockerFilter = False; o0.rocker = "any"; o0.beats = "all"; o0.zeroForce = math.nan
+    thrV = None  # one threshold per channel (myodish_analysis; NaN = auto)
+    if not isinstance(opts.threshold, str) and np.size(opts.threshold) > 1:
+        if np.size(opts.threshold) != len(channels):
+            raise ValueError("rocker_filter: one threshold per channel expected.")
+        thrV = np.ravel(np.asarray(opts.threshold, float))
+        o0.threshold = "auto"
+
+    def o_of(chX):
+        """options of the contraction masks of channel chX (its threshold with per-channel thresholds)"""
+        if thrV is None or chX not in channels:
+            return o0
+        o = Struct(o0)
+        o.threshold = float(thrV[channels.index(chX)])
+        return o
     P = _constants()
     R = [_empty_r(c) for c in channels]
 
@@ -137,7 +151,7 @@ def rocker_filter(S, channels, opts, Sctx=None):
     MB = [None] * nX
     for k in np.flatnonzero(need):
         try:
-            B0, C0 = analyze_channel(Sctx, dcX[k], None, o0)
+            B0, C0 = analyze_channel(Sctx, dcX[k], None, o_of(dcX[k]))
             if C0.stimTimes.size >= 3:
                 MA[k] = _first_mask(B0, C0)
             MB[k] = _second_mask(B0, C0)
@@ -190,7 +204,7 @@ def rocker_filter(S, channels, opts, Sctx=None):
             Sx = Sctx.copy()
             Sx.force = np.array(Sctx.force, dtype=float, copy=True)
             Sx.force[rowX] = x - _eval_artifact(I, tc, runT, f0run, P)
-            B1, C1 = analyze_channel(Sx, ch, None, o0)
+            B1, C1 = analyze_channel(Sx, ch, None, o_of(ch))
             I2 = _fit_artifact(tc, x, runT, gi, f0run, _second_mask(B1, C1), P)
             if I2.score >= I.score:
                 I = I2

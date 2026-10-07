@@ -35,6 +35,8 @@ function R = mda_protocolResults(by, G, Z, trace, opts)
 %     Transition: the first interval (from long to short) below the level whose next shorter interval is also
 %     below it; linear interpolation with the previous (longer) interval. Not reached / already at the longest
 %     interval: NaN and a note. Noise level >= 50 %: NaN (no reliable S1 contraction).
+%     S2shortest_ms, S2longest_ms   shortest / longest analysed S2 interval (NaN with 'not reached': the transition
+%                               is below S2shortest_ms; 'already at the longest interval': above S2longest_ms)
 %     S2noiseLevel_pct, amplitudeS1_uN, nS2, nTemplateBeats
 %   PRP (pauseLength)
 %     PRP15_pct, PRP30_pct, PRP60_pct   amplitude in % of the steady reference after the pause nearest to 15 / 30 /
@@ -113,7 +115,7 @@ c = {'maxCapturedFrequency_Hz', 'amplitude_0p5Hz_uN', 'FFR_1Hz_pct', 'FFR_2Hz_pc
     'captureThreshold_mA', 'stimThreshold10_mA', 'stimThreshold50_mA', 'stimThreshold95_mA', 'stimThreshold99_mA', ...
     'maxAmplitude_uN', ...
     'refPeriodNoPeak_ms', 'refPeriodNoPeakStep_ms', 'refPeriodNoResponse_ms', 'refPeriodNoResponseStep_ms', ...
-    'S2noiseLevel_pct', 'amplitudeS1_uN', 'nS2', 'nTemplateBeats', ...
+    'S2shortest_ms', 'S2longest_ms', 'S2noiseLevel_pct', 'amplitudeS1_uN', 'nS2', 'nTemplateBeats', ...
     'PRP15_pct', 'PRP15_pause_s', 'PRP30_pct', 'PRP30_pause_s', 'PRP60_pct', 'PRP60_pause_s', ...
     'resultNote'};
 end
@@ -254,6 +256,7 @@ for i = 1:numel(ciU)
     medResp(i) = median(rv(g == ciU(i)));
 end
 ciU = round(1000 * ciU);
+if ~isempty(ciU), R.S2shortest_ms = ciU(end); R.S2longest_ms = ciU(1); end
 [R.refPeriodNoPeak_ms, R.refPeriodNoPeakStep_ms, notes] = transition(ciU, 100 * fracSep, 50, 'no peak', notes);
 [R.refPeriodNoResponse_ms, R.refPeriodNoResponseStep_ms, notes] = transition(ciU, medResp, noise, 'no response', notes);
 if ~isnan(noise) && noise >= 50

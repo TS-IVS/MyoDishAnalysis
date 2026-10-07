@@ -299,6 +299,7 @@ class TrendWindow(QtWidgets.QWidget):
             o["zeroForce"] = [w.zero_of(c) for c in chans]
         else:
             o["zeroForce"] = math.nan
+        o["threshold"] = w.thr_of([int(c) for c in chans])  # threshold per channel: also for the other files
         if mode == 2:
             o["rocker"] = "stopped"
         return o

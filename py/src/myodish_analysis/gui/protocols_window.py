@@ -235,13 +235,14 @@ class ProtocolWindow(QtWidgets.QWidget):
         self.tx.setText("Analysing ...")
         QtWidgets.QApplication.processEvents()
         o = dict(win.opts)
-        for k in ("rocker", "beats", "zeroForce"):
+        for k in ("rocker", "beats", "zeroForce", "threshold"):
             o.pop(k, None)
         try:
             T, S, info = myodish_analysis(win.H.file, chs, protocol=P, quiet=True, metadata=win.Lbl,
                                           rocker=CONTRACTIONS[self.cR.currentIndex()][1],
                                           beats="stimulated" if self.cStim.isChecked() else "all",
-                                          zeroForce=[win.zero_of(c) for c in chs], **o)
+                                          zeroForce=[win.zero_of(c) for c in chs], threshold=win.thr_of(list(chs)),
+                                          **o)
         except Exception as e:  # noqa: BLE001
             self.tx.setText(f"Error: {e}")
             return

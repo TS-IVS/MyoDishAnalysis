@@ -655,17 +655,29 @@ def help_text():
         "excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.",
         "Cursor in the force plot: \"drag = select time range\" or \"click = exclude / include contraction\". Mouse "
         "wheel: zoom the time axis (shift + wheel: move); double-click: whole loaded window. Right click: zero force, "
-        "reference beat, save / export.", "",
-        "Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak. "
-        "Press again (or Add current selection in the overlay window) to add another selection as a new group.", "",
+        "reference beat, save / export.",
+        "Arrow keys: left / right = move the time axis by half its length, shift + left / right = extend it by half "
+        "its length on that side, up / down = zoom in / out. Mouse pointer over the overview: its time axis; otherwise "
+        "the force plot - beyond the loaded window the loaded window follows (read again, blue in the overview) and a "
+        "zoomed overview moves along.", "",
+        "Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak, or "
+        "the time course of the analysed range (t = 0 at the first stimulus of each group). Press again (or Add "
+        "current selection in the overlay window) to add another selection as a new group; Channels (same range) ...: "
+        "tick "
+        "channels to add them for the analysed range (same settings, threshold and zero force of each channel). Per "
+        "group (list): legend text, colour, line width, line style and a transparent band (mean +- SD, +- SEM or "
+        "range). Title, axis labels and legend position are editable below the plot (empty = automatic); Edit figure "
+        "... opens a copy as a matplotlib figure (toolbar: edit axes, curves and legend; save as .png / .pdf / .svg).",
+        "",
         "Save / Export (menu or right click on a plot): plots as .png / .jpg / .tif (300 dpi) / .pdf, plotted data "
         "(visible time range) as .xlsx / .csv / .txt; overview: picture only.", "",
         "Labels ...: labels per channel (setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, "
         "treatment, concentration, concentrationUnit, daysInCulture, cultureStart, comment, analyst) - columns of the "
         "exported tables; saved as <name>_labels.csv next to the .mdd file and loaded automatically.", "",
-        "Detection: peaks with a prominence >= threshold (auto: 0.3 x typical amplitude, >= 30 uN). A contraction "
-        "within 25 ms ... min(stimulus interval, 1 s) after a stimulus of the channel is \"stimulated\", otherwise "
-        "\"extra\".", "",
+        "Detection: peaks with a prominence >= threshold (auto: 0.3 x typical amplitude, >= 30 uN; per channel: auto "
+        "or a manual value, kept when you switch channels and used for All channels, Protocols and Trend). A "
+        "contraction within 25 ms ... min(stimulus interval, 1 s) after a stimulus of the channel is \"stimulated\", "
+        "otherwise \"extra\".", "",
         "Reference beat (right click in the force plot): the mean shape (+- SD) of the selected contractions becomes "
         "the reference of the channel. Every contraction is compared with it, aligned at the stimulus (default; a "
         "changed latency counts, contractions without stimulus at the 50 % upstroke) or at the 50 % upstroke (shape "

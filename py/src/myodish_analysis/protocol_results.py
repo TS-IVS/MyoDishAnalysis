@@ -27,7 +27,7 @@ RESULT_COLUMNS = [
     "captureThreshold_mA", "stimThreshold10_mA", "stimThreshold50_mA", "stimThreshold95_mA", "stimThreshold99_mA",
     "maxAmplitude_uN",
     "refPeriodNoPeak_ms", "refPeriodNoPeakStep_ms", "refPeriodNoResponse_ms", "refPeriodNoResponseStep_ms",
-    "S2noiseLevel_pct", "amplitudeS1_uN", "nS2", "nTemplateBeats",
+    "S2shortest_ms", "S2longest_ms", "S2noiseLevel_pct", "amplitudeS1_uN", "nS2", "nTemplateBeats",
     "PRP15_pct", "PRP15_pause_s", "PRP30_pct", "PRP30_pause_s", "PRP60_pct", "PRP60_pause_s",
     "resultNote"]
 
@@ -276,6 +276,8 @@ def _s2_results(R, Z, trace, opts):
     fracSep = np.array([np.mean(sep[v][g == x]) for x in ciU])
     medResp = np.array([np.median(resp[v][g == x]) for x in ciU])
     ciU = np.array([mround(1000 * x) for x in ciU], float)
+    if ciU.size:
+        R["S2shortest_ms"], R["S2longest_ms"] = float(ciU[-1]), float(ciU[0])
     R["refPeriodNoPeak_ms"], R["refPeriodNoPeakStep_ms"] = _transition(ciU, 100 * fracSep, 50, "no peak", notes)
     R["refPeriodNoResponse_ms"], R["refPeriodNoResponseStep_ms"] = _transition(ciU, medResp, noise, "no response",
                                                                                notes)
