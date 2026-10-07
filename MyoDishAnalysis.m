@@ -40,12 +40,26 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %                       channel or one for all (default: 'Offset' entry of each channel in the log file)
 %   'rockerFilter', tf  remove the periodic rocker artifact while the rocker moves (default false; see
 %                       mda_rockerFilter). Result per channel and range: info.rockerFilter
+%   'protocol', p       analyse stimulation protocols found in the log file (mda_protocols: comments 'start ...
+%                       protocol' / 'end ... protocol') instead of fromSeconds / toSeconds: a type ('FFR', 'RP',
+%                       'ST', 'PRP', 'PD', 'rockerSpeed'), 'all', row numbers of mda_protocols(file), or a table like
+%                       its output (e.g. with corrected from / to). Range labels: 'FFR 1', 'FFR 2', ... With a
+%                       protocol, only contractions with the rocker at rest are included unless 'rocker' is given
+%                       (grouping by rocker speed: all contractions).
+%   'groupBy', q        group the contractions by a stimulation quantity and summarize per group (see
+%                       mda_groupBeats): 'pacingFrequency', 'S2interval', 'stimCurrent', 'pauseLength',
+%                       'rockerSpeed', 'pulseDuration', 'log:<code>', 'none'. Default with 'protocol': the quantity
+%                       of the protocol type (FFR: pacingFrequency, RP: S2interval, ST: stimCurrent, PRP:
+%                       pauseLength, PD: pulseDuration). The summary then has one row per range, channel and group
+%                       (columns group, groupValue, groupRole, groupBy, capture_percent, amplitude_pctOfRef, ...).
 %   further options: see mda_options (filters, stimulus assignment, file format)
 %
 % EXAMPLES
 %   T = MyoDishAnalysis('examples/example3_humanVentricle.mdd', 6, 0, 120);
 %   [T, S] = MyoDishAnalysis(file, [1 2 3], [600 3000], [660 3060], 'labels', {'baseline','drug'}, ...
 %                                'rocker','stopped', 'output','results.xlsx', 'showFigures',true);
+%   [T, S] = MyoDishAnalysis(file, [], [], [], 'protocol', 'FFR');       %force-frequency protocol(s), per rate
+%   [T, S] = MyoDishAnalysis(file, 1, [], [], 'protocol', 'RP', 'rocker', 'any');   %S2 intervals, all beats
 %   MyoDishAnalysisGUI(file)     interactive selection of the time range / single contractions
 %
 % Requires MATLAB R2019b or newer, no toolboxes.
@@ -62,6 +76,7 @@ if nargin < 4 || isempty(toSeconds), toSeconds = inf; end
 
 % ------------------------------------------------------------------ options
 outputFile = ''; labels = {}; showFigures = false; quiet = false; chunkSeconds = 1800; metadata = [];
+protocolSel = []; groupBy = '';
 rest = {};
 i = 1;
 while i <= numel(varargin)
@@ -74,15 +89,54 @@ while i <= numel(varargin)
             case 'quiet',        quiet = logical(varargin{i+1}); i = i + 2; continue;
             case 'chunkseconds', chunkSeconds = varargin{i+1}; i = i + 2; continue;
             case 'metadata',     metadata = varargin{i+1}; i = i + 2; continue;
+            case 'protocol',     protocolSel = varargin{i+1}; i = i + 2; continue;
+            case 'groupby',      groupBy = char(varargin{i+1}); i = i + 2; continue;
         end
     end
     rest{end+1} = varargin{i}; %#ok<AGROW>
     i = i + 1;
 end
+rockerGiven = any(cellfun(@(x) (ischar(x) || isstring(x)) && strcmpi(x, 'rocker'), rest(1:2:end)));
 opts = mda_options(rest{:});
 
 % ------------------------------------------------------------------ file and ranges
 H = mda_readMdd(mddFile, [], [], opts);
+protocols = [];
+if ~isempty(protocolSel)                           %ranges = stimulation protocols of the log file
+    if istable(protocolSel)
+        protocols = protocolSel;
+    else
+        P = mda_protocols(H);
+        if isnumeric(protocolSel)
+            protocols = P(protocolSel, :);
+        elseif strcmpi(protocolSel, 'all')
+            protocols = P;
+        else
+            protocols = P(strcmpi(P.type, protocolSel) | strcmpi(P.name, protocolSel), :);
+        end
+        if isempty(protocols)
+            error('No protocol ''%s'' in the log file of %s. Protocols found: %s', char(string(protocolSel)), ...
+                H.file, strjoin(strcat(P.type, {' ('}, P.name, {')'}), ', '));
+        end
+    end
+    fromSeconds = protocols.from;
+    toSeconds = protocols.to;
+    if isempty(labels)
+        labels = strcat(protocols.type, {' '}, arrayfun(@num2str, protocols.number, 'UniformOutput', false));
+    end
+end
+nRanges = numel(fromSeconds);
+if isempty(groupBy) && ~isempty(protocols)
+    groupByR = cellstr(protocols.groupBy);
+elseif isempty(groupBy)
+    groupByR = repmat({'none'}, nRanges, 1);
+else
+    groupByR = repmat({groupBy}, nRanges, 1);
+end
+grouping = any(~strcmpi(groupByR, 'none'));
+if ~isempty(protocols) && ~rockerGiven && ~any(strcmpi(groupByR, 'rockerSpeed'))
+    opts.rocker = 'stopped';                       %protocols: contractions with the rocker at rest
+end
 if isempty(channels), channels = H.dataChannels; end
 channels = channels(:)';
 bad = channels(~ismember(channels, H.dataChannels));
@@ -172,8 +226,18 @@ for r = 1:nR
         Cm.stimTimes = cell2mat(cellfun(@(x) x.stimTimes(x.stimTimes >= x.range(1) & x.stimTimes <= x.range(2)), CsC(:), 'UniformOutput', false));
         Cm.stimCaptured = cell2mat(cellfun(@(x) x.stimCaptured(x.stimTimes >= x.range(1) & x.stimTimes <= x.range(2)), CsC(:), 'UniformOutput', false));
         Cm.threshold = median(cellfun(@(x) x.threshold, CsC));
-        T = mda_summarize(B, Cm, ranges(r,:));
-        T = [table(labels(r), 'VariableNames', {'range'}), T]; %#ok<AGROW>
+        if grouping && ~strcmpi(groupByR{r}, 'none')
+            [B, T] = mda_groupBeats(H, B, Cm, ranges(r,:), groupByR{r}, opts);
+        else
+            T = mda_summarize(B, Cm, ranges(r,:));
+            if grouping                            %same columns as the grouped ranges
+                B.group = repmat({'all'}, height(B), 1); B.groupValue = nan(height(B), 1); B.groupRole = repmat({''}, height(B), 1);
+                T = addvars(T, nan, nan, 'After', 'missedBeats_percent', 'NewVariableNames', {'capture_percent', 'currentReached_percent'});
+                T = addvars(T, nan(height(T), 1), 'After', 'amplitude_SD', 'NewVariableNames', 'amplitude_pctOfRef');
+                T = [table({'all'}, nan, {''}, {'none'}, 'VariableNames', {'group','groupValue','groupRole','groupBy'}), T]; %#ok<AGROW>
+            end
+        end
+        T = [table(repmat(labels(r), height(T), 1), 'VariableNames', {'range'}), T]; %#ok<AGROW>
         sumParts{end+1} = T; %#ok<AGROW>
         B = [table(repmat(labels(r), height(B), 1), 'VariableNames', {'range'}), B]; %#ok<AGROW>
         parts{end+1} = B; %#ok<AGROW>
@@ -222,6 +286,8 @@ info = rmfield(H, {'totalSamples','stimRow'});
 info.channels = channels;
 info.ranges = ranges;
 info.rangeLabels = labels;
+info.protocols = protocols;
+info.groupBy = groupByR;
 info.labels = Lbl;
 info.options = opts;
 info.thresholds = array2table(thrInfo, 'VariableNames', {'range','channel','from','to','threshold_uN','maxStimToPeak_s'});

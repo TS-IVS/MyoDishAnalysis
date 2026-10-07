@@ -20,11 +20,21 @@ OPTIONS (keywords)
   quiet=True              no messages
   rocker='stopped', beats='stimulated', threshold=300, zeroForce=[z1, z2, ...], rockerFilter=True,
   referenceBeat=R and all other options of options()
+  protocol='FFR'          analyse stimulation protocols found in the log file (find_protocols) instead of from_s / to_s:
+                          a type ('FFR', 'RP', 'ST', 'PRP', 'PD', 'rockerSpeed'), 'all', row numbers (0-based) of
+                          find_protocols(file), or a DataFrame like its output (e.g. corrected from / to). Range labels
+                          'FFR 1', ... With a protocol, only contractions with the rocker at rest are included unless
+                          rocker is given (grouping by rocker speed: all contractions).
+  groupBy='pacingFrequency'  group the contractions by a stimulation quantity and summarize per group (group_beats):
+                          pacingFrequency, S2interval, stimCurrent, pauseLength, rockerSpeed, pulseDuration,
+                          'log:<code>', 'none'. Default with protocol: the quantity of the protocol type.
 
 EXAMPLES
   T, S, info = myodish_analysis('examples/example3_humanVentricle.mdd', 6, 0, 120)
   T, S, info = myodish_analysis(f, [1, 2, 3], [600, 3000], [660, 3060], labels=['baseline', 'drug'],
                                     rocker='stopped', output='results.xlsx')
+  T, S, info = myodish_analysis(f, None, protocol='FFR')                   # force-frequency protocol(s), per rate
+  T, S, info = myodish_analysis(f, 1, protocol='RP', rocker='any')         # S2 intervals, all beats
 
 Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-06 (port of MyoDishAnalysis.m, 2026-10-05)
 """
@@ -42,6 +52,7 @@ from .add_labels import add_labels
 from .analyze_channel import analyze_channel
 from .labels import labels as make_labels
 from .options import options as make_options
+from .protocols import add_empty_group_columns, find_protocols, group_beats
 from .read_mdd import read_mdd
 from .rocker_filter import rocker_filter
 from .summarize import summarize
@@ -57,9 +68,42 @@ def datenum_to_timestamps(dn):
 
 
 def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output=None, labels=None,
-                         metadata=None, showFigures=False, quiet=False, chunkSeconds=1800, **opt_kw):
+                         metadata=None, showFigures=False, quiet=False, chunkSeconds=1800, protocol=None, groupBy=None,
+                         **opt_kw):
+    rockerGiven = any(k.lower() == "rocker" for k in opt_kw)
     opts = make_options(**opt_kw)
     H = read_mdd(mdd_file, None, None, opts)
+    protocols = None
+    if protocol is not None:  # ranges = stimulation protocols of the log file
+        if isinstance(protocol, pd.DataFrame):
+            protocols = protocol.reset_index(drop=True)
+        else:
+            P = find_protocols(H)
+            if isinstance(protocol, str):
+                if protocol.lower() == "all":
+                    protocols = P
+                else:
+                    sel = (P["type"].str.lower() == protocol.lower()) | (P["name"].str.lower() == protocol.lower())
+                    protocols = P[sel.to_numpy(bool)].reset_index(drop=True)
+            else:
+                protocols = P.iloc[list(np.atleast_1d(protocol))].reset_index(drop=True)
+            if len(protocols) == 0:
+                found = ", ".join(f"{a} ({b})" for a, b in zip(P["type"], P["name"]))
+                raise ValueError(f"No protocol '{protocol}' in the log file of {H.file}. Protocols found: {found}")
+        from_s = protocols["from"].to_numpy(float)
+        to_s = protocols["to"].to_numpy(float)
+        if not labels:
+            labels = [f"{t} {int(n)}" for t, n in zip(protocols["type"], protocols["number"])]
+    nRanges = np.size(from_s)
+    if groupBy is None and protocols is not None:
+        groupByR = [str(g) for g in protocols["groupBy"]]
+    elif groupBy is None:
+        groupByR = ["none"] * nRanges
+    else:
+        groupByR = [str(groupBy)] * nRanges
+    grouping = any(g.lower() != "none" for g in groupByR)
+    if protocols is not None and not rockerGiven and not any(g.lower() == "rockerspeed" for g in groupByR):
+        opts.rocker = "stopped"  # protocols: contractions with the rocker at rest
     dc = [int(c) for c in np.asarray(H.dataChannels).ravel()]
     if channels is None or np.size(channels) == 0:
         channels = dc
@@ -157,7 +201,12 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
             Cm.stimTimes = np.concatenate(st)
             Cm.stimCaptured = np.concatenate(sc)
             Cm.threshold = float(np.median([x.threshold for x in CsC]))
-            T = summarize(B, Cm, ranges[r])
+            if grouping and groupByR[r].lower() != "none":
+                B, T = group_beats(H, B, Cm, ranges[r], groupByR[r], opts)
+            else:
+                T = summarize(B, Cm, ranges[r])
+                if grouping:  # same columns as the grouped ranges
+                    B, T = add_empty_group_columns(B, T)
             T.insert(0, "range", labels[r])
             sumParts.append(T)
             B.insert(0, "range", labels[r])
@@ -206,6 +255,8 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     info["channels"] = channels
     info["ranges"] = ranges
     info["rangeLabels"] = labels
+    info["protocols"] = protocols
+    info["groupBy"] = groupByR
     info["labels"] = Lbl
     info["options"] = opts
     info["thresholds"] = pd.DataFrame(thrInfo, columns=["range", "channel", "from", "to", "threshold_uN",

@@ -3,15 +3,19 @@
     mda FILE.mdd [-c 1 6 8] [--from 600 3000] [--to 660 3060] [--labels baseline drug] [-o results.xlsx]
                   [--rocker stopped] [--beats stimulated] [--threshold 300] [--zero-force z1 z2 ...]
                   [--rocker-filter] [--metadata labels.csv] [--reference ref.mat] [--set name=value ...]
-                  [--show-figures] [--quiet]
+                  [--protocol FFR | RP | ST | PRP | PD | rockerSpeed | all | n ...] [--group-by QUANTITY]
+                  [--list-protocols] [--show-figures] [--quiet]
 
 Same analysis as MyoDishAnalysis.m (see myodish_analysis). Without --output the summary is printed.
 Examples:
     mda examples/example3_humanVentricle.mdd -c 6 --from 0 --to 120
     mda file.mdd -c 1 2 3 --from 600 3000 --to 660 3060 --labels baseline drug --rocker stopped -o results.xlsx
     mda file.mdd -c 3 --from 300 --to 500 --rocker-filter --set medianFilterMs=20 meanFilterMs=10 downsampling=1
+    mda examples/example3_humanVentricle.mdd --list-protocols
+    mda examples/example3_humanVentricle.mdd -c 6 --protocol FFR                  # per pacing frequency
+    mda examples/example8_rabbitVentricle_EP.mdd --protocol RP --rocker any       # per S2 interval
 
-TS 2026-10-06
+TS 2026-10-06 (protocols 2026-10-07)
 """
 from __future__ import annotations
 
@@ -56,11 +60,28 @@ def main(argv=None):
     ap.add_argument("--zero-force", type=float, nargs="+", help="zero force (uN), one value or one per channel")
     ap.add_argument("--rocker-filter", action="store_true", help="remove the periodic rocker artifact")
     ap.add_argument("--reference", help="reference beat(s) (.mat saved by the GUI or MATLAB) for the comparison")
+    ap.add_argument("--protocol", nargs="+", help="stimulation protocol(s) of the log file instead of --from/--to: type "
+                    "(FFR, RP, ST, PRP, PD, rockerSpeed), 'all', or numbers of --list-protocols (0-based)")
+    ap.add_argument("--group-by", help="group the contractions: pacingFrequency, S2interval, stimCurrent, pauseLength, "
+                    "rockerSpeed, pulseDuration, log:<code>, none (default with --protocol: by protocol type)")
+    ap.add_argument("--list-protocols", action="store_true", help="list the protocols found in the log file and exit")
     ap.add_argument("--set", nargs="+", default=[], metavar="NAME=VALUE", help="further options (see options)")
     ap.add_argument("--show-figures", action="store_true")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args(argv)
     from .analysis import myodish_analysis
+    if a.list_protocols:
+        import pandas as pd
+        from .protocols import find_protocols
+        P = find_protocols(a.mdd)
+        with pd.option_context("display.width", 200, "display.max_columns", 20, "display.max_colwidth", 40):
+            print(P[["type", "name", "number", "from", "to", "groupBy", "note"]].to_string() if len(P)
+                  else "no protocols found (comments 'start ... protocol' / 'end ... protocol')")
+        return 0
+    prot = None
+    if a.protocol:
+        prot = a.protocol[0] if len(a.protocol) == 1 and not a.protocol[0].isdigit() else \
+            [int(x) for x in a.protocol]
     kw = {}
     if a.rocker:
         kw["rocker"] = a.rocker
@@ -89,11 +110,12 @@ def main(argv=None):
         else:
             ap.error("--from and --to need the same number of values")
     T, S, info = myodish_analysis(a.mdd, a.channels, a.from_s, a.to_s, output=a.output, labels=a.labels,
-                                      metadata=a.metadata, showFigures=a.show_figures, quiet=a.quiet, **kw)
+                                      metadata=a.metadata, showFigures=a.show_figures, quiet=a.quiet, protocol=prot,
+                                      groupBy=a.group_by, **kw)
     if not a.output and not a.quiet:
         import pandas as pd
-        cols = ["range", "channel", "nContractions", "amplitude_mean", "amplitude_SD", "dFdtMax_mean", "TTP90_mean",
-                "TTR90_mean", "CD90_mean"]
+        cols = ["range", "channel", "group", "nStimuli", "nContractions", "capture_percent", "amplitude_mean",
+                "amplitude_SD", "amplitude_pctOfRef", "dFdtMax_mean", "TTP90_mean", "TTR90_mean", "CD90_mean"]
         with pd.option_context("display.width", 200, "display.max_columns", 20):
             print(S[[c for c in cols if c in S.columns]].to_string(index=False))
     if a.show_figures:

@@ -1,0 +1,427 @@
+"""Stimulation protocols of a MyoDish recording and grouping of the contractions by a stimulation quantity.
+Port of mda_protocols.m and mda_groupBeats.m.
+
+    P = find_protocols(mdd_file)          protocols found from the comments of the log file (or H, or the log file)
+    B, G = group_beats(H, B, C, range_, by, opts)    contractions of one channel and range grouped by 'by';
+                                                      summary per group
+
+find_protocols: protocols are marked by pairs of comments such as 'start FFR protocol' ... 'end FFR protocol',
+'start of refractory period protocol' ... 'end of refractory period protocol' or 'FFR protocol started' ... 'FFR
+protocol ended'. A start is paired with the next end of the same name (otherwise of the same type). A start without an
+end lasts until the next protocol of the same type or the end of the file (note 'no end comment'). Protocols within a
+protocol of the same type are not listed separately. Comments about the recording itself are ignored.
+P: DataFrame, one row per protocol: type, name, number (k-th protocol of this type), from, to (s), groupBy (default
+quantity), startComment, endComment, note.
+Types (keywords in the name) and default grouping: FFR (FFR, force-frequency, frequency): pacingFrequency;
+RP (refractory, RP, S1S2, S2): S2interval; ST (threshold, stimCurrent, ST): stimCurrent; PRP (post rest, PRP, rest
+potentiation): pauseLength; PD (pulse duration, PD): pulseDuration; rockerSpeed (rocker speed): rockerSpeed;
+other: none.
+
+group_beats: see the help of mda_groupBeats.m (same quantities, groups, columns):
+  pacingFrequency, S2interval, stimCurrent, pauseLength, rockerSpeed, pulseDuration, 'log:<code>'.
+
+TS 2026-10-07 (port of mda_protocols.m and mda_groupBeats.m)
+"""
+from __future__ import annotations
+
+import math
+import re
+
+import numpy as np
+import pandas as pd
+
+from ._matlab import Struct, mround
+from .log_entries import log_entries, sscanf_floats
+from .summarize import summarize
+
+_START1 = re.compile(r"^(?:start(?:ing)?|begin(?:ning)?)\s+(?:of\s+)?(?:the\s+)?(.+?)\s*$", re.I)
+_START2 = re.compile(r"^(.+?)\s+(?:started|starts|begins)\s*$", re.I)
+_END1 = re.compile(r"^(?:end(?:ed)?|stop(?:ped)?|finish(?:ed)?)\s+(?:of\s+)?(?:the\s+)?(.+?)\s*$", re.I)
+_END2 = re.compile(r"^(.+?)\s+(?:ended|ends|end|stopped|finished|done)\s*$", re.I)
+COLUMNS = ["type", "name", "number", "from", "to", "groupBy", "startComment", "endComment", "note"]
+GROUP_BY = ["pacingFrequency", "S2interval", "stimCurrent", "pauseLength", "rockerSpeed", "pulseDuration"]
+
+
+def _parse_comment(txt):
+    if "recording" in txt.lower():  # 'Started parallel recording: ...'
+        return "", ""
+    for kind, rx in (("start", _START1), ("start", _START2), ("end", _END1), ("end", _END2)):
+        m = rx.match(txt)
+        if m:
+            return kind, m.group(1)
+    return "", ""
+
+
+def _norm_name(name):
+    key = name.lower().replace("protocol", "")
+    return re.sub(r"[^a-z0-9]", "", key)
+
+
+def protocol_type(key):
+    if re.search(r"postrest|prp|restpotentiation", key):
+        return "PRP"
+    if re.search(r"refractory|^rp|s1s2|^s2", key):
+        return "RP"
+    if re.search(r"threshold|stimcurrent|^st$|^st[^a-z]", key):
+        return "ST"
+    if re.search(r"pulseduration|^pd$|^pd[^a-z]", key):
+        return "PD"
+    if re.search(r"rockerspeed", key):
+        return "rockerSpeed"
+    if re.search(r"ffr|forcefrequency|frequency", key):
+        return "FFR"
+    return "other"
+
+
+def default_group_by(typ):
+    return {"FFR": "pacingFrequency", "RP": "S2interval", "ST": "stimCurrent", "PRP": "pauseLength",
+            "PD": "pulseDuration", "rockerSpeed": "rockerSpeed"}.get(typ, "none")
+
+
+def find_protocols(src):
+    if isinstance(src, dict):
+        logFile, T = src["logFile"], src["totalSeconds"]
+    elif str(src).lower().endswith(".mdd"):
+        from .read_mdd import read_mdd
+        H = read_mdd(str(src))
+        logFile, T = H.logFile, H.totalSeconds
+    else:
+        logFile, T = str(src), math.inf
+    E = log_entries(logFile)
+    E = E[E["isComment"].to_numpy(bool) & np.isfinite(E["t_file"].to_numpy(float))]
+    E = E.sort_values("t_file", kind="stable")
+    st = []
+    open_ = []
+    for txt, tf in zip(E["text"], E["t_file"]):
+        txt = str(txt).strip()
+        kind, name = _parse_comment(txt)
+        if not kind:
+            continue
+        key = _norm_name(name)
+        typ = protocol_type(key)
+        if kind == "start":
+            st.append(dict(type=typ, name=name, key=key, start=float(tf), to=math.nan, startComment=txt,
+                           endComment="", note=""))
+            open_.append(len(st) - 1)
+        else:
+            js = [j for j, i in enumerate(open_) if st[i]["key"] == key]
+            if not js and typ != "other":
+                js = [j for j, i in enumerate(open_) if st[i]["type"] == typ]
+            if not js:
+                continue  # end without start: ignored
+            j = js[-1]
+            st[open_[j]]["to"] = float(tf)
+            st[open_[j]]["endComment"] = txt
+            del open_[j]
+    # starts without end within a protocol of the same type: not listed separately
+    drop = [math.isnan(s["to"]) and any(x["type"] == s["type"] and not math.isnan(x["to"]) and x["start"] <= s["start"]
+                                        < x["to"] for x in st) for s in st]
+    st = [s for s, d in zip(st, drop) if not d]
+    # other starts without end: until the next start of the same type or the end of the file
+    for i, s in enumerate(st):
+        if math.isnan(s["to"]):
+            nxt = [x["start"] for x in st[i + 1:] if x["type"] == s["type"]]
+            s["to"] = nxt[0] if nxt else T
+            s["note"] = "no end comment"
+    # protocols within a protocol of the same type are not listed separately
+    keep = [True] * len(st)
+    for i in range(len(st)):
+        for j in range(len(st)):
+            a, b = st[i], st[j]
+            if i != j and keep[j] and a["type"] == b["type"] and a["start"] >= b["start"] and a["to"] <= b["to"] and \
+                    (a["start"] > b["start"] or a["to"] < b["to"] or i > j):
+                keep[i] = False
+    st = [s for s, k in zip(st, keep) if k]
+    rows = []
+    for i, s in enumerate(st):
+        number = sum(1 for x in st[:i + 1] if x["type"] == s["type"])
+        rows.append([s["type"], s["name"], float(number), s["start"], s["to"], default_group_by(s["type"]),
+                     s["startComment"], s["endComment"], s["note"]])
+    P = pd.DataFrame(rows, columns=COLUMNS)
+    if len(P) == 0:
+        P = P.astype({"number": float, "from": float, "to": float})
+    return P
+
+
+# =====================================================================================================
+def group_beats(H, B, C, range_, by, opts=None):
+    from .options import options as make_options
+    from .read_mdd import read_mdd
+    if opts is None:
+        opts = make_options()
+    by = str(by)
+    byl = by.lower()
+    r0, r1 = float(range_[0]), float(range_[1])
+
+    # stimuli of the channel (with the 300 s before)
+    S = read_mdd(H, max(0.0, r0 - 300), min(H.totalSeconds, r1 + 1), opts)
+    stimCh = C.stimChannel
+    idx = np.flatnonzero(S.stim.channel == stimCh)
+    o = np.argsort(S.stim.time[idx], kind="stable")
+    idx = idx[o]
+    tt = S.stim.time[idx]
+    cur = S.stim.current[idx]
+    reached = S.stim.currentReached[idx]
+    prevInt = np.r_[np.nan, np.diff(tt)]
+    nextInt = np.r_[np.diff(tt), np.nan]
+    nS = tt.size
+
+    # value and role of every stimulus
+    val = np.full(nS, np.nan)
+    role = np.array([""] * nS, dtype=object)
+    refRole = ""
+    if byl == "pacingfrequency":
+        val = 1.0 / _group_median(prevInt, _cluster_values(prevInt, 0.0, 0.02))
+    elif byl == "s2interval":
+        with np.errstate(invalid="ignore"):
+            premature = (prevInt < 0.95 * np.r_[np.nan, prevInt[:-1]]) & (np.isnan(nextInt) | (nextInt > 1.05 * prevInt))
+        isS2 = premature & ~np.r_[False, premature[:-1]]
+        role[:] = "S1"
+        role[isS2] = "S2"
+        post = np.r_[False, isS2[:-1]]
+        role[post] = "postS2"
+        s2 = np.full(nS, np.nan)
+        s2[isS2] = prevInt[isS2]
+        v2 = _group_median(s2, _cluster_values(s2, 0.0075, 0.0))
+        val[isS2] = v2[isS2]
+        ip = np.flatnonzero(post)
+        val[ip] = v2[ip - 1]
+        refRole = "S1"
+    elif byl == "stimcurrent":
+        val = cur.astype(float)
+    elif byl == "pauselength":
+        inR = (tt >= r0) & (tt <= r1)
+        p = prevInt[inR]
+        steadyCL = float(np.median(p[~np.isnan(p)])) if np.any(~np.isnan(p)) else math.nan
+        with np.errstate(invalid="ignore"):
+            rest = prevInt >= np.fmax(1.5, 1.5 * steadyCL)
+        role[:] = "steady"
+        role[rest] = "postRest"
+        pv = np.full(nS, np.nan)
+        pv[rest] = prevInt[rest]
+        val = _group_median(pv, _cluster_values(pv, 0.0, 0.05))
+        refRole = "steady"
+    elif byl == "rockerspeed":
+        val = _rocker_speed_at(H, tt, float(opts.rockerLogDelay))
+    elif byl == "pulseduration":
+        val = _log_value_at(H, "chargeDuration", stimCh, tt) / 1000.0
+    elif byl.startswith("log:"):
+        val = _log_value_at(H, by[4:].strip(), stimCh, tt)
+    else:
+        raise ValueError(f"group_beats: unknown quantity '{by}'.")
+    lbl = _group_labels(byl, val, role, by)
+
+    # group of every contraction
+    B = B.copy()
+    nB = len(B)
+    tStim = B["t_stim"].to_numpy(float)
+    tPeak = B["t_peak"].to_numpy(float)
+    k = np.full(nB, -1)
+    for i in range(nB):
+        if not math.isnan(tStim[i]):
+            j = np.flatnonzero(tt == tStim[i])
+        else:
+            j = np.flatnonzero(tt <= tPeak[i] - opts.minStimToPeak)
+            j = j[-1:]
+        if j.size:
+            k[i] = j[0]
+    has = k >= 0
+    bVal = np.full(nB, np.nan)
+    bRole = np.array([""] * nB, dtype=object)
+    bLbl = np.array(["unknown"] * nB, dtype=object)
+    bVal[has] = val[k[has]]
+    bRole[has] = role[k[has]]
+    bLbl[has] = lbl[k[has]]
+    if byl == "rockerspeed":  # rocker speed at the peak
+        bVal = _rocker_speed_at(H, tPeak, float(opts.rockerLogDelay))
+        bLbl = _group_labels("rockerspeed", bVal, np.array([""] * nB, dtype=object), by)
+    B["group"] = list(bLbl)
+    B["groupValue"] = bVal
+    B["groupRole"] = list(bRole)
+
+    # summary per group
+    inR = (tt >= r0) & (tt <= r1)
+    Cst = np.asarray(C.stimTimes, dtype=float)
+    Ccap = np.asarray(C.stimCaptured, dtype=bool)
+    captured = np.zeros(nS, bool)
+    for i in range(nS):
+        j = np.flatnonzero(Cst == tt[i])
+        if j.size:
+            captured[i] = Ccap[j[0]]
+    inRb = (tPeak >= r0) & (tPeak <= r1)
+    keys = []
+    for x in list(lbl[inR]) + list(bLbl[inRb]):
+        if x not in keys:
+            keys.append(x)
+    roleOrder = ["", "S1", "S2", "postS2", "steady", "postRest"]
+    kr, kv = [], []
+    for key in keys:
+        j = np.flatnonzero(lbl == key)
+        if j.size:
+            kr.append(roleOrder.index(role[j[0]]))
+            kv.append(val[j[0]])
+        else:
+            j = np.flatnonzero(bLbl == key)
+            kr.append(roleOrder.index(bRole[j[0]]))
+            kv.append(bVal[j[0]])
+    kv2 = [math.inf if math.isnan(v) else v for v in kv]
+    order = sorted(range(len(keys)), key=lambda q: (kr[q], kv2[q]))
+    parts = []
+    for q in order:
+        js = inR & (lbl == keys[q])
+        Cg = Struct(dict(C))
+        Cg.stimTimes = tt[js]
+        Cg.stimCaptured = captured[js]
+        Bg = B[B["group"].to_numpy() == keys[q]]
+        T = summarize(Bg, Cg, [r0, r1])
+        pj = prevInt[js]
+        pj = pj[~np.isnan(pj)]
+        T["stimFrequency"] = 1.0 / float(np.median(pj)) if js.any() and pj.size else math.nan
+        capt = 100 * float(np.mean(captured[js])) if js.any() else math.nan
+        reach = 100 * float(np.mean(reached[js])) if js.any() else math.nan
+        pos = list(T.columns).index("missedBeats_percent") + 1
+        T.insert(pos, "capture_percent", capt)
+        T.insert(pos + 1, "currentReached_percent", reach)
+        T.insert(0, "groupBy", by)
+        T.insert(0, "groupRole", roleOrder[kr[q]])
+        T.insert(0, "groupValue", float(kv[q]))
+        T.insert(0, "group", keys[q])
+        parts.append(T)
+    if not parts:
+        return B, pd.DataFrame()
+    G = pd.concat(parts, ignore_index=True)
+    ref = math.nan
+    if refRole:
+        r = np.flatnonzero(G["groupRole"].to_numpy() == refRole)
+        if r.size:
+            ref = float(G["amplitude_mean"].iloc[r[0]])
+    G.insert(list(G.columns).index("amplitude_SD") + 1, "amplitude_pctOfRef", 100 * G["amplitude_mean"] / ref)
+    return B, G
+
+
+def add_empty_group_columns(B, T):
+    """the group columns for a range without grouping (group 'all'), so that the tables can be concatenated."""
+    B = B.copy()
+    B["group"] = "all"
+    B["groupValue"] = np.nan
+    B["groupRole"] = ""
+    T = T.copy()
+    pos = list(T.columns).index("missedBeats_percent") + 1
+    T.insert(pos, "capture_percent", np.nan)
+    T.insert(pos + 1, "currentReached_percent", np.nan)
+    T.insert(list(T.columns).index("amplitude_SD") + 1, "amplitude_pctOfRef", np.nan)
+    T.insert(0, "groupBy", "none")
+    T.insert(0, "groupRole", "")
+    T.insert(0, "groupValue", np.nan)
+    T.insert(0, "group", "all")
+    return B, T
+
+
+# =====================================================================================================
+def _cluster_values(v, absTol, relTol):
+    """groups of similar values: sorted distinct values, a new group where the gap > absTol + relTol * lower value."""
+    gid = np.full(v.shape, -1)
+    u = np.unique(v[~np.isnan(v)])
+    if u.size == 0:
+        return gid
+    br = np.r_[True, np.diff(u) > absTol + relTol * u[:-1]]
+    starts = u[br]
+    ok = ~np.isnan(v)
+    gid[ok] = np.searchsorted(starts, v[ok], side="right") - 1
+    return gid
+
+
+def _group_median(v, gid):
+    m = np.full(v.shape, np.nan)
+    for g in np.unique(gid[gid >= 0]):
+        k = gid == g
+        m[k] = np.median(v[k])
+    return m
+
+
+def _group_labels(byl, val, role, byName):
+    out = []
+    for v, r in zip(val, role):
+        if byl == "pacingfrequency":
+            stp = 0.05 if v >= 0.5 else 0.01
+            s = "%g Hz" % (mround(v / stp) * stp) if not math.isnan(v) else ""
+        elif byl == "s2interval":
+            if r == "S1":
+                s = "S1"
+            elif r == "S2":
+                s = "S2 %d ms" % mround(1000 * v) if not math.isnan(v) else ""
+            else:
+                s = "post-S2 %d ms" % mround(1000 * v) if not math.isnan(v) else ""
+        elif byl == "stimcurrent":
+            s = "%g mA" % v
+        elif byl == "pauselength":
+            s = "steady" if r == "steady" else "rest %.3g s" % v
+        elif byl == "rockerspeed":
+            s = "%g rpm" % v
+        elif byl == "pulseduration":
+            s = "%g ms" % v
+        else:
+            s = "%s %g" % (byName[4:].strip(), v)
+        if math.isnan(v) and r not in ("S1", "steady"):
+            s = "unknown"
+        out.append(s)
+    return np.array(out, dtype=object)
+
+
+def _unique_last(te, x):
+    """sorted distinct times; for several entries at the same time the last one (as MATLAB unique(..., 'last'))."""
+    u, inv = np.unique(te, return_inverse=True)
+    last = np.zeros(u.size, int)
+    for i, g in enumerate(inv):
+        last[g] = i
+    return u, x[last]
+
+
+def _rocker_speed_at(H, t, delay):
+    R = np.asarray(H.rockerSpeedLog, dtype=float).reshape(-1, 2)
+    t = np.asarray(t, dtype=float)
+    v = np.full(t.shape, np.nan)
+    if R.shape[0] == 0:
+        return v
+    R = R[np.argsort(R[:, 0], kind="stable")]
+    te = np.maximum(R[:, 0] + delay, 0.0)
+    te, rv = _unique_last(te, R[:, 1])
+    k = np.searchsorted(te, t, side="right") - 1
+    ok = (k >= 0) & ~np.isnan(t)
+    v[ok] = rv[k[ok]]
+    return v
+
+
+def _log_value_at(H, code, ch, t):
+    t = np.asarray(t, dtype=float)
+    v = np.full(t.shape, np.nan)
+    E = log_entries(H.logFile)
+    if len(E) == 0:
+        return v
+    codes = E["code"].astype(str).str.lower().to_numpy()
+    texts = E["text"].astype(str).str.lower().to_numpy()
+    isRec = codes == "recording"
+    started = np.array(["started" in x for x in texts])
+    par = np.array(["parallel" in x for x in texts])
+    rec = np.flatnonzero(isRec & started & ~par)
+    if rec.size == 0:
+        rec = np.flatnonzero(isRec & started)
+    tf = E["t_file"].to_numpy(float).copy()
+    if rec.size:
+        tf[:rec[-1]] = -np.inf
+    chs = E["channel"].to_numpy(float)
+    k = np.flatnonzero((codes == code.lower()) & ((chs == ch) | (chs == 0)))
+    if k.size == 0:
+        return v
+    x = np.full(k.size, np.nan)
+    for i, kk in enumerate(k):
+        num = sscanf_floats(str(E["text"].iloc[kk]))
+        if num:
+            x[i] = num[0]
+    te = tf[k]
+    o = np.argsort(te, kind="stable")
+    te, x = _unique_last(te[o], x[o])
+    kk = np.searchsorted(te, t, side="right") - 1
+    ok = kk >= 0
+    v[ok] = x[kk[ok]]
+    return v

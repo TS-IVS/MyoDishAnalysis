@@ -35,8 +35,20 @@ FILES = dict(
     ex1="example1_rabbitVentricle.mdd", ex2="example2_rabbitVentricle.mdd", ex3="example3_humanVentricle.mdd",
     ex3ref="example3_humanVentricle.mdd", ex4="example4_humanAtrium.mdd", ex5="example5_pigVentricle.mdd",
     ex6="example6_ratVentricle.mdd", ex7="example7_pigVentricle.mdd", ex8="example8_rabbitVentricle_EP.mdd",
-    ex9="example9_ratVentricle.mdd",
+    ex9="example9_ratVentricle.mdd", protocols="example3_humanVentricle.mdd",
 )
+PROT = {  # key: (example, channels, from, to, keyword options) as in case 'protocols' of mda_py_reference_files.m
+    "ffr3": (3, [3, 6], None, None, dict(protocol="FFR")),
+    "ffr4": (4, [3, 6], None, None, dict(protocol="FFR", rocker="any")),
+    "rp8": (8, 1, None, None, dict(protocol="RP", rocker="any")),
+    "st2": (2, [3, 5, 7], None, None, dict(protocol="ST", rocker="any")),
+    "pd2": (2, 5, None, None, dict(protocol="PD", rocker="any")),
+    "prp7": (7, [1, 3], None, None, dict(protocol="PRP")),
+    "prp7any": (7, 3, None, None, dict(protocol="PRP", rocker="any")),
+    "rocker1": (1, 5, None, None, dict(protocol="rockerSpeed")),
+    "all6": (6, [1, 6], None, None, dict(protocol="all")),
+    "log2": (2, 5, 60, 330, dict(groupBy="log:dechargeDuration", rocker="any")),
+}
 EP_CASES = ("ex8",)
 CLI = {  # key: (channels, from, to, keyword options) as in mda_py_reference_files.m
     "ex1": {"all": (None, 0, math.inf, {}), "rocker": ([1, 2, 8], 0, math.inf, dict(rockerFilter=True))},
@@ -168,7 +180,35 @@ def cmp_reader(R, mdd, a, b, name):
     report(ok and okl, lines + ll, name + " reader/overview/log")
 
 
+def _example(data, k):
+    import glob
+    return sorted(glob.glob(os.path.join(data, f"example{k}_*.mdd")))[0]
+
+
+def case_protocols(data, ref):
+    """protocols found in the log files (find_protocols) and analyses per protocol and group (group_beats)."""
+    R = loadmat(os.path.join(ref, "protocols.mat"))["R"]
+    print("--- protocols")
+    for k in range(1, 10):
+        M = table_from_struct(getattr(R, f"list{k}"))
+        P = mda.find_protocols(_example(data, k))
+        if len(P) == 0 and all(len(M[c]) == 0 or (len(M) == 1 and str(M[c].iloc[0]) in ("", "nan")) for c in M.columns):
+            report(True, [f"example {k}: no protocols in both"], f"protocols example {k}")
+            continue
+        report(*compare_tables(M, P, f"protocols example {k}", rtol=1e-12, atol=1e-9), f"protocols example {k}")
+    for key, (k, ch, a, b, kw) in PROT.items():
+        t0 = time.time()
+        kw2 = dict(kw)
+        if a is None:
+            T, S, info = mda.myodish_analysis(_example(data, k), ch, quiet=True, **kw2)
+        else:
+            T, S, info = mda.myodish_analysis(_example(data, k), ch, a, b, quiet=True, **kw2)
+        cmp_cli(getattr(R, key), T, S, info, f"protocols/{key} ({time.time() - t0:.1f} s)", 1e-9)
+
+
 def case_files(case, data, ref):
+    if case == "protocols":
+        return case_protocols(data, ref)
     R = loadmat(os.path.join(ref, case + ".mat"))["R"]
     mdd = os.path.join(data, FILES[case])
     print(f"--- {case}: {FILES[case]}")

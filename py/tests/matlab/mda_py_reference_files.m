@@ -5,7 +5,7 @@ function mda_py_reference_files(dataDir, outDir, which)
 %
 %   dataDir  folder with the example recordings (examples/ of the repository: .mdd + _log.log, LabChart .mat)
 %   outDir   folder for the results (<case>.mat), py/tests/reference
-%   which    case name(s): 'ex1' ... 'ex9', 'ex3ref' (cell or char)
+%   which    case name(s): 'ex1' ... 'ex9', 'ex3ref', 'protocols' (cell or char)
 %
 % Every case saves the contraction and summary tables (table2struct, 'ToScalar'), the thresholds, rocker filter
 % results, raw data of a short window (reader check), the overview and the log entries; the EP case also the alignment
@@ -83,6 +83,24 @@ for w = which(:)'
             R.ap = table2struct([B(:, {'t_peak', 't_stim', 'beatType'}), AP], 'ToScalar', true);
             R.apChannel = ch;
             R = runCLI(R, 'all', mdd, [], 0, inf, {});
+        case 'protocols'   % protocols found in the log files; analyses per protocol and group (mda_groupBeats)
+            mdd = fullfile(dataDir, 'example3_humanVentricle.mdd');
+            for k = 1:9
+                d = dir(fullfile(dataDir, sprintf('example%d_*.mdd', k)));
+                P = mda_protocols(fullfile(dataDir, d(1).name));
+                R.(sprintf('list%d', k)) = table2struct(P, 'ToScalar', true);
+            end
+            ex = @(k) fullfile(dataDir, getfield(dir(fullfile(dataDir, sprintf('example%d_*.mdd', k))), 'name')); %#ok<GFLD>
+            R = runCLI(R, 'ffr3', ex(3), [3 6], [], [], {'protocol', 'FFR'});
+            R = runCLI(R, 'ffr4', ex(4), [3 6], [], [], {'protocol', 'FFR', 'rocker', 'any'});
+            R = runCLI(R, 'rp8', ex(8), 1, [], [], {'protocol', 'RP', 'rocker', 'any'});
+            R = runCLI(R, 'st2', ex(2), [3 5 7], [], [], {'protocol', 'ST', 'rocker', 'any'});
+            R = runCLI(R, 'pd2', ex(2), 5, [], [], {'protocol', 'PD', 'rocker', 'any'});
+            R = runCLI(R, 'prp7', ex(7), [1 3], [], [], {'protocol', 'PRP'});
+            R = runCLI(R, 'prp7any', ex(7), 3, [], [], {'protocol', 'PRP', 'rocker', 'any'});
+            R = runCLI(R, 'rocker1', ex(1), 5, [], [], {'protocol', 'rockerSpeed'});
+            R = runCLI(R, 'all6', ex(6), [1 6], [], [], {'protocol', 'all'});
+            R = runCLI(R, 'log2', ex(2), 5, 60, 330, {'groupBy', 'log:dechargeDuration', 'rocker', 'any'});
         otherwise
             error('mda_py_reference_files: unknown case ''%s''.', c);
     end
