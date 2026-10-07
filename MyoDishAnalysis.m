@@ -96,7 +96,9 @@ while i <= numel(varargin)
     rest{end+1} = varargin{i}; %#ok<AGROW>
     i = i + 1;
 end
-rockerGiven = any(cellfun(@(x) (ischar(x) || isstring(x)) && strcmpi(x, 'rocker'), rest(1:2:end)));
+rk = rest;
+if ~isempty(rk) && isstruct(rk{1}), rk = rk(2:end); end   %options struct first (GUI)
+rockerGiven = any(cellfun(@(x) (ischar(x) || isstring(x)) && strcmpi(x, 'rocker'), rk(1:2:end)));
 opts = mda_options(rest{:});
 
 % ------------------------------------------------------------------ file and ranges

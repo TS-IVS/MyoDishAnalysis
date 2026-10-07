@@ -12,6 +12,9 @@
 3. Stimulus plot (current per pulse, interval to the previous pulse), table (mean, SD, n of the selected contractions,
    extra / missed beats) and lower plot (one parameter per contraction).
 4. + EP recording ...: LabChart .mat export aligned to the stimuli; AP parameters per contraction.
+5. Protocols ...: stimulation protocols found in the log file ('start ... protocol' / 'end ... protocol'): contractions
+   grouped by pacing frequency, S2 interval, stimulus current, rest interval, pulse duration or rocker speed; summary
+   per group, plot of a parameter against the quantity, export (protocols_window.py).
 See README.md of the MATLAB version for all details; results are the same as with MyoDishAnalysisGUI.
 
 Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-06 (port of MyoDishAnalysisGUI.m)
@@ -98,6 +101,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tr_cache = {}
         self.plot_list = _plot_list()
         self.win_overlay = self.win_trend = self.win_ref = self.win_comments = self.win_labels = None
+        self.win_protocols = None
         self._drag_item = None
         self._stim_txt = []
         self._ov_timer = QtCore.QTimer(self)
@@ -158,6 +162,9 @@ class MainWindow(QtWidgets.QMainWindow):
         bar.addWidget(btn("Overview", self.on_overview, "overview of the whole file (min/max envelope)"))
         bar.addWidget(btn("Comments ...", self.on_comments, "searchable list of the comments in the log file; "
                           "double-click = go to"))
+        bar.addWidget(btn("Protocols ...", self.on_protocols, "stimulation protocols of the log file (FFR, refractory "
+                          "period, threshold, post-rest potentiation ...): contractions grouped by pacing frequency, S2 "
+                          "interval, current, rest interval ..."))
         self.lInfo = QtWidgets.QLabel("")
         self.lInfo.setMinimumWidth(200)
         f = self.lInfo.font()
@@ -1435,6 +1442,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.win_trend = TrendWindow(self)
         self.win_trend.show()
 
+    def on_protocols(self):
+        if self.H is None:
+            self.status("Open a file first.")
+            return
+        from .protocols_window import ProtocolWindow
+        if self.win_protocols is not None and self.win_protocols.isVisible() and \
+                self.win_protocols.windowTitle().endswith(os.path.basename(self.H.file)):
+            self.win_protocols.raise_()
+            return
+        if self.win_protocols is not None:
+            self.win_protocols.close()
+        self.win_protocols = ProtocolWindow(self)
+        self.win_protocols.show()
+
     def on_comments(self):
         if self.H is None:
             self.status("Open a file first.")
@@ -1489,7 +1510,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, ev):
         """closing the main window closes its other windows (overlay, trend, reference, comments, labels, tables)."""
-        for nm in ("win_overlay", "win_trend", "win_ref", "win_comments", "win_labels"):
+        for nm in ("win_overlay", "win_trend", "win_ref", "win_comments", "win_labels", "win_protocols"):
             x = getattr(self, nm, None)
             if x is not None:
                 try:

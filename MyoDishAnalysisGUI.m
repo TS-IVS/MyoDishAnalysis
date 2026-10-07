@@ -34,10 +34,15 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %    grows downwards). 'Remove EP recording' hides it. With an EP recording every contraction gets the parameters of
 %    its action potential (mda_analyzeAP: AP_dVdtMax, AP_RMP, AP_Vmax, APD25/50/90, AP_note; table, lower plot,
 %    exports); markers in the EP plot when <= 60 contractions are visible.
+% 5. 'Protocols ...': stimulation protocols found in the log file (comments 'start ... protocol' / 'end ... protocol',
+%    mda_protocols; editable, '+ selected range' adds the range of the main window): the contractions of the ticked
+%    protocols and channels are grouped by pacing frequency, S2 interval, stimulus current, rest interval, pulse
+%    duration, rocker speed or any numeric log entry (mda_groupBeats); summary per group, plot of a parameter against
+%    the quantity (mean +- SD / SEM), export. Default: only contractions with the rocker at rest.
 %
 % Parameter definitions: mda_parameters / README. Command line version: MyoDishAnalysis.
 % Requires MATLAB R2019b or newer, no toolboxes.
-% Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05 (EP recordings 2026-10-06)
+% Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05 (EP recordings 2026-10-06, protocols 2026-10-07)
 
 if nargin < 1, mddFile = ''; end
 if nargin < 2, metadata = []; end
@@ -60,6 +65,7 @@ hOv = [];                          %overlay window and its controls
 lastDir = '';                      %folder of the last saved figure / exported data
 altPt = [nan nan];                 %force plot: position of the last right click (x = s, y = displayed force)
 hTr = []; trFiles = []; trData = []; trCache = [];   %trend window: handles, files (concatenated), contractions, cache
+hPr = []; prRes = [];              %protocol window: handles; results (contractions, summary, info)
 trSampling = '';                   %trend: description of the sampling of the last calculation
 refThr = 3;                        %reference beat: a contraction deviates if its deviation > refThr SD
 refWhich = 2;                      %  ... measured 1 = absolute, 2 = normalized to amplitude 1 (shape), 3 = either
@@ -114,7 +120,10 @@ uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Overview', 'Position',
     'TooltipString', 'overview of the whole file (min/max envelope)');
 uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Comments ...', 'Position', [0.797 0.955 0.05 0.035], 'Callback', @onComments, ...
     'TooltipString', 'searchable list of the comments in the log file; double-click = go to');
-hInfo = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.85 0.945 0.148 0.045]);
+uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Protocols ...', 'Position', [0.85 0.955 0.05 0.035], 'Callback', @onProtocols, ...
+    'TooltipString', ['stimulation protocols of the log file (FFR, refractory period, threshold, post-rest potentiation ...): ' ...
+    'contractions grouped by pacing frequency, S2 interval, current, rest interval ...']);
+hInfo = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.903 0.945 0.095 0.045]);
 
 axOv = axes(fig, 'Position', [0.05 0.845 0.70 0.075], 'FontSize', 9);
 axMain = axes(fig, 'Position', [0.05 0.45 0.70 0.345], 'FontSize', 10, 'XTickLabel', {});
@@ -1525,7 +1534,269 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         try
             if ~isempty(hCom) && isvalid(hCom.fig), delete(hCom.fig); end
             if ~isempty(hOv) && isvalid(hOv.fig), delete(hOv.fig); end
+            if ~isempty(hPr) && isvalid(hPr.fig), delete(hPr.fig); end
         catch
+        end
+    end
+
+    % ---------------------------------------------------------------- stimulation protocols (2026-10-07)
+    function onProtocols(~, ~)
+        % protocols of the log file (mda_protocols), contractions grouped by the protocol quantity (MyoDishAnalysis
+        % options 'protocol' / 'groupBy', mda_groupBeats), plot of a parameter against the quantity, export
+        if isempty(H), status('Open a file first.'); return; end
+        if ~isempty(hPr) && isvalid(hPr.fig)
+            if strcmp(hPr.file, H.file), figure(hPr.fig); return; end
+            delete(hPr.fig);
+        end
+        [~, prN, prE] = fileparts(H.file);
+        f4 = figure('Name', ['MyoDishAnalysis: protocols - ' prN prE], 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
+            'Position', [90 70 1400 760], 'DeleteFcn', @(~,~) clearProtocols());
+        dd = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
+        axP = axes(f4, 'Position', [0.06 0.47 0.55 0.49]); box(axP, 'on'); grid(axP, 'on');
+        tRes = uitable(f4, 'Units', 'normalized', 'Position', [0.01 0.01 0.62 0.37], 'RowName', [], 'FontSize', 9);
+        x0 = 0.645; w0 = 0.345;
+        uicontrol(f4, dd{:}, 'Style', 'text', 'String', ['Protocols (comments ''start ... protocol'' / ''end ... protocol'' in the log file). ' ...
+            'Tick the protocols to analyse; From / To and the grouping can be changed.'], 'HorizontalAlignment', 'left', ...
+            'Position', [x0 0.92 w0 0.06], 'FontSize', 9);
+        tProt = uitable(f4, 'Units', 'normalized', 'Position', [x0 0.6 w0 0.32], 'RowName', [], 'FontSize', 9, ...
+            'ColumnName', {'use', 'type', 'name', 'from (s)', 'to (s)', 'group by', 'note'}, ...
+            'ColumnFormat', {'logical', 'char', 'char', 'numeric', 'numeric', 'char', 'char'}, ...
+            'ColumnEditable', [true true true true true true false], 'ColumnWidth', {32, 60, 140, 62, 62, 105, 90}, ...
+            'CellSelectionCallback', @(~, ev) setappdata(f4, 'prRow', ev.Indices), ...
+            'TooltipString', ['group by: pacingFrequency, S2interval, stimCurrent, pauseLength, rockerSpeed, pulseDuration, ' ...
+            'log:<code> (any numeric entry of the log file, e.g. log:pauseDuration), none']);
+        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Find in log file', 'Position', [x0 0.55 0.11 0.04], 'Callback', @(~,~) prFind());
+        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', '+ selected range', 'Position', [x0+0.117 0.55 0.11 0.04], 'Callback', @(~,~) prAddRange(), ...
+            'TooltipString', 'add the range selected in the main window as a protocol (choose the grouping)');
+        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Remove', 'Position', [x0+0.234 0.55 0.111 0.04], 'Callback', @(~,~) prRemove());
+        uicontrol(f4, dd{:}, 'Style', 'text', 'String', 'Channels', 'HorizontalAlignment', 'left', 'Position', [x0 0.49 0.08 0.03]);
+        lbC = uicontrol(f4, dd{:}, 'Style', 'listbox', 'String', arrayfun(@(c) sprintf('Ch %d', c), H.dataChannels, 'UniformOutput', false), ...
+            'Max', 2, 'Min', 0, 'Value', max(1, find(H.dataChannels == ch, 1)), 'Position', [x0+0.08 0.39 0.12 0.13], ...
+            'TooltipString', 'ctrl / cmd + click: several channels');
+        uicontrol(f4, dd{:}, 'Style', 'text', 'String', 'Contractions', 'HorizontalAlignment', 'left', 'Position', [x0 0.335 0.08 0.03]);
+        pRk = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', {'rocker at rest only', 'all contractions', 'rocker moving only'}, ...
+            'Position', [x0+0.08 0.34 0.265 0.03], 'TooltipString', ['default: only contractions with the rocker at rest. Sharp-electrode ' ...
+            'recordings (no rocker) or protocols without rocker stops: all contractions']);
+        cSt = uicontrol(f4, dd{:}, 'Style', 'checkbox', 'String', 'only stimulated contractions', 'Value', hStim.Value, ...
+            'Position', [x0+0.08 0.3 0.265 0.03]);
+        prPar = [PI(~startsWith(PI(:,1), 'ref'), 1:2); {'amplitude_pctOfRef', '% of S1 / steady'; 'capture_percent', '%'; 'nContractions', ''}];
+        uicontrol(f4, dd{:}, 'Style', 'text', 'String', 'Parameter', 'HorizontalAlignment', 'left', 'Position', [x0 0.25 0.08 0.03]);
+        pPa = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', strcat(prPar(:,1), {' ('}, strrep(prPar(:,2), 'u', mu), {')'}), ...
+            'Position', [x0+0.08 0.255 0.265 0.03], 'Callback', @(~,~) prDraw());
+        uicontrol(f4, dd{:}, 'Style', 'text', 'String', 'Show', 'HorizontalAlignment', 'left', 'Position', [x0 0.205 0.08 0.03]);
+        pSh = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', {'-'}, 'Position', [x0+0.08 0.21 0.265 0.03], 'Callback', @(~,~) prDraw(), ...
+            'TooltipString', 'protocols grouped by the same quantity are shown together');
+        pSD = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', {[char(177) ' SD'], [char(177) ' SEM'], 'mean only'}, ...
+            'Position', [x0+0.08 0.17 0.265 0.03], 'Callback', @(~,~) prDraw());
+        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Analyse', 'FontWeight', 'bold', 'Position', [x0 0.11 w0 0.045], ...
+            'Callback', @(~,~) prAnalyse(), 'TooltipString', ['contractions of the ticked protocols and channels, grouped (threshold, ' ...
+            'filters, zero force, rocker filter and labels as in the main window)']);
+        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [x0 0.06 0.17 0.04], 'Callback', @(~,~) prSaveFigure());
+        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Export ...', 'Position', [x0+0.175 0.06 0.17 0.04], 'Callback', @(~,~) prExport());
+        tx = uicontrol(f4, dd{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [x0 0.0 w0 0.055], 'FontSize', 8);
+        hPr = struct('fig', f4, 'file', H.file, 'ax', axP, 'tRes', tRes, 'tProt', tProt, 'lbC', lbC, 'pRk', pRk, 'cSt', cSt, ...
+            'pPa', pPa, 'par', {prPar}, 'pSh', pSh, 'pSD', pSD, 'tx', tx);
+        prRes = [];
+        prFind();
+    end
+
+    function clearProtocols()
+        hPr = []; prRes = [];
+    end
+
+    function prFind()
+        if isempty(hPr) || ~isvalid(hPr.fig), return; end
+        try
+            prP = mda_protocols(H);
+        catch ME
+            hPr.tx.String = ['Protocols: ' ME.message]; prP = table();
+        end
+        if height(prP) == 0
+            hPr.tProt.Data = cell(0, 7);
+            hPr.tx.String = 'No protocol found (comments ''start ... protocol'' / ''end ... protocol''). Add a range with ''+ selected range''.';
+            return;
+        end
+        hPr.tProt.Data = [num2cell(~strcmp(prP.type, 'other')), prP.type, prP.name, num2cell(round(prP.from, 2)), ...
+            num2cell(round(prP.to, 2)), prP.groupBy, prP.note];
+        hPr.tx.String = sprintf('%d protocol(s) found in the log file.', height(prP));
+    end
+
+    function prAddRange()
+        if any(isnan(range)), hPr.tx.String = 'Select a range in the main window first.'; return; end
+        hPr.tProt.Data = [hPr.tProt.Data; {true, 'manual', 'selected range', round(range(1), 2), round(range(2), 2), 'pacingFrequency', ''}];
+    end
+
+    function prRemove()
+        prIdx = getappdata(hPr.fig, 'prRow');
+        if isempty(prIdx) || isempty(hPr.tProt.Data), return; end
+        prD = hPr.tProt.Data;
+        prD(unique(prIdx(:,1)), :) = [];
+        hPr.tProt.Data = prD;
+        setappdata(hPr.fig, 'prRow', []);
+    end
+
+    function prAnalyse()
+        prD = hPr.tProt.Data;
+        if isempty(prD), hPr.tx.String = 'No protocol.'; return; end
+        prUse = cellfun(@(x) isequal(x, true), prD(:,1));
+        prD = prD(prUse, :);
+        prChs = H.dataChannels(hPr.lbC.Value);
+        if isempty(prD) || isempty(prChs), hPr.tx.String = 'Tick at least one protocol and select a channel.'; return; end
+        prFrom = cellfun(@double, prD(:,4)); prTo = cellfun(@double, prD(:,5));
+        if any(isnan(prFrom) | isnan(prTo) | prTo <= prFrom), hPr.tx.String = 'From / To: numbers (s), To > From.'; return; end
+        prTyp = prD(:,2); prTyp(cellfun(@isempty, prTyp)) = {'manual'};
+        prNum = zeros(numel(prTyp), 1);
+        for q = 1:numel(prTyp), prNum(q) = sum(strcmp(prTyp(1:q), prTyp{q})); end
+        prBy = strtrim(prD(:,6)); prBy(cellfun(@isempty, prBy)) = {'none'};
+        prP = table(prTyp, prD(:,3), prNum, prFrom, prTo, prBy, repmat({''}, numel(prTyp), 1), repmat({''}, numel(prTyp), 1), ...
+            repmat({''}, numel(prTyp), 1), 'VariableNames', {'type','name','number','from','to','groupBy','startComment','endComment','note'});
+        prRk = {'stopped', 'any', 'moving'};
+        prBt = {'all', 'stimulated'};
+        prO = opts;
+        prO.zeroForce = zeroUser(prChs);                %NaN = Offset of the log file
+        hPr.tx.String = 'Analysing ...'; drawnow;
+        try
+            [prT, prS, prI] = MyoDishAnalysis(H.file, prChs, [], [], prO, 'protocol', prP, 'rocker', prRk{hPr.pRk.Value}, ...
+                'beats', prBt{hPr.cSt.Value + 1}, 'quiet', true, 'metadata', Lbl);
+        catch ME
+            hPr.tx.String = ['Error: ' ME.message]; return;
+        end
+        prRes = struct('T', prT, 'S', prS, 'info', prI);
+        prQ = unique(prS.groupBy(~strcmp(prS.groupBy, 'none')), 'stable');
+        prItems = cell(numel(prQ), 1);
+        for q = 1:numel(prQ)
+            prItems{q} = sprintf('%s: %s', prQ{q}, strjoin(unique(prS.range(strcmp(prS.groupBy, prQ{q})), 'stable'), ', '));
+        end
+        if isempty(prItems), prItems = {'-'}; end
+        hPr.pSh.String = prItems; hPr.pSh.Value = 1;
+        hPr.pSh.UserData = prQ;
+        prNotes = strjoin(prI.notes(1:min(2, end)), ' ');
+        hPr.tx.String = sprintf('%d contractions, %d groups (%s; channels %s). %s', height(prT), height(prS), ...
+            strjoin(strcat(prP.type, {' '}, arrayfun(@num2str, prP.number, 'UniformOutput', false)), ', '), ...
+            strjoin(arrayfun(@num2str, prChs, 'UniformOutput', false), ', '), prNotes);
+        prDraw();
+    end
+
+    function prDraw()
+        if isempty(hPr) || ~isvalid(hPr.fig), return; end
+        axP = hPr.ax;
+        cla(axP); legend(axP, 'off'); hold(axP, 'on');
+        if isempty(prRes) || isempty(hPr.pSh.UserData), prTable(); return; end
+        prQ = hPr.pSh.UserData{hPr.pSh.Value};
+        prNm = hPr.par{hPr.pPa.Value, 1}; prUnit = strrep(hPr.par{hPr.pPa.Value, 2}, 'u', mu);
+        prS = prRes.S;
+        if ismember(prNm, {'amplitude_pctOfRef', 'capture_percent', 'nContractions'})
+            prM = prNm; prSDc = '';
+        else
+            prM = [prNm '_mean']; prSDc = [prNm '_SD'];
+        end
+        prS = prS(strcmp(prS.groupBy, prQ), :);
+        switch prQ
+            case 'pacingFrequency', prXl = 'pacing frequency (Hz)'; prXf = 1;
+            case 'S2interval',      prXl = 'S2 interval (ms)';      prXf = 1000;
+            case 'stimCurrent',     prXl = 'stimulus current (mA)'; prXf = 1;
+            case 'pauseLength',     prXl = 'rest interval (s)';     prXf = 1;
+            case 'rockerSpeed',     prXl = 'rocker speed (rpm)';    prXf = 1;
+            case 'pulseDuration',   prXl = 'pulse duration (ms)';   prXf = 1;
+            otherwise,              prXl = strrep(prQ, 'log:', ''); prXf = 1;
+        end
+        prCol = [0 114 189; 217 83 25; 237 177 32; 126 47 142; 119 172 48; 77 190 238; 162 20 47; 0 0 0] / 255;
+        prKeys = unique(strcat(prS.range, {'|'}, arrayfun(@num2str, prS.channel, 'UniformOutput', false)), 'stable');
+        prH = gobjects(0); prL = {};
+        for q = 1:numel(prKeys)
+            prK = strsplit(prKeys{q}, '|');
+            prG = prS(strcmp(prS.range, prK{1}) & prS.channel == str2double(prK{2}), :);
+            prC = prCol(mod(q-1, size(prCol,1)) + 1, :);
+            for prRo = unique(prG.groupRole, 'stable')'
+                prR = prG(strcmp(prG.groupRole, prRo{1}), :);
+                prY = prR.(prM);
+                if any(strcmp(prRo{1}, {'S1', 'steady'}))           %reference: horizontal line
+                    if ~isempty(prY) && ~isnan(prY(1))
+                        prH(end+1) = yline(axP, prY(1), '--', 'Color', prC, 'LineWidth', 1.2); %#ok<AGROW>
+                        prL{end+1} = sprintf('Ch %s %s %s', prK{2}, prK{1}, prRo{1}); %#ok<AGROW>
+                    end
+                    continue;
+                end
+                prX = prR.groupValue * prXf;
+                prOk = ~isnan(prX);
+                [prX, prO2] = sort(prX(prOk)); prY = prY(prOk); prY = prY(prO2);
+                if strcmp(prRo{1}, 'postS2'), prSty = 's:'; else, prSty = 'o-'; end
+                if ~isempty(prSDc) && hPr.pSD.Value < 3
+                    prE = prR.(prSDc)(prOk); prE = prE(prO2);
+                    if hPr.pSD.Value == 2
+                        prNn = prR.([prNm '_n'])(prOk); prE = prE ./ sqrt(prNn(prO2));
+                    end
+                    prE(isnan(prE)) = 0;
+                    prH(end+1) = errorbar(axP, prX, prY, prE, prSty, 'Color', prC, 'MarkerFaceColor', prC, 'LineWidth', 1.2, 'CapSize', 0); %#ok<AGROW>
+                else
+                    prH(end+1) = plot(axP, prX, prY, prSty, 'Color', prC, 'MarkerFaceColor', prC, 'LineWidth', 1.2); %#ok<AGROW>
+                end
+                prRl = prRo{1}; if strcmp(prRl, 'postS2'), prRl = 'post-S2'; end
+                prL{end+1} = strtrim(sprintf('Ch %s %s %s', prK{2}, prK{1}, prRl)); %#ok<AGROW>
+            end
+        end
+        hold(axP, 'off');
+        xlabel(axP, prXl);
+        if isempty(prUnit), ylabel(axP, prNm, 'Interpreter', 'none'); else, ylabel(axP, sprintf('%s (%s)', prNm, prUnit), 'Interpreter', 'none'); end
+        if ~isempty(prH), legend(axP, prH, prL, 'Location', 'best', 'Interpreter', 'none', 'FontSize', 8, 'Box', 'off'); end
+        prTable();
+    end
+
+    function prTable()
+        if isempty(hPr) || ~isvalid(hPr.fig), return; end
+        if isempty(prRes), hPr.tRes.Data = {}; return; end
+        prNm = hPr.par{hPr.pPa.Value, 1};
+        prS = prRes.S;
+        prCols = {'range', 'channel', 'group', 'nStimuli', 'nContractions', 'capture_percent'};
+        if ismember([prNm '_mean'], prS.Properties.VariableNames)
+            prCols = [prCols, {[prNm '_mean'], [prNm '_SD'], [prNm '_n']}];
+        elseif ismember(prNm, prS.Properties.VariableNames) && ~ismember(prNm, prCols)
+            prCols{end+1} = prNm;
+        end
+        if ~ismember('amplitude_pctOfRef', prCols), prCols{end+1} = 'amplitude_pctOfRef'; end
+        prD = cell(height(prS), numel(prCols));
+        for j = 1:numel(prCols)
+            v = prS.(prCols{j});
+            if iscell(v)
+                prD(:, j) = v;
+            else
+                for i = 1:height(prS)
+                    if isnan(v(i)), prD{i, j} = ''; elseif startsWith(prCols{j}, 'n'), prD{i, j} = sprintf('%.0f', v(i)); else, prD{i, j} = sprintf('%.4g', v(i)); end
+                end
+            end
+        end
+        hPr.tRes.ColumnName = prCols;
+        hPr.tRes.Data = prD;
+    end
+
+    function prSaveFigure()
+        if isempty(prRes), hPr.tx.String = 'Press Analyse first.'; return; end
+        file = askFile('image', 'protocols');
+        if isempty(file), return; end
+        f2 = figure('Visible', 'off', 'Color', 'w', 'Units', 'pixels', 'Position', [50 50 900 600]);
+        try
+            lg = hPr.ax.Legend;
+            if ~isempty(lg) && isvalid(lg), c = copyobj([lg hPr.ax], f2); a = c(2); else, a = copyobj(hPr.ax, f2); end
+            a.Units = 'normalized'; a.Position = [0.11 0.12 0.85 0.82];
+            saveFigureFile(f2, file);
+            hPr.tx.String = ['Saved: ' file];
+        catch ME
+            hPr.tx.String = ['Save: ' ME.message];
+        end
+        delete(f2);
+    end
+
+    function prExport()
+        if isempty(prRes), hPr.tx.String = 'Press Analyse first.'; return; end
+        file = askFile('data', 'protocols');
+        if isempty(file), return; end
+        [pp, nn, ee] = fileparts(file);
+        if strcmpi(ee, '.txt'), file = fullfile(pp, [nn '.csv']); end
+        try
+            files = mda_writeResults(file, prRes.T, prRes.S, prRes.info);
+            hPr.tx.String = ['Written: ' strjoin(files, ', ')];
+        catch ME
+            hPr.tx.String = ['Export: ' ME.message];
         end
     end
 

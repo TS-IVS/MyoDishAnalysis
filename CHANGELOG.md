@@ -12,6 +12,15 @@ MATLAB and Python versions have the same version number and give the same result
   `rockerLogDelay`. Checked on the 7 example recordings with rocker bit: the reconstructed state agrees with the bit in
   ≥ 99.96 % of the samples. Example 8 (sharp electrode) has the missing bit.
 
+- Stimulation protocols: `mda_protocols` / `find_protocols` find protocols from the comments of the log file
+  (`start … protocol` / `end … protocol`; FFR, RP, ST, PRP, PD, rocker speed; several per file). `mda_groupBeats` /
+  `group_beats` group the contractions and stimuli by pacing frequency, S2 interval (S1 / S2 / post-S2), stimulus
+  current, rest interval, pulse duration, rocker speed or any numeric log entry; summary per group with capture and
+  amplitude relative to S1 / steady state. `MyoDishAnalysis` options `'protocol'` and `'groupBy'` (Python `protocol=`,
+  `groupBy=`; command line `--protocol`, `--group-by`, `--list-protocols`); sheet `protocols` in the results.
+- GUI (MATLAB and Python): window **Protocols ...**: editable protocol list, channels, rocker selection, grouping,
+  plot of a parameter against the quantity (mean ± SD / SEM), result table, figure and data export.
+
 ### Changed
 - Tests: tolerance of the rocker-filter comparison per statistic (summary means 0.5 %, SDs 2 %); which flat peaks move
   by one sample depends on the linear-algebra library.

@@ -118,6 +118,11 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    offset, clock drift and residual; **CHECK** marks an uncertain alignment. **Remove EP recording** hides it.
    With an EP recording, every contraction also gets its AP parameters (see below; table, lower plot, exports).
    Script access: `api = fig.UserData; api.epRecording(matFile); EP = api.epRecordingData();`
+8. **Protocols ...**: stimulation protocols found in the log file (see "Stimulation protocols"), editable
+   (From / To, grouping; **+ selected range** adds the range of the main window). Tick protocols and channels,
+   choose the contractions (rocker at rest / all / rocker moving) and press **Analyse**: summary per group (table) and
+   a parameter against the quantity (mean ± SD / SEM; S1 / steady state as dashed line, post-S2 dotted). Threshold,
+   filters, zero force, rocker filter and labels are taken from the main window. **Save figure** / **Export**.
 
 ## EP recordings (`mda_readEPRecording`)
 `EP = mda_readEPRecording(matFile, mda_readMdd(mddFile))` places a LabChart recording on the time axis of the
@@ -216,6 +221,49 @@ Own additional fields are kept as extra columns.
 * `contractions`: one row per detected contraction; `summary`: one row per channel and range
   (counts incl. nExtraBeats, nMissedBeats, extraBeats_percent, missedBeats_percent; mean, SD and n of all parameters
   of the included contractions).
+
+## Stimulation protocols (`'protocol'`, `'groupBy'`; GUI: **Protocols ...**)
+Protocols such as force-frequency (FFR), refractory period (RP, S1-S2), stimulation threshold (ST), post-rest
+potentiation (PRP) or pulse duration (PD) are found from the comments of the log file and analysed per value of
+their stimulation quantity.
+```matlab
+P = mda_protocols(file)                                              % protocols in the log file
+[c, s] = MyoDishAnalysis(file, [3 6], [], [], 'protocol', 'FFR');   % per pacing frequency, rocker at rest
+[c, s] = MyoDishAnalysis(file, 1, [], [], 'protocol', 'RP', 'rocker', 'any');   % per S2 interval, all beats
+[c, s] = MyoDishAnalysis(file, 5, 60, 330, 'groupBy', 'log:chargeDuration');   % any range and log quantity
+```
+* **Finding the protocols** (`mda_protocols`): pairs of comments `start … protocol` / `end … protocol` (also
+  `start of …`, `… protocol started` / `… ended`). A start is paired with the next end of the same name, otherwise of
+  the same type; several protocols of the same type are numbered (`FFR 1`, `FFR 2`). A start without an end lasts
+  until the next protocol of the same type or the end of the file (note `no end comment`). Type from keywords:
+  FFR / frequency → `FFR`, refractory / S1S2 → `RP`, threshold / stimCurrent → `ST`, post rest / PRP → `PRP`,
+  pulse duration → `PD`, rocker speed → `rockerSpeed`, others `other`. The table can be edited (`from`, `to`,
+  `groupBy`) and passed as `'protocol', P`; the GUI shows it editable (`+ selected range` adds the range of the main
+  window).
+* **Grouping** (`mda_groupBeats`): every stimulus of the channel gets a value; a stimulated contraction belongs to the
+  group of its stimulus, an extra contraction to the group of the last stimulus before it.
+
+  | `groupBy` | value | default for |
+  |---|---|---|
+  | `pacingFrequency` | 1 / interval from the previous stimulus (Hz); intervals within 2 % are one group; label rounded to 0.05 Hz | FFR |
+  | `S2interval` | S2 = premature stimulus (interval < 95 % of the previous one, next interval longer, previous stimulus not premature); groups `S1`, `S2 <ms>` and `post-S2 <ms>` (the next stimulus; post-extrasystolic potentiation); S2 intervals within 7.5 ms are one group | RP |
+  | `stimCurrent` | current of the pulse (mA, status channel); `currentReached_percent` per group | ST |
+  | `pauseLength` | first stimulus after a pause (interval ≥ 1.5 s and ≥ 1.5 × the median interval): `rest <s>` (within 5 % one group); all others `steady` | PRP |
+  | `pulseDuration` | `chargeDuration` entry of the log file for the stimulated channel (ms) | PD |
+  | `rockerSpeed` | rocker speed at the peak (rpm, `rockerSpeed` entries of the log file); all contractions by default | rockerSpeed |
+  | `log:<code>` | any numeric entry of the log file for the stimulated channel (or channel 0), e.g. `log:pauseDuration` | – |
+* **Summary**: one row per protocol, channel and group with `group`, `groupValue`, `groupRole`, `groupBy`, `nStimuli`,
+  `nContractions`, `capture_percent` (stimuli followed by a contraction, independent of the rocker filter),
+  `amplitude_pctOfRef` (mean amplitude in % of the group `S1` / `steady`) and mean, SD and n of all parameters. The
+  contraction table gets the columns `group`, `groupValue`, `groupRole`; the Excel output a sheet `protocols`.
+* **Rocker**: with `'protocol'` only contractions with the rocker at rest are included unless `'rocker'` is given
+  (grouping by rocker speed: all). Sharp-electrode recordings (no rocker) and protocols without rocker stops need
+  `'rocker','any'` (GUI: "all contractions"). A contraction counts as "rocker moving" if the rocker moved anywhere
+  between its diastolic minimum and 90 % relaxation; after long rests (PRP) the diastolic minimum can lie in the rest
+  while the rocker still moved.
+* Examples: `examples/example3_humanVentricle` (FFR), `example8_rabbitVentricle_EP` (RP: no response ≤ 463 ms,
+  response at 492 ms), `example2_rabbitVentricle` (PD, ST), `example7_pigVentricle` (PRP), `example1_rabbitVentricle`
+  (rocker speed).
 
 ## Parameters (per contraction)
 Within the cycle between the previous and the next peak (at most 3 s on each side):
@@ -361,6 +409,8 @@ lower plot, the trend and all exports.
 | `mda_referenceBeat.m` | reference beat (mean ± SD) and comparison of every contraction with it |
 | `mda_readEPRecording.m` | EP recording (LabChart `.mat`) aligned to the stimuli of the `.mdd` file |
 | `mda_analyzeAP.m` | AP parameters (dV/dt max, RMP, V_max, APD25/50/90) per contraction, stimulus artefact handling |
+| `mda_protocols.m` | stimulation protocols found from the comments of the log file |
+| `mda_groupBeats.m` | contractions grouped by a stimulation quantity (pacing frequency, S2 interval, current, rest, ...), summary per group |
 | `mda_parameters.m` | names, units and definitions of the parameters |
 | `mda_options.m` | options and defaults |
 | `mda_summarize.m`, `mda_writeResults.m` | summary table, Excel/CSV export |
