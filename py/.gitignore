@@ -1,0 +1,9 @@
+# recordings for the MATLAB comparison (large; not part of the package)
+tests/data/
+tests/reference/dbg_*.mat
+__pycache__/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/

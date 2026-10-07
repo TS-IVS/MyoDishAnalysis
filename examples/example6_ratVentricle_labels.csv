@@ -1,0 +1,9 @@
+channel,setupID,sliceID,species,sampleID,sampleGroup,sliceGroup,tissue,treatment,concentration,concentrationUnit,daysInCulture,cultureStart,comment,analyst
+1,,,rat,,,,ventricle,,,,2,,,
+2,,,rat,,,,ventricle,,,,2,,,
+3,,,rat,,,,ventricle,,,,2,,,
+4,,,rat,,,,ventricle,,,,2,,,
+5,,,rat,,,,ventricle,,,,2,,,
+6,,,rat,,,,ventricle,,,,2,,,
+7,,,rat,,,,ventricle,,,,2,,,
+8,,,rat,,,,ventricle,,,,2,,,

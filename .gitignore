@@ -1,0 +1,21 @@
+# recordings and local test data (not part of the repository), except the anonymized examples
+py/tests/data/
+*.mdd
+*_log.log
+!examples/*.mdd
+!examples/*_log.log
+# MATLAB
+*.asv
+*.mex*
+slprj/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+# system
+.DS_Store
+Thumbs.db

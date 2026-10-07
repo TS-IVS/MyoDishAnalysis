@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest a new parameter, option or improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you need, and for which experiments?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How could it work (definition of a parameter, GUI, output)?
+  - type: dropdown
+    id: implementation
+    attributes:
+      label: For
+      options: ["MATLAB and Python", "MATLAB", "Python"]

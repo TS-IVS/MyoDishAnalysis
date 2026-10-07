@@ -1,0 +1,28 @@
+title: "[Use] "
+labels: ["use"]
+body:
+  - type: markdown
+    attributes:
+      value: Tell us where and for what you use MyoDishAnalysis. This helps to keep it maintained and is cited as evidence of use.
+  - type: input
+    id: lab
+    attributes:
+      label: Lab / institution (optional)
+  - type: input
+    id: tissue
+    attributes:
+      label: Tissue and species
+      placeholder: "human left ventricle, rabbit, pig, ..."
+  - type: textarea
+    id: application
+    attributes:
+      label: Application
+      description: Protocols (pacing, FFR, drugs, EP recordings ...), MATLAB or Python, publications or theses using it.
+    validations:
+      required: true
+  - type: checkboxes
+    id: list
+    attributes:
+      label: Listing
+      options:
+        - label: You may list our lab as a user in the README.

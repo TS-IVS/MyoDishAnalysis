@@ -1,0 +1,458 @@
+"""Read a MyoDish .mdd file (force data, stimulus pulses, rocker state). Port of mda_readMdd.m.
+
+    H = read_mdd(mdd_file)                          file facts only (no data)
+    S = read_mdd(H, from_s, to_s, opts)             data, with the file facts H of an earlier call (faster: the log
+                                                    file is not read again; same opts as for H)
+    S = read_mdd(mdd_file, from_s, to_s[, opts])    data between from_s and to_s (time in the file)
+    O = read_mdd(mdd_file, 'overview', bin_s[, opts, progress])    min/max of every channel per bin of the file
+    O = read_mdd(mdd_file, 'overview', [bin_s, from_s, to_s], ...)  only this part of the file
+
+FILE FORMAT (MyoDish software; facts from the Seidel lab's importMyoDishData)
+  - int16, little endian, channels interleaved. Standard: 8 force channels + 1 stimulus/status channel at 400 Hz
+    (7200 bytes per second). Since MyoDish software 2.0.9708 (07/2026) a file may contain only the recorded
+    channel(s) + the status channel (single channel mode: 2 x int16 per sample).
+    Old files (2020/21, software 1.0.x): 8 force channels at 500 Hz, no status channel.
+  - sampling rate, recording duration (--> number of channels) and extended sensor mode are read from the log file
+    <name>_log.log (UTF-16) next to the .mdd file.
+  - the values in the file are arbitrary units (AU), converted to uN with the 'Calibration' entry of each channel in
+    the log file (see calibration_factor). Option calibration='none' keeps the values as stored in the file.
+  - status channel, bits (1-based): 1-8 stimulus current [mA], 9 current not reached, 10-13 stimulated channel,
+    14 external trigger, 15 rocker moving (set in every sample while the rocker moves), 16 extra pulse. A stimulus
+    pulse is a sample with any bit other than bit 15 set.
+
+OUTPUT (S, a Struct with the field names of the MATLAB version)
+  file facts: file, logFile, samplingRate, nChannelsInFile, dataChannels (physical channel numbers, 1-based),
+              hasStimChannel, totalSeconds, recordingStart (MATLAB datenum of file time 0, NaN if unknown),
+              extendedSensorIntervals, notes, offsetLog / calibrationLog ([time channel value] rows; time -Inf =
+              logged before the recording start), rockerSpeedLog ([time rpm]), calibrationApplied,
+              extendedSensorFactor
+  data:       t (s; centre of the averaged raw samples, first raw sample = 0 s), dt, force (nData x n, uN),
+              rockerOn (bool, n), stim (Struct of arrays: time, channel, current, currentReached, external,
+              isExtraPulse, rockerOn; one entry per stimulus pulse of any channel)
+  Single channel files: force has one row = channel 1, stim.channel keeps the physical channel number.
+
+TS 2026-10-06 (port of mda_readMdd.m, TS 2026-10-05)
+"""
+from __future__ import annotations
+
+import math
+import os
+
+import numpy as np
+
+from ._matlab import Struct, datenum, mround
+from .calibration_factor import calibration_factor
+from .log_entries import read_log_text, split_lines, sscanf_floats, str2double
+from .options import options as _options
+
+import re as _re
+
+
+def read_mdd(mdd_file, from_s=None, to_s=None, opts=None, progress=None):
+    if opts is None:
+        opts = _options()
+    if isinstance(mdd_file, dict):  # file facts of an earlier call (same options): the log file is not read again
+        S = Struct(mdd_file)
+    else:
+        S = read_header(str(mdd_file), opts)
+    if from_s is None or (not isinstance(from_s, str) and np.size(from_s) == 0):
+        return S
+    if isinstance(from_s, str) and from_s.lower() == "overview":
+        b = to_s
+        t_range = None
+        if b is not None and np.size(b) == 3:
+            b = list(np.ravel(b))
+            t_range = b[1:3]
+            b = b[0]
+        if b is None or (not np.isscalar(b) and np.size(b) == 0):
+            b = max(1.0, S.totalSeconds / 20000.0)
+        return read_overview(S, float(b), progress, t_range)
+    if to_s is None:
+        to_s = math.inf
+    return read_data(S, float(from_s), float(to_s), opts.downsampling)
+
+
+# =====================================================================================================
+def read_header(mdd_file, opts=None):
+    if opts is None:
+        opts = _options()
+    if not os.path.isfile(mdd_file):
+        raise FileNotFoundError(f"read_mdd: file not found: {mdd_file}")
+    H = Struct()
+    H.file = os.path.abspath(mdd_file)
+    H.bytes = os.path.getsize(H.file)
+    p, nm = os.path.split(H.file)
+    n = os.path.splitext(nm)[0]
+    H.logFile = os.path.join(p, n + "_log.log")
+    H.notes = []
+
+    L = read_log(H.logFile)
+    H.recordingStart = L.startDatenum
+    H.programVersion = L.programVersion
+    H.offsetLog = L.offsetEvents
+    H.calibrationLog = L.calibrationEvents
+    H.rockerSpeedLog = L.rockerSpeedEvents
+
+    # sampling rate: option > log file > 500 Hz for old 8-channel files (software 1.0.x) > 400 Hz
+    if opts.samplingRate is not None:
+        fs = float(opts.samplingRate); src = "option"
+    elif not math.isnan(L.samplingRate):
+        fs = L.samplingRate; src = "log file"
+    elif (opts.nChannels is not None and opts.nChannels == 8) or L.nChannelsController == 8:
+        fs = 500.0; src = "assumed (old 8-channel file)"
+    else:
+        fs = 400.0; src = "assumed"
+    H.samplingRate = fs
+    H.samplingRateSource = src
+    if src not in ("log file", "option"):
+        H.notes.append(f"No sampling rate in the log file: {_g(fs)} Hz assumed.")
+
+    # number of int16 channels in the file: option > file size / recording duration > single channel mode > 9
+    if opts.nChannels is not None:
+        nCh = int(opts.nChannels)
+    else:
+        nCh = None
+        if not math.isnan(L.recordingDuration) and L.recordingDuration > 5:
+            nEst = H.bytes / (2 * fs * L.recordingDuration)
+            if abs(nEst - mround(nEst)) < 0.1 and 2 <= mround(nEst) <= 9:
+                nCh = int(mround(nEst))
+            else:
+                H.notes.append(f"File size does not fit the recording duration in the log file ({nEst:.2f} channels).")
+        elif L.singleChannelMode is True:
+            nCh = 2
+        if nCh is None and math.isnan(L.samplingRate) and L.nChannelsController == 8:
+            nCh = 8  # old 8-channel file (500 Hz, no status channel)
+        if nCh is None:
+            # no usable log information: the status channel (last channel) contains almost only 0 or the rocker
+            # bit (16384); test 9 channels first, then single channel mode (2), then the others
+            nCh = 9
+            for cand in (9, 2, 3, 4, 5, 6, 7, 8):
+                if _status_fraction(H.file, cand) > 0.95:
+                    nCh = cand
+                    break
+            H.notes.append(f"{nCh} channels in the file (from the content of the status channel).")
+    H.nChannelsInFile = nCh
+
+    # status (stimulus) channel = last channel, except in legacy 8-channel files (500 Hz / nChannels;8 in the log)
+    isLegacy = math.isnan(L.samplingRate) or L.samplingRate == 500 or L.nChannelsController == 8
+    if nCh == 8 and isLegacy:
+        H.hasStimChannel = False
+        H.dataChannels = np.arange(1, 9)
+    elif nCh >= 9:
+        H.hasStimChannel = True
+        H.dataChannels = np.arange(1, 9)
+    else:
+        H.hasStimChannel = True
+        H.dataChannels = np.arange(1, nCh)
+    H.stimRow = nCh - 1  # 0-based row of the status channel (MATLAB: nCh)
+    H.totalSamples = H.bytes // (2 * nCh)
+    H.totalSeconds = H.totalSamples / fs
+
+    # extended sensor mode: intervals [from to] (s) in which the calibration value is divided by 3.3
+    ext = []
+    esm = opts.extendedSensorMode
+    if isinstance(esm, str):
+        for tt, on in L.extendedSensorModeEvents:
+            if on == 1 and (not ext or not math.isinf(ext[-1][1])):
+                ext.append([tt, math.inf])
+            elif on == 0 and ext and math.isinf(ext[-1][1]):
+                ext[-1][1] = tt
+    elif esm:
+        ext = [[-math.inf, math.inf]]
+    ext = np.array(ext, dtype=float).reshape(-1, 2)
+    H.extendedSensorIntervals = ext[ext[:, 1] > ext[:, 0]]
+    H.extendedSensorFactor = float(opts.extendedSensorFactor)
+
+    # calibration (AU per mN) --> factor 1000 / calibration per data channel (calibration_factor)
+    H.calibrationApplied = opts.calibration == "auto"
+    if H.calibrationApplied:
+        C = np.asarray(H.calibrationLog).reshape(-1, 3)
+        C = C[np.isin(C[:, 1], H.dataChannels) & (C[:, 2] > 0)]
+        oddC = C[C[:, 2] != 1000]
+        if oddC.shape[0]:
+            H.notes.append("Calibration %s AU/mN in channel(s) %s: data converted to uN (AU x 1000 / calibration)."
+                           % (_mat2str(np.unique(oddC[:, 2])), _mat2str(np.unique(oddC[:, 1]))))
+        if H.extendedSensorIntervals.shape[0]:
+            H.notes.append("Extended sensor mode on (%s s): calibration / %s."
+                           % (_mat2str(H.extendedSensorIntervals, 6), _g(H.extendedSensorFactor)))
+    else:
+        H.notes.append("Calibration not applied: force values in arbitrary units (AU) as stored in the file.")
+    return H
+
+
+def _g(x):
+    return f"{x:g}"
+
+
+def _mat2str(a, prec=15):
+    a = np.asarray(a, dtype=float)
+
+    def f(v):
+        if math.isinf(v):
+            return "Inf" if v > 0 else "-Inf"
+        return f"{v:.{prec}g}"
+    if a.ndim <= 1:
+        if a.size == 1:
+            return f(float(a.ravel()[0]))
+        return "[" + " ".join(f(v) for v in a.ravel()) + "]"
+    if a.shape[0] == 1 and a.shape[1] == 1:
+        return f(float(a[0, 0]))
+    return "[" + ";".join(" ".join(f(v) for v in row) for row in a) + "]"
+
+
+# =====================================================================================================
+def read_data(H, from_s, to_s, nDS=2, stim_only=False):
+    """data between from_s and to_s (see read_mdd); stim_only: stimulus pulses and rocker state only (force not
+    converted, S.force has no columns)."""
+    S = Struct(H)
+    S.notes = list(H.notes)
+    fs = S.samplingRate
+    nCh = S.nChannelsInFile
+    nDS = int(nDS)
+    if from_s < 0:
+        from_s = S.totalSeconds + from_s
+    if to_s < 0:
+        to_s = S.totalSeconds + to_s
+    i0 = max(0, math.floor(from_s * fs / nDS) * nDS)  # first raw sample (0-based), on the nDS grid
+    i1 = S.totalSamples if not math.isfinite(to_s) else min(S.totalSamples, math.ceil(to_s * fs))
+    nRaw = (max(0, i1 - i0) // nDS) * nDS
+    raw = np.fromfile(S.file, dtype="<i2", count=nCh * nRaw, offset=i0 * nCh * 2) if nRaw > 0 \
+        else np.zeros(0, dtype="<i2")
+    raw = raw[: (raw.size // nCh) * nCh].reshape(-1, nCh).T  # nCh x nRaw
+    nRaw = (raw.shape[1] // nDS) * nDS
+    raw = raw[:, :nRaw]
+    n = nRaw // nDS
+    S.fromSeconds = i0 / fs
+    S.toSeconds = (i0 + nRaw) / fs
+    S.dt = nDS / fs
+    S.downsampling = nDS
+    S.t = ((i0 + np.arange(n) * nDS) + (nDS - 1) / 2) / fs
+
+    # force channels: mean of nDS samples (nDS = 2: identical to the median used by importMyoDishData)
+    nData = len(S.dataChannels)
+    S.force = np.zeros((nData, 0 if stim_only else n))
+    for c in range(0 if stim_only else nData):
+        x = raw[c].astype(float)
+        if nDS == 2:
+            x = (x[0::2] + x[1::2]) / 2
+        elif nDS > 2:
+            x = np.median(x.reshape(n, nDS), axis=1)
+        S.force[c] = x
+    for c in range(0 if stim_only else nData):  # AU --> uN (calibration, extended sensor mode)
+        S.force[c] = S.force[c] * calibration_factor(S, S.dataChannels[c], S.t)
+
+    # status channel: stimulus pulses and rocker state
+    S.stim = Struct(time=np.zeros(0), channel=np.zeros(0, dtype=int), current=np.zeros(0),
+                    currentReached=np.zeros(0, bool), external=np.zeros(0, bool), isExtraPulse=np.zeros(0, bool),
+                    rockerOn=np.zeros(0, bool))
+    S.rockerOn = np.zeros(n, bool)
+    if S.hasStimChannel and nRaw > 0:
+        code = raw[S.stimRow].view(np.uint16)
+        rockerBit = (code & 16384) != 0  # bit 15
+        idx = np.flatnonzero((code & 49151) != 0)  # any bit except bit 15 = stimulus pulse
+        pc = code[idx]
+        ch = ((pc >> 9) & 15).astype(int)  # bits 10-13
+        ch[ch > 8] -= 8
+        ch[ch == 0] = 8
+        S.stim.time = (i0 + idx) / fs
+        S.stim.channel = ch
+        S.stim.current = (pc & 255).astype(float)  # bits 1-8 [mA]
+        S.stim.currentReached = (pc & 256) == 0  # bit 9
+        S.stim.external = (pc & 8192) != 0  # bit 14
+        S.stim.isExtraPulse = (pc & 32768) != 0  # bit 16
+        S.stim.rockerOn = rockerBit[idx].copy()
+        # rocker state of every (downsampled) sample. In older firmware the rocker bit may only be set in the
+        # stimulus pulses: then the state of the last pulse (any channel) is held until the next pulse.
+        if np.count_nonzero(rockerBit) > 2 * np.count_nonzero(S.stim.rockerOn):
+            S.rockerOn = rockerBit.reshape(n, nDS).any(axis=1)
+        elif S.stim.rockerOn.any():
+            isPulse = np.zeros(nRaw, bool)
+            isPulse[idx] = True
+            lastPulse = np.cumsum(isPulse)
+            pulseState = np.r_[False, S.stim.rockerOn]
+            state = pulseState[lastPulse]
+            S.rockerOn = state.reshape(n, nDS).any(axis=1)
+            S.notes.append("Rocker state taken from the stimulus pulses (rocker bit not set continuously).")
+    return S
+
+
+# =====================================================================================================
+def read_overview(H, bin_s, progress=None, t_range=None):
+    """min/max of every data channel per bin over the whole file or the part t_range = [from to] (s), chunk-wise."""
+    fs = H.samplingRate
+    nCh = H.nChannelsInFile
+    binSamples = max(1, mround(bin_s * fs))
+    chunkBins = max(1, math.floor(600 * fs / binSamples))  # about 10 min per read
+    chunkSamples = chunkBins * binSamples
+    if t_range is None:
+        s0, s1 = 0, H.totalSamples
+    else:
+        s0 = min(H.totalSamples, max(0, math.floor(t_range[0] * fs)))
+        s1 = min(H.totalSamples, math.ceil(t_range[1] * fs))
+    nSamples = max(0, s1 - s0)
+    nBins = math.ceil(nSamples / binSamples)
+    nData = len(H.dataChannels)
+    O = Struct(H)
+    O.binSeconds = binSamples / fs
+    O.tBin = (s0 + (np.arange(nBins) + 0.5) * binSamples) / fs
+    O.minForce = np.full((nData, nBins), np.nan)
+    O.maxForce = np.full((nData, nBins), np.nan)
+    O.rockerFraction = np.zeros(nBins)
+    b0 = 0
+    with open(H.file, "rb") as fh:
+        fh.seek(s0 * nCh * 2)
+        while b0 < nBins:
+            m = min(chunkSamples, nSamples - b0 * binSamples)
+            raw = np.fromfile(fh, dtype="<i2", count=m * nCh)
+            m = raw.size // nCh
+            if m == 0:
+                break
+            raw = raw[: m * nCh].reshape(m, nCh).T
+            nb = math.ceil(m / binSamples)
+            pad = nb * binSamples - m
+            for c in range(nData):
+                x = np.r_[raw[c].astype(float), np.full(pad, np.nan)]
+                X = x.reshape(nb, binSamples)
+                with np.errstate(all="ignore"):
+                    O.minForce[c, b0:b0 + nb] = np.nanmin(X, axis=1)
+                    O.maxForce[c, b0:b0 + nb] = np.nanmax(X, axis=1)
+            if H.hasStimChannel:
+                r = ((raw[H.stimRow].view(np.uint16) & 16384) != 0).astype(float)
+                r = np.r_[r, np.full(pad, np.nan)]
+                O.rockerFraction[b0:b0 + nb] = np.nanmean(r.reshape(nb, binSamples), axis=1)
+            b0 += nb
+            if progress is not None:
+                progress(min(1.0, b0 / nBins))
+    for c in range(nData):  # AU --> uN
+        kc = calibration_factor(H, H.dataChannels[c], O.tBin)
+        O.minForce[c] *= kc
+        O.maxForce[c] *= kc
+    return O
+
+
+# =====================================================================================================
+def _status_fraction(file, nCh):
+    """fraction of the values of the last channel (status channel if nCh is correct) that are 0 or 16384."""
+    raw = np.fromfile(file, dtype="<i2", count=nCh * 20000)
+    ncol = math.ceil(raw.size / nCh)
+    raw = np.r_[raw, np.zeros(ncol * nCh - raw.size, dtype=raw.dtype)].reshape(ncol, nCh).T
+    if raw.shape[1] < 100:
+        return 0.0
+    v = raw[nCh - 1]
+    q = float(np.mean((v == 0) | (v == 16384)))
+    if np.all(raw == 0):
+        q = 0.0
+    return q
+
+
+# =====================================================================================================
+_SYS = _re.compile(r"^\s*([+-]?\d+)\s*([+-]?\d+)\s*([+-]?\d+)\s*([+-]?\d+):([+-]?\d+):([+-]?\d+)(?::([+-]?\d+))?")
+
+
+def read_log(log_file):
+    """the facts needed from the MyoDish log file (lines: systemTime;dataLogTime_ms;channel;code;value)."""
+    L = Struct(samplingRate=math.nan, recordingDuration=math.nan, nChannelsController=math.nan,
+               singleChannelMode=None, extendedSensorModeEvents=np.zeros((0, 2)), startDatenum=math.nan,
+               programVersion="", offsetEvents=np.zeros((0, 3)), calibrationEvents=np.zeros((0, 3)),
+               rockerSpeedEvents=np.zeros((0, 2)))
+    txt = read_log_text(log_file)
+    if txt is None:
+        return L
+    lines = split_lines(txt)
+    nValid = 0
+    tStart = tStop = tStartPar = tStopPar = math.nan
+    sysStart = sysStartPar = sysFirst = ""
+    tFirst = math.nan
+    ext, offs, cal, rck = [], [], [], []  # last column: line number
+    lineStart = lineStartPar = math.nan
+    for i, line in enumerate(lines, start=1):
+        f = _re.split(";+", line)  # strsplit: consecutive delimiters are collapsed
+        if len(f) < 5:
+            continue
+        tsec = str2double(f[1]) / 1000.0
+        if math.isnan(tsec):
+            continue
+        nValid += 1
+        if not sysFirst:
+            sysFirst = f[0].strip(); tFirst = tsec
+        code = f[3].strip()
+        value = ";".join(f[4:]).strip()
+        lc = code.lower(); lv = value.lower()
+        if lc == "samplingrate recording":
+            v = str2double(value)
+            if not math.isnan(v):
+                L.samplingRate = v
+        elif lc == "recording":
+            par = "parallel" in lv
+            if "started" in lv:
+                if par:
+                    tStartPar = tsec; sysStartPar = f[0].strip(); lineStartPar = i
+                else:
+                    tStart = tsec; sysStart = f[0].strip(); lineStart = i
+            elif "stopped" in lv:
+                if par:
+                    tStopPar = tsec
+                else:
+                    tStop = tsec
+        elif lc == "event" and "extended sensor mode" in lv:
+            ext.append([tsec, float("off" not in lv), i])
+        elif lc in ("offset", "calibration"):
+            # one entry per channel ('<ch>;Calibration;1000'), or (software 2.0.80xx, 2022) all channels in one
+            # line with channel 0 ('0;Calibration; 1000 1000 ... 1000')
+            ch = str2double(f[2]); v = sscanf_floats(value)
+            if not math.isnan(ch) and v:
+                if ch == 0 and len(v) > 1:
+                    E = [[tsec, k + 1, vk, i] for k, vk in enumerate(v)]
+                else:
+                    E = [[tsec, ch, v[0], i]]
+                (offs if lc == "offset" else cal).extend(E)
+        elif lc == "rockerspeed":
+            v = str2double(value)
+            if not math.isnan(v):
+                rck.append([tsec, v, i])
+        elif lc == "nchannels":
+            v = str2double(value)
+            if not math.isnan(v):
+                L.nChannelsController = v
+        elif lc == "programinfo" and "version" in lv:
+            L.programVersion = value
+        elif "singlechannelmode" in lc or (lc == "event" and "singlechannelmode" in lv):
+            L.singleChannelMode = not ("off" in lv or "false" in lv or lv == "0")
+    if nValid == 0:
+        return L
+    # entries of the main recording have priority over 'parallel recording' entries (schedule files)
+    if math.isnan(tStart) and math.isnan(tStop):
+        tStart = tStartPar; tStop = tStopPar; sysStart = sysStartPar
+    if not math.isnan(tStart) and not math.isnan(tStop) and tStop > tStart:
+        L.recordingDuration = tStop - tStart
+    elif not math.isnan(tStop):
+        L.recordingDuration = tStop
+    # entries logged before the 'Recording started' line hold from the start of the file (time -Inf)
+    if math.isnan(lineStart):
+        lineStart = lineStartPar
+    ext = np.array(ext, dtype=float).reshape(-1, 3)
+    offs = np.array(offs, dtype=float).reshape(-1, 4)
+    cal = np.array(cal, dtype=float).reshape(-1, 4)
+    rck = np.array(rck, dtype=float).reshape(-1, 3)
+    if not math.isnan(lineStart):
+        ext[ext[:, 2] < lineStart, 0] = -math.inf
+        offs[offs[:, 3] < lineStart, 0] = -math.inf
+        cal[cal[:, 3] < lineStart, 0] = -math.inf
+        rck[rck[:, 2] < lineStart, 0] = -math.inf
+    L.rockerSpeedEvents = rck[:, :2].copy()
+    L.extendedSensorModeEvents = ext[:, :2].copy()
+    L.offsetEvents = offs[:, :3].copy()
+    L.calibrationEvents = cal[:, :3].copy()
+    tSys = tStart
+    if not sysStart:
+        sysStart = sysFirst; tSys = tFirst
+    m = _SYS.match(sysStart)  # e.g. 2026 08 04 05:59:00:983
+    if m:
+        v = [int(x) if x is not None else 0 for x in m.groups()]
+        if math.isnan(tSys):
+            tSys = 0.0
+        try:
+            L.startDatenum = datenum(v[0], v[1], v[2], v[3], v[4], v[5] + v[6] / 1000.0) - tSys / 86400.0
+        except ValueError:
+            pass
+    return L

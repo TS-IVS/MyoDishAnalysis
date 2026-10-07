@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work or gives wrong results
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thank you for reporting. Please give enough details to reproduce the problem.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "MATLAB: row 'software' of the info sheet of an exported file; Python: `mda --version`"
+      placeholder: "1.0.0-beta.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: implementation
+    attributes:
+      label: MATLAB or Python
+      options: ["MATLAB (command line)", "MATLAB (GUI)", "Python (command line)", "Python (GUI)"]
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Operating system and MATLAB / Python version
+      placeholder: "Windows 11, MATLAB R2024b"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Error message (complete), screenshot if useful.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Command or GUI steps, channel, time range, options.
+      placeholder: "MyoDishAnalysis('file.mdd', 3, 600, 660, 'rockerFilter', true)"
+  - type: textarea
+    id: data
+    attributes:
+      label: Recording
+      description: Type of recording (species, tissue, protocol). Can you share a short .mdd + _log.log file (attach a zip, or say how to get it)?

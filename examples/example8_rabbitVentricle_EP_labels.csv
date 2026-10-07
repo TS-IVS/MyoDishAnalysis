@@ -1,0 +1,2 @@
+channel,setupID,sliceID,species,sampleID,sampleGroup,sliceGroup,tissue,treatment,concentration,concentrationUnit,daysInCulture,cultureStart,comment,analyst
+1,,,rabbit,,,,ventricle,lidocaine,300,uM,0,,"sharp electrode, 37 degC",

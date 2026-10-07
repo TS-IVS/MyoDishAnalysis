@@ -1,0 +1,2 @@
+channel,setupID,sliceID,species,sampleID,sampleGroup,sliceGroup,tissue,treatment,concentration,concentrationUnit,daysInCulture,cultureStart,comment,analyst
+1,,,rat,,,,ventricle,lidocaine,100,uM,5,,lidocaine 0 -> 100 uM during the recording,

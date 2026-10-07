@@ -1,0 +1,35 @@
+# How to cite MyoDishAnalysis. GitHub shows this as "Cite this repository" (APA, BibTeX).
+# After the first release: add the Zenodo concept DOI (identifiers).
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "MyoDishAnalysis"
+abstract: >-
+  Analysis of MyoDish recordings (.mdd) in MATLAB and Python: parameters of every single contraction,
+  reference beat, removal of the periodic rocker artifact, alignment of a parallel electrophysiological
+  recording (LabChart) and action potential parameters. Command-line functions and an interactive GUI;
+  the MATLAB and Python versions give the same results.
+authors:
+  - family-names: "Seidel"
+    given-names: "Thomas"
+    affiliation: "Institute of Cellular and Molecular Physiology, Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU); InVitroSys GmbH"
+    email: "thomas.seidel@fau.de"
+    orcid: "https://orcid.org/0000-0002-3127-1693"
+version: "1.0.0-beta.1"
+date-released: "2026-10-07"
+license: "GPL-3.0-or-later"
+repository-code: "https://github.com/TS-IVS/MyoDishAnalysis"
+# identifiers:
+#   - type: doi
+#     value: "10.5281/zenodo.XXXXXXX"
+#     description: "Concept DOI (all versions)"
+keywords:
+  - myocardial slices
+  - living myocardial slices
+  - cardiac tissue culture
+  - MyoDish
+  - contractility
+  - force measurement
+  - action potential
+  - MATLAB
+  - Python

@@ -1,0 +1,9 @@
+channel,setupID,sliceID,species,sampleID,sampleGroup,sliceGroup,tissue,treatment,concentration,concentrationUnit,daysInCulture,cultureStart,comment,analyst
+1,,,human,,,,right atrium,,,,8,,no addition logged,
+2,,,human,,,,right atrium,,,,8,,no addition logged,
+3,,,human,,,,right atrium,isoprenaline,100,nM,8,,added at 62 s,
+4,,,human,,,,right atrium,isoprenaline,100,nM,8,,added at 66 s,
+5,,,human,,,,right atrium,,,,8,,no addition logged,
+6,,,human,,,,right atrium,isoprenaline,100,nM,8,,added at 151 s,
+7,,,human,,,,right atrium,,,,8,,no addition logged,
+8,,,human,,,,right atrium,isoprenaline,100,nM,8,,added at 154 s,

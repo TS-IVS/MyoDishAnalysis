@@ -1,0 +1,4 @@
+# binary data: no line-ending conversion, no diff
+*.mdd binary
+*.log binary
+*.mat binary

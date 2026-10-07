@@ -1,0 +1,46 @@
+# MyoDishAnalysis (Python port of the MATLAB MyoDishAnalysis)   TS 2026-10-06
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "myodish-analysis"
+version = "1.0.0b1"
+description = "Analysis of MyoDish recordings (.mdd): parameters of every single contraction, reference beat, rocker filter, alignment of EP recordings and AP analysis. Python version of the MATLAB MyoDishAnalysis."
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Thomas Seidel", email = "thomas.seidel@fau.de" }]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "matplotlib>=3.7",
+    "h5py>=3.8",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.5", "pyqtgraph>=0.13.3"]
+test = ["pytest>=7"]
+all = ["PySide6>=6.5", "pyqtgraph>=0.13.3", "pytest>=7"]
+
+[project.scripts]
+mda = "myodish_analysis.cli:main"
+mda-test = "myodish_analysis.cli:selftest_main"
+
+[project.gui-scripts]
+mda-gui = "myodish_analysis.gui:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::RuntimeWarning"]

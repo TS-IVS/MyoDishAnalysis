@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and examples of use
+    url: https://github.com/TS-IVS/MyoDishAnalysis/discussions
+    about: Ask questions and tell us where you use MyoDishAnalysis (Show and tell).
+  - name: E-mail
+    url: mailto:thomas.seidel@fau.de
+    about: Without a GitHub account.
