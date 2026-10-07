@@ -464,6 +464,7 @@ def read_log(log_file):
     tFirst = math.nan
     ext, offs, cal, rck = [], [], [], []  # last column: line number
     lineStart = lineStartPar = math.nan
+    tMax = tMaxPar = -math.inf  # latest dataLogTime since the chosen start line
     for i, line in enumerate(lines, start=1):
         f = _re.split(";+", line)  # strsplit: consecutive delimiters are collapsed
         if len(f) < 5:
@@ -484,10 +485,14 @@ def read_log(log_file):
         elif lc == "recording":
             par = "parallel" in lv
             if "started" in lv:
+                # the first start line; a later one only if the dataLogTime starts again (new recording). A
+                # recording that was stopped and started again is appended to the same .mdd file.
                 if par:
-                    tStartPar = tsec; sysStartPar = f[0].strip(); lineStartPar = i
+                    if math.isnan(lineStartPar) or tsec < tMaxPar - 1:
+                        tStartPar = tsec; sysStartPar = f[0].strip(); lineStartPar = i; tMaxPar = tsec
                 else:
-                    tStart = tsec; sysStart = f[0].strip(); lineStart = i
+                    if math.isnan(lineStart) or tsec < tMax - 1:
+                        tStart = tsec; sysStart = f[0].strip(); lineStart = i; tMax = tsec
             elif "stopped" in lv:
                 if par:
                     tStopPar = tsec
@@ -517,6 +522,10 @@ def read_log(log_file):
             L.programVersion = value
         elif "singlechannelmode" in lc or (lc == "event" and "singlechannelmode" in lv):
             L.singleChannelMode = not ("off" in lv or "false" in lv or lv == "0")
+        if not math.isnan(lineStart):
+            tMax = max(tMax, tsec)
+        if not math.isnan(lineStartPar):
+            tMaxPar = max(tMaxPar, tsec)
     if nValid == 0:
         return L
     # entries of the main recording have priority over 'parallel recording' entries (schedule files)

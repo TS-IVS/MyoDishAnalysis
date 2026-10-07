@@ -13,7 +13,9 @@ function [B, G] = mda_groupBeats(H, B, C, range, by, opts)
 %                             rounded to 0.05 Hz (>= 0.5 Hz) or 0.01 Hz
 %          'S2interval'       S1-S2 protocols: S2 = premature stimulus (interval < 95 % of the previous one, next
 %                             interval longer, previous stimulus not premature); groups 'S1', 'S2 <interval>' and
-%                             'post-S2 <interval>' (the stimulus after an S2); S2 intervals within 7.5 ms = one group
+%                             'post-S2 <interval>' (the stimulus after an S2); S2 intervals within 7.5 ms = one group.
+%                             'S1' = the other stimuli at the basic interval (median, +-5 %); stimuli at other intervals
+%                             (e.g. trains at a higher rate between the S1-S2 steps): group 'other'
 %          'stimCurrent'      stimulus current of the pulse (mA, status channel)
 %          'pauseLength'      post-rest potentiation: first stimulus after a pause (interval >= 1.5 s and >= 1.5 x the
 %                             median interval) = 'rest <interval>' (intervals within 5 % = one group), all other
@@ -26,7 +28,7 @@ function [B, G] = mda_groupBeats(H, B, C, range, by, opts)
 %   opts   options (mda_options; minStimToPeak, rockerLogDelay)
 %
 %   B      with the columns group (text), groupValue (number; NaN for 'S1', 'steady', unknown) and groupRole
-%          ('S1' / 'S2' / 'postS2', 'steady' / 'postRest', otherwise ''). A stimulated contraction belongs to the group
+%          ('S1' / 'S2' / 'postS2' / 'other', 'steady' / 'postRest', otherwise ''). A stimulated contraction belongs to the group
 %          of its stimulus, an extra / unpaced contraction to the group of the last stimulus before its peak
 %          (rockerSpeed: rocker speed at the peak).
 %   G      one row per group (order: role, value): group, groupValue, groupRole, groupBy, then the columns of
@@ -35,7 +37,7 @@ function [B, G] = mda_groupBeats(H, B, C, range, by, opts)
 %          (mean amplitude in % of the group 'S1' / 'steady'; NaN for the other quantities). stimFrequency of a group =
 %          1 / median interval from the previous stimulus.
 %
-% TS 2026-10-07
+% TS 2026-10-07 (S2interval: group 'other' 2026-10-07)
 
 if nargin < 6 || isempty(opts), opts = mda_options(); end
 by = char(by);
@@ -48,9 +50,9 @@ idx = find(S.stim.channel == stimCh);
 idx = idx(o);
 cur = S.stim.current(idx);
 reached = S.stim.currentReached(idx);
-prevInt = [nan; diff(tt)];
-nextInt = [diff(tt); nan];
 nS = numel(tt);
+prevInt = [nan; diff(tt)]; prevInt = prevInt(1:nS, 1);   %no stimuli (channel not paced): empty
+nextInt = [diff(tt); nan]; nextInt = nextInt(1:nS, 1);
 
 % ------------------------------------------------------------------ value and role of every stimulus
 val = nan(nS, 1);                                  %group value
@@ -68,6 +70,10 @@ switch lower(by)
         role(isS2) = {'S2'};
         post = [false; isS2(1:end-1)];
         role(post) = {'postS2'};
+        cand = ~isS2 & ~post;                      %S1 = basic interval; other intervals: 'other'
+        inR = tt >= range(1) & tt <= range(2);
+        base = median(prevInt(cand & inR), 'omitnan');
+        role(cand & abs(prevInt - base) > 0.05 * base) = {'other'};
         s2 = nan(nS, 1); s2(isS2) = prevInt(isS2);
         gid = clusterValues(s2, 0.0075, 0);
         v2 = groupMedian(s2, gid);
@@ -128,7 +134,7 @@ captured = false(nS, 1);
 captured(isC) = C.stimCaptured(locC(isC));
 keys = unique([lbl(inR); B.group(B.t_peak >= range(1) & B.t_peak <= range(2))], 'stable');
 % order: role (as listed below), then value
-roleOrder = {'', 'S1', 'S2', 'postS2', 'steady', 'postRest'};
+roleOrder = {'', 'S1', 'S2', 'postS2', 'other', 'steady', 'postRest'};
 kr = zeros(numel(keys), 1); kv = nan(numel(keys), 1);
 for q = 1:numel(keys)
     j = find(strcmp(lbl, keys{q}), 1);
@@ -207,6 +213,7 @@ for i = 1:n
         case 's2interval'
             switch role{i}
                 case 'S1', s = 'S1';
+                case 'other', s = 'other';
                 case 'S2', s = sprintf('S2 %d ms', round(1000 * v));
                 otherwise, s = sprintf('post-S2 %d ms', round(1000 * v));
             end
@@ -217,7 +224,7 @@ for i = 1:n
         case 'pulseduration', s = sprintf('%g ms', v);
         otherwise, s = sprintf('%s %g', strtrim(byName(5:end)), v);
     end
-    if isnan(v) && ~any(strcmp(role{i}, {'S1', 'steady'})), s = 'unknown'; end
+    if isnan(v) && ~any(strcmp(role{i}, {'S1', 'other', 'steady'})), s = 'unknown'; end
     lbl{i} = s;
 end
 end
@@ -239,14 +246,30 @@ v(ok) = rv(k(ok));
 end
 
 
+function rec = recordingStartRow(E)
+% row of the 'Recording started' entry that starts the data of the .mdd file: the first one (main recording before
+% 'parallel recording'); a later one only if the dataLogTime starts again (new recording in the same log file; a
+% recording that was stopped and started again is appended to the .mdd file, its dataLogTime continues)
+isRec = strcmpi(E.code, 'Recording') & contains(lower(E.text), 'started');
+par = contains(lower(E.text), 'parallel');
+c = find(isRec & ~par);
+if isempty(c), c = find(isRec); end
+rec = [];
+if isempty(c), return; end
+rec = c(1);
+for j = reshape(c(2:end), 1, [])
+    if E.t_file(j) < max(E.t_file(rec:j-1)) - 1, rec = j; end
+end
+end
+
+
 function v = logValueAt(H, code, ch, t)
 % value of the last log entry 'code' for channel ch (or 0) at or before the times t; entries before the start of the
 % recording count from -Inf
 E = mda_logEntries(H.logFile);
 v = nan(size(t));
 if isempty(E), return; end
-rec = find(strcmpi(E.code, 'Recording') & contains(lower(E.text), 'started') & ~contains(lower(E.text), 'parallel'), 1, 'last');
-if isempty(rec), rec = find(strcmpi(E.code, 'Recording') & contains(lower(E.text), 'started'), 1, 'last'); end
+rec = recordingStartRow(E);
 tf = E.t_file;
 if ~isempty(rec), tf(1:rec-1) = -inf; end
 k = find(strcmpi(E.code, code) & (E.channel == ch | E.channel == 0));

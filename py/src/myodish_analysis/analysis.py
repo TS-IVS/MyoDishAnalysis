@@ -214,6 +214,9 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
             if not quiet:
                 print(f"  {labels[r]}, channel {ch}: {len(B)} contractions detected, {int(B['included'].sum())} "
                       f"included (threshold {Cm.threshold:.0f} uN, {Cm.thresholdMode})")
+                if (opts.rocker == "stopped" and len(B) > 0 and not B["included"].any()
+                        and B["rockerMoving"].astype(bool).all()):
+                    print("    the rocker moved during every contraction: rocker='any' includes them")
                 if opts.rockerFilter and rfRows:
                     msgs = []
                     for row in rfRows:

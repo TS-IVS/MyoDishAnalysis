@@ -18,6 +18,11 @@ MATLAB and Python versions have the same version number and give the same result
   current, rest interval, pulse duration, rocker speed or any numeric log entry; summary per group with capture and
   amplitude relative to S1 / steady state. `MyoDishAnalysis` options `'protocol'` and `'groupBy'` (Python `protocol=`,
   `groupBy=`; command line `--protocol`, `--group-by`, `--list-protocols`); sheet `protocols` in the results.
+- Protocols also from schedule-file events of the log file (`Loaded schedule file <name>.txt` … `Jumped back from
+  loaded schedule file`), if the file name contains a protocol keyword (e.g. `PD_Test_12Steps`, `StimThreshold_2-90mA`);
+  keywords also as words of CamelCase / underscore names. Comments and file names about the schedule itself
+  (`start scheduleFile_…`) are ignored (they were listed as a protocol spanning the whole file; with `FFR_and_PRP` in
+  the name as a PRP protocol that hid the real PRP protocols).
 - GUI (MATLAB and Python): window **Protocols ...**: editable protocol list, channels, rocker selection, grouping,
   plot of a parameter against the quantity (mean ± SD / SEM), result table, figure and data export.
 
@@ -29,6 +34,18 @@ MATLAB and Python versions have the same version number and give the same result
   contractions (3–61 s) are now included, amplitudes ≤ 1.3 % lower. In the other examples only the first
   contraction after a longer interval changes (FFR step to 0.2 Hz, ST pause of 6 s; ≤ 0.6 %, with rocker filter
   ≤ 1.8 %); regular pacing is unchanged.
+- `S2interval` grouping: `S1` = stimuli at the basic interval (median ± 5 %); stimuli at other intervals (e.g. the
+  trains at increasing rates between the S1-S2 steps of the daily RP schedule) form the group `other` instead of
+  being part of the S1 reference (`amplitude_pctOfRef`).
+- Log file: the first `Recording started` entry is the start of the data. A recording that was stopped and started
+  again is appended to the same `.mdd` file (dataLogTime continues); the last start was used before, which shifted
+  `clockTime` by the length of the interruption, set all earlier rocker speed entries to the file start and broke
+  grouping by log values (e.g. pulse duration). A later start counts only if the dataLogTime starts again. Known
+  limitation: one start time per file, so `clockTime` of the data recorded after a restart is early by the length of
+  the interruption.
+- Protocol summary of a channel without stimuli in the range: no error in Python (group `unknown`, as in MATLAB).
+- Command line: hint when no contraction is included because the rocker moved during all of them
+  (`'rocker','any'`).
 - Tests: tolerance of the rocker-filter comparison per statistic (summary means 0.5 %, SDs 2 %); which flat peaks move
   by one sample depends on the linear-algebra library.
 

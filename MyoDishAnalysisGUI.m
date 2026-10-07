@@ -1555,7 +1555,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         axP = axes(f4, 'Position', [0.06 0.47 0.55 0.49]); box(axP, 'on'); grid(axP, 'on');
         tRes = uitable(f4, 'Units', 'normalized', 'Position', [0.01 0.01 0.62 0.37], 'RowName', [], 'FontSize', 9);
         x0 = 0.645; w0 = 0.345;
-        uicontrol(f4, dd{:}, 'Style', 'text', 'String', ['Protocols (comments ''start ... protocol'' / ''end ... protocol'' in the log file). ' ...
+        uicontrol(f4, dd{:}, 'Style', 'text', 'String', ['Protocols (comments ''start ... protocol'' / ''end ... protocol'' or schedule files in the log file). ' ...
             'Tick the protocols to analyse; From / To and the grouping can be changed.'], 'HorizontalAlignment', 'left', ...
             'Position', [x0 0.92 w0 0.06], 'FontSize', 9);
         tProt = uitable(f4, 'Units', 'normalized', 'Position', [x0 0.6 w0 0.32], 'RowName', [], 'FontSize', 9, ...
@@ -1708,6 +1708,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             prG = prS(strcmp(prS.range, prK{1}) & prS.channel == str2double(prK{2}), :);
             prC = prCol(mod(q-1, size(prCol,1)) + 1, :);
             for prRo = unique(prG.groupRole, 'stable')'
+                if strcmp(prRo{1}, 'other'), continue; end    %S1-S2: stimuli at other intervals (table only)
                 prR = prG(strcmp(prG.groupRole, prRo{1}), :);
                 prY = prR.(prM);
                 if any(strcmp(prRo{1}, {'S1', 'steady'}))           %reference: horizontal line

@@ -61,8 +61,8 @@ class ProtocolWindow(QtWidgets.QWidget):
         # right: protocols and settings
         v = QtWidgets.QVBoxLayout()
         h.addLayout(v, 2)
-        lab = QtWidgets.QLabel("Protocols (comments 'start ... protocol' / 'end ... protocol' in the log file). Tick the "
-                               "protocols to analyse; From / To and the grouping can be changed.")
+        lab = QtWidgets.QLabel("Protocols (comments 'start ... protocol' / 'end ... protocol' or schedule files in the "
+                               "log file). Tick the protocols to analyse; From / To and the grouping can be changed.")
         lab.setWordWrap(True)
         v.addWidget(lab)
         self.tp = QtWidgets.QTableWidget(0, 7)
@@ -272,6 +272,8 @@ class ProtocolWindow(QtWidgets.QWidget):
             col = COLORS[k % len(COLORS)]
             k += 1
             for role, Gr in G.groupby("groupRole", sort=False):
+                if role == "other":  # S1-S2: stimuli at other intervals (table only)
+                    continue
                 y = Gr[mcol].to_numpy(float)
                 x = Gr["groupValue"].to_numpy(float) * xf
                 if role in ("S1", "steady"):  # reference: horizontal line

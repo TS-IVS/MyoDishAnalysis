@@ -467,6 +467,7 @@ tStart = nan; tStop = nan; tStartPar = nan; tStopPar = nan;
 sysStart = ''; sysStartPar = ''; sysFirst = ''; tFirst = nan;
 ext = zeros(0,3); offs = zeros(0,4); cal = zeros(0,4); rck = zeros(0,3);  %last column: line number
 lineStart = nan; lineStartPar = nan;
+tMax = -inf; tMaxPar = -inf;                        %latest dataLogTime since the chosen start line
 for i = 1:numel(lines)
     f = strsplit(lines{i}, ';');
     if numel(f) < 5, continue; end
@@ -481,10 +482,16 @@ for i = 1:numel(lines)
     elseif strcmpi(code,'Recording')
         par = contains(value,'parallel','IgnoreCase',true);
         if contains(value,'started','IgnoreCase',true)
+            % the first start line; a later one only if the dataLogTime starts again (new recording). A recording
+            % that was stopped and started again is appended to the same .mdd file (dataLogTime continues).
             if par
-                tStartPar = tsec; sysStartPar = strtrim(f{1}); lineStartPar = i;
+                if isnan(lineStartPar) || tsec < tMaxPar - 1
+                    tStartPar = tsec; sysStartPar = strtrim(f{1}); lineStartPar = i; tMaxPar = tsec;
+                end
             else
-                tStart = tsec; sysStart = strtrim(f{1}); lineStart = i;
+                if isnan(lineStart) || tsec < tMax - 1
+                    tStart = tsec; sysStart = strtrim(f{1}); lineStart = i; tMax = tsec;
+                end
             end
         elseif contains(value,'stopped','IgnoreCase',true)
             if par, tStopPar = tsec; else, tStop = tsec; end
@@ -514,6 +521,8 @@ for i = 1:numel(lines)
         v = lower(value);
         L.singleChannelMode = ~(contains(v,'off') || contains(v,'false') || strcmp(v,'0'));
     end
+    if ~isnan(lineStart), tMax = max(tMax, tsec); end
+    if ~isnan(lineStartPar), tMaxPar = max(tMaxPar, tsec); end
 end
 if nValid == 0, return; end
 % entries of the main recording have priority over 'parallel recording' entries (schedule files)

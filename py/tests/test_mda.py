@@ -203,6 +203,65 @@ def test_rocker_source_examples():
         mda.options(rockerSource="x")
 
 
+# ------------------------------------------------------------------------------------------------ protocols / log file
+def _write_log(path, rows):
+    # lines: systemTime;dataLogTime_ms;channel;code;value
+    path.write_text("\n".join(f"{a};{int(round(b * 1000))};{c};{d};{e}" for a, b, c, d, e in rows) + "\n",
+                    encoding="utf-8")
+    return str(path)
+
+
+def test_find_protocols_comments_and_schedule_files(tmp_path):
+    S = "2026 01 01 06:00:00:000"
+    log = _write_log(tmp_path / "x_log.log", [
+        (S, 0, 0, "Recording", "started parallel recording: C:\\data\\x.mdd"),
+        (S, 0, 0, "comment", "Started parallel recording: 01.Jan.2026 06:00:00"),
+        (S, 1, 0, "comment", "start scheduleFile_humanVentricle_FFR_and_PRP"),       # schedule itself: ignored
+        (S, 2, 0, "schedule", "Loaded schedule file C:\\p r\\FFR_60beats_0.2-4Hz.txt"),
+        (S, 3, 0, "comment", "FFR protocol started"),
+        (S, 100, 0, "comment", "FFR protocol ended"),
+        (S, 101, 0, "schedule", "Jumped back from loaded schedule file."),          # older logs: no name
+        (S, 110, 0, "schedule", "Loaded schedule file C:\\p\\PD_Test_12Steps.txt"),
+        (S, 200, 0, "schedule", "Jumped back from loaded schedule file C:\\p\\PD_Test_12Steps.txt."),
+        (S, 210, 0, "schedule", "Loaded schedule file C:\\p\\QC_large.txt"),           # no protocol keyword
+        (S, 220, 0, "comment", "start post rest potentiation protocol"),
+        (S, 300, 0, "comment", "end post rest potentiation protocol"),
+        (S, 310, 0, "schedule", "Jumped back from loaded schedule file C:\\p\\QC_large.txt."),
+        (S, 320, 0, "comment", "end scheduleFile_humanVentricle"),
+    ])
+    P = mda.find_protocols(log)
+    assert P["type"].tolist() == ["FFR", "PD", "PRP"]
+    assert P["name"].tolist() == ["FFR_60beats_0.2-4Hz", "PD_Test_12Steps", "post rest potentiation protocol"]
+    np.testing.assert_allclose(P[["from", "to"]].to_numpy(), [[2, 101], [110, 200], [220, 300]])
+    from myodish_analysis.protocols import protocol_type
+    assert [protocol_type(n) for n in ("ST_50-8mA_stepSize2mA", "PulseDurationProtocol", "RP_1000-240ms_FJump",
+                                       "isoprenalineFrequencyProtocol", "QC_large")] == \
+        ["ST", "PD", "RP", "FFR", "other"]
+
+
+def test_read_log_recording_restarted(tmp_path):
+    from myodish_analysis.read_mdd import read_log
+    rows = [("2026 01 01 06:00:00:000", 0, 0, "Recording", "started parallel recording: x.mdd"),
+            ("2026 01 01 06:00:00:000", 0, 1, "Offset", "100"),
+            ("2026 01 01 06:00:05:000", 5, 0, "rockerSpeed", "60"),
+            ("2026 01 01 06:05:00:000", 300, 0, "Recording", "stopped parallel recording: x.mdd"),
+            # recording started again 1 h later: appended to the .mdd file, dataLogTime continues
+            ("2026 01 01 07:05:00:000", 300, 0, "Recording", "started parallel recording: x.mdd"),
+            ("2026 01 01 07:05:00:000", 300, 1, "Offset", "120"),
+            ("2026 01 01 07:06:00:000", 360, 0, "Recording", "stopped parallel recording: x.mdd")]
+    L = read_log(_write_log(tmp_path / "a_log.log", rows))
+    assert abs(L.startDatenum - M.datenum(2026, 1, 1, 6, 0, 0)) < 1e-9     # first start
+    assert L.recordingDuration == 360
+    np.testing.assert_allclose(L.rockerSpeedEvents, [[5, 60]])
+    np.testing.assert_allclose(L.offsetEvents, [[0, 1, 100], [300, 1, 120]])
+    # a new recording in the same log file (dataLogTime starts again): the later start counts
+    rows2 = rows[:4] + [("2026 01 01 08:00:00:000", 0, 0, "Recording", "started parallel recording: x.mdd"),
+                        ("2026 01 01 08:00:10:000", 10, 0, "rockerSpeed", "30")]
+    L2 = read_log(_write_log(tmp_path / "b_log.log", rows2))
+    assert abs(L2.startDatenum - M.datenum(2026, 1, 1, 8, 0, 0)) < 1e-9
+    np.testing.assert_allclose(L2.rockerSpeedEvents, [[-np.inf, 60], [10, 30]])
+
+
 # ------------------------------------------------------------------------------------------------ command line / GUI
 def test_cli_help(capsys):
     from myodish_analysis.cli import main

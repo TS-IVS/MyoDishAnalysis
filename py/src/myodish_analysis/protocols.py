@@ -9,18 +9,21 @@ find_protocols: protocols are marked by pairs of comments such as 'start FFR pro
 'start of refractory period protocol' ... 'end of refractory period protocol' or 'FFR protocol started' ... 'FFR
 protocol ended'. A start is paired with the next end of the same name (otherwise of the same type). A start without an
 end lasts until the next protocol of the same type or the end of the file (note 'no end comment'). Protocols within a
-protocol of the same type are not listed separately. Comments about the recording itself are ignored.
+protocol of the same type are not listed separately. Comments about the recording itself and about schedule files
+('start scheduleFile_humanVentricle') are ignored. Schedule files loaded by a schedule (log events 'Loaded schedule
+file <path>' ... 'Jumped back from loaded schedule file <path>') are protocols, too, if their file name contains a
+protocol keyword (e.g. PD_Test_12Steps.txt) and not 'schedule'; name = file name without extension.
 P: DataFrame, one row per protocol: type, name, number (k-th protocol of this type), from, to (s), groupBy (default
 quantity), startComment, endComment, note.
 Types (keywords in the name) and default grouping: FFR (FFR, force-frequency, frequency): pacingFrequency;
 RP (refractory, RP, S1S2, S2): S2interval; ST (threshold, stimCurrent, ST): stimCurrent; PRP (post rest, PRP, rest
 potentiation): pauseLength; PD (pulse duration, PD): pulseDuration; rockerSpeed (rocker speed): rockerSpeed;
-other: none.
+other: none. FFR, RP, ST, PRP, PD also as separate words or parts of a CamelCase / underscore name ('PD_Test').
 
 group_beats: see the help of mda_groupBeats.m (same quantities, groups, columns):
   pacingFrequency, S2interval, stimCurrent, pauseLength, rockerSpeed, pulseDuration, 'log:<code>'.
 
-TS 2026-10-07 (port of mda_protocols.m and mda_groupBeats.m)
+TS 2026-10-07 (port of mda_protocols.m and mda_groupBeats.m; schedule files 2026-10-07)
 """
 from __future__ import annotations
 
@@ -52,23 +55,45 @@ def _parse_comment(txt):
     return "", ""
 
 
+_LOADED = re.compile(r"^Loaded schedule file\s+(.+?)\s*$", re.I)
+_JUMPED = re.compile(r"^Jumped back from loaded schedule file\s*(.*?)\s*$", re.I)
+_WORDS = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
+
+
+def _parse_schedule_event(txt):
+    """'Loaded schedule file C:\\...\\PD_Test.txt' / 'Jumped back from loaded schedule file C:\\...\\PD_Test.txt.'"""
+    m = _LOADED.match(txt)
+    kind = "start"
+    if not m:
+        m = _JUMPED.match(txt)
+        kind = "end"
+        if not m:
+            return "", ""
+    p = re.sub(r"\.+$", "", m.group(1).replace("\\", "/"))
+    p = p.rsplit("/", 1)[-1]
+    return kind, re.sub(r"\.[A-Za-z0-9]{1,4}$", "", p)
+
+
 def _norm_name(name):
     key = name.lower().replace("protocol", "")
     return re.sub(r"[^a-z0-9]", "", key)
 
 
-def protocol_type(key):
+def protocol_type(name):
+    """protocol type from the name (keywords; FFR, RP, ST, PRP, PD also as words: 'PD_Test' -> PD)"""
+    key = _norm_name(name)
+    tok = [w.lower() for w in _WORDS.findall(str(name))]
     if re.search(r"postrest|prp|restpotentiation", key):
         return "PRP"
-    if re.search(r"refractory|^rp|s1s2|^s2", key):
+    if re.search(r"refractory|^rp|s1s2|^s2", key) or "rp" in tok:
         return "RP"
-    if re.search(r"threshold|stimcurrent|^st$|^st[^a-z]", key):
+    if re.search(r"threshold|stimcurrent|^st$|^st[^a-z]", key) or "st" in tok:
         return "ST"
-    if re.search(r"pulseduration|^pd$|^pd[^a-z]", key):
+    if re.search(r"pulseduration|^pd$|^pd[^a-z]", key) or "pd" in tok:
         return "PD"
     if re.search(r"rockerspeed", key):
         return "rockerSpeed"
-    if re.search(r"ffr|forcefrequency|frequency", key):
+    if re.search(r"ffr|forcefrequency|frequency", key) or "ffr" in tok:
         return "FFR"
     return "other"
 
@@ -88,17 +113,38 @@ def find_protocols(src):
     else:
         logFile, T = str(src), math.inf
     E = log_entries(logFile)
-    E = E[E["isComment"].to_numpy(bool) & np.isfinite(E["t_file"].to_numpy(float))]
+    isSched = np.array([str(c).lower() == "schedule" for c in E["code"]], dtype=bool)
+    E = E[(E["isComment"].to_numpy(bool) | isSched) & np.isfinite(E["t_file"].to_numpy(float))]
     E = E.sort_values("t_file", kind="stable")
     st = []
     open_ = []
-    for txt, tf in zip(E["text"], E["t_file"]):
+    sched = []  # names of the loaded schedule files (nested)
+    for txt, tf, isC in zip(E["text"], E["t_file"], E["isComment"]):
         txt = str(txt).strip()
-        kind, name = _parse_comment(txt)
-        if not kind:
+        if isC:
+            kind, name = _parse_comment(txt)
+            if not kind:
+                continue
+        else:
+            kind, name = _parse_schedule_event(txt)
+            if not kind:
+                continue
+            if kind == "start":
+                sched.append(name)
+            else:  # 'Jumped back from loaded schedule file.' (older logs): the last one
+                js = [j for j, x in enumerate(sched) if x == name]
+                if not name or not js:
+                    js = [len(sched) - 1]
+                if js[-1] < 0:
+                    continue
+                name = sched.pop(js[-1])
+            txt = ("Loaded schedule file " if kind == "start" else "Jumped back from loaded schedule file ") + name
+        if "schedule" in name.lower():  # the schedule file itself
             continue
         key = _norm_name(name)
-        typ = protocol_type(key)
+        typ = protocol_type(name)
+        if not isC and typ == "other":  # schedule files without protocol keyword
+            continue
         if kind == "start":
             st.append(dict(type=typ, name=name, key=key, start=float(tf), to=math.nan, startComment=txt,
                            endComment="", note=""))
@@ -162,9 +208,9 @@ def group_beats(H, B, C, range_, by, opts=None):
     tt = S.stim.time[idx]
     cur = S.stim.current[idx]
     reached = S.stim.currentReached[idx]
-    prevInt = np.r_[np.nan, np.diff(tt)]
-    nextInt = np.r_[np.diff(tt), np.nan]
     nS = tt.size
+    prevInt = np.r_[np.nan, np.diff(tt)][:nS]  # no stimuli (channel not paced): empty
+    nextInt = np.r_[np.diff(tt), np.nan][:nS]
 
     # value and role of every stimulus
     val = np.full(nS, np.nan)
@@ -180,6 +226,12 @@ def group_beats(H, B, C, range_, by, opts=None):
         role[isS2] = "S2"
         post = np.r_[False, isS2[:-1]]
         role[post] = "postS2"
+        cand = ~isS2 & ~post  # S1 = basic interval; other intervals: 'other'
+        inR = (tt >= r0) & (tt <= r1)
+        p = prevInt[cand & inR]
+        base = float(np.median(p[~np.isnan(p)])) if np.any(~np.isnan(p)) else math.nan
+        with np.errstate(invalid="ignore"):
+            role[cand & (np.abs(prevInt - base) > 0.05 * base)] = "other"
         s2 = np.full(nS, np.nan)
         s2[isS2] = prevInt[isS2]
         v2 = _group_median(s2, _cluster_values(s2, 0.0075, 0.0))
@@ -253,7 +305,7 @@ def group_beats(H, B, C, range_, by, opts=None):
     for x in list(lbl[inR]) + list(bLbl[inRb]):
         if x not in keys:
             keys.append(x)
-    roleOrder = ["", "S1", "S2", "postS2", "steady", "postRest"]
+    roleOrder = ["", "S1", "S2", "postS2", "other", "steady", "postRest"]
     kr, kv = [], []
     for key in keys:
         j = np.flatnonzero(lbl == key)
@@ -348,6 +400,8 @@ def _group_labels(byl, val, role, byName):
         elif byl == "s2interval":
             if r == "S1":
                 s = "S1"
+            elif r == "other":
+                s = "other"
             elif r == "S2":
                 s = "S2 %d ms" % mround(1000 * v) if not math.isnan(v) else ""
             else:
@@ -362,7 +416,7 @@ def _group_labels(byl, val, role, byName):
             s = "%g ms" % v
         else:
             s = "%s %g" % (byName[4:].strip(), v)
-        if math.isnan(v) and r not in ("S1", "steady"):
+        if math.isnan(v) and r not in ("S1", "other", "steady"):
             s = "unknown"
         out.append(s)
     return np.array(out, dtype=object)
@@ -403,12 +457,19 @@ def _log_value_at(H, code, ch, t):
     isRec = codes == "recording"
     started = np.array(["started" in x for x in texts])
     par = np.array(["parallel" in x for x in texts])
-    rec = np.flatnonzero(isRec & started & ~par)
-    if rec.size == 0:
-        rec = np.flatnonzero(isRec & started)
+    c = np.flatnonzero(isRec & started & ~par)
+    if c.size == 0:
+        c = np.flatnonzero(isRec & started)
     tf = E["t_file"].to_numpy(float).copy()
-    if rec.size:
-        tf[:rec[-1]] = -np.inf
+    # the first start; a later one only if the dataLogTime starts again (new recording in the same log file; a
+    # recording that was stopped and started again is appended to the .mdd file, its dataLogTime continues)
+    if c.size:
+        rec = int(c[0])
+        for j in c[1:]:
+            seg = tf[rec:j]
+            if np.any(~np.isnan(seg)) and tf[j] < np.nanmax(seg) - 1:
+                rec = int(j)
+        tf[:rec] = -np.inf
     chs = E["channel"].to_numpy(float)
     k = np.flatnonzero((codes == code.lower()) & ((chs == ch) | (chs == 0)))
     if k.size == 0:

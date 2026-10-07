@@ -8,12 +8,18 @@ function P = mda_protocols(src)
 % ended'. A start is paired with the next end of the same name (otherwise of the same type). A start without an
 % end lasts until the next protocol of the same type or the end of the file (note 'no end comment'). Protocols
 % within a protocol of the same type (e.g. 'PRP protocol started' within 'start post rest potentiation protocol')
-% are not listed separately. Comments about the recording itself ('Started parallel recording ...') are ignored.
+% are not listed separately. Comments about the recording itself ('Started parallel recording ...') and about schedule
+% files ('start scheduleFile_humanVentricle', 'end of schedule file ...') are ignored.
+% Schedule files loaded by a schedule (log events 'Loaded schedule file <path>' ... 'Jumped back from loaded schedule
+% file <path>') are protocols, too, if their file name contains a protocol keyword (e.g. PD_Test_12Steps.txt,
+% ST_50-8mA_stepSize2mA.txt) and not 'schedule'; name = file name without extension. If such a protocol is also marked
+% by comments, the longer of the two is listed.
 %
 % P  table, one row per protocol (in the order of the start): type, name, number (k-th protocol of this type),
 %    from, to (s, time in the file), groupBy (default quantity for mda_groupBeats), startComment, endComment, note
 %
-% Types (keywords in the name, not case sensitive) and default grouping:
+% Types (keywords in the name, not case sensitive; FFR, RP, ST, PRP, PD also as separate words or parts of a
+% CamelCase / underscore name such as 'PD_Test') and default grouping:
 %   FFR          FFR, force-frequency, frequency          pacingFrequency
 %   RP           refractory, RP, S1S2, S2                 S2interval
 %   ST           threshold, stimCurrent, ST               stimCurrent
@@ -22,7 +28,7 @@ function P = mda_protocols(src)
 %   rockerSpeed  rocker speed                             rockerSpeed
 %   other        all other names                          none
 %
-% TS 2026-10-07
+% TS 2026-10-07 (schedule files 2026-10-07)
 
 if isstruct(src)
     logFile = src.logFile; T = src.totalSeconds;
@@ -35,17 +41,34 @@ else
     end
 end
 E = mda_logEntries(logFile);
-E = E(E.isComment & isfinite(E.t_file), :);
+E = E((E.isComment | strcmpi(E.code, 'schedule')) & isfinite(E.t_file), :);
 E = sortrows(E, 't_file');                        %stable
 
 st = struct('type', {}, 'name', {}, 'key', {}, 'from', {}, 'to', {}, 'startComment', {}, 'endComment', {}, 'note', {});
 open = zeros(0, 1);                               %indices of open (unpaired) starts
+sched = {};                                       %names of the loaded schedule files (nested)
 for k = 1:height(E)
     txt = strtrim(E.text{k});
-    [kind, name] = parseComment(txt);
-    if isempty(kind), continue; end
+    if E.isComment(k)
+        [kind, name] = parseComment(txt);
+        if isempty(kind), continue; end
+    else
+        [kind, name] = parseScheduleEvent(txt);
+        if isempty(kind), continue; end
+        if strcmp(kind, 'start')
+            sched{end+1} = name; %#ok<AGROW>
+        else                                      %'Jumped back from loaded schedule file.' (older logs): the last one
+            j = find(strcmp(sched, name), 1, 'last');
+            if isempty(name) || isempty(j), j = numel(sched); end
+            if j == 0, continue; end
+            name = sched{j}; sched(j) = [];
+        end
+        if strcmp(kind, 'start'), txt = ['Loaded schedule file ' name]; else, txt = ['Jumped back from loaded schedule file ' name]; end
+    end
+    if contains(lower(name), 'schedule'), continue; end           %the schedule file itself
     key = normName(name);
-    typ = protocolType(key);
+    typ = protocolType(name);
+    if ~E.isComment(k) && strcmp(typ, 'other'), continue; end   %schedule files without protocol keyword
     if strcmp(kind, 'start')
         st(end+1) = struct('type', typ, 'name', name, 'key', key, 'from', E.t_file(k), 'to', nan, ...
             'startComment', txt, 'endComment', '', 'note', ''); %#ok<AGROW>
@@ -116,6 +139,24 @@ if ~isempty(tok), kind = 'end'; name = tok{1}; return; end
 end
 
 
+function [kind, name] = parseScheduleEvent(txt)
+% 'Loaded schedule file C:\...\PD_Test_12Steps.txt' / 'Jumped back from loaded schedule file C:\...\PD_Test.txt.'
+kind = ''; name = '';
+tok = regexp(txt, '^Loaded schedule file\s+(.+?)\s*$', 'tokens', 'once', 'ignorecase');
+if ~isempty(tok)
+    kind = 'start';
+else
+    tok = regexp(txt, '^Jumped back from loaded schedule file\s*(.*?)\s*$', 'tokens', 'once', 'ignorecase');
+    if isempty(tok), return; end
+    kind = 'end';
+end
+p = regexprep(strrep(tok{1}, '\', '/'), '\.+$', '');
+k = find(p == '/', 1, 'last');
+if ~isempty(k), p = p(k+1:end); end
+name = regexprep(p, '\.[A-Za-z0-9]{1,4}$', '');
+end
+
+
 function key = normName(name)
 % lower case, without 'protocol' and non-alphanumeric characters ('PulseDurationProtocol' = 'pulse duration')
 key = lower(name);
@@ -124,18 +165,20 @@ key = regexprep(key, '[^a-z0-9]', '');
 end
 
 
-function typ = protocolType(key)
+function typ = protocolType(name)
+key = normName(name);
+tok = lower(regexp(char(name), '[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+', 'match'));   %words: 'PD_Test' -> pd, test
 if ~isempty(regexp(key, 'postrest|prp|restpotentiation', 'once'))
     typ = 'PRP';
-elseif ~isempty(regexp(key, 'refractory|^rp|s1s2|^s2', 'once'))
+elseif ~isempty(regexp(key, 'refractory|^rp|s1s2|^s2', 'once')) || ismember('rp', tok)
     typ = 'RP';
-elseif ~isempty(regexp(key, 'threshold|stimcurrent|^st$|^st[^a-z]', 'once'))
+elseif ~isempty(regexp(key, 'threshold|stimcurrent|^st$|^st[^a-z]', 'once')) || ismember('st', tok)
     typ = 'ST';
-elseif ~isempty(regexp(key, 'pulseduration|^pd$|^pd[^a-z]', 'once'))
+elseif ~isempty(regexp(key, 'pulseduration|^pd$|^pd[^a-z]', 'once')) || ismember('pd', tok)
     typ = 'PD';
 elseif ~isempty(regexp(key, 'rockerspeed', 'once'))
     typ = 'rockerSpeed';
-elseif ~isempty(regexp(key, 'ffr|forcefrequency|frequency', 'once'))
+elseif ~isempty(regexp(key, 'ffr|forcefrequency|frequency', 'once')) || ismember('ffr', tok)
     typ = 'FFR';
 else
     typ = 'other';

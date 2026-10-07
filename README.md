@@ -224,8 +224,8 @@ Own additional fields are kept as extra columns.
 
 ## Stimulation protocols (`'protocol'`, `'groupBy'`; GUI: **Protocols ...**)
 Protocols such as force-frequency (FFR), refractory period (RP, S1-S2), stimulation threshold (ST), post-rest
-potentiation (PRP) or pulse duration (PD) are found from the comments of the log file and analysed per value of
-their stimulation quantity.
+potentiation (PRP) or pulse duration (PD) are found from the comments and schedule-file events of the log file and
+analysed per value of their stimulation quantity.
 ```matlab
 P = mda_protocols(file)                                              % protocols in the log file
 [c, s] = MyoDishAnalysis(file, [3 6], [], [], 'protocol', 'FFR');   % per pacing frequency, rocker at rest
@@ -237,7 +237,12 @@ P = mda_protocols(file)                                              % protocols
   the same type; several protocols of the same type are numbered (`FFR 1`, `FFR 2`). A start without an end lasts
   until the next protocol of the same type or the end of the file (note `no end comment`). Type from keywords:
   FFR / frequency → `FFR`, refractory / S1S2 → `RP`, threshold / stimCurrent → `ST`, post rest / PRP → `PRP`,
-  pulse duration → `PD`, rocker speed → `rockerSpeed`, others `other`. The table can be edited (`from`, `to`,
+  pulse duration → `PD`, rocker speed → `rockerSpeed`, others `other` (FFR, RP, ST, PRP, PD also as words of a
+  name such as `PD_Test_12Steps`). Schedule files loaded by a schedule (log events `Loaded schedule file …` /
+  `Jumped back from loaded schedule file …`) are protocols, too, if their file name contains such a keyword
+  (e.g. `FFR_60beats_0.2-4Hz…`, `RP_1000-240ms_FJump…`, `StimThreshold_2-90mA`, `PostRestPotentiation`); name = file
+  name. Comments and file names about the schedule itself (`start scheduleFile_humanVentricle`) are ignored; of two
+  protocols of the same type within each other (comment and schedule file) the outer one is listed. The table can be edited (`from`, `to`,
   `groupBy`) and passed as `'protocol', P`; the GUI shows it editable (`+ selected range` adds the range of the main
   window).
 * **Grouping** (`mda_groupBeats`): every stimulus of the channel gets a value; a stimulated contraction belongs to the
@@ -246,7 +251,7 @@ P = mda_protocols(file)                                              % protocols
   | `groupBy` | value | default for |
   |---|---|---|
   | `pacingFrequency` | 1 / interval from the previous stimulus (Hz); intervals within 2 % are one group; label rounded to 0.05 Hz | FFR |
-  | `S2interval` | S2 = premature stimulus (interval < 95 % of the previous one, next interval longer, previous stimulus not premature); groups `S1`, `S2 <ms>` and `post-S2 <ms>` (the next stimulus; post-extrasystolic potentiation); S2 intervals within 7.5 ms are one group | RP |
+  | `S2interval` | S2 = premature stimulus (interval < 95 % of the previous one, next interval longer, previous stimulus not premature); groups `S2 <ms>` and `post-S2 <ms>` (the next stimulus; post-extrasystolic potentiation; S2 intervals within 7.5 ms are one group), `S1` (other stimuli at the basic interval, median ± 5 %) and `other` (other intervals, e.g. trains at a higher rate between the S1-S2 steps; analyse them with `pacingFrequency`) | RP |
   | `stimCurrent` | current of the pulse (mA, status channel); `currentReached_percent` per group | ST |
   | `pauseLength` | first stimulus after a pause (interval ≥ 1.5 s and ≥ 1.5 × the median interval): `rest <s>` (within 5 % one group); all others `steady` | PRP |
   | `pulseDuration` | `chargeDuration` entry of the log file for the stimulated channel (ms) | PD |

@@ -246,6 +246,9 @@ for r = 1:nR
         if ~quiet
             fprintf('  %s, channel %d: %d contractions detected, %d included (threshold %.0f uN, %s)\n', ...
                 labels{r}, channels(c), height(B), sum(B.included), Cm.threshold, Cm.thresholdMode);
+            if strcmp(opts.rocker, 'stopped') && height(B) > 0 && ~any(B.included) && all(B.rockerMoving)
+                fprintf('    the rocker moved during every contraction: ''rocker'',''any'' includes them\n');
+            end
             if opts.rockerFilter && ~isempty(rfRows)
                 k = strcmp(rfRows(:,1), labels{r}) & cell2mat(rfRows(:,2)) == channels(c);
                 msgs = unique(regexprep(rfRows(k,10), '^Rocker filter, channel \d+: ', ''), 'stable');
