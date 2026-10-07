@@ -51,8 +51,12 @@ FILE FORMAT (normally taken from the log file <name>_log.log next to the .mdd fi
                    'none': values as stored in the file (AU; also no extended sensor mode factor)
   extendedSensorMode  'auto' (default: from the log file), True (on during the whole file) or False
   extendedSensorFactor  default 3.3
+  rockerSource     'auto' (default): rocker state from bit 15 of the status channel; from the 'rockerSpeed' entries
+                   of the log file if that bit is missing (some setups) or there is no status channel.
+                   'status' or 'log' forces one source
+  rockerLogDelay   delay of the rocker movement after a 'rockerSpeed' entry of the log file [s] (default 0.27)
 
-TS 2026-10-06 (port of mda_options.m, TS 2026-10-05)
+TS 2026-10-06 (port of mda_options.m, TS 2026-10-05; rockerSource 2026-10-07)
 """
 from __future__ import annotations
 
@@ -81,6 +85,8 @@ _DEFAULTS = dict(
     extendedSensorMode="auto",
     extendedSensorFactor=3.3,
     calibration="auto",
+    rockerSource="auto",
+    rockerLogDelay=0.27,
 )
 NAMES = list(_DEFAULTS)
 
@@ -125,6 +131,9 @@ def options(base=None, **changes):
     if isinstance(opts.maxStimToPeak, str):
         opts.maxStimToPeak = "auto"
     opts.downsampling = max(1, mround(float(opts.downsampling)))
+    opts.rockerSource = str(opts.rockerSource).lower()
+    if opts.rockerSource not in ("auto", "status", "log"):
+        raise ValueError("options: 'rockerSource' must be 'auto', 'status' or 'log'.")
     rf = opts.rockerFilter
     opts.rockerFilter = (rf is True) or (not isinstance(rf, str) and rf is not None and not _is_empty(rf)
                                           and bool(rf == 1)) or (isinstance(rf, str) and rf.lower() in ("on", "true"))

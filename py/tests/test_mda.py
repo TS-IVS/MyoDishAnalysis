@@ -167,6 +167,42 @@ def test_write_results_xlsx_and_csv(tmp_path, synthetic_beats):
     assert any(p.name.startswith("res") and p.suffix == ".csv" for p in tmp_path.iterdir())
 
 
+# ------------------------------------------------------------------------------------------------ rocker state from the log
+def test_rocker_intervals_from_log():
+    from myodish_analysis.read_mdd import rocker_intervals_from_log, rocker_state_from_log
+    # moving before the first entry; entries before the recording (-Inf) count from 0; delay; end of file
+    R = np.array([[-np.inf, 60], [10, 0], [20, 60], [25, 90], [30, 0], [50, 60]], float)
+    I = rocker_intervals_from_log(R, 0.27, 40.0)
+    np.testing.assert_allclose(I, [[0, 10.27], [20.27, 30.27]])
+    assert rocker_intervals_from_log(np.array([[-np.inf, 0], [5, 60]], float), 0.0, 8.0).tolist() == [[5.0, 8.0]]
+    assert rocker_intervals_from_log(np.zeros((0, 2)), 0.27, 8.0).shape == (0, 2)
+    on = rocker_state_from_log(I, np.array([-1, 0, 10.26, 10.27, 20.27, 30.0, 35.0]))
+    assert on.tolist() == [False, True, True, False, True, True, False]
+
+
+EX = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "examples"))
+
+
+@pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
+def test_rocker_source_examples():
+    # example 8: rocker bit missing although the log has rocker speeds > 0 --> state from the log
+    H = mda.read_mdd(os.path.join(EX, "example8_rabbitVentricle_EP.mdd"))
+    assert H.rockerSource == "log" and H.rockerLogIntervals.shape[0] == 17
+    S = mda.read_mdd(H, 0, H.totalSeconds)
+    assert 0.5 < S.rockerOn.mean() < 0.55
+    # example 3: rocker bit present; the state reconstructed from the log agrees with it
+    f = os.path.join(EX, "example3_humanVentricle.mdd")
+    H = mda.read_mdd(f)
+    assert H.rockerSource == "status channel"
+    S = mda.read_mdd(H, 0, H.totalSeconds)
+    Hl = mda.read_mdd(f, opts=mda.options(rockerSource="log"))
+    Sl = mda.read_mdd(Hl, 0, H.totalSeconds)
+    assert np.mean(S.rockerOn == Sl.rockerOn) > 0.999
+    assert np.mean(S.stim.rockerOn == Sl.stim.rockerOn) > 0.999
+    with pytest.raises(ValueError):
+        mda.options(rockerSource="x")
+
+
 # ------------------------------------------------------------------------------------------------ command line / GUI
 def test_cli_help(capsys):
     from myodish_analysis.cli import main

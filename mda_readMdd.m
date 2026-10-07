@@ -25,12 +25,20 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %   - status channel, bits (1-based): 1-8 stimulus current [mA], 9 current not reached, 10-13 stimulated
 %     channel, 14 external trigger, 15 rocker moving (set in every sample while the rocker moves),
 %     16 extra pulse. A stimulus pulse is a sample with any bit other than bit 15 set.
+%   - some setups do not transmit the rocker bit (firmware error). If bit 15 is never set while the log file has
+%     rocker speeds > 0 (tested in up to 5 such periods), or if there is no status channel, the rocker state is
+%     taken from the 'rockerSpeed' entries of the log file (moving while rpm > 0, from 'rockerLogDelay' = 0.27 s
+%     after the entry: median delay of the rocker bit in 154 transitions of 7 recordings, 0.26-0.31 s; moving
+%     before the first entry, as in all 7 recordings).
+%     Options 'rockerSource' ('auto' | 'status' | 'log') and 'rockerLogDelay', see mda_options.
 %
 % OUTPUT (S)
 %   file facts: file, logFile, samplingRate, nChannelsInFile, dataChannels, hasStimChannel, totalSeconds,
 %               recordingStart (datenum of file time 0, NaN if unknown), extendedSensorIntervals, notes,
 %               offsetLog / calibrationLog ([time channel value] of the 'Offset' / 'Calibration' entries of the log;
-%               time -Inf = logged before the recording start), calibrationApplied, extendedSensorFactor
+%               time -Inf = logged before the recording start), calibrationApplied, extendedSensorFactor,
+%               rockerSpeedLog ([time rpm]), rockerSource ('status channel' or 'log'), rockerLogIntervals
+%               ([from to] in s with rocker speed > 0 according to the log file)
 %   data:       t (1 x n, s; centre of the averaged raw samples, first raw sample = 0 s), dt,
 %               force (numel(dataChannels) x n, uN), rockerOn (1 x n logical),
 %               stim (struct with fields time, channel, current, currentReached, external, isExtraPulse,
@@ -148,6 +156,30 @@ H.stimRow = nCh;
 H.totalSamples = floor(H.bytes / (2 * nCh));
 H.totalSeconds = H.totalSamples / fs;
 
+% rocker state: bit 15 of the status channel or, if this bit is missing although the log file has rocker speeds
+% > 0 (firmware error in some setups) or there is no status channel, the 'rockerSpeed' entries of the log file
+% (rocker moving while rpm > 0, from 'rockerLogDelay' s after the entry)
+H.rockerLogIntervals = rockerIntervalsFromLog(H.rockerSpeedLog, opts.rockerLogDelay, H.totalSeconds);
+switch lower(char(opts.rockerSource))
+    case 'log'
+        H.rockerSource = 'log';
+    case 'status'
+        H.rockerSource = 'status channel';
+    otherwise
+        H.rockerSource = 'status channel';
+        if ~isempty(H.rockerLogIntervals)
+            if ~H.hasStimChannel
+                H.rockerSource = 'log';
+                H.notes{end+1} = sprintf('No status channel: rocker state from the rockerSpeed entries of the log file (+%g s).', ...
+                    opts.rockerLogDelay);
+            elseif ~rockerBitInIntervals(H)
+                H.rockerSource = 'log';
+                H.notes{end+1} = sprintf(['Rocker bit missing in the status channel although the rocker speed was > 0: ' ...
+                    'rocker state from the rockerSpeed entries of the log file (+%g s).'], opts.rockerLogDelay);
+            end
+        end
+end
+
 % extended sensor mode: intervals [from to] (s) in which the calibration value is divided by 3.3
 ext = zeros(0,2);
 if ischar(opts.extendedSensorMode) || isstring(opts.extendedSensorMode)
@@ -231,6 +263,7 @@ end
 S.stim = struct('time',zeros(0,1),'channel',zeros(0,1),'current',zeros(0,1),'currentReached',false(0,1), ...
     'external',false(0,1),'isExtraPulse',false(0,1),'rockerOn',false(0,1));
 S.rockerOn = false(1,n);
+isLog = isfield(S, 'rockerSource') && strcmp(S.rockerSource, 'log');
 if S.hasStimChannel && nRaw > 0
     code = typecast(raw(S.stimRow,:), 'uint16');
     rockerBit = bitand(code, uint16(16384)) ~= 0;                 %bit 15
@@ -249,7 +282,9 @@ if S.hasStimChannel && nRaw > 0
 
     % rocker state of every (downsampled) sample. In older firmware the rocker bit may only be set in the
     % stimulus pulses: then the state of the last pulse (any channel) is held until the next pulse.
-    if nnz(rockerBit) > 2 * nnz(S.stim.rockerOn)
+    if isLog
+        % rocker state from the log file (below)
+    elseif nnz(rockerBit) > 2 * nnz(S.stim.rockerOn)
         S.rockerOn = any(reshape(rockerBit, nDS, n), 1);
     elseif any(S.stim.rockerOn)
         isPulse = false(1, nRaw);
@@ -260,6 +295,11 @@ if S.hasStimChannel && nRaw > 0
         S.rockerOn = any(reshape(state, nDS, n), 1);
         S.notes{end+1} = 'Rocker state taken from the stimulus pulses (rocker bit not set continuously).';
     end
+end
+if isLog && nRaw > 0                               %rocker state from the 'rockerSpeed' entries of the log file
+    state = rockerStateFromLog(S.rockerLogIntervals, (i0 + (0:nRaw-1)) / fs);
+    S.rockerOn = any(reshape(state, nDS, n), 1);
+    S.stim.rockerOn = reshape(state(round(S.stim.time * fs) - i0 + 1), [], 1);
 end
 end
 
@@ -305,7 +345,11 @@ while b0 < nBins
         O.minForce(c, b0+(1:nb)) = min(X, [], 1);
         O.maxForce(c, b0+(1:nb)) = max(X, [], 1);
     end
-    if S.hasStimChannel
+    if isfield(S, 'rockerSource') && strcmp(S.rockerSource, 'log')
+        r = double(rockerStateFromLog(S.rockerLogIntervals, (s0 + b0 * binSamples + (0:m-1)) / fs));
+        r(end+1:end+pad) = nan;
+        O.rockerFraction(b0+(1:nb)) = mean(reshape(r, binSamples, nb), 1, 'omitnan');
+    elseif S.hasStimChannel
         r = double(bitand(typecast(raw(S.stimRow,:),'uint16'), uint16(16384)) ~= 0);
         r(end+1:end+pad) = nan;
         O.rockerFraction(b0+(1:nb)) = mean(reshape(r, binSamples, nb), 1, 'omitnan');
@@ -317,6 +361,70 @@ for c = 1:nData                                    %AU --> uN (calibration, exte
     kc = mda_calibrationFactor(S, S.dataChannels(c), O.tBin);
     O.minForce(c,:) = O.minForce(c,:) .* kc;
     O.maxForce(c,:) = O.maxForce(c,:) .* kc;
+end
+end
+
+
+% =====================================================================================================
+function I = rockerIntervalsFromLog(R, delay, T)
+% [from to] (s, time in the file) in which the rocker moves according to the 'rockerSpeed' entries (rpm > 0).
+% An entry takes effect 'delay' s after its time; entries before the recording start (time -Inf) at time 0.
+% Before the first entry the rocker moves (default state; in 7 of 7 recordings with rocker bit it moved at the
+% start, also when the first entry was a speed > 0).
+I = zeros(0,2);
+if isempty(R), return; end
+[~, o] = sort(R(:,1));                             %stable
+R = R(o,:);
+t = max(R(:,1) + delay, 0);
+a = 0;
+for k = 1:size(R,1)
+    if R(k,2) > 0 && isnan(a)
+        a = t(k);
+    elseif R(k,2) <= 0 && ~isnan(a)
+        I(end+1,:) = [a t(k)]; %#ok<AGROW>
+        a = nan;
+    end
+end
+if ~isnan(a), I(end+1,:) = [a T]; end
+I(:,2) = min(I(:,2), T);
+I = I(I(:,2) > I(:,1), :);
+end
+
+
+function on = rockerStateFromLog(I, t)
+% true where t lies in one of the intervals I = [from to] (sorted, disjoint): from <= t < to
+on = false(size(t));
+if isempty(I) || isempty(t), return; end
+k = discretize(t, [I(:,1); inf]);
+v = ~isnan(k);
+tv = t(v);
+on(v) = tv(:) < I(k(v),2);
+end
+
+
+function tf = rockerBitInIntervals(H)
+% true if bit 15 of the status channel is set in (one of) the first 5 intervals with rocker movement according
+% to the log file (0.25 s after the start, at most 4 s each); true also if no interval can be tested
+I = H.rockerLogIntervals;
+I = [I(:,1) + 0.25, min(I(:,2) - 0.25, I(:,1) + 4.25)];
+I = I(I(:,2) - I(:,1) >= 0.5, :);
+tf = isempty(I);
+if tf, return; end
+fid = fopen(H.file, 'r', 'ieee-le');
+if fid < 0, tf = true; return; end
+cleaner = onCleanup(@() fclose(fid));
+fs = H.samplingRate;
+nCh = H.nChannelsInFile;
+for k = 1:min(5, size(I,1))
+    s0 = floor(I(k,1) * fs);
+    m = min(H.totalSamples, ceil(I(k,2) * fs)) - s0;
+    if m <= 0, continue; end
+    fseek(fid, s0 * nCh * 2, 'bof');
+    raw = fread(fid, [nCh m], 'int16=>int16');
+    if any(bitand(typecast(raw(H.stimRow,:), 'uint16'), uint16(16384)) ~= 0)
+        tf = true;
+        return;
+    end
 end
 end
 

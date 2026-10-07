@@ -58,8 +58,12 @@ function opts = mda_options(varargin)
 %   'extendedSensorMode' 'auto' (default: from the log file, events 'extended sensor mode on/off'), true (on during
 %                      the whole file, e.g. old log files without the event) or false. While on, the calibration value
 %                      is divided by 'extendedSensorFactor' (default 3.3; 1000 --> 1000/3.3, i.e. AU x 3.3)
+%   'rockerSource'     'auto' (default): rocker state from bit 15 of the status channel; from the 'rockerSpeed'
+%                      entries of the log file if that bit is missing (some setups) or there is no status channel.
+%                      'status' or 'log' forces one source
+%   'rockerLogDelay'   delay of the rocker movement after a 'rockerSpeed' entry of the log file [s] (default 0.27)
 %
-% TS 2026-10-05
+% TS 2026-10-05 (rockerSource 2026-10-07)
 
 opts = struct( ...
     'threshold', 'auto', ...
@@ -83,7 +87,9 @@ opts = struct( ...
     'nChannels', [], ...
     'extendedSensorMode', 'auto', ...
     'extendedSensorFactor', 3.3, ...
-    'calibration', 'auto');
+    'calibration', 'auto', ...
+    'rockerSource', 'auto', ...
+    'rockerLogDelay', 0.27);
 
 args = varargin;
 if ~isempty(args) && isstruct(args{1})
@@ -133,6 +139,8 @@ if ischar(opts.maxStimToPeak) || isstring(opts.maxStimToPeak)
     opts.maxStimToPeak = 'auto';
 end
 opts.downsampling = max(1,round(opts.downsampling));
+opts.rockerSource = lower(char(opts.rockerSource));
+if ~ismember(opts.rockerSource,{'auto','status','log'}), error('mda_options: ''rockerSource'' must be ''auto'', ''status'' or ''log''.'); end
 opts.rockerFilter = isequal(opts.rockerFilter, true) || isequal(opts.rockerFilter, 1) || ...
     ((ischar(opts.rockerFilter) || isstring(opts.rockerFilter)) && any(strcmpi(opts.rockerFilter, {'on','true'})));
 if ~isempty(opts.referenceBeat) && ~isstruct(opts.referenceBeat)

@@ -3,6 +3,19 @@
 All notable changes. Versions: `MAJOR.MINOR.PATCH` (pre-releases `-beta.N`; Python package: `1.0.0bN`).
 MATLAB and Python versions have the same version number and give the same results.
 
+## [Unreleased]
+### Added
+- Rocker state from the log file where the status channel does not contain it: if bit 15 (rocker moving) is never
+  set while the log file has rocker speeds > 0 (firmware error in some setups), or if there is no status channel, the
+  state is reconstructed from the `rockerSpeed` entries (moving while rpm > 0, 0.27 s after the entry). The status
+  channel bit has priority whenever it is present. Options `rockerSource` (`auto` | `status` | `log`) and
+  `rockerLogDelay`. Checked on the 7 example recordings with rocker bit: the reconstructed state agrees with the bit in
+  ≥ 99.96 % of the samples. Example 8 (sharp electrode) has the missing bit.
+
+### Changed
+- Tests: tolerance of the rocker-filter comparison per statistic (summary means 0.5 %, SDs 2 %); which flat peaks move
+  by one sample depends on the linear-algebra library.
+
 ## [1.0.0-beta.1] – 2026-10-07
 First public pre-release (beta for testers and collaborators).
 

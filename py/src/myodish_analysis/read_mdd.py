@@ -19,19 +19,26 @@ FILE FORMAT (MyoDish software; facts from the Seidel lab's importMyoDishData)
   - status channel, bits (1-based): 1-8 stimulus current [mA], 9 current not reached, 10-13 stimulated channel,
     14 external trigger, 15 rocker moving (set in every sample while the rocker moves), 16 extra pulse. A stimulus
     pulse is a sample with any bit other than bit 15 set.
+  - some setups do not transmit the rocker bit (firmware error). If bit 15 is never set while the log file has rocker
+    speeds > 0 (tested in up to 5 such periods), or if there is no status channel, the rocker state is taken from the
+    'rockerSpeed' entries of the log file (moving while rpm > 0, from rockerLogDelay = 0.27 s after the entry: median
+    delay of the rocker bit in 154 transitions of 7 recordings, 0.26-0.31 s; moving before the first entry, as in
+    all 7 recordings). Options rockerSource ('auto' |
+    'status' | 'log') and rockerLogDelay, see options.
 
 OUTPUT (S, a Struct with the field names of the MATLAB version)
   file facts: file, logFile, samplingRate, nChannelsInFile, dataChannels (physical channel numbers, 1-based),
               hasStimChannel, totalSeconds, recordingStart (MATLAB datenum of file time 0, NaN if unknown),
               extendedSensorIntervals, notes, offsetLog / calibrationLog ([time channel value] rows; time -Inf =
               logged before the recording start), rockerSpeedLog ([time rpm]), calibrationApplied,
-              extendedSensorFactor
+              extendedSensorFactor, rockerSource ('status channel' or 'log'), rockerLogIntervals ([from to] in s
+              with rocker speed > 0 according to the log file)
   data:       t (s; centre of the averaged raw samples, first raw sample = 0 s), dt, force (nData x n, uN),
               rockerOn (bool, n), stim (Struct of arrays: time, channel, current, currentReached, external,
               isExtraPulse, rockerOn; one entry per stimulus pulse of any channel)
   Single channel files: force has one row = channel 1, stim.channel keeps the physical channel number.
 
-TS 2026-10-06 (port of mda_readMdd.m, TS 2026-10-05)
+TS 2026-10-06 (port of mda_readMdd.m, TS 2026-10-05; rocker state from the log 2026-10-07)
 """
 from __future__ import annotations
 
@@ -148,6 +155,27 @@ def read_header(mdd_file, opts=None):
     H.totalSamples = H.bytes // (2 * nCh)
     H.totalSeconds = H.totalSamples / fs
 
+    # rocker state: bit 15 of the status channel or, if this bit is missing although the log file has rocker speeds
+    # > 0 (firmware error in some setups) or there is no status channel, the 'rockerSpeed' entries of the log file
+    # (rocker moving while rpm > 0, from 'rockerLogDelay' s after the entry)
+    H.rockerLogIntervals = rocker_intervals_from_log(H.rockerSpeedLog, float(opts.rockerLogDelay), H.totalSeconds)
+    src = str(opts.rockerSource).lower()
+    if src == "log":
+        H.rockerSource = "log"
+    elif src == "status":
+        H.rockerSource = "status channel"
+    else:
+        H.rockerSource = "status channel"
+        if H.rockerLogIntervals.shape[0]:
+            if not H.hasStimChannel:
+                H.rockerSource = "log"
+                H.notes.append("No status channel: rocker state from the rockerSpeed entries of the log file (+%s s)."
+                               % _g(float(opts.rockerLogDelay)))
+            elif not _rocker_bit_in_intervals(H):
+                H.rockerSource = "log"
+                H.notes.append("Rocker bit missing in the status channel although the rocker speed was > 0: rocker "
+                               "state from the rockerSpeed entries of the log file (+%s s)." % _g(float(opts.rockerLogDelay)))
+
     # extended sensor mode: intervals [from to] (s) in which the calibration value is divided by 3.3
     ext = []
     esm = opts.extendedSensorMode
@@ -246,6 +274,7 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False):
                     currentReached=np.zeros(0, bool), external=np.zeros(0, bool), isExtraPulse=np.zeros(0, bool),
                     rockerOn=np.zeros(0, bool))
     S.rockerOn = np.zeros(n, bool)
+    isLog = S.get("rockerSource") == "log"
     if S.hasStimChannel and nRaw > 0:
         code = raw[S.stimRow].view(np.uint16)
         rockerBit = (code & 16384) != 0  # bit 15
@@ -263,7 +292,9 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False):
         S.stim.rockerOn = rockerBit[idx].copy()
         # rocker state of every (downsampled) sample. In older firmware the rocker bit may only be set in the
         # stimulus pulses: then the state of the last pulse (any channel) is held until the next pulse.
-        if np.count_nonzero(rockerBit) > 2 * np.count_nonzero(S.stim.rockerOn):
+        if isLog:
+            pass  # rocker state from the log file (below)
+        elif np.count_nonzero(rockerBit) > 2 * np.count_nonzero(S.stim.rockerOn):
             S.rockerOn = rockerBit.reshape(n, nDS).any(axis=1)
         elif S.stim.rockerOn.any():
             isPulse = np.zeros(nRaw, bool)
@@ -273,7 +304,71 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False):
             state = pulseState[lastPulse]
             S.rockerOn = state.reshape(n, nDS).any(axis=1)
             S.notes.append("Rocker state taken from the stimulus pulses (rocker bit not set continuously).")
+    if isLog and nRaw > 0:  # rocker state from the 'rockerSpeed' entries of the log file
+        state = rocker_state_from_log(S.rockerLogIntervals, (i0 + np.arange(nRaw)) / fs)
+        S.rockerOn = state.reshape(n, nDS).any(axis=1)
+        S.stim.rockerOn = state[np.round(S.stim.time * fs).astype(int) - i0]
     return S
+
+
+def rocker_intervals_from_log(R, delay, T):
+    """[from to] (s, time in the file) in which the rocker moves according to the 'rockerSpeed' entries (rpm > 0).
+    An entry takes effect 'delay' s after its time; entries before the recording start (time -Inf) at time 0.
+    Before the first entry the rocker moves (default state; in 7 of 7 recordings with rocker bit it moved at the start,
+    also when the first entry was a speed > 0)."""
+    R = np.asarray(R, dtype=float).reshape(-1, 2)
+    I = []
+    if R.shape[0] == 0:
+        return np.zeros((0, 2))
+    R = R[np.argsort(R[:, 0], kind="stable")]
+    t = np.maximum(R[:, 0] + delay, 0.0)
+    a = 0.0
+    for k in range(R.shape[0]):
+        if R[k, 1] > 0 and math.isnan(a):
+            a = t[k]
+        elif R[k, 1] <= 0 and not math.isnan(a):
+            I.append([a, t[k]])
+            a = math.nan
+    if not math.isnan(a):
+        I.append([a, T])
+    I = np.array(I, dtype=float).reshape(-1, 2)
+    I[:, 1] = np.minimum(I[:, 1], T)
+    return I[I[:, 1] > I[:, 0]]
+
+
+def rocker_state_from_log(I, t):
+    """True where t lies in one of the intervals I = [from to] (sorted, disjoint): from <= t < to."""
+    t = np.asarray(t, dtype=float)
+    I = np.asarray(I, dtype=float).reshape(-1, 2)
+    if I.shape[0] == 0 or t.size == 0:
+        return np.zeros(t.shape, bool)
+    k = np.searchsorted(I[:, 0], t, side="right") - 1
+    v = k >= 0
+    on = np.zeros(t.shape, bool)
+    on[v] = t[v] < I[k[v], 1]
+    return on
+
+
+def _rocker_bit_in_intervals(H):
+    """True if bit 15 of the status channel is set in (one of) the first 5 intervals with rocker movement according
+    to the log file (0.25 s after the start, at most 4 s each); True also if no interval can be tested."""
+    I = np.asarray(H.rockerLogIntervals, dtype=float).reshape(-1, 2)
+    I = np.c_[I[:, 0] + 0.25, np.minimum(I[:, 1] - 0.25, I[:, 0] + 4.25)]
+    I = I[I[:, 1] - I[:, 0] >= 0.5]
+    if I.shape[0] == 0:
+        return True
+    fs = H.samplingRate
+    nCh = H.nChannelsInFile
+    for k in range(min(5, I.shape[0])):
+        s0 = math.floor(I[k, 0] * fs)
+        m = min(H.totalSamples, math.ceil(I[k, 1] * fs)) - s0
+        if m <= 0:
+            continue
+        raw = np.fromfile(H.file, dtype="<i2", count=nCh * m, offset=s0 * nCh * 2)
+        raw = raw[: (raw.size // nCh) * nCh].reshape(-1, nCh).T
+        if np.any((raw[H.stimRow].view(np.uint16) & 16384) != 0):
+            return True
+    return False
 
 
 # =====================================================================================================
@@ -316,7 +411,11 @@ def read_overview(H, bin_s, progress=None, t_range=None):
                 with np.errstate(all="ignore"):
                     O.minForce[c, b0:b0 + nb] = np.nanmin(X, axis=1)
                     O.maxForce[c, b0:b0 + nb] = np.nanmax(X, axis=1)
-            if H.hasStimChannel:
+            if H.get("rockerSource") == "log":
+                r = rocker_state_from_log(H.rockerLogIntervals, (s0 + b0 * binSamples + np.arange(m)) / fs).astype(float)
+                r = np.r_[r, np.full(pad, np.nan)]
+                O.rockerFraction[b0:b0 + nb] = np.nanmean(r.reshape(nb, binSamples), axis=1)
+            elif H.hasStimChannel:
                 r = ((raw[H.stimRow].view(np.uint16) & 16384) != 0).astype(float)
                 r = np.r_[r, np.full(pad, np.nan)]
                 O.rockerFraction[b0:b0 + nb] = np.nanmean(r.reshape(nb, binSamples), axis=1)
