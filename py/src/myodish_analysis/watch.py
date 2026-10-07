@@ -18,7 +18,7 @@ Per recording (results_folder/<subfolder of raw_folder>/):
       protocol, channel and group, protocolResults (FFR, ST thresholds, refractory periods, PRP).
   Labels per channel (metadata): <name>_labels.csv next to the .mdd file (saved by the GUI), if present.
 results_folder/mda_index.csv
-  one row per recording: file (path relative to raw_folder), bytes, modified, logBytes, status (ok / error /
+  one row per recording: file (path relative to raw_folder), bytes, modified (time of the .mdd file, UTC), logBytes, status (ok / error /
   running / noLog), version, implementation (MATLAB / Python), code (fingerprint of the core functions), options,
   analyzed, seconds, nContractions, outputs, message. The same file is used by the MATLAB and the Python watcher.
 results_folder/reports/mda_report_<date>_<time>.txt
@@ -175,7 +175,11 @@ def _one_pass(raw, res, o, aopts):
         return _scan_and_analyse(raw, res, o, aopts)
     finally:
         if not o["dry_run"] and os.path.isfile(lock):
-            os.remove(lock)
+            try:
+                os.remove(lock)
+            except OSError as ex:
+                print(f"warning: lock file {lock} could not be deleted ({ex}); delete it, otherwise the next "
+                      f"passes are skipped for {LOCK_HOURS:g} h")
 
 
 def _scan_and_analyse(raw, res, o, aopts):
@@ -199,7 +203,7 @@ def _scan_and_analyse(raw, res, o, aopts):
             continue
         if now - lastChange < 60 * float(o["min_file_age_minutes"]):
             continue  # still written / copied
-        modified = _dt.datetime.fromtimestamp(st.st_mtime).strftime(_TIME_FMT)
+        modified = _dt.datetime.fromtimestamp(st.st_mtime, _dt.timezone.utc).strftime(_TIME_FMT) + " UTC"
         why = _why(X.iloc[pos[rel]] if rel in pos else None, st.st_size, modified, logBytes, version, code, otext, o)
         if why:
             todo.append((rel, f, logf, st.st_size, modified, logBytes, lastChange, why))
@@ -241,7 +245,7 @@ def _scan_and_analyse(raw, res, o, aopts):
                 X.at[pos[rel], k] = v
         else:
             pos[rel] = len(X)
-            X = pd.concat([X, pd.DataFrame([row])[INDEX_COLUMNS]], ignore_index=True)
+            X = pd.DataFrame(X.to_dict("records") + [row], columns=INDEX_COLUMNS)
         _write_index(res, X)
     report = ""
     if blocks:
@@ -381,8 +385,12 @@ def _write_index(res, X):
 
 
 def _parse_time(s):
+    """'yyyy-mm-dd HH:MM:SS UTC' (index column 'modified') --> datetime; None if not readable."""
+    s = str(s)
+    if not s.endswith(" UTC"):
+        return None
     try:
-        return _dt.datetime.strptime(str(s), _TIME_FMT)
+        return _dt.datetime.strptime(s[:-4], _TIME_FMT)
     except ValueError:
         return None
 

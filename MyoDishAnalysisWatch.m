@@ -19,7 +19,7 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %       protocol, channel and group, protocolResults (FFR, ST thresholds, refractory periods, PRP)
 %   Labels per channel (metadata): <name>_labels.csv next to the .mdd file (saved by the GUI), if present.
 % resultsFolder/mda_index.csv
-%   one row per recording: file (path relative to rawFolder), bytes, modified, logBytes, status (ok / error /
+%   one row per recording: file (path relative to rawFolder), bytes, modified (time of the .mdd file, UTC), logBytes, status (ok / error /
 %   running / noLog), version, implementation (MATLAB / Python), code (fingerprint of the core functions), options,
 %   analyzed, seconds, nContractions, outputs, message. The same file is used by the MATLAB and the Python watcher.
 % resultsFolder/reports/mda_report_<date>_<time>.txt
@@ -115,6 +115,7 @@ end
 
 
 function [X, report] = scanAndAnalyse(raw, res, W, args)
+report = '';
 X = readIndex(res);
 version = mda_version();
 code = codeFingerprint();
@@ -134,7 +135,7 @@ for k = 1:numel(F)
     if ~isempty(dl), logBytes = dl.bytes; lastChange = max(lastChange, dl.datenum); end
     if ~isnan(fromDate) && F(k).datenum < fromDate, continue; end
     if (t - lastChange) * 1440 < W.minFileAgeMinutes, continue; end     %still written / copied
-    modified = datestr(F(k).datenum, 'yyyy-mm-dd HH:MM:SS');
+    modified = utcText(F(k).datenum);
     i = find(strcmp(X.file, rel), 1);
     if isempty(i), r = []; else, r = X(i,:); end
     why = reason(r, F(k).bytes, modified, logBytes, version, code, otext, W);
@@ -461,8 +462,17 @@ end
 end
 
 function d = parseTime(s)
+% 'yyyy-mm-dd HH:MM:SS UTC' (index column 'modified') --> datenum (UTC); NaN if not readable
 d = nan;
-if ~isempty(regexp(s, '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', 'once')), d = datenum(s, 'yyyy-mm-dd HH:MM:SS'); end
+if ~isempty(regexp(s, '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC$', 'once')), d = datenum(s(1:19), 'yyyy-mm-dd HH:MM:SS'); end
+end
+
+function s = utcText(dn)
+% local datenum (dir) --> 'yyyy-mm-dd HH:MM:SS UTC': the index is valid on computers in other time zones
+t = datetime(dn, 'ConvertFrom', 'datenum', 'TimeZone', 'local');
+t.TimeZone = 'UTC';
+t.Format = 'yyyy-MM-dd HH:mm:ss';
+s = [char(t) ' UTC'];
 end
 
 function p = absPath(p)
@@ -480,5 +490,10 @@ s = strtrim(regexprep(char(s), '[\r\n,]+', ' '));
 end
 
 function deleteIfExists(f)
-if isfile(f), delete(f); end
+if ~isfile(f), return; end
+try
+    delete(f);
+catch ME
+    warning('MyoDishAnalysisWatch: lock file %s could not be deleted (%s); delete it, otherwise the next passes are skipped for 12 h.', f, ME.message);
+end
 end
