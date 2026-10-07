@@ -40,6 +40,7 @@ addpath('/path/to/MyoDishAnalysis')
 MyoDishAnalysisGUI('examples/example3_humanVentricle.mdd')                   % interactive
 [c, s] = MyoDishAnalysis('examples/example3_humanVentricle.mdd', 6, 0, 120);  % channel 6, 0–120 s
 mda_test                                                                       % self test
+MyoDishAnalysisWatch('raw', 'results')                                         % new recordings of a folder
 ```
 More examples: `example_MyoDishAnalysis.m`. Help: `help MyoDishAnalysis`, `help mda_options`.
 **Example recordings** (folder `examples`, see `examples/README.md`): anonymized MyoDish recordings of human ventricle
@@ -238,6 +239,46 @@ Own additional fields are kept as extra columns.
 * `contractions`: one row per detected contraction; `summary`: one row per channel and range
   (counts incl. nExtraBeats, nMissedBeats, extraBeats_percent, missedBeats_percent; mean, SD and n of all parameters
   of the included contractions).
+
+## Automatic analysis of new recordings (`MyoDishAnalysisWatch`; Python `mda-watch`)
+```matlab
+MyoDishAnalysisWatch('/data/myodish/raw', '/data/myodish/results', 'rockerFilter', true)
+MyoDishAnalysisWatch(raw, results, 'fromDate', '2026-10-01', 'dryRun', true)   % only list what would be analysed
+```
+```bash
+mda-watch /data/myodish/raw /data/myodish/results --rocker-filter --quiet
+```
+Each pass searches the raw folder (with subfolders) for `.mdd` files and analyses the new and changed ones. The
+watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`: every improvement of the analysis applies to
+its results as well.
+* **Per recording** (results folder, same subfolders as in the raw folder): `<name>_contractions.csv` (every single
+  contraction of the whole recording), `<name>_summary.csv` (one row per channel and time bin, `'binMinutes'`,
+  default 60; range label = clock time of the bin start), `_parameters`, `_info`, `_labels` (`_rockerFilter`); if the
+  log file contains stimulation protocols also `<name>_protocols_*.csv` with `protocolResults`. Labels per channel:
+  `<name>_labels.csv` next to the `.mdd` file (saved by the GUI). With 60-min bins the contractions are identical to
+  `MyoDishAnalysis(file)`.
+* **Index** `mda_index.csv` (one row per recording; the same file for MATLAB and Python): size and time (UTC) of the
+  `.mdd` file, size of the log file, status (`ok`, `error`, `running`, `noLog`), version, implementation, fingerprint
+  of the core functions, options, analysis time, number of contractions, message. With `'reanalyze','outdated'`
+  (default) a recording is analysed again when its files, the version, the options or (same implementation) the core
+  functions change; `'new'`: only new and changed files; `'all'`. Errors are retried when something changed or with
+  `'retryErrors',true`.
+* **Report** `reports/mda_report_<date>_<time>.txt` per pass: for every analysed recording and channel the number of
+  contractions, capture (% of the stimuli followed by a contraction), extra beats (% of the detected contractions),
+  mean amplitude in the first and last bin with ≥ 10 contractions and flags (no contractions, capture < 90 %, extra
+  beats > 10 %, amplitude change > 30 %; `'flagCapture'`, `'flagExtraBeats'`, `'flagAmplitudeChange'`).
+* **Skipped**: files changed in the last 10 min (`'minFileAgeMinutes'`), names starting with `.` (rsync temporary
+  files, hidden folders), recordings without `Recording stopped` in the log file (status `running`; analysed when
+  unchanged for 30 h, `'incompleteAfterHours'`), recordings without log file (`noLog`). A lock file
+  (`mda_watch.lock`) prevents two watchers on the same results folder; one left behind by a crashed run is ignored
+  after 12 h (or delete it).
+* **Daily**: the scheduler of the operating system (cron / launchd / Windows task scheduler) with `mda-watch ...` or
+  `matlab -batch "MyoDishAnalysisWatch(...)"`; or `'interval', 24` (one pass every 24 h, MATLAB stays busy).
+* Further options: `'filter'` (regular expression on the relative path), `'maxFiles'`, `'protocols',false`,
+  `'quiet',true`; all other name/value pairs are analysis options of `MyoDishAnalysis` for all recordings.
+* Tested on 31 recordings (729 MB, rat, rabbit, pig, human, schedule files up to 2 h, single channel, sharp
+  electrode) on one Mac: MATLAB 149 s, Python 69 s; results of MATLAB and Python identical (116 result files, max. relative
+  difference 3e-10).
 
 ## Stimulation protocols (`'protocol'`, `'groupBy'`; GUI: **Protocols ...**)
 Protocols such as force-frequency (FFR), refractory period (RP, S1-S2), stimulation threshold (ST), post-rest
@@ -449,6 +490,7 @@ lower plot, the trend and all exports.
 |---|---|
 | `MyoDishAnalysis.m` | command-line analysis (from–to, several channels/ranges, export) |
 | `MyoDishAnalysisGUI.m` | interactive analysis |
+| `MyoDishAnalysisWatch.m` | automatic analysis of new recordings of a folder (index, results, report) |
 | `mda_readMdd.m` | file reader (data, stimuli, rocker state, log file, overview) |
 | `mda_logEntries.m` | entries of the log file (comments, events, settings) |
 | `mda_calibrationFactor.m`, `mda_zeroForce.m` | AU → µN (calibration, extended sensor mode); zero force of a channel |
@@ -465,6 +507,8 @@ lower plot, the trend and all exports.
 | `mda_summarize.m`, `mda_writeResults.m` | summary table, Excel/CSV export |
 | `mda_labels.m`, `mda_addLabels.m` | labels per channel (metadata) |
 | `mda_test.m` | self test (parameters, rocker filter) |
+| `mda_testWatch.m` | test of the watcher with example recordings |
+| `mda_version.m` | version number |
 | `example_MyoDishAnalysis.m` | examples |
 | `examples/` | anonymized example recordings (`.mdd`, `_log.log`, `_labels.csv`, LabChart `.mat`), see `examples/README.md` |
 | `py/` | Python version (same results), see `py/README.md` |

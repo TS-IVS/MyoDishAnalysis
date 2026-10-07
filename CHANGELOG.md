@@ -5,6 +5,16 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Added
+- Watcher (2026-10-08): `MyoDishAnalysisWatch` / `mda-watch` (`myodish_analysis.watch`) analyses the new and changed
+  recordings of a folder and its subfolders: every contraction of the whole recording, summary per time bin (clock-time
+  labels), stimulation protocols with protocol results; index `mda_index.csv` shared by MATLAB and Python (recordings
+  are analysed again when their files, the version, the options or the core functions change); report per pass with
+  capture, extra beats, amplitude change and flags; running recordings, missing log files and rsync temporary files
+  are skipped. Only calls of the core functions. Tests `mda_testWatch.m`, `py/tests/test_watch.py`.
+- Header field `recordingStopped` (`mda_readMdd` / `read_header`): 1 if the last `Recording` entry of the log file for
+  this file is `stopped`, 0 if the recording is still running (or was aborted), NaN / None without such entries.
+- `mda_version.m` (version number, also in the `info` sheet).
+
 - Rocker state from the log file where the status channel does not contain it: if bit 15 (rocker moving) is never
   set while the log file has rocker speeds > 0 (firmware error in some setups), or if there is no status channel, the
   state is reconstructed from the `rockerSpeed` entries (moving while rpm > 0, 0.27 s after the entry). The status
@@ -47,6 +57,9 @@ MATLAB and Python versions have the same version number and give the same result
     options); export with SEM, min and max.
 
 ### Changed
+- RP protocol results: a numerically zero S1 template (flat signal, mean of the baseline-corrected traces ±1e-12 µN)
+  is "no S1 contraction" in both versions (MATLAB continued with +7e-12, Python stopped with 0 / −2e-13; found by
+  comparing the watcher results of 31 recordings).
 - Diastolic minimum (F_dia) after a stimulation pause (stimulus interval ≥ 2.5 s and ≥ 1.5 × the interval before):
   searched only from 0.5 s before the stimulus (new option `pauseDiastoleWindow`, `Inf` = previous behaviour), not
   during the pause. Post-rest contractions of PRP protocols were counted as "rocker moving" (and excluded with

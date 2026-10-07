@@ -44,6 +44,7 @@ mda examples/example3_humanVentricle.mdd -c 6 --from 0 --to 120   # summary of c
 mda file.mdd -c 1 2 3 --from 600 3000 --to 660 3060 --labels baseline drug --rocker stopped -o results.xlsx
 mda file.mdd -c 3 --from 300 --to 500 --rocker-filter --set medianFilterMs=20 meanFilterMs=10
 mda-test                                                     # self test (= mda_test.m)
+mda-watch raw_folder results_folder --rocker-filter          # new recordings of a folder (= MyoDishAnalysisWatch.m)
 mda --help
 ```
 
@@ -83,7 +84,8 @@ in MATLAB.
 | `mda_protocols`, `mda_groupBeats`, `mda_protocolResults` | `find_protocols()`, `group_beats()`, `protocol_results()`; `myodish_analysis(..., protocol=, groupBy=)` (`info['protocolResults']`); `mda FILE --protocol FFR`, `--group-by`, `--list-protocols`; GUI **Protocols ...** |
 | `mda_summarize`, `mda_writeResults` | `summarize()`, `write_results()` |
 | `mda_labels`, `mda_addLabels` | `labels()`, `add_labels()` |
-| `mda_test` | `selftest()`, `mda-test`, `tests/test_mda.py` |
+| `MyoDishAnalysisWatch` | `watch()`, `mda-watch` (same index `mda_index.csv` and results; see the main README) |
+| `mda_test`, `mda_testWatch` | `selftest()`, `mda-test`, `tests/test_mda.py`, `tests/test_watch.py` |
 
 ## Agreement with MATLAB (R2026a), checked 2026-10-07
 `tests/compare_matlab.py` compares the Python results with MATLAB results of the same calls
