@@ -3,7 +3,8 @@ function outFiles = mda_writeResults(outputFile, contractions, summary, info)
 %
 %   mda_writeResults('results.xlsx', contractions, summary, info)
 %       sheets: contractions, summary, parameters (definitions), info (file facts and options), labels,
-%       rockerFilter (option 'rockerFilter': result per channel and time range), protocols (option 'protocol')
+%       rockerFilter (option 'rockerFilter': result per channel and time range), protocols (option 'protocol'),
+%       protocolResults (characteristic values per protocol and channel, mda_protocolResults)
 %   mda_writeResults('results.csv', ...)
 %       results_contractions.csv, results_summary.csv, results_parameters.csv, results_info.csv
 %
@@ -98,6 +99,10 @@ if strcmpi(e, '.csv')
         outFiles{end+1} = fullfile(p, [n '_protocols.csv']);
         writetable(info.protocols, outFiles{end});
     end
+    if isfield(info, 'protocolResults') && istable(info.protocolResults) && height(info.protocolResults) > 0
+        outFiles{end+1} = fullfile(p, [n '_protocolResults.csv']);
+        writetable(info.protocolResults, outFiles{end});
+    end
 else
     outFiles = {outputFile};
     writeSheet(contractions, outputFile, 'contractions');
@@ -112,6 +117,9 @@ else
     end
     if isfield(info, 'protocols') && istable(info.protocols) && height(info.protocols) > 0
         writeSheet(info.protocols, outputFile, 'protocols');
+    end
+    if isfield(info, 'protocolResults') && istable(info.protocolResults) && height(info.protocolResults) > 0
+        writeSheet(info.protocolResults, outputFile, 'protocolResults');
     end
 end
 end

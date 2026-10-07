@@ -23,6 +23,12 @@ MATLAB and Python versions have the same version number and give the same result
   keywords also as words of CamelCase / underscore names. Comments and file names about the schedule itself
   (`start scheduleFile_…`) are ignored (they were listed as a protocol spanning the whole file; with `FFR_and_PRP` in
   the name as a PRP protocol that hid the real PRP protocols).
+- Protocol results (`mda_protocolResults` / `protocol_results`; `info.protocolResults`, sheet `protocolResults`, GUI
+  table "protocol results"), one row per protocol and channel: maximum captured frequency and amplitude at 1 / 2 / 3 Hz
+  in % of 0.5 Hz (FFR); current thresholds at 10 / 50 / 95 / 99 % of the maximum amplitude and the lowest captured
+  current (ST); refractory periods "no separate peak" and "no response at all" from the S2 response (subtraction of
+  the scaled S1 template, noise level from pseudo-S2 as in GetRefractoryPeriod) (RP); post-rest potentiation at the
+  pauses nearest to 15 / 30 / 60 s (PRP).
 - GUI (MATLAB and Python): window **Protocols ...**: editable protocol list, channels, rocker selection, grouping,
   plot of a parameter against the quantity (mean ± SD / SEM), result table, figure and data export.
 

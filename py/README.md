@@ -80,7 +80,7 @@ in MATLAB.
 | `mda_referenceBeat('create' / 'align' / 'compare' / 'relative' / 'traces', …)` | `reference_beat.create()`, `.align()`, `.compare()`, `.relative()`, `.traces()`; `.save_reference()` / `.load_reference()` (`.mat`, interchangeable with MATLAB) |
 | `mda_readEPRecording` | `read_ep_recording()` |
 | `mda_analyzeAP` | `analyze_ap()` |
-| `mda_protocols`, `mda_groupBeats` | `find_protocols()`, `group_beats()`; `myodish_analysis(..., protocol=, groupBy=)`; `mda FILE --protocol FFR`, `--group-by`, `--list-protocols`; GUI **Protocols ...** |
+| `mda_protocols`, `mda_groupBeats`, `mda_protocolResults` | `find_protocols()`, `group_beats()`, `protocol_results()`; `myodish_analysis(..., protocol=, groupBy=)` (`info['protocolResults']`); `mda FILE --protocol FFR`, `--group-by`, `--list-protocols`; GUI **Protocols ...** |
 | `mda_summarize`, `mda_writeResults` | `summarize()`, `write_results()` |
 | `mda_labels`, `mda_addLabels` | `labels()`, `add_labels()` |
 | `mda_test` | `selftest()`, `mda-test`, `tests/test_mda.py` |

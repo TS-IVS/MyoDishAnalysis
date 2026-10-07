@@ -10,7 +10,9 @@ to_s       end of the time range. Lists define several ranges, e.g. from_s=[600,
 contractions  DataFrame, one row per detected contraction (also the excluded ones, see column 'included')
 summary       DataFrame, one row per channel and range: numbers of contractions/stimuli, mean and SD of all
               parameters of the included contractions
-info          dict: file facts, options, detection threshold per channel and range, notes
+info          dict: file facts, options, detection threshold per channel and range, notes; with grouped protocols
+              (FFR, ST, RP, PRP) info['protocolResults']: characteristic values per protocol and channel (see
+              protocol_results.py), also sheet 'protocolResults' of the results file
 
 OPTIONS (keywords)
   output='results.xlsx'   write the results (.xlsx: sheets contractions, summary, parameters, info; or .csv)
@@ -52,6 +54,7 @@ from .add_labels import add_labels
 from .analyze_channel import analyze_channel
 from .labels import labels as make_labels
 from .options import options as make_options
+from .protocol_results import RESULT_COLUMNS, protocol_results
 from .protocols import add_empty_group_columns, find_protocols, group_beats
 from .read_mdd import read_mdd
 from .rocker_filter import rocker_filter
@@ -152,7 +155,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     pad = opts.maxBeatWindow + 2
     if opts.rockerFilter:
         pad = max(pad, 60)  # context for the estimate of the rocker artifact
-    parts, sumParts, thrInfo, rfRows = [], [], [], []
+    parts, sumParts, thrInfo, rfRows, resRows = [], [], [], [], []
     nFig = 0
     f0cache = np.zeros((0, 2))
     for r in range(nR):
@@ -163,6 +166,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
         lastB = [None] * len(channels)
         lastC = [None] * len(channels)
         S = None
+        Sres = None  # S2interval results: data of the whole range (traces)
         for q in range(nQ):
             S = read_mdd(H, max(0.0, edges[q] - pad), edges[q + 1] + pad, opts)
             sub = [edges[q], edges[q + 1]]
@@ -206,7 +210,18 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
             Cm.stimCaptured = np.concatenate(sc)
             Cm.threshold = float(np.median([x.threshold for x in CsC]))
             if grouping and groupByR[r].lower() != "none":
-                B, T = group_beats(H, B, Cm, ranges[r], groupByR[r], opts)
+                B, T, Z = group_beats(H, B, Cm, ranges[r], groupByR[r], opts, return_stimuli=True)
+                gb = groupByR[r].lower()
+                if gb in ("pacingfrequency", "stimcurrent", "s2interval", "pauselength"):
+                    trace = None
+                    if gb == "s2interval":  # S2 response: traces of the whole range
+                        if Sres is None:
+                            Sres = read_mdd(H, max(0.0, ranges[r, 0] - 2), ranges[r, 1] + 2, opts)
+                        _, Cx = analyze_channel(Sres, ch, ranges[r], opts)
+                        trace = dict(t=Cx.t, f=Cx.f, tR=Sres.t, rockerOn=Sres.rockerOn)
+                    Rr = protocol_results(groupByR[r], T, Z, trace, opts)
+                    resRows.append(dict({"range": labels[r], "channel": ch, "from": float(ranges[r, 0]),
+                                         "to": float(ranges[r, 1]), "groupBy": groupByR[r]}, **Rr))
             else:
                 T = summarize(B, Cm, ranges[r])
                 if grouping:  # same columns as the grouped ranges
@@ -266,6 +281,15 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     info["groupBy"] = groupByR
     info["labels"] = Lbl
     info["options"] = opts
+    if resRows:
+        PR = pd.DataFrame(resRows, columns=["range", "channel", "from", "to", "groupBy"] + RESULT_COLUMNS)
+        PR.insert(0, "file", os.path.basename(H.file))
+        if hasStart:
+            PR = add_labels(PR, Lbl, list(datenum_to_timestamps(rs + (PR["from"].to_numpy() + PR["to"].to_numpy())
+                                                                 / 2 / 86400.0)))
+        else:
+            PR = add_labels(PR, Lbl)
+        info["protocolResults"] = PR
     info["thresholds"] = pd.DataFrame(thrInfo, columns=["range", "channel", "from", "to", "threshold_uN",
                                                         "maxStimToPeak_s"])
     if opts.rockerFilter:

@@ -260,7 +260,29 @@ P = mda_protocols(file)                                              % protocols
 * **Summary**: one row per protocol, channel and group with `group`, `groupValue`, `groupRole`, `groupStep`, `groupBy`, `nStimuli`,
   `nContractions`, `capture_percent` (stimuli followed by a contraction, independent of the rocker filter),
   `amplitude_pctOfRef` (mean amplitude in % of the group `S1` / `steady`) and mean, SD and n of all parameters. The
-  contraction table gets the columns `group`, `groupValue`, `groupRole`; the Excel output a sheet `protocols`.
+  contraction table gets the columns `group`, `groupValue`, `groupRole`, `groupStep`; the Excel output a sheet
+  `protocols`.
+* **Protocol results** (`mda_protocolResults`; `info.protocolResults`, sheet `protocolResults`, GUI table "protocol
+  results"): one row per protocol and channel. A group counts as *captured* if at most max(1, 10 % of its stimuli)
+  are not followed by a contraction and ≥ 2 are (as in GetFFRdata / GetStimThreshold).
+
+  | protocol | columns | definition |
+  |---|---|---|
+  | FFR | `maxCapturedFrequency_Hz` | highest captured pacing frequency |
+  | | `FFR_1Hz_pct`, `FFR_2Hz_pct`, `FFR_3Hz_pct`, `amplitude_0p5Hz_uN` | mean amplitude at 1 / 2 / 3 Hz in % of 0.5 Hz (captured groups, ± 5 %) |
+  | ST | `stimThreshold10_mA`, `…50`, `…95`, `…99` | lowest captured current whose mean amplitude is ≥ 10 / 50 / 95 / 99 % of the largest one (thresh10 … thresh99 of GetStimThreshold); `captureThreshold_mA` = lowest captured current, `maxAmplitude_uN` |
+  | RP | `refPeriodNoPeak_ms` | S2 interval below which there is no separate contraction peak (< 50 % of the S2 with a peak) |
+  | | `refPeriodNoResponse_ms` | S2 interval below which there is no response at all (median S2 response < noise level) |
+  | | `…Step_ms`, `S2noiseLevel_pct`, `amplitudeS1_uN`, `nS2`, `nTemplateBeats` | distance of the two S2 intervals around the transition (uncertainty ≈ ± step/2), noise level, ... |
+  | PRP | `PRP15_pct`, `PRP30_pct`, `PRP60_pct` (+ `_pause_s`) | amplitude in % of the steady reference after the pause nearest to 15 / 30 / 60 s (pause = stimulus interval − steady interval) |
+
+  S2 response (as in GetRefractoryPeriod): the mean S1 contraction (S1 interval before and after, rocker at rest) is
+  scaled to the S1 contraction of each S1-S2 pair (S1 … S2 + 20 ms) and subtracted; response = maximum of the
+  residual (30-ms mean) S2 + 30 … 600 ms in % of S1; separate peak = local maximum of the force after the S2 with a
+  prominence ≥ max(noise level, 2 %); noise level = 99th percentile of the response at pseudo-S2 on the S1 beats. A
+  transition is the first S2 interval (from long to short) below the level whose next shorter interval is also
+  below it, interpolated linearly. Example 8 (rabbit, ERP 460 ms in the lab table): no peak 477.5 ms, no response
+  464 ms (step 29 ms).
 * **Rocker, stimulated beats**: with `'protocol'` only stimulated contractions (`'beats','stimulated'`) with the
   rocker at rest are included unless `'rocker'` / `'beats'` is given (grouping by rocker speed: all). Sharp-electrode recordings (no rocker) and protocols without rocker stops need
   `'rocker','any'` (GUI: "all contractions"). A contraction counts as "rocker moving" if the rocker moved anywhere
@@ -419,6 +441,7 @@ lower plot, the trend and all exports.
 | `mda_analyzeAP.m` | AP parameters (dV/dt max, RMP, V_max, APD25/50/90) per contraction, stimulus artefact handling |
 | `mda_protocols.m` | stimulation protocols found from the comments of the log file |
 | `mda_groupBeats.m` | contractions grouped by a stimulation quantity (pacing frequency, S2 interval, current, rest, ...), summary per group |
+| `mda_protocolResults.m` | characteristic values per protocol and channel (max. captured frequency, FFR ratios, current thresholds, refractory periods, PRP at 15 / 30 / 60 s) |
 | `mda_parameters.m` | names, units and definitions of the parameters |
 | `mda_options.m` | options and defaults |
 | `mda_summarize.m`, `mda_writeResults.m` | summary table, Excel/CSV export |

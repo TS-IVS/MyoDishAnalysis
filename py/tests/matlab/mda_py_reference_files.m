@@ -126,6 +126,9 @@ X = struct('contractions', table2struct(T, 'ToScalar', true), 'summary', table2s
 if isfield(info, 'rockerFilter') && height(info.rockerFilter) > 0
     X.rockerFilter = table2struct(info.rockerFilter, 'ToScalar', true);
 end
+if isfield(info, 'protocolResults') && height(info.protocolResults) > 0
+    X.protocolResults = table2struct(info.protocolResults, 'ToScalar', true);
+end
 R.(key) = X;
 end
 

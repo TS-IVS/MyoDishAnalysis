@@ -12,7 +12,10 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %   contractions table, one row per detected contraction (also the excluded ones, see column 'included')
 %   summary      table, one row per channel and range: numbers of contractions/stimuli, mean and SD of all
 %                parameters of the included contractions
-%   info         struct: file facts, options, detection threshold per channel and range, notes
+%   info         struct: file facts, options, detection threshold per channel and range, notes; with grouped
+%                protocols (FFR, ST, RP, PRP) info.protocolResults: characteristic values per protocol and channel
+%                (max. captured frequency, FFR ratios, current thresholds, refractory periods, PRP at 15 / 30 /
+%                60 s; see mda_protocolResults), also sheet 'protocolResults' of the results file
 %
 % PARAMETERS (per contraction; force in uN, times in s; see mda_analyzeChannel for the exact definitions)
 %   amplitude, diastolicForce (F_dia - zero force), diastolicSignal (F_dia, sensor signal), dFdtMax, dFdtMin,
@@ -181,7 +184,7 @@ end
 pad = opts.maxBeatWindow + 2;
 if opts.rockerFilter, pad = max(pad, 60); end      %context for the estimate of the rocker artifact
 parts = {}; sumParts = {}; thrInfo = zeros(0, 6);
-rfRows = {};
+rfRows = {}; resParts = {};
 nFig = 0;
 f0cache = [];                                       %rocker frequency per rocker speed, estimated once (all channels)
 for r = 1:nR
@@ -189,6 +192,7 @@ for r = 1:nR
     nQ = numel(edges) - 1;
     Bc = cell(numel(channels), nQ); Cs = cell(numel(channels), nQ);
     lastB = cell(1, numel(channels)); lastC = cell(1, numel(channels));
+    Sres = [];                                      %S2interval results: data of the whole range (traces)
     for q = 1:nQ
         % each chunk is read once for all channels; the file header (log file) is not read again
         S = mda_readMdd(H, max(0, edges(q) - pad), edges(q+1) + pad, opts);
@@ -232,7 +236,19 @@ for r = 1:nR
         Cm.stimCaptured = cell2mat(cellfun(@(x) x.stimCaptured(x.stimTimes >= x.range(1) & x.stimTimes <= x.range(2)), CsC(:), 'UniformOutput', false));
         Cm.threshold = median(cellfun(@(x) x.threshold, CsC));
         if grouping && ~strcmpi(groupByR{r}, 'none')
-            [B, T] = mda_groupBeats(H, B, Cm, ranges(r,:), groupByR{r}, opts);
+            [B, T, Z] = mda_groupBeats(H, B, Cm, ranges(r,:), groupByR{r}, opts);
+            gb = lower(groupByR{r});
+            if ismember(gb, {'pacingfrequency', 'stimcurrent', 's2interval', 'pauselength'})
+                trace = [];
+                if strcmp(gb, 's2interval')            %S2 response: traces of the whole range
+                    if isempty(Sres), Sres = mda_readMdd(H, max(0, ranges(r,1) - 2), ranges(r,2) + 2, opts); end
+                    [~, Cx] = mda_analyzeChannel(Sres, channels(c), ranges(r,:), opts);
+                    trace = struct('t', Cx.t, 'f', Cx.f, 'tR', Sres.t, 'rockerOn', Sres.rockerOn);
+                end
+                Rr = mda_protocolResults(groupByR{r}, T, Z, trace, opts);
+                resParts{end+1} = [table(labels(r), channels(c), ranges(r,1), ranges(r,2), groupByR(r), ...
+                    'VariableNames', {'range','channel','from','to','groupBy'}), Rr]; %#ok<AGROW>
+            end
         else
             T = mda_summarize(B, Cm, ranges(r,:));
             if grouping                            %same columns as the grouped ranges
@@ -291,12 +307,23 @@ else
     summary = mda_addLabels(summary, Lbl);
 end
 
+if ~isempty(resParts)                              %characteristic values per protocol and channel
+    PR = vertcat(resParts{:});
+    PR = addvars(PR, repmat({shortName(H.file)}, height(PR), 1), 'Before', 1, 'NewVariableNames', 'file');
+    if ~isnan(H.recordingStart)
+        PR = mda_addLabels(PR, Lbl, datetime(H.recordingStart + (PR.from + PR.to) / 2 / 86400, 'ConvertFrom', 'datenum'));
+    else
+        PR = mda_addLabels(PR, Lbl);
+    end
+end
+
 info = rmfield(H, {'totalSamples','stimRow'});
 info.channels = channels;
 info.ranges = ranges;
 info.rangeLabels = labels;
 info.protocols = protocols;
 info.groupBy = groupByR;
+if ~isempty(resParts), info.protocolResults = PR; end
 info.labels = Lbl;
 info.options = opts;
 info.thresholds = array2table(thrInfo, 'VariableNames', {'range','channel','from','to','threshold_uN','maxStimToPeak_s'});

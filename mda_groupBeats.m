@@ -1,7 +1,7 @@
-function [B, G] = mda_groupBeats(H, B, C, range, by, opts)
+function [B, G, Z] = mda_groupBeats(H, B, C, range, by, opts)
 %MDA_GROUPBEATS  Group the contractions of one channel and time range by a stimulation quantity; summary per group.
 %
-%   [B, G] = mda_groupBeats(H, B, C, range, by, opts)
+%   [B, G, Z] = mda_groupBeats(H, B, C, range, by, opts)
 %
 %   H      file facts (mda_readMdd(mddFile))
 %   B      contraction table of one channel and range (mda_analyzeChannel / MyoDishAnalysis)
@@ -33,14 +33,16 @@ function [B, G] = mda_groupBeats(H, B, C, range, by, opts)
 %
 %   B      with the columns group (text), groupValue (number; NaN for 'S1', 'steady', unknown), groupRole
 %          ('S1' / 'preS2' / 'S2' / 'postS2' / 'other', 'steady' / 'afterRest' / 'postRest' / 'other', otherwise '')
-%          and groupStep (pauseLength: number of the pause in the range, otherwise NaN). A stimulated contraction belongs to the group
-%          of its stimulus, an extra / unpaced contraction to the group of the last stimulus before its peak
-%          (rockerSpeed: rocker speed at the peak).
+%          and groupStep (pauseLength: number of the pause in the range, otherwise NaN). A stimulated contraction
+%          belongs to the group of its stimulus, an extra / unpaced contraction to the group of the last stimulus
+%          before its peak (rockerSpeed: rocker speed at the peak).
 %   G      one row per group (order: role, value): group, groupValue, groupRole, groupStep, groupBy, then the columns of
 %          mda_summarize for the contractions and stimuli of the group, capture_percent (stimuli followed by a
 %          contraction), currentReached_percent (stimuli with the set current reached) and amplitude_pctOfRef
 %          (mean amplitude in % of the group 'S1' / 'steady'; NaN for the other quantities). stimFrequency of a group =
 %          1 / median interval from the previous stimulus.
+%   Z      the stimuli of the channel (with the 300 s before the range): t, prevInt, nextInt, role, value, step,
+%          group, captured (followed by a contraction), inRange (input of mda_protocolResults)
 %
 % TS 2026-10-07 (S2interval: groups 'other', 'pre-S2'; pauseLength: one group per pause, 'after rest', 'other')
 
@@ -195,6 +197,8 @@ for q = 1:numel(keys)
     T = [table(keys(q), kv(q), roleOrder(kr(q)), ks(q), {by}, 'VariableNames', {'group','groupValue','groupRole','groupStep','groupBy'}), T]; %#ok<AGROW>
     parts{q} = T;
 end
+Z = table(tt, prevInt, nextInt, role, val, step, lbl, captured, inR, 'VariableNames', ...
+    {'t','prevInt','nextInt','role','value','step','group','captured','inRange'});
 if isempty(parts)
     G = table();
     return;

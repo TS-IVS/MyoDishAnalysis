@@ -21,7 +21,8 @@ RP (refractory, RP, S1S2, S2): S2interval; ST (threshold, stimCurrent, ST): stim
 potentiation): pauseLength; PD (pulse duration, PD): pulseDuration; rockerSpeed (rocker speed): rockerSpeed;
 other: none. FFR, RP, ST, PRP, PD also as separate words or parts of a CamelCase / underscore name ('PD_Test').
 
-group_beats: see the help of mda_groupBeats.m (same quantities, groups, columns):
+group_beats: see the help of mda_groupBeats.m (same quantities, groups, columns; return_stimuli=True: also Z, the
+stimuli of the channel with role, value and capture, input of protocol_results):
   pacingFrequency, S2interval, stimCurrent, pauseLength, rockerSpeed, pulseDuration, 'log:<code>'.
 
 TS 2026-10-07 (port of mda_protocols.m and mda_groupBeats.m; schedule files 2026-10-07)
@@ -206,7 +207,7 @@ def find_protocols(src):
 
 
 # =====================================================================================================
-def group_beats(H, B, C, range_, by, opts=None):
+def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
     from .options import options as make_options
     from .read_mdd import read_mdd
     if opts is None:
@@ -384,8 +385,10 @@ def group_beats(H, B, C, range_, by, opts=None):
         T.insert(0, "groupValue", float(kv[q]))
         T.insert(0, "group", keys[q])
         parts.append(T)
+    Z = pd.DataFrame(dict(t=tt, prevInt=prevInt, nextInt=nextInt, role=role, value=val, step=step, group=lbl,
+                          captured=captured, inRange=inR))
     if not parts:
-        return B, pd.DataFrame()
+        return (B, pd.DataFrame(), Z) if return_stimuli else (B, pd.DataFrame())
     G = pd.concat(parts, ignore_index=True)
     ref = math.nan
     if refRole:
@@ -393,7 +396,7 @@ def group_beats(H, B, C, range_, by, opts=None):
         if r.size:
             ref = float(G["amplitude_mean"].iloc[r[0]])
     G.insert(list(G.columns).index("amplitude_SD") + 1, "amplitude_pctOfRef", 100 * G["amplitude_mean"] / ref)
-    return B, G
+    return (B, G, Z) if return_stimuli else (B, G)
 
 
 def add_empty_group_columns(B, T):

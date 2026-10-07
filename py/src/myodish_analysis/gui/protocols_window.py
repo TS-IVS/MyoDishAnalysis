@@ -100,7 +100,7 @@ class ProtocolWindow(QtWidgets.QWidget):
                            "or protocols without rocker stops: all contractions")
         g.addWidget(self.cR, 1, 1)
         self.cStim = QtWidgets.QCheckBox("only stimulated contractions")
-        self.cStim.setChecked(win.cbStim.isChecked())
+        self.cStim.setChecked(True)  # protocols: stimulated contractions (as MyoDishAnalysis)
         g.addWidget(self.cStim, 2, 1)
         g.addWidget(QtWidgets.QLabel("Parameter"), 3, 0)
         self.cP = QtWidgets.QComboBox()
@@ -119,6 +119,13 @@ class ProtocolWindow(QtWidgets.QWidget):
         self.cSD.addItems(["mean ± SD", "mean ± SEM", "mean"])
         self.cSD.currentIndexChanged.connect(lambda *_: self.draw())
         g.addWidget(self.cSD, 5, 1)
+        g.addWidget(QtWidgets.QLabel("Table"), 6, 0)
+        self.cTab = QtWidgets.QComboBox()
+        self.cTab.addItems(["groups", "protocol results"])
+        self.cTab.setToolTip("protocol results: max. captured frequency, FFR ratios, current thresholds, refractory "
+                             "periods (no peak / no response), PRP at 15 / 30 / 60 s, per protocol and channel")
+        self.cTab.currentIndexChanged.connect(lambda *_: self.fill_table())
+        g.addWidget(self.cTab, 6, 1)
         v.addLayout(g)
         b = QtWidgets.QPushButton("Analyse")
         f = b.font()
@@ -315,14 +322,31 @@ class ProtocolWindow(QtWidgets.QWidget):
         if S is None:
             self.tbl.setRowCount(0)
             return
-        nm, _ = self.params[max(0, self.cP.currentIndex())]
-        cols = ["range", "channel", "group", "nStimuli", "nContractions", "capture_percent"]
+        if self.cTab.currentIndex() == 1:  # protocol results: the columns with values
+            S = self.info.get("protocolResults") if self.info else None
+            if S is None or len(S) == 0:
+                self.tbl.setRowCount(0)
+                return
+            vals = [c for c in S.columns[S.columns.get_loc("groupBy") + 1:] if c != "resultNote"
+                    and S[c].notna().any()]
+            cols = ["range", "channel"] + vals + ["resultNote"]
+        else:
+            nm, _ = self.params[max(0, self.cP.currentIndex())]
+            cols = self._group_columns(S, ["range", "channel", "group", "nStimuli", "nContractions",
+                                           "capture_percent"], nm)
+        self._fill(S, cols)
+
+    @staticmethod
+    def _group_columns(S, cols, nm):
         if nm + "_mean" in S.columns:
             cols += [nm + "_mean", nm + "_SD", nm + "_n"]
         elif nm in S.columns and nm not in cols:
             cols += [nm]
         if "amplitude_pctOfRef" not in cols:
             cols += ["amplitude_pctOfRef"]
+        return cols
+
+    def _fill(self, S, cols):
         self.tbl.setColumnCount(len(cols))
         self.tbl.setHorizontalHeaderLabels(cols)
         self.tbl.setRowCount(len(S))

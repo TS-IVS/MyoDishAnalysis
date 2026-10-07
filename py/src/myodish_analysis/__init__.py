@@ -30,9 +30,10 @@ from .labels import labels  # noqa: E402
 from .add_labels import add_labels  # noqa: E402
 from .analysis import myodish_analysis  # noqa: E402
 from .protocols import find_protocols, group_beats  # noqa: E402
+from .protocol_results import protocol_results  # noqa: E402
 from .selftest import selftest  # noqa: E402
 
 __all__ = ["options", "parameters", "PARAMETERS", "LABEL_NAMES", "read_mdd", "read_header", "read_data",
            "read_overview", "log_entries", "calibration_factor", "zero_force", "analyze_channel", "rocker_filter",
            "reference_beat", "read_ep_recording", "analyze_ap", "AP_PARAMETERS", "summarize", "write_results",
-           "labels", "add_labels", "myodish_analysis", "find_protocols", "group_beats", "selftest", "__version__"]
+           "labels", "add_labels", "myodish_analysis", "find_protocols", "group_beats", "protocol_results", "selftest", "__version__"]

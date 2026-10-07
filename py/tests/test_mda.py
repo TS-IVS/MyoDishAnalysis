@@ -276,6 +276,23 @@ def test_prp_groups_example7():
     assert 115 < R["amplitude_pctOfRef"].max() < 125
 
 
+@pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
+def test_protocol_results_examples():
+    def res(f, ch, **kw):
+        return mda.myodish_analysis(os.path.join(EX, f), ch, quiet=True, **kw)[2]["protocolResults"].iloc[0]
+    r = res("example8_rabbitVentricle_EP.mdd", 1, protocol="RP", rocker="any")  # S2 463 ms: none, 492 ms: full
+    assert 463 < r["refPeriodNoPeak_ms"] < 492 and r["refPeriodNoPeakStep_ms"] == 29
+    assert 463 <= r["refPeriodNoResponse_ms"] < 492 and r["S2noiseLevel_pct"] < 10
+    r = res("example3_humanVentricle.mdd", 6, protocol="FFR")
+    assert r["maxCapturedFrequency_Hz"] == 4 and 90 < r["FFR_1Hz_pct"] < 115 and 60 < r["FFR_3Hz_pct"] < 90
+    r = res("example2_rabbitVentricle.mdd", 5, protocol="ST", rocker="any")
+    assert r["captureThreshold_mA"] <= r["stimThreshold10_mA"] <= r["stimThreshold50_mA"] <= r["stimThreshold95_mA"] \
+        <= r["stimThreshold99_mA"]
+    r = res("example7_pigVentricle.mdd", 1, protocol="PRP")
+    assert (r["PRP15_pause_s"], r["PRP30_pause_s"], r["PRP60_pause_s"]) == (15, 30, 60)
+    assert 115 < r["PRP15_pct"] < 125 and np.isnan(r["FFR_1Hz_pct"])
+
+
 # ------------------------------------------------------------------------------------------------ command line / GUI
 def test_cli_help(capsys):
     from myodish_analysis.cli import main

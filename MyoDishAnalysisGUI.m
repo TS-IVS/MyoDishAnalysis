@@ -1577,7 +1577,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         pRk = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', {'rocker at rest only', 'all contractions', 'rocker moving only'}, ...
             'Position', [x0+0.08 0.34 0.265 0.03], 'TooltipString', ['default: only contractions with the rocker at rest. Sharp-electrode ' ...
             'recordings (no rocker) or protocols without rocker stops: all contractions']);
-        cSt = uicontrol(f4, dd{:}, 'Style', 'checkbox', 'String', 'only stimulated contractions', 'Value', hStim.Value, ...
+        cSt = uicontrol(f4, dd{:}, 'Style', 'checkbox', 'String', 'only stimulated contractions', 'Value', 1, ...
             'Position', [x0+0.08 0.3 0.265 0.03]);
         prPar = [PI(~startsWith(PI(:,1), 'ref'), 1:2); {'amplitude_pctOfRef', '% of S1 / steady'; 'capture_percent', '%'; 'nContractions', ''}];
         uicontrol(f4, dd{:}, 'Style', 'text', 'String', 'Parameter', 'HorizontalAlignment', 'left', 'Position', [x0 0.25 0.08 0.03]);
@@ -1587,7 +1587,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         pSh = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', {'-'}, 'Position', [x0+0.08 0.21 0.265 0.03], 'Callback', @(~,~) prDraw(), ...
             'TooltipString', 'protocols grouped by the same quantity are shown together');
         pSD = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', {[char(177) ' SD'], [char(177) ' SEM'], 'mean only'}, ...
-            'Position', [x0+0.08 0.17 0.265 0.03], 'Callback', @(~,~) prDraw());
+            'Position', [x0+0.08 0.17 0.13 0.03], 'Callback', @(~,~) prDraw());
+        pTb = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', {'table: groups', 'table: protocol results'}, ...
+            'Position', [x0+0.215 0.17 0.13 0.03], 'Callback', @(~,~) prTable(), 'TooltipString', ['protocol results: ' ...
+            'max. captured frequency, FFR ratios, current thresholds, refractory periods (no peak / no response), ' ...
+            'PRP at 15 / 30 / 60 s, per protocol and channel']);
         uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Analyse', 'FontWeight', 'bold', 'Position', [x0 0.11 w0 0.045], ...
             'Callback', @(~,~) prAnalyse(), 'TooltipString', ['contractions of the ticked protocols and channels, grouped (threshold, ' ...
             'filters, zero force, rocker filter and labels as in the main window)']);
@@ -1595,7 +1599,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Export ...', 'Position', [x0+0.175 0.06 0.17 0.04], 'Callback', @(~,~) prExport());
         tx = uicontrol(f4, dd{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [x0 0.0 w0 0.055], 'FontSize', 8);
         hPr = struct('fig', f4, 'file', H.file, 'ax', axP, 'tRes', tRes, 'tProt', tProt, 'lbC', lbC, 'pRk', pRk, 'cSt', cSt, ...
-            'pPa', pPa, 'par', {prPar}, 'pSh', pSh, 'pSD', pSD, 'tx', tx);
+            'pPa', pPa, 'par', {prPar}, 'pSh', pSh, 'pSD', pSD, 'pTb', pTb, 'tx', tx);
         prRes = [];
         prFind();
     end
@@ -1747,14 +1751,23 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if isempty(hPr) || ~isvalid(hPr.fig), return; end
         if isempty(prRes), hPr.tRes.Data = {}; return; end
         prNm = hPr.par{hPr.pPa.Value, 1};
-        prS = prRes.S;
-        prCols = {'range', 'channel', 'group', 'nStimuli', 'nContractions', 'capture_percent'};
-        if ismember([prNm '_mean'], prS.Properties.VariableNames)
-            prCols = [prCols, {[prNm '_mean'], [prNm '_SD'], [prNm '_n']}];
-        elseif ismember(prNm, prS.Properties.VariableNames) && ~ismember(prNm, prCols)
-            prCols{end+1} = prNm;
+        if hPr.pTb.Value == 2                           %protocol results: the columns with values
+            if ~isfield(prRes.info, 'protocolResults'), hPr.tRes.Data = {}; hPr.tRes.ColumnName = {}; return; end
+            prS = prRes.info.protocolResults;
+            prV = prS.Properties.VariableNames(find(strcmp(prS.Properties.VariableNames, 'groupBy')) + 1:end);
+            prV = prV(~strcmp(prV, 'resultNote'));
+            prV = prV(cellfun(@(c) any(~isnan(prS.(c))), prV));
+            prCols = [{'range', 'channel'}, prV, {'resultNote'}];
+        else
+            prS = prRes.S;
+            prCols = {'range', 'channel', 'group', 'nStimuli', 'nContractions', 'capture_percent'};
+            if ismember([prNm '_mean'], prS.Properties.VariableNames)
+                prCols = [prCols, {[prNm '_mean'], [prNm '_SD'], [prNm '_n']}];
+            elseif ismember(prNm, prS.Properties.VariableNames) && ~ismember(prNm, prCols)
+                prCols{end+1} = prNm;
+            end
+            if ~ismember('amplitude_pctOfRef', prCols), prCols{end+1} = 'amplitude_pctOfRef'; end
         end
-        if ~ismember('amplitude_pctOfRef', prCols), prCols{end+1} = 'amplitude_pctOfRef'; end
         prD = cell(height(prS), numel(prCols));
         for j = 1:numel(prCols)
             v = prS.(prCols{j});

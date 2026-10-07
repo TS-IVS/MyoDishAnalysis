@@ -2,7 +2,8 @@
 
     write_results('results.xlsx', contractions, summary, info)
         sheets: contractions, summary, parameters (definitions), info (file facts and options), labels,
-        rockerFilter (option rockerFilter: result per channel and time range), protocols (option protocol)
+        rockerFilter (option rockerFilter: result per channel and time range), protocols (option protocol),
+        protocolResults (characteristic values per protocol and channel)
     write_results('results.csv', ...)
         results_contractions.csv, results_summary.csv, results_parameters.csv, results_info.csv (+ labels,
         rockerFilter)
@@ -146,6 +147,9 @@ def write_results(output_file, contractions, summary, info):
     pr = info.get("protocols")
     if isinstance(pr, pd.DataFrame) and len(pr) > 0:
         tabs.append(("protocols", pr))
+    rr = info.get("protocolResults")
+    if isinstance(rr, pd.DataFrame) and len(rr) > 0:
+        tabs.append(("protocolResults", rr))
     if e.lower() == ".csv":
         out = []
         for name, T in tabs:

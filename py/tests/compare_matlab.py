@@ -142,7 +142,16 @@ def cmp_cli(X, T, S, info, name, rtol, rocker=False):
                                  name + " rockerFilter", rtol=1e-6, atol=1e-6)
         ok4 = ok4 and okr
         l4 += lr
-    report(okS and ok1 and ok2 and ok3 and ok4, lines + l1 + l2 + l3 + l4, name)
+    ok5, l5 = True, []
+    if hasattr(X, "protocolResults"):
+        Mp = table_from_struct(X.protocolResults)
+        Pp = info.get("protocolResults")
+        if Pp is None:
+            ok5, l5 = False, [f"{name} protocolResults: missing in Python"]
+        else:
+            ok5, l5 = compare_tables(Mp, Pp.reset_index(drop=True), name + " protocolResults", rtol=max(rtol, 1e-9),
+                                     atol=max(rtol, 1e-9), skip=("clockTime",))
+    report(okS and ok1 and ok2 and ok3 and ok4 and ok5, lines + l1 + l2 + l3 + l4 + l5, name)
 
 
 def cmp_reader(R, mdd, a, b, name):
