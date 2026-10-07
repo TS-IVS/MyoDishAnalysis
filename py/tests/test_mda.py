@@ -262,6 +262,20 @@ def test_read_log_recording_restarted(tmp_path):
     np.testing.assert_allclose(L2.rockerSpeedEvents, [[-np.inf, 60], [10, 30]])
 
 
+@pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
+def test_prp_groups_example7():
+    # one group per pause (steps 1-7), 2nd interval after a pause / lower rate at the end are no rests,
+    # 'after rest' is not part of the steady reference
+    _, S, _ = mda.myodish_analysis(os.path.join(EX, "example7_pigVentricle.mdd"), 1, protocol="PRP", quiet=True)
+    R = S[S["groupRole"] == "postRest"]
+    assert R["group"].tolist() == ["rest 2 s", "rest 3 s", "rest 5 s", "rest 9 s", "rest 16 s", "rest 31 s", "rest 61 s"]
+    assert R["groupStep"].tolist() == [1, 2, 3, 4, 5, 6, 7]
+    assert set(S["group"]) == set(R["group"]) | {"steady", "after rest", "other"}
+    st = S[S["group"] == "steady"].iloc[0]
+    assert st["nContractions"] == 8 and st["amplitude_pctOfRef"] == 100
+    assert 115 < R["amplitude_pctOfRef"].max() < 125
+
+
 # ------------------------------------------------------------------------------------------------ command line / GUI
 def test_cli_help(capsys):
     from myodish_analysis.cli import main

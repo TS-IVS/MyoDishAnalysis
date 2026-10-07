@@ -43,7 +43,20 @@ MATLAB and Python versions have the same version number and give the same result
   grouping by log values (e.g. pulse duration). A later start counts only if the dataLogTime starts again. Known
   limitation: one start time per file, so `clockTime` of the data recorded after a restart is early by the length of
   the interruption.
-- Protocol summary of a channel without stimuli in the range: no error in Python (group `unknown`, as in MATLAB).
+- `pauseLength` grouping (PRP): a pause needs a known, ≥ 1.5 × shorter interval before it and the return of the steady
+  interval within 3 stimuli, so the second (2 s) interval after each post-rest beat, a lower rate at the end of the
+  protocol and the first intervals of the recording are no longer rests. One group per pause with the new column
+  `groupStep` (number of the pause; the effective pause differs between channels in recent firmware). Stimuli within
+  10 s after a pause form the group `after rest` and are no longer part of the `steady` reference (the reference is
+  now the steady pacing before the first pause, as in GetPostRestPotentiation). Example 7: reference 4184 instead of
+  4052 µN, post-rest 104–119 %.
+- `S2interval`: S1 stimuli followed by an S2 form the group `pre-S2` (relaxation cut off; not in the S1 reference).
+- Protocols: only stimulated contractions by default (`'beats','stimulated'`, as in the original protocol scripts);
+  a protocol start comment repeated within 10 s counts once.
+- Protocols: note `gap of … in the log` when the log has a gap of > 10 min within a protocol (the schedule stalled;
+  found in 4 of 146 daily schedule files, e.g. 23.5 h, after which the remaining commands were sent within 1 s).
+- Protocol summary of a channel without stimuli in the range: no error in Python (group `unknown`, as in MATLAB; also
+  for `S2interval`).
 - Command line: hint when no contraction is included because the rocker moved during all of them
   (`'rocker','any'`).
 - Tests: tolerance of the rocker-filter comparison per statistic (summary means 0.5 %, SDs 2 %); which flat peaks move

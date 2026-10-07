@@ -9,8 +9,9 @@ find_protocols: protocols are marked by pairs of comments such as 'start FFR pro
 'start of refractory period protocol' ... 'end of refractory period protocol' or 'FFR protocol started' ... 'FFR
 protocol ended'. A start is paired with the next end of the same name (otherwise of the same type). A start without an
 end lasts until the next protocol of the same type or the end of the file (note 'no end comment'). Protocols within a
-protocol of the same type are not listed separately. Comments about the recording itself and about schedule files
-('start scheduleFile_humanVentricle') are ignored. Schedule files loaded by a schedule (log events 'Loaded schedule
+protocol of the same type are not listed separately; a start comment repeated within 10 s counts once. A gap of > 10
+min between the log entries within a protocol is noted ('gap of 23.5 h in the log': schedule stalled). Comments about
+the recording itself and about schedule files ('start scheduleFile_humanVentricle') are ignored. Schedule files loaded by a schedule (log events 'Loaded schedule
 file <path>' ... 'Jumped back from loaded schedule file <path>') are protocols, too, if their file name contains a
 protocol keyword (e.g. PD_Test_12Steps.txt) and not 'schedule'; name = file name without extension.
 P: DataFrame, one row per protocol: type, name, number (k-th protocol of this type), from, to (s), groupBy (default
@@ -113,6 +114,8 @@ def find_protocols(src):
     else:
         logFile, T = str(src), math.inf
     E = log_entries(logFile)
+    tAll = np.sort(E["t_file"].to_numpy(float)) if len(E) else np.zeros(0)
+    tAll = tAll[np.isfinite(tAll)]  # all log entries (gaps within a protocol)
     isSched = np.array([str(c).lower() == "schedule" for c in E["code"]], dtype=bool)
     E = E[(E["isComment"].to_numpy(bool) | isSched) & np.isfinite(E["t_file"].to_numpy(float))]
     E = E.sort_values("t_file", kind="stable")
@@ -163,12 +166,16 @@ def find_protocols(src):
     drop = [math.isnan(s["to"]) and any(x["type"] == s["type"] and not math.isnan(x["to"]) and x["start"] <= s["start"]
                                         < x["to"] for x in st) for s in st]
     st = [s for s, d in zip(st, drop) if not d]
-    # other starts without end: until the next start of the same type or the end of the file
+    # other starts without end: until the next start of the same type or the end of the file; a start followed by
+    # another start of the same type within 10 s is a repeated comment and dropped
+    drop = [False] * len(st)
     for i, s in enumerate(st):
         if math.isnan(s["to"]):
             nxt = [x["start"] for x in st[i + 1:] if x["type"] == s["type"]]
             s["to"] = nxt[0] if nxt else T
             s["note"] = "no end comment"
+            drop[i] = bool(nxt) and nxt[0] - s["start"] < 10
+    st = [s for s, d in zip(st, drop) if not d]
     # protocols within a protocol of the same type are not listed separately
     keep = [True] * len(st)
     for i in range(len(st)):
@@ -178,6 +185,15 @@ def find_protocols(src):
                     (a["start"] > b["start"] or a["to"] < b["to"] or i > j):
                 keep[i] = False
     st = [s for s, k in zip(st, keep) if k]
+    # a gap of > 10 min between the log entries within a protocol (e.g. the schedule stalled and the remaining
+    # commands were sent later at once): note
+    for s in st:
+        if not math.isfinite(s["to"]):
+            continue
+        g = float(np.max(np.diff(np.r_[s["start"], tAll[(tAll > s["start"]) & (tAll < s["to"])], s["to"]])))
+        if g > 600:
+            gs = "%.1f h" % (math.floor(g / 360) / 10) if g >= 3600 else "%d min" % math.floor(g / 60)
+            s["note"] = "; ".join(x for x in (s["note"], f"gap of {gs} in the log") if x)
     rows = []
     for i, s in enumerate(st):
         number = sum(1 for x in st[:i + 1] if x["type"] == s["type"])
@@ -214,6 +230,7 @@ def group_beats(H, B, C, range_, by, opts=None):
 
     # value and role of every stimulus
     val = np.full(nS, np.nan)
+    step = np.full(nS, np.nan)  # pauseLength: number of the pause
     role = np.array([""] * nS, dtype=object)
     refRole = ""
     if byl == "pacingfrequency":
@@ -224,7 +241,7 @@ def group_beats(H, B, C, range_, by, opts=None):
         isS2 = premature & ~np.r_[False, premature[:-1]]
         role[:] = "S1"
         role[isS2] = "S2"
-        post = np.r_[False, isS2[:-1]]
+        post = np.r_[False, isS2[:-1]][:nS]
         role[post] = "postS2"
         cand = ~isS2 & ~post  # S1 = basic interval; other intervals: 'other'
         inR = (tt >= r0) & (tt <= r1)
@@ -232,6 +249,7 @@ def group_beats(H, B, C, range_, by, opts=None):
         base = float(np.median(p[~np.isnan(p)])) if np.any(~np.isnan(p)) else math.nan
         with np.errstate(invalid="ignore"):
             role[cand & (np.abs(prevInt - base) > 0.05 * base)] = "other"
+        role[(role == "S1") & np.r_[isS2[1:], False][:nS]] = "preS2"  # relaxation cut off by the S2
         s2 = np.full(nS, np.nan)
         s2[isS2] = prevInt[isS2]
         v2 = _group_median(s2, _cluster_values(s2, 0.0075, 0.0))
@@ -245,13 +263,25 @@ def group_beats(H, B, C, range_, by, opts=None):
         inR = (tt >= r0) & (tt <= r1)
         p = prevInt[inR]
         steadyCL = float(np.median(p[~np.isnan(p)])) if np.any(~np.isnan(p)) else math.nan
+        before = np.r_[np.nan, prevInt[:-1]][:nS]
+        # pause: the interval before is known and >= 1.5 x shorter (not the 2nd interval after a pause), and the
+        # steady interval returns within the next 3 stimuli (not a change to a lower rate, e.g. at the end)
         with np.errstate(invalid="ignore"):
-            rest = prevInt >= np.fmax(1.5, 1.5 * steadyCL)
-        role[:] = "steady"
+            steady = np.abs(prevInt - steadyCL) <= 0.05 * steadyCL
+            rest = (prevInt >= np.fmax(1.5, 1.5 * steadyCL)) & (prevInt >= 1.5 * before)
+        for r in np.flatnonzero(rest):
+            nx = steady[r + 1:min(r + 4, nS)]
+            rest[r] = nx.size == 0 or bool(nx.any())
+        after = np.zeros(nS, bool)  # potentiation decays: not part of the steady reference
+        for r in np.flatnonzero(rest):
+            after |= (tt > tt[r]) & (tt <= tt[r] + 10)
+        role[:] = "other"
+        role[steady] = "steady"
+        role[after] = "afterRest"
         role[rest] = "postRest"
-        pv = np.full(nS, np.nan)
-        pv[rest] = prevInt[rest]
-        val = _group_median(pv, _cluster_values(pv, 0.0, 0.05))
+        val[rest] = prevInt[rest]
+        sr = rest & inR
+        step[sr] = np.arange(1, int(sr.sum()) + 1)
         refRole = "steady"
     elif byl == "rockerspeed":
         val = _rocker_speed_at(H, tt, float(opts.rockerLogDelay))
@@ -262,6 +292,14 @@ def group_beats(H, B, C, range_, by, opts=None):
     else:
         raise ValueError(f"group_beats: unknown quantity '{by}'.")
     lbl = _group_labels(byl, val, role, by)
+    if byl == "pauselength":  # one group per pause: equal labels get the pause number
+        ir = np.flatnonzero(~np.isnan(step))
+        if ir.size:
+            u, cnt = np.unique(lbl[ir], return_counts=True)
+            dupl = set(u[cnt > 1])
+            for i in ir:
+                if lbl[i] in dupl:
+                    lbl[i] = "%s #%d" % (lbl[i], int(step[i]))
 
     # group of every contraction
     B = B.copy()
@@ -281,6 +319,8 @@ def group_beats(H, B, C, range_, by, opts=None):
     bVal = np.full(nB, np.nan)
     bRole = np.array([""] * nB, dtype=object)
     bLbl = np.array(["unknown"] * nB, dtype=object)
+    bStep = np.full(nB, np.nan)
+    bStep[has] = step[k[has]]
     bVal[has] = val[k[has]]
     bRole[has] = role[k[has]]
     bLbl[has] = lbl[k[has]]
@@ -290,6 +330,7 @@ def group_beats(H, B, C, range_, by, opts=None):
     B["group"] = list(bLbl)
     B["groupValue"] = bVal
     B["groupRole"] = list(bRole)
+    B["groupStep"] = bStep
 
     # summary per group
     inR = (tt >= r0) & (tt <= r1)
@@ -305,19 +346,22 @@ def group_beats(H, B, C, range_, by, opts=None):
     for x in list(lbl[inR]) + list(bLbl[inRb]):
         if x not in keys:
             keys.append(x)
-    roleOrder = ["", "S1", "S2", "postS2", "other", "steady", "postRest"]
-    kr, kv = [], []
+    roleOrder = ["", "S1", "preS2", "S2", "postS2", "steady", "afterRest", "postRest", "other"]
+    kr, kv, ks = [], [], []
     for key in keys:
         j = np.flatnonzero(lbl == key)
         if j.size:
             kr.append(roleOrder.index(role[j[0]]))
             kv.append(val[j[0]])
+            ks.append(step[j[0]])
         else:
             j = np.flatnonzero(bLbl == key)
             kr.append(roleOrder.index(bRole[j[0]]))
             kv.append(bVal[j[0]])
+            ks.append(bStep[j[0]])
     kv2 = [math.inf if math.isnan(v) else v for v in kv]
-    order = sorted(range(len(keys)), key=lambda q: (kr[q], kv2[q]))
+    ks2 = [math.inf if math.isnan(v) else v for v in ks]
+    order = sorted(range(len(keys)), key=lambda q: (kr[q], kv2[q], ks2[q]))
     parts = []
     for q in order:
         js = inR & (lbl == keys[q])
@@ -335,6 +379,7 @@ def group_beats(H, B, C, range_, by, opts=None):
         T.insert(pos, "capture_percent", capt)
         T.insert(pos + 1, "currentReached_percent", reach)
         T.insert(0, "groupBy", by)
+        T.insert(0, "groupStep", float(ks[q]))
         T.insert(0, "groupRole", roleOrder[kr[q]])
         T.insert(0, "groupValue", float(kv[q]))
         T.insert(0, "group", keys[q])
@@ -357,12 +402,14 @@ def add_empty_group_columns(B, T):
     B["group"] = "all"
     B["groupValue"] = np.nan
     B["groupRole"] = ""
+    B["groupStep"] = np.nan
     T = T.copy()
     pos = list(T.columns).index("missedBeats_percent") + 1
     T.insert(pos, "capture_percent", np.nan)
     T.insert(pos + 1, "currentReached_percent", np.nan)
     T.insert(list(T.columns).index("amplitude_SD") + 1, "amplitude_pctOfRef", np.nan)
     T.insert(0, "groupBy", "none")
+    T.insert(0, "groupStep", np.nan)
     T.insert(0, "groupRole", "")
     T.insert(0, "groupValue", np.nan)
     T.insert(0, "group", "all")
@@ -400,6 +447,8 @@ def _group_labels(byl, val, role, byName):
         elif byl == "s2interval":
             if r == "S1":
                 s = "S1"
+            elif r == "preS2":
+                s = "pre-S2"
             elif r == "other":
                 s = "other"
             elif r == "S2":
@@ -409,14 +458,14 @@ def _group_labels(byl, val, role, byName):
         elif byl == "stimcurrent":
             s = "%g mA" % v
         elif byl == "pauselength":
-            s = "steady" if r == "steady" else "rest %.3g s" % v
+            s = "rest %.3g s" % v if r == "postRest" else ("after rest" if r == "afterRest" else r)
         elif byl == "rockerspeed":
             s = "%g rpm" % v
         elif byl == "pulseduration":
             s = "%g ms" % v
         else:
             s = "%s %g" % (byName[4:].strip(), v)
-        if math.isnan(v) and r not in ("S1", "other", "steady"):
+        if math.isnan(v) and r not in ("S1", "preS2", "other", "steady", "afterRest"):
             s = "unknown"
         out.append(s)
     return np.array(out, dtype=object)

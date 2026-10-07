@@ -14,12 +14,16 @@ function [B, G] = mda_groupBeats(H, B, C, range, by, opts)
 %          'S2interval'       S1-S2 protocols: S2 = premature stimulus (interval < 95 % of the previous one, next
 %                             interval longer, previous stimulus not premature); groups 'S1', 'S2 <interval>' and
 %                             'post-S2 <interval>' (the stimulus after an S2); S2 intervals within 7.5 ms = one group.
-%                             'S1' = the other stimuli at the basic interval (median, +-5 %); stimuli at other intervals
-%                             (e.g. trains at a higher rate between the S1-S2 steps): group 'other'
+%                             'S1' = the other stimuli at the basic interval (median, +-5 %) that are not followed by an
+%                             S2 ('pre-S2': relaxation cut off by the S2); stimuli at other intervals (e.g. trains at a
+%                             higher rate between the S1-S2 steps): group 'other'
 %          'stimCurrent'      stimulus current of the pulse (mA, status channel)
-%          'pauseLength'      post-rest potentiation: first stimulus after a pause (interval >= 1.5 s and >= 1.5 x the
-%                             median interval) = 'rest <interval>' (intervals within 5 % = one group), all other
-%                             stimuli 'steady'
+%          'pauseLength'      post-rest potentiation: first stimulus after a pause (interval >= 1.5 s, >= 1.5 x the
+%                             median interval and >= 1.5 x the interval before; the median interval returns within the
+%                             next 3 stimuli) = 'rest <interval>', one group per pause
+%                             (groupStep = number of the pause in the range); the stimuli within 10 s after it 'after
+%                             rest' (potentiation decays); the other stimuli at the median interval (+-5 %) 'steady'
+%                             (reference), all others 'other'
 %          'rockerSpeed'      rocker speed (rpm) at the contraction peak / stimulus ('rockerSpeed' entries of the log
 %                             file, + rockerLogDelay); before the first entry: unknown
 %          'pulseDuration'    'chargeDuration' entry of the log file for the stimulated channel (ms)
@@ -27,17 +31,18 @@ function [B, G] = mda_groupBeats(H, B, C, range, by, opts)
 %                             'log:pauseDuration', 'log:stimCurrent'
 %   opts   options (mda_options; minStimToPeak, rockerLogDelay)
 %
-%   B      with the columns group (text), groupValue (number; NaN for 'S1', 'steady', unknown) and groupRole
-%          ('S1' / 'S2' / 'postS2' / 'other', 'steady' / 'postRest', otherwise ''). A stimulated contraction belongs to the group
+%   B      with the columns group (text), groupValue (number; NaN for 'S1', 'steady', unknown), groupRole
+%          ('S1' / 'preS2' / 'S2' / 'postS2' / 'other', 'steady' / 'afterRest' / 'postRest' / 'other', otherwise '')
+%          and groupStep (pauseLength: number of the pause in the range, otherwise NaN). A stimulated contraction belongs to the group
 %          of its stimulus, an extra / unpaced contraction to the group of the last stimulus before its peak
 %          (rockerSpeed: rocker speed at the peak).
-%   G      one row per group (order: role, value): group, groupValue, groupRole, groupBy, then the columns of
+%   G      one row per group (order: role, value): group, groupValue, groupRole, groupStep, groupBy, then the columns of
 %          mda_summarize for the contractions and stimuli of the group, capture_percent (stimuli followed by a
 %          contraction), currentReached_percent (stimuli with the set current reached) and amplitude_pctOfRef
 %          (mean amplitude in % of the group 'S1' / 'steady'; NaN for the other quantities). stimFrequency of a group =
 %          1 / median interval from the previous stimulus.
 %
-% TS 2026-10-07 (S2interval: group 'other' 2026-10-07)
+% TS 2026-10-07 (S2interval: groups 'other', 'pre-S2'; pauseLength: one group per pause, 'after rest', 'other')
 
 if nargin < 6 || isempty(opts), opts = mda_options(); end
 by = char(by);
@@ -56,6 +61,7 @@ nextInt = [diff(tt); nan]; nextInt = nextInt(1:nS, 1);
 
 % ------------------------------------------------------------------ value and role of every stimulus
 val = nan(nS, 1);                                  %group value
+step = nan(nS, 1);                                 %pauseLength: number of the pause
 role = repmat({''}, nS, 1);
 refRole = '';
 switch lower(by)
@@ -74,6 +80,7 @@ switch lower(by)
         inR = tt >= range(1) & tt <= range(2);
         base = median(prevInt(cand & inR), 'omitnan');
         role(cand & abs(prevInt - base) > 0.05 * base) = {'other'};
+        role(strcmp(role, 'S1') & [isS2(2:end); false]) = {'preS2'};   %relaxation cut off by the S2
         s2 = nan(nS, 1); s2(isS2) = prevInt(isS2);
         gid = clusterValues(s2, 0.0075, 0);
         v2 = groupMedian(s2, gid);
@@ -86,12 +93,25 @@ switch lower(by)
     case 'pauselength'
         inR = tt >= range(1) & tt <= range(2);
         steadyCL = median(prevInt(inR), 'omitnan');
-        rest = prevInt >= max(1.5, 1.5 * steadyCL);
-        role(:) = {'steady'};
+        % pause: the interval before is known and >= 1.5 x shorter (not the 2nd interval after a pause), and the
+        % steady interval returns within the next 3 stimuli (not a change to a lower rate, e.g. at the end)
+        before = [nan; prevInt(1:end-1)];
+        isSteady = abs(prevInt - steadyCL) <= 0.05 * steadyCL;
+        rest = prevInt >= max(1.5, 1.5 * steadyCL) & prevInt >= 1.5 * before;
+        for r = find(rest)'
+            nx = isSteady(r+1:min(r+3, nS));
+            rest(r) = isempty(nx) || any(nx);
+        end
+        after = false(nS, 1);                      %potentiation decays: not part of the steady reference
+        for r = find(rest)'
+            after = after | (tt > tt(r) & tt <= tt(r) + 10);
+        end
+        role(:) = {'other'};
+        role(isSteady) = {'steady'};
+        role(after) = {'afterRest'};
         role(rest) = {'postRest'};
-        pv = nan(nS, 1); pv(rest) = prevInt(rest);
-        gid = clusterValues(pv, 0, 0.05);
-        val = groupMedian(pv, gid);
+        val(rest) = prevInt(rest);
+        step(rest & inR) = 1:nnz(rest & inR);
         refRole = 'steady';
     case 'rockerspeed'
         val = rockerSpeedAt(H, tt, opts.rockerLogDelay);
@@ -105,6 +125,14 @@ switch lower(by)
         end
 end
 lbl = groupLabels(lower(by), val, role, by);
+if strcmpi(by, 'pauseLength')                      %one group per pause: equal labels get the pause number
+    ir = find(~isnan(step));
+    if ~isempty(ir)
+        [~, ~, iu] = unique(lbl(ir));
+        dup = ir(ismember(iu, find(accumarray(iu, 1) > 1)));
+        for i = dup', lbl{i} = sprintf('%s #%d', lbl{i}, step(i)); end
+    end
+end
 
 % ------------------------------------------------------------------ group of every contraction
 k = nan(height(B), 1);
@@ -117,8 +145,9 @@ for i = 1:height(B)
     if ~isempty(j), k(i) = j; end
 end
 bVal = nan(height(B), 1); bRole = repmat({''}, height(B), 1); bLbl = repmat({'unknown'}, height(B), 1);
+bStep = nan(height(B), 1);
 has = ~isnan(k);
-bVal(has) = val(k(has)); bRole(has) = role(k(has)); bLbl(has) = lbl(k(has));
+bVal(has) = val(k(has)); bRole(has) = role(k(has)); bLbl(has) = lbl(k(has)); bStep(has) = step(k(has));
 if strcmpi(by, 'rockerSpeed')                     %rocker speed at the peak
     bVal = rockerSpeedAt(H, B.t_peak, opts.rockerLogDelay);
     bLbl = groupLabels('rockerspeed', bVal, repmat({''}, height(B), 1), by);
@@ -126,6 +155,7 @@ end
 B.group = bLbl;
 B.groupValue = bVal;
 B.groupRole = bRole;
+B.groupStep = bStep;
 
 % ------------------------------------------------------------------ summary per group
 inR = tt >= range(1) & tt <= range(2);
@@ -134,20 +164,21 @@ captured = false(nS, 1);
 captured(isC) = C.stimCaptured(locC(isC));
 keys = unique([lbl(inR); B.group(B.t_peak >= range(1) & B.t_peak <= range(2))], 'stable');
 % order: role (as listed below), then value
-roleOrder = {'', 'S1', 'S2', 'postS2', 'other', 'steady', 'postRest'};
-kr = zeros(numel(keys), 1); kv = nan(numel(keys), 1);
+roleOrder = {'', 'S1', 'preS2', 'S2', 'postS2', 'steady', 'afterRest', 'postRest', 'other'};
+kr = zeros(numel(keys), 1); kv = nan(numel(keys), 1); ks = nan(numel(keys), 1);
 for q = 1:numel(keys)
     j = find(strcmp(lbl, keys{q}), 1);
     if ~isempty(j)
-        kr(q) = find(strcmp(roleOrder, role{j})); kv(q) = val(j);
+        kr(q) = find(strcmp(roleOrder, role{j})); kv(q) = val(j); ks(q) = step(j);
     else
         j = find(strcmp(B.group, keys{q}), 1);
-        kr(q) = find(strcmp(roleOrder, B.groupRole{j})); kv(q) = B.groupValue(j);
+        kr(q) = find(strcmp(roleOrder, B.groupRole{j})); kv(q) = B.groupValue(j); ks(q) = B.groupStep(j);
     end
 end
 kv2 = kv; kv2(isnan(kv2)) = inf;                   %unknown last
-[~, o] = sortrows([kr kv2]);
-keys = keys(o); kr = kr(o); kv = kv(o);
+ks2 = ks; ks2(isnan(ks2)) = inf;
+[~, o] = sortrows([kr kv2 ks2]);
+keys = keys(o); kr = kr(o); kv = kv(o); ks = ks(o);
 parts = cell(numel(keys), 1);
 for q = 1:numel(keys)
     js = inR & strcmp(lbl, keys{q});
@@ -161,7 +192,7 @@ for q = 1:numel(keys)
     capt = nan; reach = nan;
     if any(js), capt = 100 * mean(captured(js)); reach = 100 * mean(reached(js)); end
     T = addvars(T, capt, reach, 'After', 'missedBeats_percent', 'NewVariableNames', {'capture_percent', 'currentReached_percent'});
-    T = [table(keys(q), kv(q), roleOrder(kr(q)), {by}, 'VariableNames', {'group','groupValue','groupRole','groupBy'}), T]; %#ok<AGROW>
+    T = [table(keys(q), kv(q), roleOrder(kr(q)), ks(q), {by}, 'VariableNames', {'group','groupValue','groupRole','groupStep','groupBy'}), T]; %#ok<AGROW>
     parts{q} = T;
 end
 if isempty(parts)
@@ -213,18 +244,23 @@ for i = 1:n
         case 's2interval'
             switch role{i}
                 case 'S1', s = 'S1';
+                case 'preS2', s = 'pre-S2';
                 case 'other', s = 'other';
                 case 'S2', s = sprintf('S2 %d ms', round(1000 * v));
                 otherwise, s = sprintf('post-S2 %d ms', round(1000 * v));
             end
         case 'stimcurrent', s = sprintf('%g mA', v);
         case 'pauselength'
-            if strcmp(role{i}, 'steady'), s = 'steady'; else, s = sprintf('rest %.3g s', v); end
+            switch role{i}
+                case 'postRest', s = sprintf('rest %.3g s', v);
+                case 'afterRest', s = 'after rest';
+                otherwise, s = role{i};            %'steady', 'other'
+            end
         case 'rockerspeed', s = sprintf('%g rpm', v);
         case 'pulseduration', s = sprintf('%g ms', v);
         otherwise, s = sprintf('%s %g', strtrim(byName(5:end)), v);
     end
-    if isnan(v) && ~any(strcmp(role{i}, {'S1', 'other', 'steady'})), s = 'unknown'; end
+    if isnan(v) && ~any(strcmp(role{i}, {'S1', 'preS2', 'other', 'steady', 'afterRest'})), s = 'unknown'; end
     lbl{i} = s;
 end
 end

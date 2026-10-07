@@ -71,6 +71,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
                          metadata=None, showFigures=False, quiet=False, chunkSeconds=1800, protocol=None, groupBy=None,
                          **opt_kw):
     rockerGiven = any(k.lower() == "rocker" for k in opt_kw)
+    beatsGiven = any(k.lower() == "beats" for k in opt_kw)
     opts = make_options(**opt_kw)
     H = read_mdd(mdd_file, None, None, opts)
     protocols = None
@@ -102,8 +103,11 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     else:
         groupByR = [str(groupBy)] * nRanges
     grouping = any(g.lower() != "none" for g in groupByR)
-    if protocols is not None and not rockerGiven and not any(g.lower() == "rockerspeed" for g in groupByR):
-        opts.rocker = "stopped"  # protocols: contractions with the rocker at rest
+    if protocols is not None and not any(g.lower() == "rockerspeed" for g in groupByR):
+        if not rockerGiven:
+            opts.rocker = "stopped"  # protocols: contractions with the rocker at rest ...
+        if not beatsGiven:
+            opts.beats = "stimulated"  # ... that follow a stimulus
     dc = [int(c) for c in np.asarray(H.dataChannels).ravel()]
     if channels is None or np.size(channels) == 0:
         channels = dc

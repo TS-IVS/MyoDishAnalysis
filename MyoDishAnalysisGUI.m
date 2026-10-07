@@ -1708,7 +1708,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             prG = prS(strcmp(prS.range, prK{1}) & prS.channel == str2double(prK{2}), :);
             prC = prCol(mod(q-1, size(prCol,1)) + 1, :);
             for prRo = unique(prG.groupRole, 'stable')'
-                if strcmp(prRo{1}, 'other'), continue; end    %S1-S2: stimuli at other intervals (table only)
+                if any(strcmp(prRo{1}, {'other', 'preS2', 'afterRest'})), continue; end   %no value: table only
                 prR = prG(strcmp(prG.groupRole, prRo{1}), :);
                 prY = prR.(prM);
                 if any(strcmp(prRo{1}, {'S1', 'steady'}))           %reference: horizontal line

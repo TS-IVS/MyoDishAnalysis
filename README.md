@@ -251,18 +251,18 @@ P = mda_protocols(file)                                              % protocols
   | `groupBy` | value | default for |
   |---|---|---|
   | `pacingFrequency` | 1 / interval from the previous stimulus (Hz); intervals within 2 % are one group; label rounded to 0.05 Hz | FFR |
-  | `S2interval` | S2 = premature stimulus (interval < 95 % of the previous one, next interval longer, previous stimulus not premature); groups `S2 <ms>` and `post-S2 <ms>` (the next stimulus; post-extrasystolic potentiation; S2 intervals within 7.5 ms are one group), `S1` (other stimuli at the basic interval, median ± 5 %) and `other` (other intervals, e.g. trains at a higher rate between the S1-S2 steps; analyse them with `pacingFrequency`) | RP |
+  | `S2interval` | S2 = premature stimulus (interval < 95 % of the previous one, next interval longer, previous stimulus not premature); groups `S2 <ms>` and `post-S2 <ms>` (the next stimulus; post-extrasystolic potentiation; S2 intervals within 7.5 ms are one group), `S1` (other stimuli at the basic interval, median ± 5 %, not followed by an S2), `pre-S2` (S1 followed by an S2: relaxation cut off) and `other` (other intervals, e.g. trains at a higher rate between the S1-S2 steps; analyse them with `pacingFrequency`) | RP |
   | `stimCurrent` | current of the pulse (mA, status channel); `currentReached_percent` per group | ST |
-  | `pauseLength` | first stimulus after a pause (interval ≥ 1.5 s and ≥ 1.5 × the median interval): `rest <s>` (within 5 % one group); all others `steady` | PRP |
+  | `pauseLength` | first stimulus after a pause (interval ≥ 1.5 s, ≥ 1.5 × the median interval and ≥ 1.5 × the interval before; the median interval returns within the next 3 stimuli): `rest <s>`, one group per pause with `groupStep` = number of the pause (pooling over channels whose effective pauses differ); stimuli within 10 s after a pause `after rest` (decaying potentiation, not part of the reference); other stimuli at the median interval (± 5 %) `steady` (reference); all others `other` | PRP |
   | `pulseDuration` | `chargeDuration` entry of the log file for the stimulated channel (ms) | PD |
   | `rockerSpeed` | rocker speed at the peak (rpm, `rockerSpeed` entries of the log file); all contractions by default | rockerSpeed |
   | `log:<code>` | any numeric entry of the log file for the stimulated channel (or channel 0), e.g. `log:pauseDuration` | – |
-* **Summary**: one row per protocol, channel and group with `group`, `groupValue`, `groupRole`, `groupBy`, `nStimuli`,
+* **Summary**: one row per protocol, channel and group with `group`, `groupValue`, `groupRole`, `groupStep`, `groupBy`, `nStimuli`,
   `nContractions`, `capture_percent` (stimuli followed by a contraction, independent of the rocker filter),
   `amplitude_pctOfRef` (mean amplitude in % of the group `S1` / `steady`) and mean, SD and n of all parameters. The
   contraction table gets the columns `group`, `groupValue`, `groupRole`; the Excel output a sheet `protocols`.
-* **Rocker**: with `'protocol'` only contractions with the rocker at rest are included unless `'rocker'` is given
-  (grouping by rocker speed: all). Sharp-electrode recordings (no rocker) and protocols without rocker stops need
+* **Rocker, stimulated beats**: with `'protocol'` only stimulated contractions (`'beats','stimulated'`) with the
+  rocker at rest are included unless `'rocker'` / `'beats'` is given (grouping by rocker speed: all). Sharp-electrode recordings (no rocker) and protocols without rocker stops need
   `'rocker','any'` (GUI: "all contractions"). A contraction counts as "rocker moving" if the rocker moved anywhere
   between its diastolic minimum and 90 % relaxation. After a stimulation pause the diastolic minimum is searched only
   in the last 0.5 s before the stimulus (option `pauseDiastoleWindow`), so that rocker movement or drift during the

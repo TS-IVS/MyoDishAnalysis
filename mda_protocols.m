@@ -8,7 +8,8 @@ function P = mda_protocols(src)
 % ended'. A start is paired with the next end of the same name (otherwise of the same type). A start without an
 % end lasts until the next protocol of the same type or the end of the file (note 'no end comment'). Protocols
 % within a protocol of the same type (e.g. 'PRP protocol started' within 'start post rest potentiation protocol')
-% are not listed separately. Comments about the recording itself ('Started parallel recording ...') and about schedule
+% are not listed separately; a start comment repeated within 10 s counts once. A gap of > 10 min between the log
+% entries within a protocol is noted ('gap of 23.5 h in the log': schedule stalled). Comments about the recording itself ('Started parallel recording ...') and about schedule
 % files ('start scheduleFile_humanVentricle', 'end of schedule file ...') are ignored.
 % Schedule files loaded by a schedule (log events 'Loaded schedule file <path>' ... 'Jumped back from loaded schedule
 % file <path>') are protocols, too, if their file name contains a protocol keyword (e.g. PD_Test_12Steps.txt,
@@ -41,6 +42,7 @@ else
     end
 end
 E = mda_logEntries(logFile);
+tAll = sort(E.t_file(isfinite(E.t_file)));       %all log entries (gaps within a protocol)
 E = E((E.isComment | strcmpi(E.code, 'schedule')) & isfinite(E.t_file), :);
 E = sortrows(E, 't_file');                        %stable
 
@@ -92,15 +94,19 @@ for i = 1:numel(st)
     end
 end
 st = st(~drop);
-% other starts without end: until the next start of the same type or the end of the file
+% other starts without end: until the next start of the same type or the end of the file; a start followed by
+% another start of the same type within 10 s is a repeated comment and dropped
+drop = false(1, numel(st));
 for i = 1:numel(st)
     if isnan(st(i).to)
         nxt = [st(i+1:end).from];
         nxt = nxt(strcmp({st(i+1:end).type}, st(i).type));
         if ~isempty(nxt), st(i).to = nxt(1); else, st(i).to = T; end
         st(i).note = 'no end comment';
+        drop(i) = ~isempty(nxt) && nxt(1) - st(i).from < 10;
     end
 end
+st = st(~drop);
 % protocols within a protocol of the same type are not listed separately
 keep = true(1, numel(st));
 for i = 1:numel(st)
@@ -112,6 +118,17 @@ for i = 1:numel(st)
     end
 end
 st = st(keep);
+% a gap of > 10 min between the log entries within a protocol (e.g. the schedule stalled and the remaining commands
+% were sent later at once): note
+for i = 1:numel(st)
+    if ~isfinite(st(i).to), continue; end
+    g = max(diff([st(i).from; tAll(tAll > st(i).from & tAll < st(i).to); st(i).to]));
+    if g > 600
+        if g >= 3600, gs = sprintf('%.1f h', floor(g / 360) / 10); else, gs = sprintf('%d min', floor(g / 60)); end
+        if isempty(st(i).note), st(i).note = ['gap of ' gs ' in the log'];
+        else, st(i).note = [st(i).note '; gap of ' gs ' in the log']; end
+    end
+end
 n = numel(st);
 number = zeros(n, 1); groupBy = cell(n, 1);
 for i = 1:n

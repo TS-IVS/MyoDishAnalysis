@@ -44,14 +44,15 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %                       protocol' / 'end ... protocol') instead of fromSeconds / toSeconds: a type ('FFR', 'RP',
 %                       'ST', 'PRP', 'PD', 'rockerSpeed'), 'all', row numbers of mda_protocols(file), or a table like
 %                       its output (e.g. with corrected from / to). Range labels: 'FFR 1', 'FFR 2', ... With a
-%                       protocol, only contractions with the rocker at rest are included unless 'rocker' is given
-%                       (grouping by rocker speed: all contractions).
+%                       protocol, only stimulated contractions with the rocker at rest are included unless 'rocker'
+%                       / 'beats' is given (grouping by rocker speed: all contractions).
 %   'groupBy', q        group the contractions by a stimulation quantity and summarize per group (see
 %                       mda_groupBeats): 'pacingFrequency', 'S2interval', 'stimCurrent', 'pauseLength',
 %                       'rockerSpeed', 'pulseDuration', 'log:<code>', 'none'. Default with 'protocol': the quantity
 %                       of the protocol type (FFR: pacingFrequency, RP: S2interval, ST: stimCurrent, PRP:
 %                       pauseLength, PD: pulseDuration). The summary then has one row per range, channel and group
-%                       (columns group, groupValue, groupRole, groupBy, capture_percent, amplitude_pctOfRef, ...).
+%                       (columns group, groupValue, groupRole, groupStep, groupBy, capture_percent,
+%                       amplitude_pctOfRef, ...).
 %   further options: see mda_options (filters, stimulus assignment, file format)
 %
 % EXAMPLES
@@ -99,6 +100,7 @@ end
 rk = rest;
 if ~isempty(rk) && isstruct(rk{1}), rk = rk(2:end); end   %options struct first (GUI)
 rockerGiven = any(cellfun(@(x) (ischar(x) || isstring(x)) && strcmpi(x, 'rocker'), rk(1:2:end)));
+beatsGiven = any(cellfun(@(x) (ischar(x) || isstring(x)) && strcmpi(x, 'beats'), rk(1:2:end)));
 opts = mda_options(rest{:});
 
 % ------------------------------------------------------------------ file and ranges
@@ -136,8 +138,9 @@ else
     groupByR = repmat({groupBy}, nRanges, 1);
 end
 grouping = any(~strcmpi(groupByR, 'none'));
-if ~isempty(protocols) && ~rockerGiven && ~any(strcmpi(groupByR, 'rockerSpeed'))
-    opts.rocker = 'stopped';                       %protocols: contractions with the rocker at rest
+if ~isempty(protocols) && ~any(strcmpi(groupByR, 'rockerSpeed'))
+    if ~rockerGiven, opts.rocker = 'stopped'; end   %protocols: contractions with the rocker at rest ...
+    if ~beatsGiven, opts.beats = 'stimulated'; end  %... that follow a stimulus
 end
 if isempty(channels), channels = H.dataChannels; end
 channels = channels(:)';
@@ -234,9 +237,10 @@ for r = 1:nR
             T = mda_summarize(B, Cm, ranges(r,:));
             if grouping                            %same columns as the grouped ranges
                 B.group = repmat({'all'}, height(B), 1); B.groupValue = nan(height(B), 1); B.groupRole = repmat({''}, height(B), 1);
+                B.groupStep = nan(height(B), 1);
                 T = addvars(T, nan, nan, 'After', 'missedBeats_percent', 'NewVariableNames', {'capture_percent', 'currentReached_percent'});
                 T = addvars(T, nan(height(T), 1), 'After', 'amplitude_SD', 'NewVariableNames', 'amplitude_pctOfRef');
-                T = [table({'all'}, nan, {''}, {'none'}, 'VariableNames', {'group','groupValue','groupRole','groupBy'}), T]; %#ok<AGROW>
+                T = [table({'all'}, nan, {''}, nan, {'none'}, 'VariableNames', {'group','groupValue','groupRole','groupStep','groupBy'}), T]; %#ok<AGROW>
             end
         end
         T = [table(repmat(labels(r), height(T), 1), 'VariableNames', {'range'}), T]; %#ok<AGROW>

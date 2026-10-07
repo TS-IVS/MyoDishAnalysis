@@ -272,7 +272,7 @@ class ProtocolWindow(QtWidgets.QWidget):
             col = COLORS[k % len(COLORS)]
             k += 1
             for role, Gr in G.groupby("groupRole", sort=False):
-                if role == "other":  # S1-S2: stimuli at other intervals (table only)
+                if role in ("other", "preS2", "afterRest"):  # no value: table only
                     continue
                 y = Gr[mcol].to_numpy(float)
                 x = Gr["groupValue"].to_numpy(float) * xf
