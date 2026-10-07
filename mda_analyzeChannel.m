@@ -31,7 +31,9 @@ function [B, C] = mda_analyzeChannel(S, channel, range, opts)
 %      by minStimToPeak ... maxStimToPeak (and is the most prominent peak after this stimulus), otherwise
 %      'extra'. Channels without stimulus pulses: 'unpaced'.
 %   4. parameters, per contraction, between the previous and the next peak (at most maxBeatWindow s):
-%      diastolic minimum before the peak (F_dia) and minimum after the peak (F_min,post)
+%      diastolic minimum before the peak (F_dia) and minimum after the peak (F_min,post). After a stimulation
+%      pause (stimulus interval >= 2.5 s and >= 1.5 x the interval before) F_dia is searched only from
+%      pauseDiastoleWindow (0.5 s) before the stimulus (mda_options).
 %        amplitude       F_peak - F_dia                                                [uN]
 %        diastolicForce  F_dia - zero force (zero = 'Offset' of the channel in the log file or 'zeroForce') [uN]
 %        diastolicSignal F_dia (sensor signal at the minimum before the peak)            [uN]
@@ -52,7 +54,9 @@ function [B, C] = mda_analyzeChannel(S, channel, range, opts)
 
 if nargin < 3, range = []; end
 if nargin < 4 || isempty(opts), opts = mda_options(); end
-if ~isfield(opts, 'rockerFilter') || ~isfield(opts, 'referenceBeat'), opts = mda_options(opts); end   %options struct of an older version
+if ~isfield(opts, 'rockerFilter') || ~isfield(opts, 'referenceBeat') || ~isfield(opts, 'pauseDiastoleWindow')
+    opts = mda_options(opts);       %options struct of an older version
+end
 
 row = find(S.dataChannels == channel, 1);
 if isempty(row)
@@ -132,6 +136,7 @@ tPk = t(iPk);
 % ------------------------------------------------------------------ stimulus assignment
 beatType = repmat({'unpaced'}, nPk, 1);
 tStimOfBeat = nan(nPk, 1);
+jStimOfBeat = zeros(nPk, 1);
 stimCaptured = false(numel(ST), 1);
 if ~isempty(ST)
     beatType(:) = {'extra'};
@@ -148,8 +153,20 @@ if ~isempty(ST)
         k = ks(best);
         beatType{k} = 'stimulated';
         tStimOfBeat(k) = ST(jj);
+        jStimOfBeat(k) = jj;
         stimCaptured(jj) = true;
     end
+end
+% contractions after a stimulation pause (stimulus interval >= 2.5 s and >= 1.5 x the interval before; without a
+% previous stimulus in the data: time since the start of the data; without the interval before: median interval):
+% F_dia is searched only from opts.pauseDiastoleWindow before the stimulus, not during the pause (drift, rocker
+% movement until shortly before the stimulus, e.g. post-rest potentiation protocols)
+afterPause = false(nPk, 1);
+for k = find(jStimOfBeat > 0)'
+    jj = jStimOfBeat(k);
+    if jj >= 2, prevInt = ST(jj) - ST(jj-1); else, prevInt = ST(jj) - t(1); end
+    if jj >= 3, before = ST(jj-1) - ST(jj-2); else, before = CL; end
+    afterPause(k) = prevInt >= max(2.5, 1.5 * before);
 end
 
 % ------------------------------------------------------------------ zero force (sensor signal without load)
@@ -174,6 +191,7 @@ for q = 1:n
     if k < nPk, b = iPk(k+1); else, b = N; end
     a = max([a, i - maxW, 1]);
     b = min([b, i + maxW, N]);
+    if afterPause(k), a = max(a, find(t >= tStimOfBeat(k) - opts.pauseDiastoleWindow, 1)); end
     [Fdia, ia] = min(f(i:-1:a)); ia = i - ia + 1;   %last minimum before the peak (flat diastole: the one next to the upstroke)
     [Fpost, ib] = min(f(i:b));  ib = i + ib - 1;
     Fpk = f(i);

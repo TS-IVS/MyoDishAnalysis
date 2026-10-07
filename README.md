@@ -259,15 +259,18 @@ P = mda_protocols(file)                                              % protocols
 * **Rocker**: with `'protocol'` only contractions with the rocker at rest are included unless `'rocker'` is given
   (grouping by rocker speed: all). Sharp-electrode recordings (no rocker) and protocols without rocker stops need
   `'rocker','any'` (GUI: "all contractions"). A contraction counts as "rocker moving" if the rocker moved anywhere
-  between its diastolic minimum and 90 % relaxation; after long rests (PRP) the diastolic minimum can lie in the rest
-  while the rocker still moved.
+  between its diastolic minimum and 90 % relaxation. After a stimulation pause the diastolic minimum is searched only
+  in the last 0.5 s before the stimulus (option `pauseDiastoleWindow`), so that rocker movement or drift during the
+  rest does not count (PRP: the rocker typically stops ~1.2 s before the post-rest stimulus).
 * Examples: `examples/example3_humanVentricle` (FFR), `example8_rabbitVentricle_EP` (RP: no response ≤ 463 ms,
   response at 492 ms), `example2_rabbitVentricle` (PD, ST), `example7_pigVentricle` (PRP), `example1_rabbitVentricle`
   (rocker speed).
 
 ## Parameters (per contraction)
 Within the cycle between the previous and the next peak (at most 3 s on each side):
-F_dia = minimum before the peak, F_min,post = minimum after the peak.
+F_dia = minimum before the peak, F_min,post = minimum after the peak. After a stimulation pause (stimulus interval
+≥ 2.5 s and ≥ 1.5 × the interval before) F_dia is searched only from 0.5 s before the stimulus
+(`pauseDiastoleWindow`; `Inf` = as for all other contractions).
 Upstroke levels = F_dia + x % of the amplitude (last crossing before the peak); relaxation levels =
 F_min,post + (100 − x) % of (F_peak − F_min,post) (first crossing after the peak). Crossing times are
 interpolated linearly between samples; dF/dt = central difference of the filtered signal.

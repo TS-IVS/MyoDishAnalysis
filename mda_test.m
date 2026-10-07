@@ -13,8 +13,10 @@ function ok = mda_test()
 % Reference beat: shoulder, partial response, slow relaxation and (aligned at the stimulus) a 40 ms longer latency must
 % deviate by > 5 SD, normal beats < 3 SD (normalized); the partial response (half amplitude, same shape) only in the
 % absolute deviation, the longer latency not when aligned at the 50 % upstroke.
+% Stimulation pause: after a 9 s pause with rocker movement until 1.2 s before the stimulus, F_dia (amplitude 1000 uN)
+% and the rocker state of the first contraction come from the 0.5 s before its stimulus (option pauseDiastoleWindow).
 %
-% TS 2026-10-05
+% TS 2026-10-05 (stimulation pause 2026-10-07)
 
 dt = 0.005;
 t = 0:dt:20;
@@ -125,6 +127,34 @@ fprintf(['relative to the reference: amplitude normal %.0f-%.0f %%, partial %.0f
     max(pa(tp == 0)), min(pa(tp == 2)), max(pa(tp == 2)), min(pr(tp == 3)), max(pr(tp == 3)), ...
     max(abs(B.diastolicForce_dRef(tp == 0))), passStr(okP));
 ok = ok && okP;
+
+% stimulation pause (2026-10-07): 1 Hz, pause of 9 s, rocker moving (artifact +-120 uN) until 1.2 s before the next
+% stimulus. F_dia of the first contraction after the pause: only from pauseDiastoleWindow (0.5 s) before its stimulus
+% (amplitude 1000 uN, rocker stopped); with the whole window (Inf) the artifact gives F_dia and the rocker state.
+t = 0:dt:30;
+F = 100 * ones(size(t));
+onset = [1:10, 19:28];
+for k = 1:numel(onset)
+    I = t >= onset(k) & t < onset(k) + 0.2;
+    F(I) = 100 + 1000 * (t(I) - onset(k)) / 0.2;
+    I = t >= onset(k) + 0.2 & t < onset(k) + 0.6;
+    F(I) = 1100 - 1000 * (t(I) - onset(k) - 0.2) / 0.4;
+end
+on = t >= 13.5 & t < 17.7;
+F(on) = F(on) + 120 * sin(2*pi*1.2*t(on));
+S = struct('dataChannels', 1, 'dt', dt, 't', t, 'force', F, 'rockerOn', on, 'fromSeconds', 0, 'toSeconds', 30);
+S.stim = struct('time', (onset - 0.1)', 'channel', ones(numel(onset), 1));
+o = mda_options('noFiltering', 'zeroForce', 40);
+B = mda_analyzeChannel(S, 1, [0.5 29.5], o);
+B0 = mda_analyzeChannel(S, 1, [0.5 29.5], mda_options(o, 'pauseDiastoleWindow', inf));
+p = abs(B.t_stim - 18.9) < 1e-9;
+okS = height(B) == 20 && height(B0) == 20 && sum(p) == 1 && abs(B.amplitude(p) - 1000) < 1e-6 && ...
+    abs(B.diastolicSignal(p) - 100) < 1e-6 && ~B.rockerMoving(p) && B0.amplitude(p) > 1050 && B0.rockerMoving(p) && ...
+    max(abs(B.amplitude(~p) - B0.amplitude(~p))) < 1e-9 && ~any(B.rockerMoving);
+fprintf(['stimulation pause 9 s, rocker moving until 1.2 s before the stimulus: amplitude %.1f uN (expected 1000; ' ...
+    'whole window %.1f), rocker moving %d (whole window %d), other contractions unchanged   %s\n'], B.amplitude(p), ...
+    B0.amplitude(p), B.rockerMoving(p), B0.rockerMoving(p), passStr(okS));
+ok = ok && okS;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
 end
 

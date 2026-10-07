@@ -43,6 +43,10 @@ DIASTOLIC FORCE
   zeroForce        sensor signal without load [uN] for diastolicForce = F_dia - zeroForce (None = 'Offset' entry of
                    the channel in the log file; NaN = from the log file). myodish_analysis(): one value per
                    channel or one for all channels
+  pauseDiastoleWindow  after a stimulation pause (stimulus interval >= 2.5 s and >= 1.5 x the interval before),
+                   F_dia is searched only from this time before the stimulus to the peak [s] (default 0.5; inf = from
+                   the previous peak or maxBeatWindow, as for all other contractions). F_dia and the rocker state then
+                   do not depend on drift or rocker movement during the pause
 
 FILE FORMAT (normally taken from the log file <name>_log.log next to the .mdd file; these options override it)
   samplingRate     [Hz] (None = from the log file; without log file 400 Hz)
@@ -56,9 +60,11 @@ FILE FORMAT (normally taken from the log file <name>_log.log next to the .mdd fi
                    'status' or 'log' forces one source
   rockerLogDelay   delay of the rocker movement after a 'rockerSpeed' entry of the log file [s] (default 0.27)
 
-TS 2026-10-06 (port of mda_options.m, TS 2026-10-05; rockerSource 2026-10-07)
+TS 2026-10-06 (port of mda_options.m, TS 2026-10-05; rockerSource, pauseDiastoleWindow 2026-10-07)
 """
 from __future__ import annotations
+
+import numbers
 
 from ._matlab import Struct, mround
 
@@ -87,6 +93,7 @@ _DEFAULTS = dict(
     calibration="auto",
     rockerSource="auto",
     rockerLogDelay=0.27,
+    pauseDiastoleWindow=0.5,
 )
 NAMES = list(_DEFAULTS)
 
@@ -145,6 +152,10 @@ def options(base=None, **changes):
         raise ValueError("options: 'referenceBeat' must be None or a reference from reference_beat.create.")
     else:
         opts.referenceBeat = list(opts.referenceBeat)
+    pw = opts.pauseDiastoleWindow
+    if isinstance(pw, (bool, str)) or not isinstance(pw, numbers.Real) or not pw > 0:
+        raise ValueError("options: 'pauseDiastoleWindow' must be a positive number of seconds (inf = off).")
+    opts.pauseDiastoleWindow = float(pw)
     opts.calibration = str(opts.calibration).lower()
     if opts.calibration not in ("auto", "none"):
         raise ValueError("options: 'calibration' must be 'auto' or 'none'.")

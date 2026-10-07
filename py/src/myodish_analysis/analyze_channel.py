@@ -24,7 +24,9 @@ PROCESSING (see the MATLAB help and README)
      threshold: relThreshold x typical amplitude, at least minThreshold
   3. stimulus assignment: 'stimulated' if the peak follows a stimulus of the channel by minStimToPeak ...
      maxStimToPeak (and is the most prominent peak after this stimulus), otherwise 'extra'; 'unpaced' without stimuli
-  4. parameters between the previous and the next peak (at most maxBeatWindow s), see parameters.py
+  4. parameters between the previous and the next peak (at most maxBeatWindow s), see parameters.py. After a
+     stimulation pause (stimulus interval >= 2.5 s and >= 1.5 x the interval before) F_dia is searched only from
+     pauseDiastoleWindow (0.5 s) before the stimulus (options.py)
 
 TS 2026-10-06 (port of mda_analyzeChannel.m, TS 2026-10-05)
 """
@@ -47,7 +49,7 @@ UNITS_FIRST = {"channel": "", "contraction": "", "t_peak": "s", "beatType": "", 
 def analyze_channel(S, channel, range_=None, opts=None):
     if opts is None:
         opts = _options()
-    elif "rockerFilter" not in opts or "referenceBeat" not in opts:
+    elif "rockerFilter" not in opts or "referenceBeat" not in opts or "pauseDiastoleWindow" not in opts:
         opts = _options(opts)
     dataChannels = list(np.asarray(S.dataChannels).ravel())
     if channel not in dataChannels:
@@ -122,6 +124,7 @@ def analyze_channel(S, channel, range_=None, opts=None):
     # ------------------------------------------------------------------ stimulus assignment
     beatType = np.array(["unpaced"] * nPk, dtype=object)
     tStimOfBeat = np.full(nPk, np.nan)
+    jStimOfBeat = np.full(nPk, -1)
     stimCaptured = np.zeros(ST.size, bool)
     if ST.size:
         beatType[:] = "extra"
@@ -135,7 +138,18 @@ def analyze_channel(S, channel, range_=None, opts=None):
             k = ks[np.argmax(promPk[ks])]  # several peaks after one stimulus: the most prominent one
             beatType[k] = "stimulated"
             tStimOfBeat[k] = ST[jj]
+            jStimOfBeat[k] = jj
             stimCaptured[jj] = True
+    # contractions after a stimulation pause (stimulus interval >= 2.5 s and >= 1.5 x the interval before; without a
+    # previous stimulus in the data: time since the start of the data; without the interval before: median interval):
+    # F_dia is searched only from opts.pauseDiastoleWindow before the stimulus, not during the pause (drift, rocker
+    # movement until shortly before the stimulus, e.g. post-rest potentiation protocols)
+    afterPause = np.zeros(nPk, bool)
+    for k in np.flatnonzero(jStimOfBeat >= 0):
+        jj = jStimOfBeat[k]
+        prevInt = ST[jj] - ST[jj - 1] if jj >= 1 else ST[jj] - t[0]
+        before = ST[jj - 1] - ST[jj - 2] if jj >= 2 else CL
+        afterPause[k] = prevInt >= np.fmax(2.5, 1.5 * before)
 
     # ------------------------------------------------------------------ zero force
     _, zeroSource, zeroT, zeroV = zero_force(S, channel, opts.zeroForce)
@@ -156,6 +170,8 @@ def analyze_channel(S, channel, range_=None, opts=None):
         b = iPk[k + 1] if k < nPk - 1 else N - 1
         a = max(a, i - maxW, 0)
         b = min(b, i + maxW, N - 1)
+        if afterPause[k]:
+            a = max(a, int(np.searchsorted(t, tStimOfBeat[k] - opts.pauseDiastoleWindow, side="left")))
         seg = f[a:i + 1][::-1]  # f(i:-1:a): last minimum before the peak (flat diastole: the one next to the upstroke)
         ia = i - int(np.argmin(seg))
         Fdia = f[ia]

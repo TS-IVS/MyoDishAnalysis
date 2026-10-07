@@ -47,6 +47,10 @@ function opts = mda_options(varargin)
 %   'zeroForce'        sensor signal without load [uN] for diastolicForce = F_dia - zeroForce ([] = 'Offset' entry of
 %                      the channel in the log file; NaN = from the log file). MyoDishAnalysis: one value per
 %                      channel or one for all channels
+%   'pauseDiastoleWindow' after a stimulation pause (stimulus interval >= 2.5 s and >= 1.5 x the interval before),
+%                      F_dia is searched only from this time before the stimulus to the peak [s] (default 0.5;
+%                      Inf = from the previous peak or maxBeatWindow, as for all other contractions). F_dia and the
+%                      rocker state then do not depend on drift or rocker movement during the pause
 %
 % FILE FORMAT (normally taken from the log file <name>_log.log next to the .mdd file; these options override it)
 %   'samplingRate'     [Hz] ([] = from the log file; without log file 400 Hz)
@@ -63,7 +67,7 @@ function opts = mda_options(varargin)
 %                      'status' or 'log' forces one source
 %   'rockerLogDelay'   delay of the rocker movement after a 'rockerSpeed' entry of the log file [s] (default 0.27)
 %
-% TS 2026-10-05 (rockerSource 2026-10-07)
+% TS 2026-10-05 (rockerSource, pauseDiastoleWindow 2026-10-07)
 
 opts = struct( ...
     'threshold', 'auto', ...
@@ -89,7 +93,8 @@ opts = struct( ...
     'extendedSensorFactor', 3.3, ...
     'calibration', 'auto', ...
     'rockerSource', 'auto', ...
-    'rockerLogDelay', 0.27);
+    'rockerLogDelay', 0.27, ...
+    'pauseDiastoleWindow', 0.5);
 
 args = varargin;
 if ~isempty(args) && isstruct(args{1})
@@ -145,6 +150,9 @@ opts.rockerFilter = isequal(opts.rockerFilter, true) || isequal(opts.rockerFilte
     ((ischar(opts.rockerFilter) || isstring(opts.rockerFilter)) && any(strcmpi(opts.rockerFilter, {'on','true'})));
 if ~isempty(opts.referenceBeat) && ~isstruct(opts.referenceBeat)
     error('mda_options: ''referenceBeat'' must be [] or a reference from mda_referenceBeat.');
+end
+if ~(isnumeric(opts.pauseDiastoleWindow) && isscalar(opts.pauseDiastoleWindow) && opts.pauseDiastoleWindow > 0)
+    error('mda_options: ''pauseDiastoleWindow'' must be a positive number of seconds (Inf = off).');
 end
 opts.calibration = lower(char(opts.calibration));
 if ~ismember(opts.calibration,{'auto','none'}), error('mda_options: ''calibration'' must be ''auto'' or ''none''.'); end

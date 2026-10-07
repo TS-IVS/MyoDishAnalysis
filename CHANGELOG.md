@@ -22,6 +22,13 @@ MATLAB and Python versions have the same version number and give the same result
   plot of a parameter against the quantity (mean ± SD / SEM), result table, figure and data export.
 
 ### Changed
+- Diastolic minimum (F_dia) after a stimulation pause (stimulus interval ≥ 2.5 s and ≥ 1.5 × the interval before):
+  searched only from 0.5 s before the stimulus (new option `pauseDiastoleWindow`, `Inf` = previous behaviour), not
+  during the pause. Post-rest contractions of PRP protocols were counted as "rocker moving" (and excluded with
+  `'rocker','stopped'`) because the minimum lay in the rest while the rocker still moved. Example 7: all post-rest
+  contractions (3–61 s) are now included, amplitudes ≤ 1.3 % lower. In the other examples only the first
+  contraction after a longer interval changes (FFR step to 0.2 Hz, ST pause of 6 s; ≤ 0.6 %, with rocker filter
+  ≤ 1.8 %); regular pacing is unchanged.
 - Tests: tolerance of the rocker-filter comparison per statistic (summary means 0.5 %, SDs 2 %); which flat peaks move
   by one sample depends on the linear-algebra library.
 

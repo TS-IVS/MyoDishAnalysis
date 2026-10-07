@@ -14,6 +14,8 @@ Reference beat: shoulder, partial response, slow relaxation and (aligned at the 
 deviate by > 5 SD, normal beats < 3 SD (normalized); the partial response (half amplitude, same shape) only in the
 absolute deviation, the longer latency not when aligned at the 50 % upstroke. The noise is drawn with numpy (the
 MATLAB test uses rng(3)); the criteria are the same. tests/compare_matlab.py compares with MATLAB on identical signals.
+Stimulation pause: after a 9 s pause with rocker movement until 1.2 s before the stimulus, F_dia (amplitude 1000 uN)
+and the rocker state of the first contraction come from the 0.5 s before its stimulus (option pauseDiastoleWindow).
 
 TS 2026-10-06 (port of mda_test.m, TS 2026-10-05)
 """
@@ -160,6 +162,29 @@ def selftest(verbose=True, seed=3):
         f"{pr[tp == 3].min():.0f}-{pr[tp == 3].max():.0f} % (expected 150) | diastolic force difference normal max "
         f"{np.abs(dd[tp == 0]).max():.0f} uN   {_pass(okP)}")
     ok = ok and okP
+
+    # stimulation pause: 1 Hz, pause of 9 s, rocker moving (artifact +-120 uN) until 1.2 s before the next stimulus.
+    # F_dia of the first contraction after the pause: only from pauseDiastoleWindow (0.5 s) before its stimulus
+    # (amplitude 1000 uN, rocker stopped); with the whole window (inf) the artifact gives F_dia and the rocker state.
+    t = colon(0, dt, 30)
+    onset = np.r_[np.arange(1, 11), np.arange(19, 29)].astype(float)
+    F = synthetic_signal(t, onset)
+    on = (t >= 13.5) & (t < 17.7)
+    F[on] = F[on] + 120 * np.sin(2 * np.pi * 1.2 * t[on])
+    S = _S(t, F, onset, on=on)
+    o = options(noFiltering=True, zeroForce=40)
+    B, _ = analyze_channel(S, 1, [0.5, 29.5], o)
+    B0, _ = analyze_channel(S, 1, [0.5, 29.5], options(o, pauseDiastoleWindow=np.inf))
+    p = np.abs(B["t_stim"].to_numpy() - 18.9) < 1e-9
+    a, a0 = B["amplitude"].to_numpy(), B0["amplitude"].to_numpy()
+    rm, rm0 = B["rockerMoving"].to_numpy(bool), B0["rockerMoving"].to_numpy(bool)
+    okS = bool(len(B) == 20 and len(B0) == 20 and p.sum() == 1 and abs(a[p][0] - 1000) < 1e-6
+               and abs(B["diastolicSignal"].to_numpy()[p][0] - 100) < 1e-6 and not rm[p][0] and a0[p][0] > 1050
+               and rm0[p][0] and np.max(np.abs(a[~p] - a0[~p])) < 1e-9 and not rm.any())
+    out(f"stimulation pause 9 s, rocker moving until 1.2 s before the stimulus: amplitude {a[p][0]:.1f} uN (expected "
+        f"1000; whole window {a0[p][0]:.1f}), rocker moving {int(rm[p][0])} (whole window {int(rm0[p][0])}), other "
+        f"contractions unchanged   {_pass(okS)}")
+    ok = ok and okS
     out("selftest: all tests passed." if ok else "selftest: TEST FAILED.")
     return bool(ok)
 
