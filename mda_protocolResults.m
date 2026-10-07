@@ -210,7 +210,7 @@ if nT < 3, notes = {sprintf('only %d steady-state S1 beats with the rocker at re
 m = mean(Y, 2);
 A1 = max(m);
 R.amplitudeS1_uN = A1;
-if A1 <= 0, notes = {'no S1 contraction'}; return; end
+if A1 <= 1e-6, notes = {'no S1 contraction'}; return; end   %flat signal: A1 ~ +-1e-12 (rounding), 2026-10-08
 
 n = numel(jS2);
 CI = nan(n, 1); resp = nan(n, 1); prom = nan(n, 1);

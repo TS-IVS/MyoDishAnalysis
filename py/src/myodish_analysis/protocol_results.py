@@ -211,7 +211,7 @@ def _s2_results(R, Z, trace, opts):
     m = Y.mean(axis=1)
     A1 = float(np.max(m))
     R["amplitudeS1_uN"] = A1
-    if A1 <= 0:
+    if A1 <= 1e-6:  # flat signal: A1 ~ +-1e-12 (rounding, sign depends on the order of summation), 2026-10-08
         return ["no S1 contraction"]
 
     nTg = tg.size
