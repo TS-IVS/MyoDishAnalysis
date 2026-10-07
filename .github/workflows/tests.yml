@@ -29,7 +29,17 @@ jobs:
       - name: Self test
         run: mda-test
       - name: pytest (incl. comparison with the MATLAB results on the example recordings)
-        run: python -m pytest -q py/tests
+        shell: bash
+        run: python -m pytest -q -rfE --tb=short py/tests 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
+      - name: Report pytest failures as annotations
+        if: failure()
+        shell: bash
+        run: |
+          python - <<'PY'
+          lines = open("pytest.log", encoding="utf-8", errors="replace").read().splitlines()
+          bad = [l for l in lines if l.startswith(("FAILED", "ERROR", "E   "))][:40] or lines[-40:]
+          print("::error title=pytest::" + "%0A".join(l.replace("%", "%25") for l in bad))
+          PY
 
   matlab:
     runs-on: ubuntu-latest
