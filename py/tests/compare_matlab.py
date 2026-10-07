@@ -74,7 +74,8 @@ def cmp_cli(X, T, S, info, name, rtol, rocker=False):
     """compare the outputs of myodish_analysis with MATLAB. rocker=True (option rockerFilter): the artifact is a
     least-squares fit (identical to ~1e-12, not bit-identical); after its subtraction the filtered signal has exactly
     flat peaks (two or three equal samples) in a few contractions, whose peak can then be found one (rarely two) samples
-    (5 ms) apart. Such rows (<= 1 %) are counted and excluded from the row-wise comparison; summary within 0.5 %."""
+    (5 ms) apart. Which peaks move depends on the BLAS library. Such rows (<= 1 %) are counted and excluded from the row-wise
+    comparison; summary means within 0.5 %, SDs within 2 %."""
     M = table_from_struct(X.contractions)
     P = T.copy()
     if "clockTime" in P.columns:
@@ -104,7 +105,13 @@ def cmp_cli(X, T, S, info, name, rtol, rocker=False):
         l1.append(f"{name} contractions: clockTime max diff {dct * 1000:.3f} ms")
         ok1 = ok1 and dct < 1e-4
     Ms = table_from_struct(X.summary)
-    ok2, l2 = compare_tables(Ms, S, name + " summary", rtol=5e-3 if rocker else rtol, atol=rtol)
+    if rocker:  # SDs react most to the few contractions whose peak moved by one sample (BLAS-dependent)
+        sd = [c for c in Ms.columns if c.endswith("_SD") and c in S.columns]
+        ok2a, l2a = compare_tables(Ms, S, name + " summary (means)", rtol=5e-3, atol=rtol, skip=sd)
+        ok2b, l2b = compare_tables(Ms, S, name + " summary (SDs)", rtol=2e-2, atol=rtol, cols=sd)
+        ok2, l2 = ok2a and ok2b, l2a + l2b
+    else:
+        ok2, l2 = compare_tables(Ms, S, name + " summary", rtol=rtol, atol=rtol)
     Mt = table_from_struct(X.thresholds)
     ok3, l3 = compare_tables(Mt, info["thresholds"], name + " thresholds", rtol=rtol, atol=rtol)
     ok4, l4 = True, []

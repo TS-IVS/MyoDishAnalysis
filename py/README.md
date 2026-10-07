@@ -105,8 +105,9 @@ in MATLAB.
 * **Rocker filter** (examples 1, 3 and 6): the subtracted artifact agrees to ~1e-11 (least-squares solutions of
   LAPACK / Accelerate vs. MATLAB). Where the artifact subtraction leaves a flat peak, this tiny difference can move the peak
   of 0.06–0.4 % of the contractions by one sample of the analysed signal (5 ms at 400 Hz with the default downsampling 2;
-  macOS: rarely two samples). The parameters of these contractions then differ accordingly; summary values agree within
-  0.2 %.
+  macOS: rarely two samples). Which peaks move depends on the linear-algebra library (it differs between computers). The
+  parameters of these contractions then differ accordingly; summary SDs agree within 0.6 % and means more closely
+  (test tolerance: means 0.5 %, SDs 2 %).
 
 Run it yourself (in the repository; the example recordings and MATLAB results are not part of the installed package):
 ```bash
