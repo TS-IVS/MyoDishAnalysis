@@ -40,6 +40,12 @@ jobs:
           bad = [l for l in lines if l.startswith(("FAILED", "ERROR", "E   "))][:40] or lines[-40:]
           print("::error title=pytest::" + "%0A".join(l.replace("%", "%25") for l in bad))
           PY
+          python py/tests/compare_matlab.py ex1 ex3 ex6 > compare.log 2>&1 || true
+          python - <<'PY'
+          lines = open("compare.log", encoding="utf-8", errors="replace").read().splitlines()
+          keep = [l for l in lines if "rocker" in l and ("DIFF" in l or "sample" in l or "summary" in l or "largest" in l)][:40]
+          print("::warning title=compare_matlab rocker::" + "%0A".join(l.replace("%", "%25") for l in keep))
+          PY
 
   matlab:
     runs-on: ubuntu-latest
