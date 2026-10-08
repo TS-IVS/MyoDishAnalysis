@@ -27,7 +27,11 @@ function [B, C] = mda_analyzeChannel(S, channel, range, opts)
 %      Automatic threshold (default): relThreshold (0.3) x the typical contraction amplitude, at least
 %      minThreshold (30 uN). Typical amplitude: paced channels: median of the n largest prominences
 %      (n = number of stimuli in the data); unpaced: the prominences above the largest gap between the
-%      sorted prominences (see autoThreshold).
+%      sorted prominences (see autoThreshold). Paced channels while the rocker moves (option artifactGap): if
+%      small peaks between the contractions (rocker artifacts: <= 0.5 x typical, not locked to the stimuli)
+%      form a cluster separated from the contractions by a clear gap, the threshold is raised into the gap;
+%      small peaks locked to a stimulus (alternans, partial capture) are kept (see artifactGapThreshold;
+%      C.thresholdArtifacts = number of removed peaks).
 %   3. stimulus assignment: a contraction is 'stimulated' if its peak follows a stimulus of the channel
 %      by minStimToPeak ... maxStimToPeak (and is the most prominent peak after this stimulus), otherwise
 %      'extra'. Channels without stimulus pulses: 'unpaced'.
@@ -117,6 +121,8 @@ prom = P(cand);
 if isnumeric(opts.threshold) && numel(opts.threshold) > 1
     error('mda_analyzeChannel: one threshold per channel (several channels: MyoDishAnalysis).');
 end
+nArt = 0;                                           %small peaks below a raised auto threshold (rocker artifacts)
+keepLow = false(size(prom));                        %small peaks below it that are kept (locked to a stimulus)
 if isnumeric(opts.threshold) && ~isnan(opts.threshold)  %NaN = auto (per-channel thresholds of MyoDishAnalysis)
     thr = opts.threshold;
     thrMode = 'manual';
@@ -124,8 +130,11 @@ if isnumeric(opts.threshold) && ~isnan(opts.threshold)  %NaN = auto (per-channel
 else
     [thr, typAmp] = autoThreshold(prom, numel(ST), opts);
     thrMode = 'auto';
+    if (~isfield(opts, 'artifactGap') || opts.artifactGap) && numel(ST) >= 3   %paced: above rocker artifacts
+        [thr, keepLow, nArt] = artifactGapThreshold(t(cand), prom, thr, typAmp, ST, S.rockerOn(cand), CL);
+    end
 end
-keep = prom >= thr;
+keep = prom >= thr | keepLow;
 cand = cand(keep);
 prom = prom(keep);
 % minimum interval: the more prominent of two close maxima wins
@@ -279,6 +288,7 @@ C.peakTimes = tPk;
 C.threshold = thr;
 C.thresholdMode = thrMode;
 C.typicalAmplitude = typAmp;
+C.thresholdArtifacts = nArt;
 C.stimTimes = ST(:);
 C.stimCaptured = stimCaptured;
 C.stimInterval = CL;
@@ -333,6 +343,47 @@ if nMean > 1
     if mod(nMean, 2) == 0, delay = delay + dt/2; end
 end
 t = t - delay;
+end
+
+
+function [thr, keepLow, nLow] = artifactGapThreshold(tc, prom, thr, typical, ST, rocker, CL)
+% Paced channels: small peaks between the contractions (rocker artifacts while the rocker moves) can pass the auto
+% threshold (relThreshold x typical). The prominences >= thr are sorted; if the largest ratio between two consecutive
+% values below the typical amplitude is >= 1.6, the lower cluster (all <= 0.5 x typical) has >= 3 peaks that are not
+% locked to the stimuli (latency to the previous stimulus not within +-0.1 s of the median latency of the upper
+% cluster), at most chance level + 0.2 of the lower cluster is locked and >= 75 % of it occurs while the rocker moves,
+% the threshold is raised to the geometric mean of the two prominences at the gap. Peaks of the lower cluster that are
+% locked to a stimulus stay (keepLow; small stimulated contractions: alternans, partial capture). nLow: number of
+% removed peaks. TS 2026-10-09
+keepLow = false(size(prom));
+nLow = 0;
+k = find(prom >= thr);
+if numel(k) < 6 || isnan(typical) || isempty(ST), return; end
+[p, o] = sort(prom(k), 'descend');
+k = k(o);
+r = p(1:end-1) ./ p(2:end);
+r(p(1:end-1) > typical | p(2:end) > 0.5 * typical) = 0;    %gap below the bulk, lower cluster <= 0.5 x typical
+[rMax, g] = max(r);
+if rMax < 1.6, return; end
+hi = k(1:g); lo = k(g+1:end);
+latHi = median(stimLatency(tc(hi), ST), 'omitnan');
+if isnan(latHi), return; end
+locked = abs(stimLatency(tc(lo), ST) - latHi) <= 0.1;
+chance = 0.2 / max(CL, 0.2);                                %fraction locked by chance (window 0.2 s per cycle)
+if nnz(~locked) < 3 || mean(locked) > min(0.6, chance + 0.2) || mean(rocker(lo)) < 0.75, return; end
+thr = sqrt(p(g) * p(g+1));
+keepLow(lo(locked)) = true;
+nLow = nnz(~locked);
+end
+
+
+function lat = stimLatency(tt, ST)
+% time since the previous stimulus (NaN before the first one)
+lat = nan(size(tt));
+for q = 1:numel(tt)
+    j = find(ST <= tt(q), 1, 'last');
+    if ~isempty(j), lat(q) = tt(q) - ST(j); end
+end
 end
 
 

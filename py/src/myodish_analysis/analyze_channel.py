@@ -21,7 +21,9 @@ PROCESSING (see the MATLAB help and README)
   0. option rockerFilter: the periodic rocker artifact is subtracted first (rocker_filter)
   1. filter: moving median (50 ms) + moving mean (25 ms) on the 200 Hz signal (as GetContractionParameters)
   2. contractions = local maxima with a prominence >= threshold that are >= minBeatInterval apart; automatic
-     threshold: relThreshold x typical amplitude, at least minThreshold
+     threshold: relThreshold x typical amplitude, at least minThreshold; paced channels while the rocker moves
+     (option artifactGap): raised into a clear gap above small peaks not locked to the stimuli (rocker artifacts),
+     small peaks locked to a stimulus stay (artifact_gap_threshold; C.thresholdArtifacts = removed peaks)
   3. stimulus assignment: 'stimulated' if the peak follows a stimulus of the channel by minStimToPeak ...
      maxStimToPeak (and is the most prominent peak after this stimulus), otherwise 'extra'; 'unpaced' without stimuli
   4. parameters between the previous and the next peak (at most maxBeatWindow s), see parameters.py. After a
@@ -104,6 +106,8 @@ def analyze_channel(S, channel, range_=None, opts=None):
     prom = P[cand]
     if not isinstance(opts.threshold, str) and np.size(opts.threshold) > 1:
         raise ValueError("analyze_channel: one threshold per channel (several channels: myodish_analysis).")
+    nArt = 0  # small peaks below a raised auto threshold (rocker artifacts)
+    keepLow = np.zeros(prom.size, bool)  # small peaks below it that are kept (locked to a stimulus)
     if not isinstance(opts.threshold, str) and not math.isnan(float(np.ravel(opts.threshold)[0])):
         thr = float(np.ravel(opts.threshold)[0])  # NaN = auto (per-channel thresholds of myodish_analysis)
         thrMode = "manual"
@@ -111,7 +115,10 @@ def analyze_channel(S, channel, range_=None, opts=None):
     else:
         thr, typAmp = auto_threshold(prom, ST.size, opts)
         thrMode = "auto"
-    keep = prom >= thr
+        if opts.get("artifactGap", True) and ST.size >= 3:  # paced: above the rocker artifacts
+            thr, keepLow, nArt = artifact_gap_threshold(t[cand], prom, thr, typAmp, ST,
+                                                        np.asarray(S.rockerOn, bool)[cand], CL)
+    keep = (prom >= thr) | keepLow
     cand = cand[keep]
     prom = prom[keep]
     # minimum interval: the more prominent of two close maxima wins
@@ -268,6 +275,7 @@ def analyze_channel(S, channel, range_=None, opts=None):
     C.threshold = thr
     C.thresholdMode = thrMode
     C.typicalAmplitude = typAmp
+    C.thresholdArtifacts = nArt
     C.stimTimes = ST
     C.stimCaptured = stimCaptured
     C.stimInterval = CL
@@ -318,6 +326,47 @@ def filter_signal(x, t, dt, opts):
         if nMean % 2 == 0:
             delay += dt / 2
     return f, np.asarray(t, dtype=float) - delay
+
+
+def artifact_gap_threshold(tc, prom, thr, typical, ST, rocker, CL):
+    """paced channels: raise the auto threshold into a clear gap above a cluster of small peaks that are not locked
+    to the stimuli and occur while the rocker moves (rocker artifacts); peaks of that cluster locked to a stimulus
+    stay (see artifactGapThreshold in mda_analyzeChannel.m). Returns thr, keepLow (bool per candidate), nLow."""
+    keepLow = np.zeros(prom.size, bool)
+    k = np.flatnonzero(prom >= thr)
+    if k.size < 6 or math.isnan(typical) or ST.size == 0:
+        return thr, keepLow, 0
+    o = np.argsort(-prom[k], kind="stable")
+    k = k[o]
+    p = prom[k]
+    r = p[:-1] / p[1:]
+    r[(p[:-1] > typical) | (p[1:] > 0.5 * typical)] = 0  # gap below the bulk, lower cluster <= 0.5 x typical
+    g = int(np.argmax(r))
+    if r[g] < 1.6:
+        return thr, keepLow, 0
+    hi, lo = k[:g + 1], k[g + 1:]
+    lat_hi = _stim_latency(tc[hi], ST)
+    if np.all(np.isnan(lat_hi)):
+        return thr, keepLow, 0
+    lat_hi = float(np.nanmedian(lat_hi))
+    with np.errstate(invalid="ignore"):
+        locked = np.abs(_stim_latency(tc[lo], ST) - lat_hi) <= 0.1
+    chance = 0.2 / max(CL, 0.2)  # fraction locked by chance (window 0.2 s per cycle)
+    if np.count_nonzero(~locked) < 3 or locked.mean() > min(0.6, chance + 0.2) or rocker[lo].mean() < 0.75:
+        return thr, keepLow, 0
+    thr = math.sqrt(p[g] * p[g + 1])
+    keepLow[lo[locked]] = True
+    return float(thr), keepLow, int(np.count_nonzero(~locked))
+
+
+def _stim_latency(tt, ST):
+    """time since the previous stimulus (NaN before the first one)"""
+    tt = np.asarray(tt, float)
+    j = np.searchsorted(ST, tt, side="right") - 1
+    lat = np.full(tt.size, np.nan)
+    ok = j >= 0
+    lat[ok] = tt[ok] - ST[j[ok]]
+    return lat
 
 
 def auto_threshold(prom, nStim, opts):

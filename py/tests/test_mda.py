@@ -368,11 +368,11 @@ def test_gui_nav_buttons_trend_channels(monkeypatch):
         monkeypatch.setattr(mw, "_shift_held", lambda: True)
         w.bNav["right"].click()
         assert (w.S.fromSeconds, w.S.toSeconds) == (30, 120)
-        w.bNav["up"].click()  # zoom: shift does not matter
-        assert list(w.pMain.vb.viewRange()[0]) == [52.5, 97.5] and w.S.toSeconds == 120
+        w.bNav["up"].click()  # zoom the loaded window (selection in the overview); shift does not matter
+        assert (w.S.fromSeconds, w.S.toSeconds) == (52.5, 97.5) and list(w.range) == [52.5, 97.5]
         monkeypatch.setattr(mw, "_shift_held", lambda: False)
         w.bNav["down"].click()
-        assert list(w.pMain.vb.viewRange()[0]) == [30, 120]
+        assert (w.S.fromSeconds, w.S.toSeconds) == (30, 120) and list(w.pMain.vb.viewRange()[0]) == [30, 120]
         w.bNav["left"].click()
         assert (w.S.fromSeconds, w.S.toSeconds) == (0, 90)
         # trend: channels 1 and 3 overlaid (one calculation, file read once), then channel 3 alone from the cache
@@ -439,8 +439,8 @@ def test_gui_threshold_keys_overlay():
         assert (w.S.fromSeconds, w.S.toSeconds) == (30, 90)
         w.on_key("right", True)
         assert (w.S.fromSeconds, w.S.toSeconds) == (30, 120)
-        w.on_key("up", False)
-        assert list(w.pMain.vb.viewRange()[0]) == [52.5, 97.5] and w.S.toSeconds == 120
+        w.on_key("up", False)  # zoom: the loaded window (selection), read again
+        assert (w.S.fromSeconds, w.S.toSeconds) == (52.5, 97.5) and list(w.pMain.vb.viewRange()[0]) == [52.5, 97.5]
         # overlay: channels of the same range, styles, bands, time course, export tables
         w.overlay_channels([1, 3])
         ov = w.win_overlay

@@ -658,13 +658,11 @@ def help_text():
         "Cursor in the force plot: \"drag = select time range\" or \"click = exclude / include contraction\". Mouse "
         "wheel: zoom the time axis (shift + wheel: move); double-click: whole loaded window. Right click: zero force, "
         "reference beat, save / export.",
-        "Arrow keys: left / right = move the time axis by half its length, shift + left / right = extend it by half "
-        "its length on that side, up / down = zoom in / out. Mouse pointer over the overview: its time axis; otherwise "
-        "the force plot - beyond the loaded window the loaded window follows (read again, blue in the overview) and a "
-        "zoomed overview moves along.",
-        "Buttons under the force plot: the same for the force plot - left / right arrow button = move by half the "
-        "length (shift + click: extend on that side), middle buttons = zoom in (half the span) / zoom out (twice the "
-        "span).", "",
+        "Arrow keys and the buttons under the force plot change the loaded window (= blue selection in the overview and "
+        "analysed range; read again): left / right = move it by half its length, shift + left / right (shift + click) "
+        "= extend it by half its length on that side, up / down (middle buttons) = zoom in / out (half / twice its "
+        "length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed overview moves "
+        "along. The mouse wheel zooms only the display.", "",
         "Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak, or "
         "the time course of the analysed range (t = 0 at the first stimulus of each group). Press again (or Add "
         "current selection in the overlay window) to add another selection as a new group; Channels (same range) ...: "

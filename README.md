@@ -57,13 +57,12 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    overview, or type From/To (seconds) and press **Load**, to load a time window.
    **Mouse wheel** over the overview: zoom the time axis (shift + wheel: move; double-click: whole file); the zoomed
    part is re-read in more detail (useful for 24-h recordings).
-   **Arrow keys** (click into a plot first; MATLAB: not while the toolbar zoom / pan is active): ← / → move the time
-   axis by half its length, shift + ← / → extend it by half its length on that side, ↑ / ↓ zoom in / out. With the
-   mouse pointer over the overview they move its zoomed time axis; otherwise the force plot: beyond the loaded window,
-   the loaded window follows (same length, longer when extended; read again, blue window in the overview) and a zoomed
-   overview moves along. The analysed range is then the new loaded window.
-   **Buttons under the force plot** do the same with the mouse: ◀ / ▶ (bottom left / right) move the time axis by half
-   its length, shift + click extends it on that side; →← / ←→ (middle) zoom in (half the span) / out (twice the span).
+   **Arrow keys** (click into a plot first; MATLAB: not while the toolbar zoom / pan is active) and the **buttons under
+   the force plot** change the loaded window, i.e. the blue selection in the overview and the analysed range (read
+   again): ← / → (◀ / ▶ bottom left / right) move it by half its length, shift + ← / → (shift + click) extend it by half
+   its length on that side, ↑ / ↓ (→← / ←→ in the middle) zoom in / out (half / twice its length, around the centre).
+   With the mouse pointer over the overview the keys move its zoomed time axis instead; a zoomed overview moves along
+   when the window leaves its visible part. The mouse wheel zooms only the display.
 2. **Force plot**: force − zero force (if the zero force is known, see "Zero force"; otherwise the sensor signal).
    Red = selected contractions, grey = excluded by the filters, x = excluded by you,
    blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.
@@ -453,8 +452,12 @@ stimuli in this channel), `t_stim`, `stimToPeak`, `rockerMoving` (rocker moved a
 * Contractions = local maxima with a prominence ≥ threshold, ≥ 0.15 s apart. Automatic threshold:
   0.3 × typical amplitude (≥ 30 µN); typical amplitude = median of the n largest prominences
   (n = number of stimuli) or, without stimuli, of the prominences above the largest gap between the sorted
-  prominences. The threshold is computed per channel from the analysed window; check it in the GUI or with
-  `'showFigures',true`, and set it manually if necessary (`'threshold',µN`).
+  prominences. Paced channels while the rocker moves (option `'artifactGap'`, default on): small peaks between the
+  contractions (rocker artifacts: ≤ 0.5 × typical, not locked to the stimuli) that form a cluster separated from the
+  contractions by a clear gap (prominence ratio ≥ 1.6, ≥ 3 such peaks) raise the threshold into the gap; small peaks
+  locked to a stimulus (alternans, partial capture) stay (status line in the GUI). The threshold is computed per
+  channel from the analysed window; check it in the GUI or with `'showFigures',true`, and set it manually if
+  necessary (`'threshold',µN`).
 
 ## External trigger (external stimulator; option `'externalTrigger'`, GUI list *stimuli*)
 With the external controller unit (one chamber) the slice can be paced by an external stimulator whose TTL pulses

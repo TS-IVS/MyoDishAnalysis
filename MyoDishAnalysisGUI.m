@@ -15,12 +15,11 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %    rocker at rest). Drag in the overview (or type From/To and press Load) to load a time window.
 %    Mouse wheel over the overview or the force plot: zoom the time axis (shift + wheel: move); double-click:
 %    whole file / whole loaded window. The zoomed overview is re-read in more detail.
-%    Arrow keys (click into a plot first): left / right = move the time axis by half its length, shift + left / right
-%    = extend it by half its length on that side, up / down = zoom in / out. Mouse pointer over the overview: its
-%    time axis; otherwise the force plot: beyond the loaded window, the loaded window follows (read again; blue
-%    window in the overview) and the overview moves along when the window leaves its zoomed part.
-%    The buttons under the force plot do the same for the force plot: left / right (shift + click: extend on that side),
-%    zoom in / zoom out (middle).
+%    Arrow keys (click into a plot first) and the buttons under the force plot change the loaded window (= the blue
+%    selection in the overview and the analysed range; read again): left / right = move it by half its length, shift
+%    + left / right (shift + click) = extend it by half its length on that side, up / down (middle buttons) = zoom in
+%    / out (half / twice its length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed
+%    overview moves along when the window leaves its visible part. The mouse wheel zooms only the display.
 % 2. The force plot shows the loaded window (force - zero force, if the zero force is known): detected contractions
 %    (red = selected, grey = excluded by the filters, black x = excluded by you), stimuli (blue ticks), rocker moving
 %    (grey background). The stimulus plot below shows the current of every stimulus pulse (mA; green = extra pulse,
@@ -156,16 +155,16 @@ axOv = axes(fig, 'Position', [0.05 0.845 0.70 0.075], 'FontSize', 9);
 axMain = axes(fig, 'Position', [0.05 0.477 0.70 0.318], 'FontSize', 10, 'XTickLabel', {});
 axStim = axes(fig, 'Position', [0.05 0.315 0.70 0.105], 'FontSize', 9, 'XTickLabel', {});
 axPar = axes(fig, 'Position', [0.05 0.07 0.70 0.2], 'FontSize', 10);
-% buttons under the force plot (as the arrow keys): move left / right (shift + click: extend), zoom in / out
+% buttons under the force plot (as the arrow keys): loaded window (selection) left / right (shift + click: extend), zoom in / out
 nb = {'Style', 'pushbutton', 'Units', 'normalized', 'FontSize', 9, 'BackgroundColor', 'w'};
 uicontrol(fig, nb{:}, 'String', char(9664), 'Position', [0.05 0.4485 0.022 0.026], 'Callback', @(~,~) onNavButton('leftarrow'), ...
-    'TooltipString', 'move the time axis to the left by half its length (shift + click: extend it to the left; key: left arrow)');
+    'TooltipString', 'loaded window (selection): move it to the left by half its length (shift + click: extend it to the left; key: left arrow)');
 uicontrol(fig, nb{:}, 'String', char([8594 8592]), 'Position', [0.373 0.4485 0.026 0.026], 'Callback', @(~,~) onNavButton('uparrow'), ...
-    'TooltipString', 'zoom in: half the time span around the centre (key: up arrow)');
+    'TooltipString', 'loaded window (selection): zoom in to half its length around the centre (key: up arrow)');
 uicontrol(fig, nb{:}, 'String', char([8592 8594]), 'Position', [0.401 0.4485 0.026 0.026], 'Callback', @(~,~) onNavButton('downarrow'), ...
-    'TooltipString', 'zoom out: twice the time span (key: down arrow)');
+    'TooltipString', 'loaded window (selection): zoom out to twice its length (key: down arrow)');
 uicontrol(fig, nb{:}, 'String', char(9654), 'Position', [0.728 0.4485 0.022 0.026], 'Callback', @(~,~) onNavButton('rightarrow'), ...
-    'TooltipString', 'move the time axis to the right by half its length (shift + click: extend it to the right; key: right arrow)');
+    'TooltipString', 'loaded window (selection): move it to the right by half its length (shift + click: extend it to the right; key: right arrow)');
 uicontrol(fig, 'Style', 'text', 'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w', 'String', 'Lower plot:', ...
     'HorizontalAlignment', 'right', 'Position', [0.05 0.272 0.05 0.025]);
 hPar = uicontrol(fig, 'Style', 'popupmenu', 'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w', ...
@@ -1960,9 +1959,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     % ---------------------------------------------------------------- keyboard: navigation on the time axis (2026-10-07)
     function onKey(~, evt)
-        % left / right arrow: move the time axis by half its length; shift: extend it by half its length on that side;
-        % up / down arrow: zoom in / out. Mouse over the overview: the overview; otherwise the force plot (beyond the
-        % loaded window the loaded window follows and is read again)
+        % left / right arrow: move the loaded window by half its length; shift: extend it by half its length on that
+        % side; up / down arrow: zoom in / out (half / twice its length). Mouse over the overview: the time axis of the
+        % overview; otherwise the loaded window (= selection in the overview, analysed range), read again
         shiftDown = strcmp(evt.Key, 'shift') || any(strcmp(evt.Modifier, 'shift'));
         if isempty(H) || ~any(strcmp(evt.Key, {'leftarrow', 'rightarrow', 'uparrow', 'downarrow'})), return; end
         co = fig.CurrentObject;                            %arrow keys of edit fields and lists stay theirs
@@ -1977,8 +1976,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             return;
         end
         if isempty(S), return; end
-        xl = navStep(xlim(axMain), evt.Key, ext, [0 H.totalSeconds], 0.3);
-        navigateTo(xl);
+        navButton(evt.Key, ext);                           %force plot: the loaded window (selection in the overview)
     end
 
     function onKeyRelease(~, evt)
@@ -1987,39 +1985,27 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function onNavButton(key)
         % buttons under the force plot: as the arrow keys in the force plot; shift + click on the left / right button
-        % extends the time axis instead of moving it
+        % extends the loaded window instead of moving it
         ext = any(strcmp(key, {'leftarrow', 'rightarrow'})) && (shiftDown || any(strcmp(fig.CurrentModifier, 'shift')));
         navButton(key, ext);
     end
 
     function navButton(key, ext)
+        % arrow keys in the force plot and the buttons under it: change the loaded window (= selection in the overview
+        % and analysed range): left / right = move it by half its length (ext / shift: extend it on that side), up /
+        % down = zoom in / out (half / twice its length around the centre, at least 1 s); the window is read again
         if isempty(H) || isempty(S), status('Load a time window first.'); return; end
-        navigateTo(navStep(xlim(axMain), key, ext, [0 H.totalSeconds], 0.3));
+        loadWindow(navStep([S.fromSeconds S.toSeconds], key, ext, [0 H.totalSeconds], 1));
     end
 
-    function navigateTo(xl)
-        % show time axis xl in the force plot; outside the loaded window the loaded window follows (same length; longer
-        % if xl is longer) and is read again
-        L = [S.fromSeconds S.toSeconds];
-        tol = 1e-6 * max(1, diff(L));
-        if xl(1) >= L(1) - tol && xl(2) <= L(2) + tol
-            xlim(axMain, [max(xl(1), L(1)), min(xl(2), L(2))]);
-            return;
-        end
-        if diff(xl) <= diff(L)
-            d = 0;
-            if xl(2) > L(2), d = xl(2) - L(2); elseif xl(1) < L(1), d = xl(1) - L(1); end
-            w = L + d;
-        else
-            w = [min(xl(1), L(1)), max(xl(2), L(2))];
-        end
+    function loadWindow(w)
+        % read the window w (s): From / To, a zoomed overview moves along; analysed range = the whole window
         w = [max(0, w(1)), min(H.totalSeconds, w(2))];
         if diff(w) > 4 * 3600, status('Window longer than 4 h: use the command line version (MyoDishAnalysis) for long ranges.'); return; end
-        if abs(w(1) - L(1)) < tol && abs(w(2) - L(2)) < tol, return; end   %start / end of the file
+        if abs(w(1) - S.fromSeconds) < 1e-6 && abs(w(2) - S.toSeconds) < 1e-6, return; end   %start / end of the file
         followOverview(w);
         hFrom.String = sprintf('%.3f', w(1)); hTo.String = sprintf('%.3f', w(2));
         onLoad();
-        if ~isempty(S), xlim(axMain, [max(xl(1), S.fromSeconds), min(xl(2), S.toSeconds)]); end
     end
 
     function followOverview(w)
@@ -2535,6 +2521,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         refresh(resetX);
         if ~isempty(hRef) && isvalid(hRef.fig), drawReference(); end
         msg = sprintf('Channel %d: %d contractions detected (threshold %.0f %sN, %s).', ch, height(B), C.threshold, mu, C.thresholdMode);
+        if isfield(C, 'thresholdArtifacts') && C.thresholdArtifacts > 0
+            msg = sprintf('%s Auto threshold raised above %d small peaks not locked to the stimuli (rocker artifacts).', msg, C.thresholdArtifacts);
+        end
         if ~isempty(rfMsg), msg = [msg ' ' rfMsg]; end
         status(msg);
     end
@@ -3677,8 +3666,7 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       '', ...
       'Force plot: red = selected contractions, grey = excluded by the filters (rocker / stimulated only), x = excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.', ...
       'Cursor in the force plot: "drag = select time range" or "click = exclude / include contraction". Zoom/pan: mouse wheel or figure toolbar (switch the tool off afterwards).', ...
-      'Arrow keys (click into a plot first): left / right = move the time axis by half its length, shift + left / right = extend it by half its length on that side, up / down = zoom in / out. Mouse pointer over the overview: its time axis; otherwise the force plot - beyond the loaded window the loaded window follows (read again, blue in the overview) and a zoomed overview moves along.', ...
-      'Buttons under the force plot: the same for the force plot - left / right arrow button = move by half the length (shift + click: extend on that side), middle buttons = zoom in (half the span) / zoom out (twice the span).', ...
+      'Arrow keys (click into a plot first) and the buttons under the force plot change the loaded window (= blue selection in the overview and analysed range; read again): left / right = move it by half its length, shift + left / right (shift + click) = extend it by half its length on that side, up / down (middle buttons) = zoom in / out (half / twice its length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed overview moves along. The mouse wheel zooms only the display.', ...
       '', ...
       'Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak, or the time course of the analysed range (t = 0 at the first stimulus of each group). Press again (or Add current selection in the overlay window) to add another selection as a new group; Channels (same range) ...: tick channels to add them for the analysed range (same settings, threshold and zero force of each channel). Per group (list): legend text, colour, line width, line style and a transparent band (mean +- SD, +- SEM or range). Title, axis labels and legend position are editable below the plot (empty = automatic); Edit figure ... opens a copy with the MATLAB plot tools.', ...
       '', ...

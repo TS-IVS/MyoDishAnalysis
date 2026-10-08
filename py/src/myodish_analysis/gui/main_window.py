@@ -708,6 +708,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.win_ref.draw()
         msg = (f"Channel {self.ch}: {len(self.B)} contractions detected (threshold {C.threshold:.0f} {MU}N, "
                f"{C.thresholdMode}).")
+        if C.get("thresholdArtifacts", 0) > 0:
+            msg += (f" Auto threshold raised above {C.thresholdArtifacts} small peaks not locked to the stimuli "
+                    f"(rocker artifacts).")
         if rf_msg:
             msg += " " + rf_msg
         self.status(msg)
@@ -1295,8 +1298,9 @@ class MainWindow(QtWidgets.QMainWindow):
         return plot.vb.sceneBoundingRect().contains(view.mapToScene(pos))
 
     def _nav_buttons(self):
-        """buttons under the force plot (as the arrow keys): left / right = move by half the span (shift + click:
-        extend on that side), middle = zoom in / out. Returns the proxy item for the plot layout."""
+        """buttons under the force plot (as the arrow keys): loaded window (selection) left / right = move by half its
+        length (shift + click: extend on that side), middle = zoom in / out. Returns the proxy item for the plot
+        layout."""
         row = QtWidgets.QWidget()
         row.setStyleSheet("background: transparent")
         hl = QtWidgets.QHBoxLayout(row)
@@ -1304,14 +1308,15 @@ class MainWindow(QtWidgets.QMainWindow):
         hl.setSpacing(4)
         self.bNav = {}
         for key, text, tip in (
-                ("left", "\u25C0", "move the time axis to the left by half its length (shift + click: extend it to the "
-                                    "left; key: left arrow)"),
+                ("left", "\u25C0", "loaded window (selection): move it to the left by half its length (shift + "
+                                    "click: extend it to the left; key: left arrow)"),
                 (None, None, None),
-                ("up", "\u2192\u2190", "zoom in: half the time span around the centre (key: up arrow)"),
-                ("down", "\u2190\u2192", "zoom out: twice the time span (key: down arrow)"),
+                ("up", "\u2192\u2190", "loaded window (selection): zoom in to half its length around the centre "
+                                         "(key: up arrow)"),
+                ("down", "\u2190\u2192", "loaded window (selection): zoom out to twice its length (key: down arrow)"),
                 (None, None, None),
-                ("right", "\u25B6", "move the time axis to the right by half its length (shift + click: extend it to "
-                                     "the right; key: right arrow)")):
+                ("right", "\u25B6", "loaded window (selection): move it to the right by half its length (shift + "
+                                     "click: extend it to the right; key: right arrow)")):
             if key is None:
                 hl.addStretch(1)
                 continue
@@ -1333,15 +1338,23 @@ class MainWindow(QtWidgets.QMainWindow):
         extends the time axis instead of moving it (ext: given by tests)"""
         if ext is None:
             ext = key in ("left", "right") and _shift_held()
+        self.nav_window(key, ext)
+
+    def nav_window(self, key, ext):
+        """arrow keys in the force plot and the buttons under it: change the loaded window (= selection in the overview
+        and analysed range): left / right = move it by half its length (ext / shift: extend it on that side), up / down
+        = zoom in / out (half / twice its length around the centre, at least 1 s); the window is read again"""
         if self.H is None or self.S is None:
             self.status("Load a time window first.")
             return
-        self.navigate_to(nav_step(self.pMain.vb.viewRange()[0], key, ext, (0.0, float(self.H.totalSeconds)), 0.3))
+        self.load_window(nav_step((float(self.S.fromSeconds), float(self.S.toSeconds)), key, ext,
+                                  (0.0, float(self.H.totalSeconds)), 1.0))
 
     def on_key(self, key, ext):
-        """left / right arrow: move the time axis by half its length; ext (shift): extend it by half its length on
-        that side; up / down: zoom in / out. Mouse over the overview: the overview; otherwise the force plot (beyond
-        the loaded window the loaded window follows and is read again). Returns True if the key was used."""
+        """left / right arrow: move the loaded window by half its length; ext (shift): extend it by half its length
+        on that side; up / down: zoom in / out (half / twice its length). Mouse over the overview: the time axis of the
+        overview; otherwise the loaded window (= selection in the overview, analysed range), read again. Returns True
+        if the key was used."""
         if self.H is None:
             return False
         if self.O is not None and self._mouse_over(self.pOv, self.glTop):
@@ -1353,38 +1366,21 @@ class MainWindow(QtWidgets.QMainWindow):
             return True
         if self.S is None:
             return False
-        self.navigate_to(nav_step(self.pMain.vb.viewRange()[0], key, ext, (0.0, float(self.H.totalSeconds)), 0.3))
+        self.nav_window(key, ext)  # force plot: the loaded window (selection in the overview)
         return True
 
-    def navigate_to(self, xl):
-        """show time axis xl in the force plot; outside the loaded window the loaded window follows (same length;
-        longer if xl is longer) and is read again"""
-        L = (float(self.S.fromSeconds), float(self.S.toSeconds))
-        tol = 1e-6 * max(1.0, L[1] - L[0])
-        if xl[0] >= L[0] - tol and xl[1] <= L[1] + tol:
-            self.pMain.vb.setXRange(max(xl[0], L[0]), min(xl[1], L[1]), padding=0)
-            return
-        if xl[1] - xl[0] <= L[1] - L[0]:
-            d = 0.0
-            if xl[1] > L[1]:
-                d = xl[1] - L[1]
-            elif xl[0] < L[0]:
-                d = xl[0] - L[0]
-            w = [L[0] + d, L[1] + d]
-        else:
-            w = [min(xl[0], L[0]), max(xl[1], L[1])]
-        w = [max(0.0, w[0]), min(float(self.H.totalSeconds), w[1])]
+    def load_window(self, w):
+        """read the window w (s): From / To, a zoomed overview moves along; analysed range = the whole window"""
+        w = [max(0.0, float(w[0])), min(float(self.H.totalSeconds), float(w[1]))]
         if w[1] - w[0] > 4 * 3600:
             self.status("Window longer than 4 h: use the command line version (mda) for long ranges.")
             return
-        if abs(w[0] - L[0]) < tol and abs(w[1] - L[1]) < tol:
+        if abs(w[0] - self.S.fromSeconds) < 1e-6 and abs(w[1] - self.S.toSeconds) < 1e-6:
             return  # start / end of the file
         self._follow_overview(w)
         self.eFrom.setText(f"{w[0]:.3f}")
         self.eTo.setText(f"{w[1]:.3f}")
         self.on_load()
-        if self.S is not None:
-            self.pMain.vb.setXRange(max(xl[0], self.S.fromSeconds), min(xl[1], self.S.toSeconds), padding=0)
 
     def _follow_overview(self, w):
         """zoomed overview: move it along when the loaded window w leaves the visible part"""

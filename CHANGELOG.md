@@ -5,11 +5,20 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Added
-- GUI (MATLAB and Python, 2026-10-09): buttons under the force plot – ◀ / ▶ move the time axis by half its length
-  (shift + click: extend it on that side), →← / ←→ zoom in / out, as the arrow keys. Trend window: *several channels
-  ...* in the channel list overlays the trends of several channels (one colour per channel, read once; export with
-  column `channel`). API `navButton`, `trend` (MATLAB), `on_nav_button`, `TrendWindow.set_channels`,
+- GUI (MATLAB and Python, 2026-10-09): buttons under the force plot – ◀ / ▶ move the loaded window (= selection in
+  the overview, analysed range) by half its length (shift + click: extend it on that side), →← / ←→ zoom it in / out
+  (half / twice its length); the arrow keys in the force plot do the same (before: only the display, the window
+  followed when the view left it); the mouse wheel zooms only the display. Trend window: *several channels ...* in the
+  channel list overlays the trends of several channels (one colour per channel, read once; export with column
+  `channel`). API `navButton`, `trend` (MATLAB), `on_nav_button`, `nav_window`, `TrendWindow.set_channels`,
   `export_tables` (Python).
+- Auto threshold of paced channels above rocker artifacts (option `artifactGap`, default on; 2026-10-09): small peaks
+  between the contractions while the rocker moves (≤ 0.5 × typical amplitude, not locked to the stimuli: latency not
+  within ±0.1 s of the median latency of the contractions) that form a cluster separated from the contractions by a
+  clear gap (ratio ≥ 1.6, ≥ 3 such peaks, at most chance level + 0.2 of the cluster locked, ≥ 75 % with the rocker
+  moving) no longer count as extra beats: the threshold is raised into the gap; small peaks locked to a stimulus
+  (alternans, partial capture) stay. `C.thresholdArtifacts` = number of removed peaks (GUI status line). Example 1
+  (rocker speed test): 125 of 5220 peaks removed (all extra beats); MATLAB reference ex1 regenerated.
 - Periods without signal (2026-10-08): `mda_signalGaps` / `signal_gaps` find periods of identical consecutive raw
   samples (≥ 2 s; the controller repeats the last value when a sensor board is missing): `chamber out` (one channel),
   `board group` (≥ 3 channels of group 1–4 or 5–8 within 1 s, or 2 within 0.1 s: technical, a defective board
