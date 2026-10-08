@@ -62,6 +62,10 @@ def test_first_and_second_pass(raw, tmp_path):
     assert len(S) == 3 and list(S["range"]) == ["2000-01-01 15:48:46", "2000-01-01 15:53:46", "2000-01-01 15:58:46"]
     assert S["nContractions"].sum() == X.loc[0, "nContractions"]
     assert os.path.isfile(os.path.join(res, "B", "example7_pigVentricle_protocols_protocolResults.csv"))
+    assert X.loc[1, "nContractions"] == 0 and "no time outside the stimulation protocols" in X.loc[1, "message"]
+    assert not os.path.isfile(os.path.join(res, "B", "example7_pigVentricle_summary.csv"))
+    assert {"bin", "nComments", "comments"} <= set(S.columns)
+    assert os.path.isfile(os.path.join(res, "A", "example9_ratVentricle_events.csv"))
     assert not os.path.isfile(os.path.join(res, "A", "example9_ratVentricle_protocols_summary.csv"))  # no protocols
     assert not os.path.isfile(os.path.join(res, W.LOCK_NAME))
     X2, report2 = W.watch(raw, res, quiet=True, bin_minutes=5)
@@ -82,10 +86,11 @@ def test_one_bin_equals_direct_analysis(raw, tmp_path):
 def test_reanalysis_when_options_or_files_change(raw, tmp_path):
     res = str(tmp_path / "results")
     W.watch(raw, res, quiet=True, protocols=False)
+    base = W.options_text({}, dict(protocols=False))
     X, _ = W.watch(raw, res, quiet=True, protocols=False, reanalyze="new", rocker="stopped")
-    assert (X["options"] == "binminutes=60; protocols=0").all()  # 'new': other options are ignored
+    assert (X["options"] == base).all()  # 'new': other options are ignored
     X, report = W.watch(raw, res, quiet=True, protocols=False, rocker="stopped")
-    assert (X["options"] == "binminutes=60; protocols=0; rocker=stopped").all() and report
+    assert (X["options"] == base + "; rocker=stopped").all() and report
     log = os.path.join(raw, "A", "example9_ratVentricle_log.log")
     with open(log, "ab") as fh:
         fh.write(b"\x00")
@@ -155,16 +160,119 @@ def test_dry_run_filter_from_date_and_lock(raw, tmp_path, capsys):
 
 def test_command_line(raw, tmp_path):
     res = str(tmp_path / "results")
-    assert watch_main([raw, res, "--quiet", "--no-protocols", "--bin-minutes", "5", "--set", "rockerFilter=1"]) == 0
+    assert watch_main([raw, res, "--quiet", "--no-protocols", "--bin-minutes", "5", "--set", "rockerFilter=1",
+                       "--contractions", "thinned", "--thin-mode", "median", "--thin-factor", "5", "--compress",
+                       "--workers", "2"]) == 0
     X = W.read_index(res)
-    assert (X["status"] == "ok").all() and (X["options"] == "binminutes=5; protocols=0; rockerfilter=1").all()
+    assert (X["status"] == "ok").all()
+    assert X.loc[0, "options"] == ("binminutes=5; compress=1; contractions=thinned; events=1; includeprotocols=0; "
+                                   "protocolmarginseconds=0; protocols=0; rockerfilter=1; thinfactor=5; thinmode=median")
+    assert os.path.isfile(os.path.join(res, "A", "example9_ratVentricle_contractions.csv.gz"))
 
 
 def test_helpers():
     assert W.parse_date("2026-10-08") == W.parse_date("08.10.2026") == W.parse_date("261008")
-    assert W.options_text({"Threshold": [300, float("nan")], "rocker": "stopped", "rockerFilter": True}, 60, True) == \
-        "binminutes=60; protocols=1; rocker=stopped; rockerfilter=1; threshold=[300 NaN]"
+    assert W.options_text({"Threshold": [300, float("nan")], "rocker": "stopped", "rockerFilter": True}) == \
+        ("binminutes=60; compress=0; contractions=all; events=1; includeprotocols=0; protocolmarginseconds=0; "
+         "protocols=1; rocker=stopped; rockerfilter=1; threshold=[300 NaN]")
+    assert W.event_category("comment", "Started parallel recording: x") == "recording"
+    assert W.event_category("comment", "start FFR protocol") == "protocol"
+    assert W.event_category("comment", "FFR protocol ended") == "protocol"
+    assert W.event_category("comment", "addition of 100nM Iso") == "comment"
+    assert W.event_category("stimFrequency", "1") == "stimulation"
+    assert W.event_category("Event", "extended sensor mode off") == "calibration"
     assert W.mda_version() == "1.0.0-beta.1" or "-" not in mda.__version__
     assert len(W.code_fingerprint()) == 8
     for f in ("example1_rabbitVentricle", "example9_ratVentricle"):
         assert mda.read_header(os.path.join(EX, f + ".mdd")).recordingStopped is True
+
+
+def test_protocols_excluded_or_included(tmp_path):
+    raw = str(tmp_path / "raw")
+    f = _copy("example2_rabbitVentricle", raw)  # PD 67-327 s, ST 512-658 s
+    P = mda.find_protocols(f)
+    res = str(tmp_path / "res")
+    X, _ = W.watch(raw, res, quiet=True, bin_minutes=5)
+    S = pd.read_csv(os.path.join(res, "example2_rabbitVentricle_summary.csv"))
+    C = pd.read_csv(os.path.join(res, "example2_rabbitVentricle_contractions.csv"))
+    for a, b in zip(P["from"], P["to"]):
+        assert not ((C["t_peak"] > a) & (C["t_peak"] < b)).any()
+        assert not ((S["from"] < b) & (S["to"] > a)).any()
+    assert len(S["range"].unique()) == 3 and (S["bin"] <= S["range"]).all()
+    res2 = str(tmp_path / "res2")
+    W.watch(raw, res2, quiet=True, bin_minutes=5, include_protocols=True)
+    C2 = pd.read_csv(os.path.join(res2, "example2_rabbitVentricle_contractions.csv"))
+    inside = np.zeros(len(C2), bool)
+    for a, b in zip(P["from"], P["to"]):
+        inside |= (C2["t_peak"] >= a).to_numpy() & (C2["t_peak"] <= b).to_numpy()
+    assert inside.any() and len(C2) > len(C)
+    res3 = str(tmp_path / "res3")
+    W.watch(raw, res3, quiet=True, bin_minutes=5, protocol_margin_seconds=30)
+    S3 = pd.read_csv(os.path.join(res3, "example2_rabbitVentricle_summary.csv"))
+    assert S3["from"].min() == 0 and (S3["from"] > 0).any() and abs(sorted(S3["from"].unique())[1] - (P["to"][0] + 30)) < 1e-6
+
+
+def test_thinned_contractions(tmp_path):
+    raw = str(tmp_path / "raw")
+    _copy("example4_humanAtrium", raw)  # extra beats in channels 6-8
+    _copy("example9_ratVentricle", raw)
+    resA, resN, resM = (str(tmp_path / x) for x in ("all", "nth", "median"))
+    W.watch(raw, resA, quiet=True, bin_minutes=5)
+    W.watch(raw, resN, quiet=True, bin_minutes=5, contractions="thinned", thin_factor=10)
+    W.watch(raw, resM, quiet=True, bin_minutes=5, contractions="thinned", thin_mode="median", thin_factor=10)
+    for n in ("example4_humanAtrium", "example9_ratVentricle"):
+        A = pd.read_csv(os.path.join(resA, n + "_contractions.csv"))
+        Nn = pd.read_csv(os.path.join(resN, n + "_contractions.csv"))
+        M = pd.read_csv(os.path.join(resM, n + "_contractions.csv"))
+        assert (A["sampledEvery"] == 1).all() and (A["sampleMode"] == "singleBeat").all()
+        for T in (Nn, M):  # extra beats complete, every other contraction represented once
+            ex = T["beatType"] == "extra"
+            assert ex.sum() == (A["beatType"] == "extra").sum() and (T.loc[ex, "sampledEvery"] == 1).all()
+            assert T["sampledEvery"].sum() >= (A["beatType"] != "extra").sum() // 10
+        assert set(Nn["sampleMode"]) == {"singleBeat"} and set(Nn.loc[Nn["beatType"] != "extra", "sampledEvery"]) <= {10.0}
+        assert M.loc[M["sampleMode"] == "median", "sampledEvery"].sum() == (A["beatType"] != "extra").sum()
+        for ch in A["channel"].unique():  # every 10th contraction of the channel (time order)
+            a = A[(A["channel"] == ch) & (A["beatType"] != "extra")].sort_values("t_peak")
+            nn = Nn[(Nn["channel"] == ch) & (Nn["beatType"] != "extra")].sort_values("t_peak")
+            np.testing.assert_allclose(nn["t_peak"].to_numpy(), a["t_peak"].to_numpy()[::10])
+    # first median block of example 9 = median of its first 10 contractions
+    A = pd.read_csv(os.path.join(resA, "example9_ratVentricle_contractions.csv")).sort_values("t_peak")
+    M = pd.read_csv(os.path.join(resM, "example9_ratVentricle_contractions.csv")).sort_values("t_peak")
+    first = A.iloc[:int(M["sampledEvery"].iloc[0])]
+    assert M["amplitude"].iloc[0] == pytest.approx(first["amplitude"].median())
+    assert M["t_peak"].iloc[0] == pytest.approx(first["t_peak"].median())
+
+
+def test_compress_none_and_stale_files(raw, tmp_path):
+    res = str(tmp_path / "results")
+    W.watch(raw, res, quiet=True, protocols=False)
+    f = os.path.join(res, "A", "example9_ratVentricle_contractions.csv")
+    assert os.path.isfile(f)
+    W.watch(raw, res, quiet=True, protocols=False, compress=True)
+    assert os.path.isfile(f + ".gz") and not os.path.isfile(f)
+    assert len(pd.read_csv(f + ".gz")) == W.read_index(res).loc[0, "nContractions"]
+    W.watch(raw, res, quiet=True, protocols=False, contractions="none")
+    assert not os.path.isfile(f + ".gz") and not os.path.isfile(f)
+    assert os.path.isfile(os.path.join(res, "A", "example9_ratVentricle_summary.csv"))
+
+
+def test_events_and_comments(tmp_path):
+    raw = str(tmp_path / "raw")
+    _copy("example4_humanAtrium", raw)  # comments 'addition of 100nM Iso' in channels 3, 4, 6, 8
+    res = str(tmp_path / "res")
+    W.watch(raw, res, quiet=True, bin_minutes=5)
+    E = pd.read_csv(os.path.join(res, "example4_humanAtrium_events.csv"))
+    assert {"clockTime", "t_file", "channel", "code", "category", "text"} <= set(E.columns)
+    assert (E.loc[E["text"] == "addition of 100nM Iso", "category"] == "comment").all()
+    S = pd.read_csv(os.path.join(res, "example4_humanAtrium_summary.csv"))
+    first = S[S["range"] == S["range"].iloc[0]].set_index("channel")
+    assert first.loc[3, "comments"] == "addition of 100nM Iso" and first.loc[1, "nComments"] == 0
+
+
+def test_parallel_workers(raw, tmp_path):
+    X1, _ = W.watch(raw, str(tmp_path / "r1"), quiet=True, protocols=False)
+    X2, _ = W.watch(raw, str(tmp_path / "r2"), quiet=True, protocols=False, workers=2)
+    assert list(X1["file"]) == list(X2["file"]) and list(X1["nContractions"]) == list(X2["nContractions"])
+    a = pd.read_csv(str(tmp_path / "r1" / "A" / "example9_ratVentricle_summary.csv"))
+    b = pd.read_csv(str(tmp_path / "r2" / "A" / "example9_ratVentricle_summary.csv"))
+    pd.testing.assert_frame_equal(a, b)

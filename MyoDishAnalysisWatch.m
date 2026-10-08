@@ -10,13 +10,20 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   again. Python: mda-watch (myodish_analysis.watch), same index and results.
 %
 % RESULTS per recording (resultsFolder/<subfolder of rawFolder>/)
-%   <name>_contractions.csv, _summary.csv, _parameters.csv, _info.csv, _labels.csv (_rockerFilter.csv)
-%       every single contraction of the whole recording; summary = one row per channel and time bin ('binMinutes',
-%       default 60 min; range label = clock time of the bin start). Same as
-%       MyoDishAnalysis(file, [], binsFrom, binsTo, 'labels', .., 'output', '<name>.csv', analysisOptions{:})
+%   <name>_summary.csv, _contractions.csv(.gz), _parameters.csv, _info.csv, _labels.csv (_rockerFilter.csv)
+%       summary = one row per channel and time range: time bins of 'binMinutes' (default 60 min) without the periods of
+%       the stimulation protocols ('includeProtocols', false, default; a bin with a protocol gives several ranges).
+%       range = clock time of the start of the range, bin = clock time of the start of the bin, nComments / comments =
+%       comments of the log file in the range (this channel or all channels). Contractions ('contractions'): 'all'
+%       (every contraction), 'thinned' (every 'thinFactor'-th contraction per channel, 'thinMode','nth', or the median
+%       of blocks of 'thinFactor' contractions, 'thinMode','median'; extra beats and, with 'includeProtocols', the
+%       contractions in the protocols are always kept) or 'none'; columns bin, sampledEvery (number of contractions per
+%       row) and sampleMode ('singleBeat' / 'median'). 'compress', true: <name>_contractions.csv.gz.
 %   <name>_protocols_*.csv (if the log file contains stimulation protocols, 'protocols', true)
-%       MyoDishAnalysis(file, [], [], [], 'protocol', 'all', 'output', '<name>_protocols.csv', ...): summary per
+%       MyoDishAnalysis(file, [], [], [], 'protocol', 'all', ...): every contraction in the protocols, summary per
 %       protocol, channel and group, protocolResults (FFR, ST thresholds, refractory periods, PRP)
+%   <name>_events.csv ('events', true): all entries of the log file (comments, stimulation and rocker settings,
+%       recording, calibration, schedule, warnings) with category, clock time and time in the file
 %   Labels per channel (metadata): <name>_labels.csv next to the .mdd file (saved by the GUI), if present.
 % resultsFolder/mda_index.csv
 %   one row per recording: file (path relative to rawFolder), bytes, modified (time of the .mdd file, UTC), logBytes, status (ok / error /
@@ -24,8 +31,8 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   analyzed, seconds, nContractions, outputs, message. The same file is used by the MATLAB and the Python watcher.
 % resultsFolder/reports/mda_report_<date>_<time>.txt
 %   report of a pass with analysed recordings: per channel contractions, capture (% of the stimuli followed by a
-%   contraction), extra beats (% of the detected contractions), mean amplitude in the first and last bin (bins with
-%   >= 10 included contractions) and flags (no contractions, capture < flagCapture %, extra beats > flagExtraBeats %,
+%   contraction), extra beats (% of the detected contractions), mean amplitude in the first and last range (>= 10
+%   included contractions) and flags (no contractions, capture < flagCapture %, extra beats > flagExtraBeats %,
 %   amplitude change > flagAmplitudeChange %).
 %
 % SKIPPED while written: files modified less than 'minFileAgeMinutes' ago (default 10), names starting with '.'
@@ -44,7 +51,13 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   'dryRun', tf             only list what would be analysed
 %   'minFileAgeMinutes', m   (default 10)       'incompleteAfterHours', h   (default 30)
 %   'binMinutes', m          time bin of the summary (default 60)
+%   'includeProtocols', tf   summary and contractions also during the stimulation protocols (default false)
+%   'protocolMarginSeconds', s   excluded after the end of a protocol as well (default 0)
 %   'protocols', tf          analyse the stimulation protocols of the log file (default true)
+%   'contractions', c        'all' (default) | 'thinned' | 'none'
+%   'thinFactor', n          (default 10)       'thinMode', m   'nth' (default) | 'median'
+%   'compress', tf           <name>_contractions.csv.gz (default false)
+%   'events', tf             <name>_events.csv and comments in the summary (default true)
 %   'flagCapture', 'flagExtraBeats', 'flagAmplitudeChange'   report flags (default 90, 10, 30 %)
 %   'quiet', tf              no messages
 %   all other name/value pairs: analysis options of MyoDishAnalysis for all recordings, e.g. 'rockerFilter', true,
@@ -54,6 +67,7 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   MyoDishAnalysisWatch('/data/myodish/raw', '/data/myodish/results', 'rockerFilter', true)
 %   MyoDishAnalysisWatch(raw, results, 'fromDate', '2026-10-01', 'dryRun', true)
 %   MyoDishAnalysisWatch(raw, results, 'interval', 24)        %one pass every 24 h (MATLAB stays busy)
+%   MyoDishAnalysisWatch(raw, results, 'contractions', 'thinned', 'thinMode', 'median', 'compress', true)
 %   Daily without an open MATLAB: the scheduler of the operating system with
 %   matlab -batch "MyoDishAnalysisWatch('raw', 'results', 'quiet', true)"   or the Python version (mda-watch).
 %
@@ -61,7 +75,9 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 
 W = struct('interval', 0, 'reanalyze', 'outdated', 'retryErrors', false, 'fromDate', '', 'filter', '', ...
     'maxFiles', inf, 'dryRun', false, 'minFileAgeMinutes', 10, 'incompleteAfterHours', 30, 'binMinutes', 60, ...
-    'protocols', true, 'flagCapture', 90, 'flagExtraBeats', 10, 'flagAmplitudeChange', 30, 'quiet', false);
+    'includeProtocols', false, 'protocolMarginSeconds', 0, 'protocols', true, 'contractions', 'all', ...
+    'thinFactor', 10, 'thinMode', 'nth', 'compress', false, 'events', true, ...
+    'flagCapture', 90, 'flagExtraBeats', 10, 'flagAmplitudeChange', 30, 'quiet', false);
 wNames = fieldnames(W);
 args = {};
 for i = 1:2:numel(varargin)
@@ -77,6 +93,14 @@ for i = 1:2:numel(varargin)
 end
 if ~ismember(lower(W.reanalyze), {'outdated', 'new', 'all'})
     error('MyoDishAnalysisWatch: ''reanalyze'': ''outdated'', ''new'' or ''all'' expected.');
+end
+W.contractions = lower(char(W.contractions)); W.thinMode = lower(char(W.thinMode));
+if ~ismember(W.contractions, {'all', 'thinned', 'none'})
+    error('MyoDishAnalysisWatch: ''contractions'': ''all'', ''thinned'' or ''none'' expected.');
+end
+if ~ismember(W.thinMode, {'nth', 'median'}), error('MyoDishAnalysisWatch: ''thinMode'': ''nth'' or ''median'' expected.'); end
+if ~isscalar(W.thinFactor) || W.thinFactor < 1 || W.thinFactor ~= round(W.thinFactor)
+    error('MyoDishAnalysisWatch: ''thinFactor'': integer >= 1 expected.');
 end
 raw = absPath(rawFolder);
 res = absPath(resultsFolder);
@@ -119,7 +143,7 @@ report = '';
 X = readIndex(res);
 version = mda_version();
 code = codeFingerprint();
-otext = optionsText(args, W.binMinutes, W.protocols);
+otext = optionsText(args, W);
 fromDate = parseDate(W.fromDate);
 oa = optionArgs(args);
 hopts = mda_options(oa{:});
@@ -128,7 +152,7 @@ F = findRecordings(raw);
 todo = {};
 for k = 1:numel(F)
     rel = F(k).rel; f = F(k).file;
-    if ~isempty(W.filter) && isempty(regexpi(rel, W.filter, 'once')), continue; end
+    if ~isempty(W.filter) && isempty(regexpi(rel, W.filter, 'once', 'emptymatch')), continue; end   %as Python re.search
     logf = [f(1:end-4) '_log.log'];
     dl = dir(logf);
     logBytes = -1; lastChange = F(k).datenum;
@@ -184,7 +208,12 @@ for k = 1:size(todo,1)
     X = setRow(X, row);
     writeIndex(res, X);
 end
+if size(todo, 1) > 0                                   %index in the order of the files
+    X = sortrows(X, 'file');
+    writeIndex(res, X);
+end
 if ~isempty(blocks)
+    blocks = sort(blocks);
     report = sprintf('MyoDishAnalysis %s (MATLAB) watcher report %s\nraw folder: %s\nresults:    %s\noptions:    %s\n\n%s', ...
         version, datestr(now, 'yyyy-mm-dd HH:MM:SS'), raw, res, otext, strjoin(blocks, newline));
     dr = fullfile(res, 'reports');
@@ -237,46 +266,233 @@ outDir = fullfile(res, fileparts(rel));
 if ~isfolder(outDir), mkdir(outDir); end
 meta = [f(1:end-4) '_labels.csv'];
 if ~isfile(meta), meta = []; end
-[fr, to, labels] = bins(H, W.binMinutes * 60);
-[C, S, info] = MyoDishAnalysis(f, [], fr, to, 'labels', labels, 'metadata', meta, 'quiet', true, ...
-    'output', fullfile(outDir, [n '.csv']), args{:});
-outputs = {[n '.csv']};
-msgs = info.notes(:)';
-if W.protocols
+msgs = {}; outputs = {};
+P = [];
+if W.protocols || ~W.includeProtocols
     try
         P = mda_protocols(H);
-        if height(P) > 0
-            MyoDishAnalysis(f, [], [], [], 'protocol', 'all', 'metadata', meta, 'quiet', true, ...
-                'output', fullfile(outDir, [n '_protocols.csv']), args{:});
-            outputs{end+1} = [n '_protocols.csv'];
-        end
+    catch ME
+        msgs{end+1} = sprintf('protocols: %s: %s', ME.identifier, ME.message);
+    end
+end
+Wp = protocolWindows(P, W.protocolMarginSeconds);
+if W.includeProtocols, Wcut = []; else, Wcut = Wp; end
+[fr, to, labels, binLabels] = ranges(H, W.binMinutes * 60, Wcut);
+deleteFile(fullfile(outDir, [n '_contractions.csv']));            %results of earlier options
+deleteFile(fullfile(outDir, [n '_contractions.csv.gz']));
+E = [];
+if W.events
+    E = mda_logEntries(H.logFile);
+    E = addvars(E, cellfun(@eventCategory, E.code, E.text, 'UniformOutput', false), 'After', 'code', ...
+        'NewVariableNames', 'category');
+    E.clockTime.Format = 'yyyy-MM-dd HH:mm:ss.SSS';
+    writetable(E, fullfile(outDir, [n '_events.csv']));
+    outputs{end+1} = [n '_events.csv'];
+end
+S = [];
+nC = 0;
+if ~isempty(fr)
+    [C, S, info] = MyoDishAnalysis(f, [], fr, to, 'labels', labels, 'metadata', meta, 'quiet', true, args{:});
+    nC = height(C);
+    [~, iS] = ismember(S.range, labels);
+    S = addvars(S, binLabels(iS), 'After', 'range', 'NewVariableNames', 'bin');
+    [~, iC] = ismember(C.range, labels);
+    C = addvars(C, binLabels(iC), 'After', 'range', 'NewVariableNames', 'bin');
+    S = addComments(S, E);
+    if W.includeProtocols, Wkeep = Wp; else, Wkeep = []; end
+    C = sampleContractions(C, labels, Wkeep, W);
+    mda_writeResults(fullfile(outDir, [n '.csv']), C, S, info);
+    cf = fullfile(outDir, [n '_contractions.csv']);
+    if strcmp(W.contractions, 'none')
+        delete(cf);
+    elseif W.compress
+        gzip(cf);
+        delete(cf);
+    end
+    outputs = [{[n '.csv']}, outputs];
+    msgs = [info.notes(:)', msgs];
+else
+    msgs{end+1} = 'no time outside the stimulation protocols';
+end
+if W.protocols && istable(P) && height(P) > 0
+    try
+        MyoDishAnalysis(f, [], [], [], 'protocol', 'all', 'metadata', meta, 'quiet', true, ...
+            'output', fullfile(outDir, [n '_protocols.csv']), args{:});
+        outputs{end+1} = [n '_protocols.csv'];
     catch ME
         msgs{end+1} = sprintf('protocols: %s: %s', ME.identifier, ME.message);
     end
 end
 row.status = 'ok';
-row.nContractions = height(C);
+row.nContractions = nC;
 row.outputs = strjoin(outputs, '; ');
 row.message = clean(strjoin(msgs, ' | '));
 block = reportBlock(rel, H, S, W);
 end
 
 
-function [fr, to, labels] = bins(H, binS)
+function Wp = protocolWindows(P, margin)
+% [from to] of the protocols (to + margin), merged where they overlap
+Wp = zeros(0, 2);
+if ~istable(P) || height(P) == 0, return; end
+V = sortrows([P.from(:), P.to(:) + margin], 1);
+Wp = V(1,:);
+for k = 2:size(V, 1)
+    if V(k,1) <= Wp(end,2)
+        Wp(end,2) = max(Wp(end,2), V(k,2));
+    else
+        Wp(end+1,:) = V(k,:); %#ok<AGROW>
+    end
+end
+end
+
+
+function [fr, to, labels, binLabels] = ranges(H, binS, Wcut)
+% time bins of binS s (half-open) without the windows Wcut ([]: bins only); range label = clock time of the start of
+% the range, bin label = clock time of the start of the bin
 T = H.totalSeconds;
 if binS > 0, edges = 0:binS:T; else, edges = 0; end
 if edges(end) >= T && numel(edges) > 1, edges(end) = []; end   %as numpy.arange: T itself is no bin start
 if numel(edges) > 1 && T - edges(end) <= 1, edges(end) = []; end  %no bin shorter than 1 s at the end
-fr = edges(:);
-to = [fr(2:end) - 1e-9; T];                         %half-open bins: no contraction twice
-labels = cell(numel(fr), 1);
-for k = 1:numel(fr)
-    if ~isnan(H.recordingStart)
-        sec = round((H.recordingStart - 719529) * 86400 + fr(k));
-        labels{k} = char(datetime(sec, 'ConvertFrom', 'posixtime', 'Format', 'yyyy-MM-dd HH:mm:ss'));
-    else
-        labels{k} = sprintf('%g-%g min', fr(k) / 60, round(to(k)) / 60);
+bto = [edges(2:end), T];
+fr = zeros(0, 1); to = zeros(0, 1); labels = cell(0, 1); binLabels = cell(0, 1);
+for k = 1:numel(edges)
+    a = edges(k); b = bto(k);
+    pieces = [a b];
+    for w = 1:size(Wcut, 1)
+        nxt = zeros(0, 2);
+        for p = 1:size(pieces, 1)
+            pa = pieces(p,1); pb = pieces(p,2);
+            if Wcut(w,2) <= pa || Wcut(w,1) >= pb, nxt(end+1,:) = [pa pb]; continue; end %#ok<AGROW>
+            if Wcut(w,1) > pa, nxt(end+1,:) = [pa Wcut(w,1)]; end %#ok<AGROW>
+            if Wcut(w,2) < pb, nxt(end+1,:) = [Wcut(w,2) pb]; end %#ok<AGROW>
+        end
+        pieces = nxt;
     end
+    for p = 1:size(pieces, 1)
+        pa = pieces(p,1); pb = pieces(p,2);
+        if pb - pa < 1, continue; end                  %no range shorter than 1 s
+        fr(end+1,1) = pa; %#ok<AGROW>
+        if k == numel(edges) && pb == T, to(end+1,1) = pb; else, to(end+1,1) = pb - 1e-9; end %#ok<AGROW>
+        labels{end+1,1} = timeLabel(H, pa, pb); %#ok<AGROW>
+        binLabels{end+1,1} = timeLabel(H, a, b); %#ok<AGROW>
+    end
+end
+end
+
+
+function s = timeLabel(H, a, b)
+if ~isnan(H.recordingStart)
+    sec = round((H.recordingStart - 719529) * 86400 + a);
+    s = char(datetime(sec, 'ConvertFrom', 'posixtime', 'Format', 'yyyy-MM-dd HH:mm:ss'));
+else
+    s = sprintf('%g-%g min', a / 60, round(b) / 60);
+end
+end
+
+
+function S = addComments(S, E)
+% columns nComments and comments: comments of the log file in the range (channel of the row or channel 0)
+nC = zeros(height(S), 1); txt = repmat({''}, height(S), 1);
+if istable(E) && height(E) > 0
+    cm = E(strcmp(E.category, 'comment'), :);
+    for r = 1:height(S)
+        k = find(cm.t_file >= S.from(r) & cm.t_file <= S.to(r) & (cm.channel == S.channel(r) | cm.channel == 0));
+        nC(r) = numel(k);
+        txt{r} = strjoin(cellfun(@clean, cm.text(k)', 'UniformOutput', false), ' | ');
+    end
+end
+S.nComments = nC;
+S.comments = txt;
+end
+
+
+function C = sampleContractions(C, labels, Wkeep, W)
+% contractions to save: all, every thinFactor-th, or medians of blocks of thinFactor (extra beats and the contractions
+% in the windows Wkeep always complete); columns sampledEvery and sampleMode
+if ~strcmp(W.contractions, 'thinned') || height(C) == 0
+    C = addvars(C, ones(height(C), 1), repmat({'singleBeat'}, height(C), 1), 'After', 'bin', ...
+        'NewVariableNames', {'sampledEvery', 'sampleMode'});
+    return;
+end
+N = W.thinFactor;
+tp = C.t_peak;
+keep = strcmp(C.beatType, 'extra');
+for w = 1:size(Wkeep, 1), keep = keep | (tp >= Wkeep(w,1) & tp <= Wkeep(w,2)); end
+[~, rIdx] = ismember(C.range, labels);
+ch = C.channel;
+[~, order] = sortrows([ch tp]);                     %per channel in time order
+singles = zeros(0, 2); blocks = {};
+if strcmp(W.thinMode, 'nth')
+    cnt = containers.Map('KeyType', 'double', 'ValueType', 'double');
+    for i = order'
+        if keep(i), singles(end+1,:) = [i 1]; continue; end %#ok<AGROW>
+        if isKey(cnt, ch(i)), cnt(ch(i)) = cnt(ch(i)) + 1; else, cnt(ch(i)) = 0; end
+        if mod(cnt(ch(i)), N) == 0, singles(end+1,:) = [i N]; end %#ok<AGROW>
+    end
+else
+    bt = C.beatType; inc = C.included; rock = C.rockerMoving;
+    cur = []; prev = [];
+    for i = order'
+        if keep(i), singles(end+1,:) = [i 1]; continue; end %#ok<AGROW>   %does not interrupt the blocks
+        key = [ch(i), rIdx(i), double(inc(i)), double(rock(i)), double(strcmp(bt{i}, 'stimulated'))];
+        if ~isempty(cur) && (~isequal(key, prev) || ~isequal(bt{i}, bt{cur(1)}) || numel(cur) == N)
+            blocks{end+1} = cur; cur = []; %#ok<AGROW>
+        end
+        cur(end+1) = i; %#ok<AGROW>
+        prev = key;
+    end
+    if ~isempty(cur), blocks{end+1} = cur; end
+end
+out = C(singles(:,1), :);
+every = singles(:,2);
+mode = repmat({'singleBeat'}, size(singles, 1), 1);
+if ~isempty(blocks)
+    first = cellfun(@(b) b(1), blocks)';
+    M = C(first, :);
+    names = C.Properties.VariableNames;
+    num = names(cellfun(@(v) isnumeric(C.(v)) && ~islogical(C.(v)), names) & ~ismember(names, {'contraction', 'channel'}));
+    A = C{:, num};
+    med = zeros(numel(blocks), numel(num));
+    for b = 1:numel(blocks), med(b,:) = median(A(blocks{b}, :), 1, 'omitnan'); end
+    for v = 1:numel(num), M.(num{v}) = med(:, v); end
+    if ismember('clockTime', names)
+        M.clockTime = C.clockTime(first) + seconds(M.t_peak - tp(first));
+    end
+    out = [out; M];
+    every = [every; cellfun(@numel, blocks)'];
+    mode = [mode; repmat({'median'}, numel(blocks), 1)];
+end
+out = addvars(out, every, mode, 'After', 'bin', 'NewVariableNames', {'sampledEvery', 'sampleMode'});
+[~, rI] = ismember(out.range, labels);
+[~, o2] = sortrows([rI, out.channel, out.t_peak]);  %range, channel, time
+C = out(o2, :);
+end
+
+
+function c = eventCategory(code, text)
+% category of a log entry: comment, protocol, recording, schedule, stimulation, rocker, calibration, warning, other
+% (same rules as in Python)
+c = lower(strtrim(code)); t = lower(strtrim(text));
+stim = {'stimfrequency', 'stimcurrent', 'chargeduration', 'dechargeduration', 'chargecurrent', 'dechargecurrent', ...
+    'stimpulse', 'stimpulses', 'stimpolarisation', 'stimpolarity', 'polarity', 'pauseduration', 'sequence', ...
+    'stimsequence', 'spikethresh'};
+if strcmp(c, 'comment')
+    if ~isempty(regexp(t, '^(started|stopped) (parallel )?recording', 'once')), c = 'recording';
+    elseif contains(t, 'schedule') || startsWith(t, 'saved settings'), c = 'schedule';
+    elseif ~isempty(regexp(t, '^(start|end|stop)\>', 'once')) || ~isempty(regexp(t, '\<(started|ended)$', 'once'))
+        c = 'protocol';
+    end
+    return;                                         %'comment' otherwise
+end
+if ismember(c, stim), c = 'stimulation';
+elseif ismember(c, {'rockerspeed', 'rocker'}), c = 'rocker';
+elseif ismember(c, {'offset', 'calibration'}) || (strcmp(c, 'event') && contains(t, 'extended sensor mode')), c = 'calibration';
+elseif strcmp(c, 'schedule'), c = 'schedule';
+elseif ismember(c, {'warning', 'error'}), c = 'warning';
+elseif ismember(c, {'recording', 'programinfo', 'nchannels', 'channel number', 'channel order', 'event'}) || ...
+        startsWith(c, 'samplingrate'), c = 'recording';
+else, c = 'other';
 end
 end
 
@@ -288,7 +504,11 @@ if ~isnan(H.recordingStart)
     start = [', start ' char(datetime(sec, 'ConvertFrom', 'posixtime', 'Format', 'yyyy-MM-dd HH:mm:ss'))];
 end
 lines = {sprintf('%s  (%.2f h, %d channels%s)', rel, H.totalSeconds / 3600, numel(H.dataChannels), start), ...
-    '  channel  contractions  capture%  extra%  amplitude first/last bin (uN)  change%  flags'};
+    '  channel  contractions  capture%  extra%  amplitude first/last range (uN)  change%  flags'};
+if ~istable(S) || height(S) == 0
+    block = sprintf('%s\n  no time outside the stimulation protocols\n', lines{1});
+    return;
+end
 for ch = unique(S.channel)'
     s = S(S.channel == ch, :);
     nDet = sum(s.nDetected); nInc = sum(s.nContractions);
@@ -307,7 +527,7 @@ for ch = unique(S.channel)'
     end
     if extra > W.flagExtraBeats, flags{end+1} = sprintf('extra beats > %g %%', W.flagExtraBeats); end %#ok<AGROW>
     if abs(chg) > W.flagAmplitudeChange, flags{end+1} = sprintf('amplitude change > %g %%', W.flagAmplitudeChange); end %#ok<AGROW>
-    lines{end+1} = sprintf('  %7d  %12d  %8s  %6s  %14s / %-14s  %7s  %s', ch, nInc, f1(cap), f1(extra), f1(a1), ...
+    lines{end+1} = sprintf('  %7d  %12d  %8s  %6s  %15s / %-15s  %7s  %s', ch, nInc, f1(cap), f1(extra), f1(a1), ...
         f1(a2), f1(chg), strjoin(flags, ', ')); %#ok<AGROW>
 end
 block = sprintf('%s\n', lines{:});
@@ -407,9 +627,15 @@ end
 c = sprintf('%08x', B * 65536 + A);
 end
 
-function s = optionsText(args, binMinutes, protocols)
+function s = optionsText(args, W)
 % canonical text of the options that change the results (index column 'options'; same text as in Python)
-keys = {'binminutes', 'protocols'}; vals = {valueText(binMinutes), valueText(logical(protocols))};
+keys = {'binminutes', 'protocols', 'contractions', 'compress', 'events', 'includeprotocols'};
+vals = {valueText(W.binMinutes), valueText(logical(W.protocols)), valueText(char(W.contractions)), ...
+    valueText(logical(W.compress)), valueText(logical(W.events)), valueText(logical(W.includeProtocols))};
+if ~W.includeProtocols, keys{end+1} = 'protocolmarginseconds'; vals{end+1} = valueText(W.protocolMarginSeconds); end
+if strcmp(W.contractions, 'thinned')
+    keys(end+1:end+2) = {'thinfactor', 'thinmode'}; vals(end+1:end+2) = {valueText(W.thinFactor), valueText(char(W.thinMode))};
+end
 for i = 1:2:numel(args)
     k = lower(args{i});
     j = find(strcmp(keys, k), 1);
@@ -487,6 +713,10 @@ end
 
 function s = clean(s)
 s = strtrim(regexprep(char(s), '[\r\n,]+', ' '));
+end
+
+function deleteFile(f)
+if isfile(f), delete(f); end
 end
 
 function deleteIfExists(f)

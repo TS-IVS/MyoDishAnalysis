@@ -11,6 +11,9 @@ MATLAB and Python versions have the same version number and give the same result
   are analysed again when their files, the version, the options or the core functions change); report per pass with
   capture, extra beats, amplitude change and flags; running recordings, missing log files and rsync temporary files
   are skipped. Only calls of the core functions. Tests `mda_testWatch.m`, `py/tests/test_watch.py`.
+  Options: summary without the stimulation protocols (default; `includeProtocols`, `protocolMarginSeconds`),
+  contractions `all` / `thinned` (every n-th or median of blocks of n, extra beats complete; columns `sampledEvery`,
+  `sampleMode`) / `none`, `compress` (.csv.gz), events file and comments per range, Python `--workers`.
 - Header field `recordingStopped` (`mda_readMdd` / `read_header`): 1 if the last `Recording` entry of the log file for
   this file is `stopped`, 0 if the recording is still running (or was aborted), NaN / None without such entries.
 - `mda_version.m` (version number, also in the `info` sheet).

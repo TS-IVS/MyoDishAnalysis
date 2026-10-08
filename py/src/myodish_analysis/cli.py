@@ -139,6 +139,7 @@ def watch_main(argv=None):
         epilog="Examples:\n  mda-watch /data/myodish/raw /data/myodish/results --rocker-filter\n"
                "  mda-watch raw results --from-date 2026-10-01 --dry-run\n"
                "  mda-watch raw results --interval 24          (one pass every 24 h, Ctrl+C stops)\n"
+               "  mda-watch raw results --contractions thinned --thin-mode median --compress --workers 6\n"
                "Daily by the operating system: cron (Linux/macOS), launchd (macOS) or the Windows task scheduler.")
     ap.add_argument("--version", action="version", version=f"MyoDishAnalysis (Python) {__version__}")
     ap.add_argument("raw", help="folder with the recordings (subfolders are searched)")
@@ -156,6 +157,18 @@ def watch_main(argv=None):
                     help="hours after which a recording without 'Recording stopped' is analysed (default 30)")
     ap.add_argument("--bin-minutes", type=float, default=60, help="time bin of the summary in min (default 60)")
     ap.add_argument("--no-protocols", action="store_true", help="no analysis of the stimulation protocols")
+    ap.add_argument("--include-protocols", action="store_true",
+                    help="summary and contractions also during the stimulation protocols (default: without them)")
+    ap.add_argument("--protocol-margin", type=float, default=0,
+                    help="s after the end of a protocol that are excluded as well (default 0)")
+    ap.add_argument("--contractions", choices=["all", "thinned", "none"], default="all",
+                    help="single contractions to save (default all)")
+    ap.add_argument("--thin-factor", type=int, default=10, help="--contractions thinned: every n-th / blocks of n (10)")
+    ap.add_argument("--thin-mode", choices=["nth", "median"], default="nth",
+                    help="--contractions thinned: every n-th contraction (default) or median of blocks of n")
+    ap.add_argument("--compress", action="store_true", help="contractions as <name>_contractions.csv.gz")
+    ap.add_argument("--no-events", action="store_true", help="no <name>_events.csv (entries of the log file)")
+    ap.add_argument("--workers", type=int, default=1, help="recordings analysed in parallel (processes, default 1)")
     ap.add_argument("--rocker", choices=["any", "stopped", "moving"])
     ap.add_argument("--beats", choices=["all", "stimulated"])
     ap.add_argument("--threshold", type=float, nargs="+", help="detection threshold (uN), one value or one per channel")
@@ -180,7 +193,9 @@ def watch_main(argv=None):
     watch(a.raw, a.results, interval=a.interval, reanalyze=a.reanalyze, retry_errors=a.retry_errors,
           from_date=a.from_date, filter=a.filter, max_files=a.max_files, dry_run=a.dry_run,
           min_file_age_minutes=a.min_age, incomplete_after_hours=a.incomplete_after, bin_minutes=a.bin_minutes,
-          protocols=not a.no_protocols, quiet=a.quiet, **kw)
+          protocols=not a.no_protocols, include_protocols=a.include_protocols,
+          protocol_margin_seconds=a.protocol_margin, contractions=a.contractions, thin_factor=a.thin_factor,
+          thin_mode=a.thin_mode, compress=a.compress, events=not a.no_events, workers=a.workers, quiet=a.quiet, **kw)
     return 0
 
 

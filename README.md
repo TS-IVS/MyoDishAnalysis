@@ -251,12 +251,25 @@ mda-watch /data/myodish/raw /data/myodish/results --rocker-filter --quiet
 Each pass searches the raw folder (with subfolders) for `.mdd` files and analyses the new and changed ones. The
 watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`: every improvement of the analysis applies to
 its results as well.
-* **Per recording** (results folder, same subfolders as in the raw folder): `<name>_contractions.csv` (every single
-  contraction of the whole recording), `<name>_summary.csv` (one row per channel and time bin, `'binMinutes'`,
-  default 60; range label = clock time of the bin start), `_parameters`, `_info`, `_labels` (`_rockerFilter`); if the
-  log file contains stimulation protocols also `<name>_protocols_*.csv` with `protocolResults`. Labels per channel:
-  `<name>_labels.csv` next to the `.mdd` file (saved by the GUI). With 60-min bins the contractions are identical to
-  `MyoDishAnalysis(file)`.
+* **Per recording** (results folder, same subfolders as in the raw folder):
+  * `<name>_summary.csv`: one row per channel and time range. The ranges are time bins (`'binMinutes'`, default 60)
+    **without the stimulation protocols** (default; `'includeProtocols',true` keeps them, `'protocolMarginSeconds'`
+    also excludes some time after each protocol); a bin with a protocol gives several ranges. Columns `range` (clock
+    time of the start of the range), `bin` (clock time of the start of the bin), `nComments` / `comments` (comments of
+    the log file in the range, this channel or all channels).
+  * `<name>_contractions.csv`: `'contractions','all'` (default: every contraction), `'thinned'` (every
+    `'thinFactor'`-th contraction per channel, default 10, `'thinMode','nth'`; or the median of blocks of
+    `'thinFactor'` successive contractions of the same type and rocker state, `'thinMode','median'`; extra beats and,
+    with `'includeProtocols'`, the contractions in the protocols are always complete) or `'none'`. Columns
+    `sampledEvery` (number of contractions represented by the row) and `sampleMode` (`singleBeat` / `median`).
+    `'compress',true`: `<name>_contractions.csv.gz` (pandas reads it directly; MATLAB: `gunzip` first). Trends from
+    the summary (all contractions): every n-th contraction can alias the rocker modulation of the amplitude.
+  * `<name>_protocols_*.csv`: every contraction in the protocols, summary per protocol, channel and group,
+    `protocolResults` (if the log file contains protocols).
+  * `<name>_events.csv` (`'events',true`): all entries of the log file with clock time, time in the file, channel,
+    code, category (comment, protocol, recording, schedule, stimulation, rocker, calibration, warning, other) and text.
+  * `_parameters`, `_info`, `_labels` (`_rockerFilter`: rocker artifact per channel and 30-min chunk). Labels per
+    channel: `<name>_labels.csv` next to the `.mdd` file (saved by the GUI).
 * **Index** `mda_index.csv` (one row per recording; the same file for MATLAB and Python): size and time (UTC) of the
   `.mdd` file, size of the log file, status (`ok`, `error`, `running`, `noLog`), version, implementation, fingerprint
   of the core functions, options, analysis time, number of contractions, message. With `'reanalyze','outdated'`
@@ -275,7 +288,9 @@ its results as well.
 * **Daily**: the scheduler of the operating system (cron / launchd / Windows task scheduler) with `mda-watch ...` or
   `matlab -batch "MyoDishAnalysisWatch(...)"`; or `'interval', 24` (one pass every 24 h, MATLAB stays busy).
 * Further options: `'filter'` (regular expression on the relative path), `'maxFiles'`, `'protocols',false`,
-  `'quiet',true`; all other name/value pairs are analysis options of `MyoDishAnalysis` for all recordings.
+  `'quiet',true`; all other name/value pairs are analysis options of `MyoDishAnalysis` for all recordings (e.g.
+  `'rockerFilter',true`: rocker artifact removed in chunks of 30 min with 60 s context, result per chunk in
+  `_rockerFilter.csv`). Python only: `--workers n` analyses n recordings in parallel (archives).
 * Tested on 31 recordings (729 MB, rat, rabbit, pig, human, schedule files up to 2 h, single channel, sharp
   electrode) on one Mac: MATLAB 149 s, Python 69 s; results of MATLAB and Python identical (116 result files, max. relative
   difference 3e-10).
