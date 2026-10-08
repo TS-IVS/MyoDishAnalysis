@@ -12,7 +12,7 @@ E.isComment   True for comments (code 'comment')
 E.attrs['clock']   info of clock_time (format '24h' / '12h', nCorrected, ambiguous, source, note)
 
 Lines (UTF-16 or UTF-8): systemTime;dataLogTime_ms;channel;code;value, e.g.
-  2022 03 07 09:44:35:717;1025;0;comment;start rockerSpeedTest
+  2000 01 01 09:44:35:717;1025;0;comment;start rockerSpeedTest
 
 TS 2026-10-06 (port of mda_logEntries.m, TS 2026-10-05; 12-hour time stamps 2026-10-08)
 """

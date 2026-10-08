@@ -4,11 +4,11 @@ mda_clockTime.m.
     clk, info = clock_time(N, t, program_version=None, file_time=None, text=None)
 
 N                n x 7: system time of each log entry as numbers: year month day hour minute second millisecond
-                 (e.g. from '2021 03 15 03:11:50:675'); rows with NaN in columns 1-6: not readable (clk None)
+                 (e.g. from '2021 03 01 03:11:50:000'); rows with NaN in columns 1-6: not readable (clk None)
 t                n: dataLogTime of the entries (s; NaN if not readable)
 program_version  'programInfo' entry (entries) of the log, e.g. 'Version 2.0.7769.26061' (str or list; optional)
 file_time        time of the last change of the .mdd file (datetime or MATLAB datenum, local time; optional)
-text             n values of the entries (optional; 'Started parallel recording: 13.Jun.2021 16:50:17' gives the
+text             n values of the entries (optional; 'Started parallel recording: 01.Mar.2021 16:50:17' gives the
                  24-hour time of its entry)
 
 clk              list of datetime (None if not readable): real-world clock time of the entries
@@ -110,7 +110,7 @@ def clock_time(N, t, program_version=None, file_time=None, text=None):
     m12 = two & (h == 12)
     base[m12] = P[m12] - H12
     kWritten = m12.astype(float)
-    # 24-hour time in the text of the entry ('Started parallel recording: 13.Jun.2021 16:50:17')
+    # 24-hour time in the text of the entry ('Started parallel recording: 01.Mar.2021 16:50:17')
     kText = np.full(n, np.nan)
     if text is not None and len(text) == n:
         for i in np.flatnonzero(two):

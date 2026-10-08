@@ -211,7 +211,7 @@ contraction and summary tables (and a sheet `labels` in the Excel output):
 | concentration | number | e.g. `100` (for dose–response analyses) |
 | concentrationUnit | text | e.g. `nM` |
 | daysInCulture | number | days in culture |
-| cultureStart | text | `2026-09-08 14:30` – if given, `daysInCulture` is calculated for every contraction from its clock time |
+| cultureStart | text | `1999-12-24 14:30` – if given, `daysInCulture` is calculated for every contraction from its clock time |
 | comment | text | free text |
 | analyst | text | initials of the person who does the analysis |
 
@@ -221,7 +221,7 @@ Own additional fields are kept as extra columns.
   ```matlab
   m.species = 'human'; m.sampleID = 'H01'; m.sliceID = {'S1','S6','S8'};
   m.sliceGroup = {'control','drug','drug'}; m.treatment = {'','isoprenaline','isoprenaline'};
-  m.concentration = [0 10 100]; m.concentrationUnit = 'nM'; m.cultureStart = '2026-09-08 16:00'; m.analyst = 'TS';
+  m.concentration = [0 10 100]; m.concentrationUnit = 'nM'; m.cultureStart = '1999-12-24 16:00'; m.analyst = 'TS';
   [c, s] = MyoDishAnalysis(mdd, [1 6 8], 1200, 1260, 'metadata', m);
   ```
 * **GUI**: button **Labels ...** (editable table; "Fill empty cells from first row"; Load/Save). Saved as

@@ -20,7 +20,7 @@ function L = mda_labels(meta, channels)
 %   concentration   number (concentration of the treatment, e.g. 100)
 %   concentrationUnit  text (e.g. 'nM')
 %   daysInCulture   number (days)
-%   cultureStart    text, date/time of the start of the culture, e.g. '2026-09-08 14:30' (or '08.09.2026 14:30').
+%   cultureStart    text, date/time of the start of the culture, e.g. '1999-12-24 14:30' (or '24.12.1999 14:30').
 %                   If given, daysInCulture of every contraction = time since cultureStart (from the clock time of
 %                   the recording), otherwise the value of daysInCulture is used.
 %   comment         text

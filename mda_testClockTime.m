@@ -67,13 +67,13 @@ ok = check(ok, 'log of two software versions', isequal(clk, [T1; T2]) && strcmp(
 
 % 8: log file + .mdd file: mda_logEntries and mda_readMdd (recording start 14:20, written 02:20)
 folder = tempname; mkdir(folder); cleanup = onCleanup(@() rmdir(folder, 's')); %#ok<NASGU>
-mdd = fullfile(folder, 'Setup2_test_0.mdd');
+mdd = fullfile(folder, 'clock_test_0.mdd');
 fid = fopen(mdd, 'w'); fwrite(fid, zeros(9, 400 * 60, 'int16'), 'int16'); fclose(fid);
 T = at([14 + 1/3, 14 + 1/3, 15, 20, 25])';
 tt = [0; seconds(T(2:end) - T(1))];
-txt = {'Recording;started: Setup2_test_0.mdd', 'samplingRate Recording;400', 'comment;Mx 1600', 'comment;observation', ...
-    'Recording;stopped: Setup2_test_0.mdd'};
-lf = fullfile(folder, 'Setup2_test_0_log.log');
+txt = {'Recording;started: clock_test_0.mdd', 'samplingRate Recording;400', 'comment;Mx 1600', 'comment;observation', ...
+    'Recording;stopped: clock_test_0.mdd'};
+lf = fullfile(folder, 'clock_test_0_log.log');
 fid = fopen(lf, 'w');
 Nw = nums(T, true);
 fprintf(fid, 'systemTime;dataLogTime;channel;code;value\n%04d %02d %02d %02d:%02d:%02d:%03d;0;0;programInfo;%s\n', Nw(1,:), V12);

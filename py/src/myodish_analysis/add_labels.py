@@ -81,5 +81,5 @@ def _parse_date(s):
             return _dt.datetime.strptime(s, f)
         except ValueError:
             pass
-    warnings.warn(f"cultureStart '{s}' not understood (use e.g. 2026-09-08 14:30).")
+    warnings.warn(f"cultureStart '{s}' not understood (use e.g. 1999-12-24 14:30).")
     return None

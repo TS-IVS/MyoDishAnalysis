@@ -5,7 +5,7 @@
 What is changed (the .mdd data file is only copied under the new name):
   - systemTime of all log lines: shifted by a whole number of days so that the first entry falls on --date
     (time of day and all time differences are kept; dataLogTime, i.e. the time in the .mdd file, is unchanged).
-  - dates in comments ('Started parallel recording: 16/Sep/2026 18:05:05'): same shift; software build date removed.
+  - dates in comments ('Started parallel recording: 01/Jan/2000 12:00:00'): same shift; software build date removed.
   - Windows paths (user names, folders with dates or sample IDs): reduced to the file name; the recording's own
     file names are replaced by <new_name>.mdd / <new_name>_log.log.
   - software version: build number removed ('Version 2.0.9708.42745' -> 'Version 2.0'; it encodes the build date).
@@ -32,8 +32,8 @@ _PATH = re.compile(r"[A-Za-z]:\\(?:[^\\\r\n]*\\)*")  # directory part of a Windo
 _MONTHS = {"jan": 1, "feb": 2, "mar": 3, "mrz": 3, "mär": 3, "apr": 4, "may": 5, "mai": 5, "jun": 6, "jul": 7,
            "aug": 8, "sep": 9, "oct": 10, "okt": 10, "nov": 11, "dec": 12, "dez": 12}
 _MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-_DATE_TXT = re.compile(r"(\d{1,2})([./])([A-Za-zä]{3})\2(\d{4})")      # 16/Sep/2026, 12.Mrz.2022
-_DATE_NUM = re.compile(r"(\d{1,2})([./])(\d{1,2})\2(\d{4})")           # 31.07.2026, 18/03/2026
+_DATE_TXT = re.compile(r"(\d{1,2})([./])([A-Za-zä]{3})\2(\d{4})")      # 01/Mar/2000, 01.Mrz.2000
+_DATE_NUM = re.compile(r"(\d{1,2})([./])(\d{1,2})\2(\d{4})")           # 31.01.2000, 18/03/2000
 
 
 def read_text(path):

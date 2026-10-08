@@ -528,7 +528,7 @@ class LabelsDialog(QtWidgets.QWidget):
             b = QtWidgets.QPushButton(text)
             b.clicked.connect(cb)
             h.addWidget(b)
-        t = QtWidgets.QLabel("cultureStart, e.g. 2026-09-08 14:30: daysInCulture is then calculated for every "
+        t = QtWidgets.QLabel("cultureStart, e.g. 1999-12-24 14:30: daysInCulture is then calculated for every "
                              "contraction. analyst: your initials. Saved as <name>_labels.csv next to the .mdd file, the "
                              "file is loaded automatically next time.")
         t.setWordWrap(True)

@@ -5,11 +5,11 @@ function [clk, info] = mda_clockTime(N, t, programVersion, fileTime, text)
 %   [clk, info] = mda_clockTime(N, t, programVersion, fileTime, text)
 %
 %   N               n x 7: system time of each log entry as numbers: year month day hour minute second millisecond
-%                   (e.g. from '2021 03 15 03:11:50:675'); rows with NaN in columns 1-6: not readable (clk NaT)
+%                   (e.g. from '2021 03 01 03:11:50:000'); rows with NaN in columns 1-6: not readable (clk NaT)
 %   t               n x 1: dataLogTime of the entries (s; NaN if not readable)
 %   programVersion  'programInfo' entry (entries) of the log, e.g. 'Version 2.0.7769.26061' (char or cellstr; optional)
 %   fileTime        time of the last change of the .mdd file (datetime or datenum, local time; optional)
-%   text            n x 1 cellstr: value of the entries (optional; 'Started parallel recording: 13.Jun.2021 16:50:17'
+%   text            n x 1 cellstr: value of the entries (optional; 'Started parallel recording: 01.Mar.2021 16:50:17'
 %                   gives the 24-hour time of its entry)
 %
 %   clk             n x 1 datetime: real-world clock time of the entries
@@ -81,7 +81,7 @@ h = N(:, 4);
 two = ok & h >= 1 & h <= 12;               %hour as written may be AM or PM
 base = P; base(two & h == 12) = P(two & h == 12) - H12;   %candidate k = 0 (hour mod 12); k = 1: 12 h later
 kWritten = double(two & h == 12);          %k of the time as written
-% 24-hour time in the text of the entry ('Started parallel recording: 13.Jun.2021 16:50:17')
+% 24-hour time in the text of the entry ('Started parallel recording: 01.Mar.2021 16:50:17')
 kText = nan(n, 1);
 if numel(text) == n
     q = regexp(text(:), '(Started|Stopped) parallel recording: *\d{1,2}\.\S+\.\d{4} (\d{1,2}):(\d{2}):\d{2}', 'tokens', 'once', 'ignorecase');

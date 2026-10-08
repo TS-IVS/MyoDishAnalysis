@@ -12,7 +12,7 @@
 
 Standard labels (always present, in this order): setupID, sliceID, species, sampleID, sampleGroup, sliceGroup,
 tissue, treatment (text), concentration (number), concentrationUnit (text), daysInCulture (number), cultureStart
-(text, e.g. '2026-09-08 14:30' or '08.09.2026 14:30'), comment, analyst (text). Further fields are kept.
+(text, e.g. '1999-12-24 14:30' or '24.12.1999 14:30'), comment, analyst (text). Further fields are kept.
 
 TS 2026-10-06 (port of mda_labels.m, TS 2026-10-04)
 """

@@ -101,18 +101,18 @@ def test_two_versions():
 
 
 def test_log_file_and_mdd(tmp_path):
-    mdd = tmp_path / "Setup2_test_0.mdd"
+    mdd = tmp_path / "clock_test_0.mdd"
     np.zeros((400 * 60, 9), dtype="<i2").tofile(mdd)
     T = at([14 + 1 / 3, 14 + 1 / 3, 15, 20, 25])
     tt = [0.0] + [(t - T[0]).total_seconds() for t in T[1:]]
-    txt = ["Recording;started: Setup2_test_0.mdd", "samplingRate Recording;400", "comment;Mx 1600",
-           "comment;observation", "Recording;stopped: Setup2_test_0.mdd"]
+    txt = ["Recording;started: clock_test_0.mdd", "samplingRate Recording;400", "comment;Mx 1600",
+           "comment;observation", "Recording;stopped: clock_test_0.mdd"]
     Nw = nums(T, True)
     lines = ["systemTime;dataLogTime;channel;code;value",
              "%04d %02d %02d %02d:%02d:%02d:%03d;0;0;programInfo;%s" % (*Nw[0], V12)]
     for k in range(len(T)):
         lines.append("%04d %02d %02d %02d:%02d:%02d:%03d;%d;0;%s" % (*Nw[k], round(tt[k] * 1000), txt[k]))
-    lf = tmp_path / "Setup2_test_0_log.log"
+    lf = tmp_path / "clock_test_0_log.log"
     lf.write_text("\n".join(lines) + "\n", encoding="utf-8")
     E = log_entries(str(lf))
     assert [c.to_pydatetime() for c in E.clockTime] == [T[0]] + T
