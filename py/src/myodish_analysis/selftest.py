@@ -18,8 +18,9 @@ Stimulation pause: after a 9 s pause with rocker movement until 1.2 s before the
 and the rocker state of the first contraction come from the 0.5 s before its stimulus (option pauseDiastoleWindow).
 External trigger pulses: a temporary 9-channel .mdd file with external trigger pulses only (status bit 14 without
 channel / current): read as channel 0, one entry per pulse, stimuli with option externalTrigger 'auto' / 'on'.
+Rocker peaks (option rockerArtifacts): rocker movement only, every 4th stimulus answered, every stimulus answered.
 
-TS 2026-10-06 (port of mda_test.m, TS 2026-10-05; external trigger 2026-10-08)
+TS 2026-10-06 (port of mda_test.m, TS 2026-10-05; external trigger 2026-10-08, rocker peaks 2026-10-09)
 """
 from __future__ import annotations
 
@@ -187,6 +188,33 @@ def selftest(verbose=True, seed=3):
         f"1000; whole window {a0[p][0]:.1f}), rocker moving {int(rm[p][0])} (whole window {int(rm0[p][0])}), other "
         f"contractions unchanged   {_pass(okS)}")
     ok = ok and okS
+
+    # peaks of the rocker movement (option rockerArtifacts, 2026-10-09): 200 s, stimuli every 2 s, rocker 60 rpm moving
+    # throughout (artifact 80 uN peak-to-peak, 2 harmonics). No contractions: none counted, C.noContractions; every 4th
+    # stimulus answered (200 uN): only these 24 contractions; every stimulus answered (150 uN): 95 contractions, no
+    # extra beats. Without the option the rocker peaks count (> 200 peaks each).
+    t = colon(0, dt, 200)
+    onset = np.arange(1, 198, 2, dtype=float)
+    a = np.cos(2 * np.pi * 1.212 * t + 0.4) + 0.3 * np.cos(4 * np.pi * 1.212 * t + 1.3)
+    art = 80 * a / (a.max() - a.min())
+    o = options(zeroForce=40)
+    nR = np.zeros((3, 4), int)
+    noC = []
+    for q, A in enumerate((0, 200, 150)):
+        ons = onset[::4] if q == 1 else onset
+        F = 100 * np.ones(t.size) if A == 0 else synthetic_signal(t, ons, amp=[A] * len(ons))
+        S = _S(t, F + art, onset, on=np.ones(t.size, bool), rocker_log=np.array([[-np.inf, 60.0]]))
+        B0, _ = analyze_channel(S, 1, [5, 195], options(o, rockerArtifacts=False))
+        B1, C1 = analyze_channel(S, 1, [5, 195], o)
+        bt = B1["beatType"].to_numpy()
+        nR[q] = [len(B0), len(B1), np.sum(bt == "stimulated"), np.sum(bt == "extra")]
+        noC.append(bool(C1.noContractions))
+    okA = bool(np.array_equal(nR[:, 1:], [[0, 0, 0], [24, 24, 0], [95, 95, 0]]) and np.all(nR[:, 0] > 200)
+               and noC == [True, False, False])
+    out(f"rocker peaks (option rockerArtifacts): no contractions {nR[0, 1]} (without the option {nR[0, 0]}, no "
+        f"contractions flag {int(noC[0])}) | every 4th stimulus {nR[1, 1]} (expected 24; without {nR[1, 0]}) | every "
+        f"stimulus {nR[2, 2]} stimulated, {nR[2, 3]} extra (expected 95, 0; without {nR[2, 0]})   {_pass(okA)}")
+    ok = ok and okA
 
     # external trigger pulses (2026-10-08): status bit 14 without channel / current (external stimulator at the
     # external controller unit), temporary .mdd file, see mda_test.m

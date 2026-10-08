@@ -452,12 +452,18 @@ stimuli in this channel), `t_stim`, `stimToPeak`, `rockerMoving` (rocker moved a
 * Contractions = local maxima with a prominence ≥ threshold, ≥ 0.15 s apart. Automatic threshold:
   0.3 × typical amplitude (≥ 30 µN); typical amplitude = median of the n largest prominences
   (n = number of stimuli) or, without stimuli, of the prominences above the largest gap between the sorted
-  prominences. Paced channels while the rocker moves (option `'artifactGap'`, default on): small peaks between the
-  contractions (rocker artifacts: ≤ 0.5 × typical, not locked to the stimuli) that form a cluster separated from the
-  contractions by a clear gap (prominence ratio ≥ 1.6, ≥ 3 such peaks) raise the threshold into the gap; small peaks
-  locked to a stimulus (alternans, partial capture) stay (status line in the GUI). The threshold is computed per
-  channel from the analysed window; check it in the GUI or with `'showFigures',true`, and set it manually if
-  necessary (`'threshold',µN`).
+  prominences. Peaks of the rocker movement (paced channels, auto threshold; option `'rockerArtifacts'`, default
+  on): (a) small peaks between the contractions (≤ 0.5 × typical, not locked to the stimuli) that form a cluster
+  separated from the contractions by a clear gap (prominence ratio ≥ 1.6, ≥ 3 such peaks) raise the threshold into
+  the gap; (b) with the rocker moving, the rocker / noise level N is taken from the rise of the signal in the 0.5 s
+  before the stimuli (90th percentile). If the largest peaks are not locked to the stimuli and their typical
+  amplitude is ≤ 50 µN, or ≤ 2 × N at the rhythm of the rocker, the peaks at that level are removed – *no
+  contractions* if nothing is left (slice not beating); peaks locked to the stimuli well above N stay (slices that
+  answer only some stimuli); (c) otherwise peaks not locked to the stimuli below min(1.5 × N, 0.5 × typical) are
+  removed. Small peaks locked to a stimulus (alternans, partial capture) stay. The GUI status line shows the number
+  of removed peaks. The threshold is computed per channel from the analysed window; check it in the GUI or with
+  `'showFigures',true`, and set it manually if necessary (`'threshold',µN`; a manual threshold switches the rocker
+  rules off).
 
 ## External trigger (external stimulator; option `'externalTrigger'`, GUI list *stimuli*)
 With the external controller unit (one chamber) the slice can be paced by an external stimulator whose TTL pulses

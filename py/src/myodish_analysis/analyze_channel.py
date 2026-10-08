@@ -21,9 +21,14 @@ PROCESSING (see the MATLAB help and README)
   0. option rockerFilter: the periodic rocker artifact is subtracted first (rocker_filter)
   1. filter: moving median (50 ms) + moving mean (25 ms) on the 200 Hz signal (as GetContractionParameters)
   2. contractions = local maxima with a prominence >= threshold that are >= minBeatInterval apart; automatic
-     threshold: relThreshold x typical amplitude, at least minThreshold; paced channels while the rocker moves
-     (option artifactGap): raised into a clear gap above small peaks not locked to the stimuli (rocker artifacts),
-     small peaks locked to a stimulus stay (artifact_gap_threshold; C.thresholdArtifacts = removed peaks)
+     threshold: relThreshold x typical amplitude, at least minThreshold. Paced channels, auto threshold (option
+     rockerArtifacts): a) raised into a clear gap above small peaks not locked to the stimuli (rocker artifacts),
+     small peaks locked to a stimulus stay (artifact_gap_threshold); b) rocker moving (>= 50 % of the data), rocker /
+     noise level N before the stimuli (pre_stimulus_noise): largest peaks not locked to the stimuli and typical
+     amplitude <= 50 uN or <= 2 x N at the rhythm of the rocker: rocker / noise peaks are removed
+     (C.noContractions if none is left); c) otherwise peaks not locked to the stimuli below min(1.5 x N,
+     0.5 x typical) (typical if at the rhythm of the rocker) are removed (rocker_noise_rule).
+     C.thresholdArtifacts = removed peaks, C.noiseLevel = N
   3. stimulus assignment: 'stimulated' if the peak follows a stimulus of the channel by minStimToPeak ...
      maxStimToPeak (and is the most prominent peak after this stimulus), otherwise 'extra'; 'unpaced' without stimuli
   4. parameters between the previous and the next peak (at most maxBeatWindow s), see parameters.py. After a
@@ -106,8 +111,11 @@ def analyze_channel(S, channel, range_=None, opts=None):
     prom = P[cand]
     if not isinstance(opts.threshold, str) and np.size(opts.threshold) > 1:
         raise ValueError("analyze_channel: one threshold per channel (several channels: myodish_analysis).")
-    nArt = 0  # small peaks below a raised auto threshold (rocker artifacts)
-    keepLow = np.zeros(prom.size, bool)  # small peaks below it that are kept (locked to a stimulus)
+    nArt = 0  # peaks removed as rocker artifacts
+    keepLow = np.zeros(prom.size, bool)  # small peaks below a raised threshold that are kept (locked to a stimulus)
+    drop = np.zeros(prom.size, bool)  # peaks removed by the rocker / noise level
+    noBeats = False  # no contractions (peaks at the rocker / noise level)
+    noiseLvl = math.nan  # rocker / noise level before the stimuli (uN)
     if not isinstance(opts.threshold, str) and not math.isnan(float(np.ravel(opts.threshold)[0])):
         thr = float(np.ravel(opts.threshold)[0])  # NaN = auto (per-channel thresholds of myodish_analysis)
         thrMode = "manual"
@@ -115,10 +123,18 @@ def analyze_channel(S, channel, range_=None, opts=None):
     else:
         thr, typAmp = auto_threshold(prom, ST.size, opts)
         thrMode = "auto"
-        if opts.get("artifactGap", True) and ST.size >= 3:  # paced: above the rocker artifacts
-            thr, keepLow, nArt = artifact_gap_threshold(t[cand], prom, thr, typAmp, ST,
-                                                        np.asarray(S.rockerOn, bool)[cand], CL)
-    keep = (prom >= thr) | keepLow
+        if opts.get("rockerArtifacts", True) and ST.size >= 3:  # paced: rocker artifacts
+            rockerOn = np.asarray(S.rockerOn, bool).ravel()
+            thr, keepLow, nArt = artifact_gap_threshold(t[cand], prom, thr, typAmp, ST, rockerOn[cand], CL)
+            if rockerOn.mean() >= 0.5:
+                noiseLvl, nNoise = pre_stimulus_noise(t, f, ST)
+                if nNoise < 10:
+                    noiseLvl = math.nan
+                fR = rocker_frequency(S, opts)
+                drop, noBeats = rocker_noise_rule(t[cand], prom, thr, keepLow, typAmp, ST, noiseLvl, rockerOn[cand],
+                                                  np.count_nonzero(rockerOn) * dt, fR)
+                nArt += int(np.count_nonzero(drop))
+    keep = ((prom >= thr) | keepLow) & ~drop
     cand = cand[keep]
     prom = prom[keep]
     # minimum interval: the more prominent of two close maxima wins
@@ -276,6 +292,8 @@ def analyze_channel(S, channel, range_=None, opts=None):
     C.thresholdMode = thrMode
     C.typicalAmplitude = typAmp
     C.thresholdArtifacts = nArt
+    C.noContractions = bool(noBeats)
+    C.noiseLevel = noiseLvl
     C.stimTimes = ST
     C.stimCaptured = stimCaptured
     C.stimInterval = CL
@@ -357,6 +375,134 @@ def artifact_gap_threshold(tc, prom, thr, typical, ST, rocker, CL):
     thr = math.sqrt(p[g] * p[g + 1])
     keepLow[lo[locked]] = True
     return float(thr), keepLow, int(np.count_nonzero(~locked))
+
+
+def pre_stimulus_noise(t, f, ST):
+    """rocker / noise level: rise (maximum minus the running minimum) of the filtered signal in the window before
+    every stimulus that follows an interval >= 0.9 s (window min(0.5 s, 0.4 x interval), where no contraction is
+    expected; a relaxation that is not finished only falls and does not count). N = 90th percentile, n = number of
+    windows (see preStimulusNoise in mda_analyzeChannel.m). TS 2026-10-09"""
+    t = np.asarray(t, float)
+    f = np.asarray(f, float)
+    r = np.full(ST.size, np.nan)
+    for j in range(1, ST.size):
+        ci = ST[j] - ST[j - 1]
+        if ci < 0.9:
+            continue
+        i1 = int(np.searchsorted(t, ST[j] - min(0.5, 0.4 * ci), side="left"))  # first t >= x
+        i2 = int(np.searchsorted(t, ST[j], side="left")) - 1  # last sample before the stimulus
+        if i2 - i1 < 2:
+            continue
+        s = f[i1:i2 + 1]
+        r[j] = float(np.max(s - np.minimum.accumulate(s)))
+    return _prctile(r, 90), int(np.count_nonzero(~np.isnan(r)))
+
+
+def rocker_noise_rule(tc, prom, thr, keepLow, typical, ST, N, rocker, tOn, fR):
+    """peaks of the rocker movement / noise of paced channels while the rocker moves (see rockerNoiseRule in
+    mda_analyzeChannel.m). Latency of the contractions: centre of the 0.2-s window with the most latencies of the
+    largest peaks (as many as stimuli); peaks within +-0.1 s of it are locked. < 50 % of the largest peaks locked
+    and (typical <= 50 uN or (typical <= 2 x N and the peaks at the rhythm of the rocker)): all peaks
+    < 3 x max(typical, N) are dropped, except locked peaks >= max(1.5 x N, N + 50) if there are
+    >= max(3, 5 % of the stimuli) of them and more than by chance; none = no peak left. Otherwise peaks not locked
+    with a prominence < min(1.5 x N, 0.5 x typical) are dropped (< min(1.5 x N, typical) if they are at the rhythm
+    of the rocker). Returns drop (bool per candidate), none. TS 2026-10-09"""
+    tc = np.asarray(tc, float)
+    above = (prom >= thr) | keepLow
+    drop = np.zeros(prom.size, bool)
+    k = np.flatnonzero(above)
+    if k.size < 3:
+        return drop, False
+    o = np.argsort(-prom[k], kind="stable")
+    top = k[o[:min(k.size, ST.size)]]
+    lat = _stim_latency(tc, ST)
+    lv = np.sort(lat[top])
+    lv = lv[~np.isnan(lv)]
+    if lv.size == 0:
+        return drop, False
+    best = 0
+    latRef = math.nan
+    for x in lv:  # densest 0.2-s window of the latencies
+        c = int(np.count_nonzero((lv >= x) & (lv <= x + 0.2)))
+        if c > best:
+            best = c
+            latRef = x + 0.1
+    with np.errstate(invalid="ignore"):
+        locked = np.abs(lat - latRef) <= 0.1
+    if locked[top].mean() < 0.5 and (typical <= 50 or (typical <= 2 * N and
+                                                       _rocker_rhythm(tc, above & rocker, tOn, fR, 0.7))):
+        Nn = typical if math.isnan(N) else N
+        big = above & (prom >= max(1.5 * Nn, Nn + 50))  # >= 50 uN above the rocker / noise level
+        lk = big & locked  # contractions of some stimuli (partial capture)
+        chance = 0.2 / max(float(np.median(np.diff(ST))), 0.2)
+        nlk = int(np.count_nonzero(lk))
+        if nlk < max(3, 0.05 * ST.size) or nlk <= min(0.6, chance + 0.2) * np.count_nonzero(big):
+            lk[:] = False  # not more than by chance
+        lim = 3 * (typical if math.isnan(N) else (N if math.isnan(typical) else max(typical, N)))
+        drop = above & (prom < lim) & ~lk
+        return drop, not bool(np.any(above & ~drop))
+    if not math.isnan(N):
+        lim = min(1.5 * N, 0.5 * typical)
+        if _rocker_rhythm(tc, above & ~locked & rocker, tOn, fR, 0.5):
+            lim = min(1.5 * N, typical)
+        drop = above & ~locked & (prom < lim)
+    return drop, False
+
+
+def _rocker_rhythm(tc, sel, tOn, fR, minPerCycle):
+    """peaks sel at the rhythm of the rocker: minPerCycle ... 2.2 peaks per rocker cycle or a median interval of 1 or
+    1/2 rocker period (+-15 %); False if the rocker frequency fR is unknown"""
+    perCycle = np.count_nonzero(sel) / max(tOn, np.finfo(float).eps) / fR
+    d = np.diff(tc[sel])
+    ipi = float(np.median(d)) * fR if d.size else math.nan
+    return bool((0 if math.isnan(perCycle) else minPerCycle <= perCycle <= 2.2) or abs(ipi - 1) <= 0.15
+                or abs(ipi - 0.5) <= 0.075)
+
+
+def rocker_frequency(S, opts):
+    """rocker frequency (Hz): opts.rockerFrequency (one value in Hz, or [rpm, f0] rows of rocker_filter: the row of
+    the logged speed, a single row otherwise) or the last logged rocker speed > 0 before the middle of the data
+    (otherwise the first one) x 0.0202 Hz/rpm; NaN if unknown (see rockerFrequency in mda_analyzeChannel.m)"""
+    g = opts.get("rockerFrequency", None)
+    ga = None
+    if g is not None and not isinstance(g, str):
+        ga = np.asarray(g, float)
+        if ga.size == 1:
+            v = float(ga.ravel()[0])
+            if v > 0:
+                return v
+            ga = None
+    rpm = math.nan
+    L = np.asarray(S.get("rockerSpeedLog", np.zeros((0, 2))), float).reshape(-1, 2)
+    if L.shape[0]:
+        mid = (float(S.fromSeconds) + float(S.toSeconds)) / 2
+        j = np.flatnonzero((L[:, 0] <= mid) & (L[:, 1] > 0))
+        if j.size:
+            rpm = float(L[j[-1], 1])
+        else:
+            j = np.flatnonzero(L[:, 1] > 0)
+            if j.size:
+                rpm = float(L[j[0], 1])
+    if ga is not None and ga.size and ((ga.ndim == 2 and ga.shape[1] == 2) or (ga.ndim == 1 and ga.size == 2)):
+        rows = ga.reshape(-1, 2)
+        j = np.flatnonzero(rows[:, 0] == rpm)
+        jj = int(j[0]) if j.size else (0 if rows.shape[0] == 1 else -1)
+        if jj >= 0 and rows[jj, 1] > 0:
+            return float(rows[jj, 1])
+    return 0.0202 * rpm if not math.isnan(rpm) else math.nan
+
+
+def _prctile(x, p):
+    """MATLAB prctile of a vector (NaN ignored)"""
+    x = np.asarray(x, float)
+    x = np.sort(x[~np.isnan(x)])
+    n = x.size
+    if n == 0:
+        return math.nan
+    if n == 1:
+        return float(x[0])
+    q = 100 * (np.arange(1, n + 1) - 0.5) / n
+    return float(np.interp(min(max(p, q[0]), q[-1]), q, x))
 
 
 def _stim_latency(tt, ST):

@@ -17,8 +17,9 @@ function ok = mda_test()
 % and the rocker state of the first contraction come from the 0.5 s before its stimulus (option pauseDiastoleWindow).
 % External trigger pulses: a temporary 9-channel .mdd file with external trigger pulses only (status bit 14 without
 % channel / current): read as channel 0, one entry per pulse, stimuli with option externalTrigger 'auto' / 'on'.
+% Rocker peaks (option rockerArtifacts): rocker movement only, every 4th stimulus answered, every stimulus answered.
 %
-% TS 2026-10-05 (stimulation pause 2026-10-07, external trigger 2026-10-08)
+% TS 2026-10-05 (stimulation pause 2026-10-07, external trigger 2026-10-08, rocker peaks 2026-10-09)
 
 dt = 0.005;
 t = 0:dt:20;
@@ -157,6 +158,41 @@ fprintf(['stimulation pause 9 s, rocker moving until 1.2 s before the stimulus: 
     'whole window %.1f), rocker moving %d (whole window %d), other contractions unchanged   %s\n'], B.amplitude(p), ...
     B0.amplitude(p), B.rockerMoving(p), B0.rockerMoving(p), passStr(okS));
 ok = ok && okS;
+
+% peaks of the rocker movement (option rockerArtifacts, 2026-10-09): 200 s, stimuli every 2 s, rocker 60 rpm moving
+% throughout (artifact 80 uN peak-to-peak, 2 harmonics). No contractions: none counted, C.noContractions; every 4th
+% stimulus answered (200 uN): only these 24 contractions; every stimulus answered (150 uN): 95 contractions, no extra
+% beats. Without the option the rocker peaks count (> 200 peaks each).
+t = 0:dt:200;
+onset = 1:2:197;
+a = cos(2*pi*1.212*t + 0.4) + 0.3 * cos(4*pi*1.212*t + 1.3);
+art = 80 * a / (max(a) - min(a));
+o = mda_options('zeroForce', 40);
+nR = zeros(3, 4); noC = false(1, 3);
+amps = [0 200 150];
+for q = 1:3
+    ons = onset;
+    if q == 2, ons = onset(1:4:end); end
+    F = 100 * ones(size(t));
+    for k = 1:numel(ons) * (amps(q) > 0)
+        I = t >= ons(k) & t < ons(k) + 0.2;
+        F(I) = 100 + amps(q) * (t(I) - ons(k)) / 0.2;
+        I = t >= ons(k) + 0.2 & t < ons(k) + 0.6;
+        F(I) = 100 + amps(q) - amps(q) * (t(I) - ons(k) - 0.2) / 0.4;
+    end
+    S = struct('dataChannels', 1, 'dt', dt, 't', t, 'force', F + art, 'rockerOn', true(size(t)), 'fromSeconds', 0, ...
+        'toSeconds', 200, 'rockerSpeedLog', [-inf 60]);
+    S.stim = struct('time', (onset - 0.1)', 'channel', ones(numel(onset), 1));
+    B0 = mda_analyzeChannel(S, 1, [5 195], mda_options(o, 'rockerArtifacts', false));
+    [B1, C1] = mda_analyzeChannel(S, 1, [5 195], o);
+    nR(q, :) = [height(B0), height(B1), nnz(strcmp(B1.beatType, 'stimulated')), nnz(strcmp(B1.beatType, 'extra'))];
+    noC(q) = C1.noContractions;
+end
+okA = isequal(nR(:, 2:4), [0 0 0; 24 24 0; 95 95 0]) && all(nR(:, 1) > 200) && isequal(noC, [true false false]);
+fprintf(['rocker peaks (option rockerArtifacts): no contractions %d (without the option %d, no contractions flag %d) | ' ...
+    'every 4th stimulus %d (expected 24; without %d) | every stimulus %d stimulated, %d extra (expected 95, 0; ' ...
+    'without %d)   %s\n'], nR(1,2), nR(1,1), noC(1), nR(2,2), nR(2,1), nR(3,3), nR(3,4), nR(3,1), passStr(okA));
+ok = ok && okA;
 
 % external trigger pulses (2026-10-08): status bit 14 without channel / current (external stimulator at the external
 % controller unit). Temporary .mdd (9 channels, 400 Hz, 30 s; contractions in channel 1 150 ms after each pulse, one

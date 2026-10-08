@@ -13,9 +13,12 @@ function opts = mda_options(varargin)
 %   'relThreshold'     auto threshold: at most this fraction of the typical contraction amplitude (default 0.3)
 %   'minThreshold'     auto threshold: never lower than this [uN] (default 30)
 %   'minBeatInterval'  minimum time between two contraction peaks [s] (default 0.15, i.e. up to ~6.7 Hz)
-%   'artifactGap'      true (default) | false: auto threshold of paced channels raised into a clear gap above small
-%                      peaks that are not locked to the stimuli and occur while the rocker moves (rocker artifacts
-%                      between the contractions; see mda_analyzeChannel)
+%   'rockerArtifacts'  true (default) | false: paced channels, auto threshold: peaks of the rocker movement are not
+%                      counted as contractions (see mda_analyzeChannel): a clear gap above small peaks not locked to
+%                      the stimuli raises the threshold; with the rocker moving, peaks at the rocker / noise level
+%                      before the stimuli that are not locked to the stimuli are dropped (no contractions at all if
+%                      the largest peaks are not locked and their typical amplitude is <= 50 uN, or <= 2 x that
+%                      level at the rhythm of the rocker)
 %
 % SELECTION OF CONTRACTIONS (the excluded ones stay in the table with included = false)
 %   'beats'            'all' (default) | 'stimulated' (only contractions that follow a stimulus of the channel)
@@ -75,14 +78,14 @@ function opts = mda_options(varargin)
 %                      'status' or 'log' forces one source
 %   'rockerLogDelay'   delay of the rocker movement after a 'rockerSpeed' entry of the log file [s] (default 0.27)
 %
-% TS 2026-10-05 (rockerSource, pauseDiastoleWindow 2026-10-07; artifactGap 2026-10-09)
+% TS 2026-10-05 (rockerSource, pauseDiastoleWindow 2026-10-07; rockerArtifacts 2026-10-09)
 
 opts = struct( ...
     'threshold', 'auto', ...
     'relThreshold', 0.3, ...
     'minThreshold', 30, ...
     'minBeatInterval', 0.15, ...
-    'artifactGap', true, ...
+    'rockerArtifacts', true, ...
     'beats', 'all', ...
     'rocker', 'any', ...
     'downsampling', 2, ...
@@ -163,8 +166,8 @@ opts.externalTrigger = lower(char(opts.externalTrigger));
 if ~ismember(opts.externalTrigger, {'auto', 'on', 'off'}), error('mda_options: ''externalTrigger'' must be ''auto'', ''on'' or ''off''.'); end
 opts.rockerSource = lower(char(opts.rockerSource));
 if ~ismember(opts.rockerSource,{'auto','status','log'}), error('mda_options: ''rockerSource'' must be ''auto'', ''status'' or ''log''.'); end
-opts.artifactGap = isequal(opts.artifactGap, true) || isequal(opts.artifactGap, 1) || ...
-    ((ischar(opts.artifactGap) || isstring(opts.artifactGap)) && any(strcmpi(opts.artifactGap, {'on','true'})));
+opts.rockerArtifacts = isequal(opts.rockerArtifacts, true) || isequal(opts.rockerArtifacts, 1) || ...
+    ((ischar(opts.rockerArtifacts) || isstring(opts.rockerArtifacts)) && any(strcmpi(opts.rockerArtifacts, {'on','true'})));
 opts.rockerFilter = isequal(opts.rockerFilter, true) || isequal(opts.rockerFilter, 1) || ...
     ((ischar(opts.rockerFilter) || isstring(opts.rockerFilter)) && any(strcmpi(opts.rockerFilter, {'on','true'})));
 if ~isempty(opts.referenceBeat) && ~isstruct(opts.referenceBeat)

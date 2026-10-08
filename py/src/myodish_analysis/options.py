@@ -13,9 +13,12 @@ DETECTION OF CONTRACTIONS
   relThreshold     auto threshold: at most this fraction of the typical contraction amplitude (default 0.3)
   minThreshold     auto threshold: never lower than this [uN] (default 30)
   minBeatInterval  minimum time between two contraction peaks [s] (default 0.15, i.e. up to ~6.7 Hz)
-  artifactGap      True (default) | False: auto threshold of paced channels raised into a clear gap above small
-                   peaks that are not locked to the stimuli and occur while the rocker moves (rocker artifacts
-                   between the contractions; see analyze_channel)
+  rockerArtifacts  True (default) | False: paced channels, auto threshold: peaks of the rocker movement are not
+                   counted as contractions (see analyze_channel): a clear gap above small peaks not locked to the
+                   stimuli raises the threshold; with the rocker moving, peaks at the rocker / noise level before
+                   the stimuli that are not locked to the stimuli are dropped (no contractions at all if the largest
+                   peaks are not locked and their typical amplitude is <= 50 uN, or <= 2 x that level at the
+                   rhythm of the rocker)
 
 SELECTION OF CONTRACTIONS (the excluded ones stay in the table with included = False)
   beats            'all' (default) | 'stimulated' (only contractions that follow a stimulus of the channel)
@@ -68,7 +71,8 @@ FILE FORMAT (normally taken from the log file <name>_log.log next to the .mdd fi
                    'status' or 'log' forces one source
   rockerLogDelay   delay of the rocker movement after a 'rockerSpeed' entry of the log file [s] (default 0.27)
 
-TS 2026-10-06 (port of mda_options.m, TS 2026-10-05; rockerSource, pauseDiastoleWindow 2026-10-07)
+TS 2026-10-06 (port of mda_options.m, TS 2026-10-05; rockerSource, pauseDiastoleWindow 2026-10-07;
+rockerArtifacts 2026-10-09)
 """
 from __future__ import annotations
 
@@ -83,7 +87,7 @@ _DEFAULTS = dict(
     relThreshold=0.3,
     minThreshold=30,
     minBeatInterval=0.15,
-    artifactGap=True,
+    rockerArtifacts=True,
     beats="all",
     rocker="any",
     downsampling=2,
@@ -164,8 +168,8 @@ def options(base=None, **changes):
     opts.rockerSource = str(opts.rockerSource).lower()
     if opts.rockerSource not in ("auto", "status", "log"):
         raise ValueError("options: 'rockerSource' must be 'auto', 'status' or 'log'.")
-    ag = opts.artifactGap
-    opts.artifactGap = (ag is True) or (not isinstance(ag, str) and ag is not None and not _is_empty(ag)
+    ag = opts.rockerArtifacts
+    opts.rockerArtifacts = (ag is True) or (not isinstance(ag, str) and ag is not None and not _is_empty(ag)
                                         and bool(ag == 1)) or (isinstance(ag, str) and ag.lower() in ("on", "true"))
     rf = opts.rockerFilter
     opts.rockerFilter = (rf is True) or (not isinstance(rf, str) and rf is not None and not _is_empty(rf)

@@ -27,11 +27,23 @@ function [B, C] = mda_analyzeChannel(S, channel, range, opts)
 %      Automatic threshold (default): relThreshold (0.3) x the typical contraction amplitude, at least
 %      minThreshold (30 uN). Typical amplitude: paced channels: median of the n largest prominences
 %      (n = number of stimuli in the data); unpaced: the prominences above the largest gap between the
-%      sorted prominences (see autoThreshold). Paced channels while the rocker moves (option artifactGap): if
-%      small peaks between the contractions (rocker artifacts: <= 0.5 x typical, not locked to the stimuli)
-%      form a cluster separated from the contractions by a clear gap, the threshold is raised into the gap;
-%      small peaks locked to a stimulus (alternans, partial capture) are kept (see artifactGapThreshold;
-%      C.thresholdArtifacts = number of removed peaks).
+%      sorted prominences (see autoThreshold). Paced channels, auto threshold (option rockerArtifacts):
+%      a) small peaks between the contractions (<= 0.5 x typical, not locked to the stimuli) that form a cluster
+%         separated from the contractions by a clear gap: the threshold is raised into the gap
+%         (artifactGapThreshold);
+%      b) rocker moving (>= 50 % of the data); rocker / noise level N = 90th percentile of the rise of the signal
+%         in the windows before the stimuli (preStimulusNoise). The largest peaks (as many as stimuli) not locked
+%         to the stimuli (< 50 % within the densest 0.2-s window of their latencies) and either typical amplitude
+%         <= 50 uN or typical <= 2 x N with the peaks at the rhythm of the rocker (0.7 ... 2.2 peaks per rocker
+%         cycle or median interval 1 or 1/2 rocker period; rocker speed of the log file x 0.0202 Hz/rpm): rocker /
+%         noise peaks - all peaks < 3 x max(typical, N) are removed, except peaks locked to the stimuli
+%         >= max(1.5 x N, N + 50 uN) if there are >= max(3, 5 % of the stimuli) of them and more than by chance
+%         (only some stimuli answered); C.noContractions if no peak is left (slice not beating);
+%      c) rocker moving, otherwise: peaks not locked to the stimuli with a prominence < min(1.5 x N,
+%         0.5 x typical) are removed, < min(1.5 x N, typical) if they are at the rhythm of the rocker
+%         (rockerNoiseRule).
+%      Small peaks locked to a stimulus (alternans, partial capture) stay. C.thresholdArtifacts = number of
+%      removed peaks, C.noiseLevel = N.
 %   3. stimulus assignment: a contraction is 'stimulated' if its peak follows a stimulus of the channel
 %      by minStimToPeak ... maxStimToPeak (and is the most prominent peak after this stimulus), otherwise
 %      'extra'. Channels without stimulus pulses: 'unpaced'.
@@ -121,8 +133,11 @@ prom = P(cand);
 if isnumeric(opts.threshold) && numel(opts.threshold) > 1
     error('mda_analyzeChannel: one threshold per channel (several channels: MyoDishAnalysis).');
 end
-nArt = 0;                                           %small peaks below a raised auto threshold (rocker artifacts)
-keepLow = false(size(prom));                        %small peaks below it that are kept (locked to a stimulus)
+nArt = 0;                                           %peaks removed as rocker artifacts
+keepLow = false(size(prom));                        %small peaks below a raised threshold that are kept (locked)
+drop = false(size(prom));                           %peaks removed by the rocker / noise level
+noBeats = false;                                    %no contractions (peaks at the rocker / noise level)
+noiseLvl = nan;                                     %rocker / noise level before the stimuli (uN)
 if isnumeric(opts.threshold) && ~isnan(opts.threshold)  %NaN = auto (per-channel thresholds of MyoDishAnalysis)
     thr = opts.threshold;
     thrMode = 'manual';
@@ -130,11 +145,19 @@ if isnumeric(opts.threshold) && ~isnan(opts.threshold)  %NaN = auto (per-channel
 else
     [thr, typAmp] = autoThreshold(prom, numel(ST), opts);
     thrMode = 'auto';
-    if (~isfield(opts, 'artifactGap') || opts.artifactGap) && numel(ST) >= 3   %paced: above rocker artifacts
+    if (~isfield(opts, 'rockerArtifacts') || opts.rockerArtifacts) && numel(ST) >= 3   %paced: rocker artifacts
         [thr, keepLow, nArt] = artifactGapThreshold(t(cand), prom, thr, typAmp, ST, S.rockerOn(cand), CL);
+        if mean(S.rockerOn) >= 0.5
+            [noiseLvl, nNoise] = preStimulusNoise(t, f, ST);
+            if nNoise < 10, noiseLvl = nan; end
+            fR = rockerFrequency(S, opts);
+            [drop, noBeats] = rockerNoiseRule(t(cand), prom, thr, keepLow, typAmp, ST, noiseLvl, ...
+                S.rockerOn(cand), nnz(S.rockerOn) * dt, fR);
+            nArt = nArt + nnz(drop);
+        end
     end
 end
-keep = prom >= thr | keepLow;
+keep = (prom >= thr | keepLow) & ~drop;
 cand = cand(keep);
 prom = prom(keep);
 % minimum interval: the more prominent of two close maxima wins
@@ -289,6 +312,8 @@ C.threshold = thr;
 C.thresholdMode = thrMode;
 C.typicalAmplitude = typAmp;
 C.thresholdArtifacts = nArt;
+C.noContractions = noBeats;
+C.noiseLevel = noiseLvl;
 C.stimTimes = ST(:);
 C.stimCaptured = stimCaptured;
 C.stimInterval = CL;
@@ -374,6 +399,132 @@ if nnz(~locked) < 3 || mean(locked) > min(0.6, chance + 0.2) || mean(rocker(lo))
 thr = sqrt(p(g) * p(g+1));
 keepLow(lo(locked)) = true;
 nLow = nnz(~locked);
+end
+
+
+function [N, n] = preStimulusNoise(t, f, ST)
+% rocker / noise level: rise (maximum minus the running minimum) of the filtered signal in the window before every
+% stimulus that follows an interval >= 0.9 s (window min(0.5 s, 0.4 x interval), where no contraction is expected; a
+% relaxation that is not finished only falls and does not count). N = 90th percentile, n = number of windows.
+% Approach of GetBeatByBeatParameters (noise before the stimuli). TS 2026-10-09
+r = nan(numel(ST), 1);
+for j = 2:numel(ST)
+    ci = ST(j) - ST(j-1);
+    if ci < 0.9, continue; end
+    i1 = firstAtLeast(t, ST(j) - min(0.5, 0.4 * ci));
+    i2 = firstAtLeast(t, ST(j)) - 1;                       %last sample before the stimulus
+    if i2 - i1 < 2, continue; end
+    s = f(i1:i2);
+    r(j) = max(s - cummin(s));
+end
+N = mprctile(r, 90);
+n = nnz(~isnan(r));
+end
+
+
+function i = firstAtLeast(t, x)
+% first index with t(i) >= x (t increasing, uniform); numel(t) + 1 if none
+n = numel(t);
+i = min(max(1, floor((x - t(1)) / (t(2) - t(1)))), n);
+while i > 1 && t(i-1) >= x, i = i - 1; end
+while i <= n && t(i) < x, i = i + 1; end
+end
+
+
+function [drop, none] = rockerNoiseRule(tc, prom, thr, keepLow, typical, ST, N, rocker, tOn, fR)
+% Latency of the contractions: centre of the 0.2-s window that contains the most latencies (time since the previous
+% stimulus) of the largest peaks (as many as stimuli); peaks within +-0.1 s of it are locked to the stimuli.
+% Peaks at the rhythm of the rocker (fR = rocker frequency, tOn = time with the rocker moving): see rockerRhythm.
+% < 50 % of the largest peaks locked and (typical amplitude <= 50 uN or (typical <= 2 x N and the peaks at the rhythm
+% of the rocker)): rocker / noise peaks - all peaks < 3 x max(typical, N) are dropped, except locked peaks
+% >= max(1.5 x N, N + 50 uN) (N = typical if unknown) if there are >= max(3, 5 % of the stimuli) of them and more of
+% these large peaks are locked than by chance (> min(0.6, chance + 0.2), as artifactGapThreshold) (contractions of
+% only some stimuli); larger peaks are no rocker artifacts and stay; none = no peak left (slice not beating).
+% Otherwise peaks not locked with a prominence < min(1.5 x N, 0.5 x typical) are dropped, < min(1.5 x N, typical) if
+% the peaks not locked are at the rhythm of the rocker (N = rocker / noise level before the stimuli; NaN = unknown).
+% TS 2026-10-09
+above = prom >= thr | keepLow;
+drop = false(size(prom));
+none = false;
+k = find(above);
+if numel(k) < 3, return; end
+[~, o] = sort(prom(k), 'descend');
+top = k(o(1:min(numel(k), numel(ST))));
+lat = stimLatency(tc, ST);
+l = sort(lat(top));
+l = l(~isnan(l));
+if isempty(l), return; end
+best = 0; latRef = nan;
+for i = 1:numel(l)                                         %densest 0.2-s window of the latencies
+    c = nnz(l >= l(i) & l <= l(i) + 0.2);
+    if c > best, best = c; latRef = l(i) + 0.1; end
+end
+locked = abs(lat - latRef) <= 0.1;
+if mean(locked(top)) < 0.5 && (typical <= 50 || (typical <= 2 * N && rockerRhythm(tc, above & rocker, tOn, fR, 0.7)))
+    Nn = N;
+    if isnan(Nn), Nn = typical; end
+    big = above & prom >= max(1.5 * Nn, Nn + 50);          %>= 50 uN above the rocker / noise level
+    lk = big & locked;                                     %contractions of some stimuli (partial capture)
+    chance = 0.2 / max(median(diff(ST)), 0.2);             %fraction of the time within +-0.1 s of the latency
+    if nnz(lk) < max(3, 0.05 * numel(ST)) || nnz(lk) <= min(0.6, chance + 0.2) * nnz(big)
+        lk(:) = false;                                     %not more than by chance
+    end
+    drop = above & prom < 3 * max(typical, N) & ~lk;       %max ignores NaN
+    none = ~any(above & ~drop);
+    return;
+end
+if ~isnan(N)
+    lim = min(1.5 * N, 0.5 * typical);
+    if rockerRhythm(tc, above & ~locked & rocker, tOn, fR, 0.5), lim = min(1.5 * N, typical); end
+    drop = above & ~locked & prom < lim;
+end
+end
+
+
+function r = rockerRhythm(tc, sel, tOn, fR, minPerCycle)
+% peaks sel at the rhythm of the rocker: minPerCycle ... 2.2 peaks per rocker cycle (tOn = time with the rocker
+% moving) or a median interval of 1 or 1/2 rocker period (+-15 %); false if the rocker frequency fR is unknown
+perCycle = nnz(sel) / max(tOn, eps) / fR;
+ipi = median(diff(tc(sel))) * fR;
+r = (perCycle >= minPerCycle && perCycle <= 2.2) || abs(ipi - 1) <= 0.15 || abs(ipi - 0.5) <= 0.075;
+end
+
+
+function fR = rockerFrequency(S, opts)
+% rocker frequency (Hz) of the data: opts.rockerFrequency (one value in Hz, or [rpm f0] rows of mda_rockerFilter:
+% the row of the logged speed, a single row otherwise) or the last logged rocker speed > 0 before the middle of the
+% data (otherwise the first one) x 0.0202 Hz/rpm (as mda_rockerFilter); NaN if unknown
+fR = nan;
+g = opts.rockerFrequency;
+if isnumeric(g) && isscalar(g) && g > 0
+    fR = g;
+    return;
+end
+rpm = nan;
+if isfield(S, 'rockerSpeedLog') && ~isempty(S.rockerSpeedLog)
+    L = S.rockerSpeedLog;
+    j = find(L(:,1) <= (S.fromSeconds + S.toSeconds) / 2 & L(:,2) > 0, 1, 'last');
+    if isempty(j), j = find(L(:,2) > 0, 1); end
+    if ~isempty(j), rpm = L(j,2); end
+end
+if isnumeric(g) && size(g, 2) == 2 && ~isempty(g)
+    j = find(g(:,1) == rpm, 1);
+    if isempty(j) && size(g, 1) == 1, j = 1; end
+    if ~isempty(j) && g(j,2) > 0, fR = g(j,2); return; end
+end
+if ~isnan(rpm), fR = 0.0202 * rpm; end
+end
+
+
+function p = mprctile(x, q)
+% prctile of a vector (NaN ignored), as the Statistics Toolbox
+x = sort(x(~isnan(x)));
+n = numel(x);
+p = nan;
+if n == 0, return; end
+if n == 1, p = x(1); return; end
+pos = 100 * ((1:n)' - 0.5) / n;
+p = interp1(pos, x(:), min(max(q, pos(1)), pos(end)));
 end
 
 

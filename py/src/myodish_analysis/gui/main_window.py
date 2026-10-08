@@ -708,9 +708,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.win_ref.draw()
         msg = (f"Channel {self.ch}: {len(self.B)} contractions detected (threshold {C.threshold:.0f} {MU}N, "
                f"{C.thresholdMode}).")
-        if C.get("thresholdArtifacts", 0) > 0:
-            msg += (f" Auto threshold raised above {C.thresholdArtifacts} small peaks not locked to the stimuli "
-                    f"(rocker artifacts).")
+        if C.get("noContractions", False):
+            lvl = "" if math.isnan(C.noiseLevel) else f" (level before the stimuli {C.noiseLevel:.0f} {MU}N)"
+            msg = (f"Channel {self.ch}: no contractions - only peaks of the rocker movement / noise{lvl}, not locked "
+                   f"to the stimuli (slice not beating?).")
+        elif C.get("thresholdArtifacts", 0) > 0:
+            msg += f" {C.thresholdArtifacts} peaks of the rocker movement not counted (not locked to the stimuli)."
         if rf_msg:
             msg += " " + rf_msg
         self.status(msg)

@@ -12,13 +12,26 @@ MATLAB and Python versions have the same version number and give the same result
   channel list overlays the trends of several channels (one colour per channel, read once; export with column
   `channel`). API `navButton`, `trend` (MATLAB), `on_nav_button`, `nav_window`, `TrendWindow.set_channels`,
   `export_tables` (Python).
-- Auto threshold of paced channels above rocker artifacts (option `artifactGap`, default on; 2026-10-09): small peaks
-  between the contractions while the rocker moves (≤ 0.5 × typical amplitude, not locked to the stimuli: latency not
-  within ±0.1 s of the median latency of the contractions) that form a cluster separated from the contractions by a
-  clear gap (ratio ≥ 1.6, ≥ 3 such peaks, at most chance level + 0.2 of the cluster locked, ≥ 75 % with the rocker
-  moving) no longer count as extra beats: the threshold is raised into the gap; small peaks locked to a stimulus
-  (alternans, partial capture) stay. `C.thresholdArtifacts` = number of removed peaks (GUI status line). Example 1
-  (rocker speed test): 125 of 5220 peaks removed (all extra beats); MATLAB reference ex1 regenerated.
+- Peaks of the rocker movement are no longer counted as contractions (paced channels, auto threshold; option
+  `rockerArtifacts`, default on; 2026-10-09). a) Small peaks between the contractions while the rocker moves
+  (≤ 0.5 × typical amplitude, not locked to the stimuli: latency not within ±0.1 s of the median latency of the
+  contractions) that form a cluster separated from the contractions by a clear gap (ratio ≥ 1.6, ≥ 3 such peaks, at
+  most chance level + 0.2 of the cluster locked, ≥ 75 % with the rocker moving): the threshold is raised into the
+  gap; small peaks locked to a stimulus (alternans, partial capture) stay. b) Rocker moving in ≥ 50 % of the data:
+  rocker / noise level N = 90th percentile of the rise of the signal in the 0.5 s before the stimuli (≥ 10 stimuli
+  after intervals ≥ 0.9 s). If < 50 % of the largest peaks (as many as stimuli) are locked to the stimuli (±0.1 s
+  around the densest 0.2-s window of their latencies) and their typical amplitude is ≤ 50 µN, or ≤ 2 × N with the
+  peaks at the rhythm of the rocker (0.7–2.2 peaks per rocker cycle or a median interval of 1 or ½ rocker period;
+  rocker speed of the log file × 0.0202 Hz/rpm): all peaks < 3 × max(typical, N) are removed, except locked peaks
+  ≥ max(1.5 × N, N + 50 µN) if there are ≥ max(3, 5 % of the stimuli) of them and more than by chance (slices that
+  answer only some stimuli); `C.noContractions` = no peak left (slice not beating). c) Otherwise peaks not locked to
+  the stimuli below min(1.5 × N, 0.5 × typical) are removed (below min(1.5 × N, typical) if they are at the rhythm
+  of the rocker). `C.thresholdArtifacts` = removed peaks, `C.noiseLevel` = N; GUI status line. Checked on 35 test
+  recordings (820 windows of 10 min × channel) and visually on rocker-only, partially capturing and dying slices;
+  known limit: an unlocked spontaneous rhythm at the rocker frequency with amplitudes ≤ 2 × N counts as rocker. The
+  examples change accordingly (e.g. example 4: channels 6 and 7 without contractions, example 3: 642 peaks of
+  channels 3 and 5 at the noise level); MATLAB references ex1, ex3, ex3ref, ex4, ex5, ex6 and protocols
+  regenerated.
 - Periods without signal (2026-10-08): `mda_signalGaps` / `signal_gaps` find periods of identical consecutive raw
   samples (≥ 2 s; the controller repeats the last value when a sensor board is missing): `chamber out` (one channel),
   `board group` (≥ 3 channels of group 1–4 or 5–8 within 1 s, or 2 within 0.1 s: technical, a defective board

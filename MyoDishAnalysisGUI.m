@@ -2521,8 +2521,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         refresh(resetX);
         if ~isempty(hRef) && isvalid(hRef.fig), drawReference(); end
         msg = sprintf('Channel %d: %d contractions detected (threshold %.0f %sN, %s).', ch, height(B), C.threshold, mu, C.thresholdMode);
-        if isfield(C, 'thresholdArtifacts') && C.thresholdArtifacts > 0
-            msg = sprintf('%s Auto threshold raised above %d small peaks not locked to the stimuli (rocker artifacts).', msg, C.thresholdArtifacts);
+        if isfield(C, 'noContractions') && C.noContractions
+            lvl = '';
+            if ~isnan(C.noiseLevel), lvl = sprintf(' (level before the stimuli %.0f %sN)', C.noiseLevel, mu); end
+            msg = sprintf(['Channel %d: no contractions - only peaks of the rocker movement / noise%s, not locked to ' ...
+                'the stimuli (slice not beating?).'], ch, lvl);
+        elseif isfield(C, 'thresholdArtifacts') && C.thresholdArtifacts > 0
+            msg = sprintf('%s %d peaks of the rocker movement not counted (not locked to the stimuli).', msg, C.thresholdArtifacts);
         end
         if ~isempty(rfMsg), msg = [msg ' ' rfMsg]; end
         status(msg);
