@@ -273,6 +273,18 @@ its results as well.
     `protocolResults` (if the log file contains protocols).
   * `<name>_events.csv` (`'events',true`): all entries of the log file with clock time, time in the file, channel,
     code, category (comment, protocol, recording, schedule, stimulation, rocker, calibration, warning, other) and text.
+  * `<name>_gaps.csv` (`'gaps',true`, default): periods without force signal (`mda_signalGaps` / `signal_gaps`, see
+    below) with clock times and the comments of the log file within 5 min of their start or end. The summary gets
+    the columns `noSignal_s` (s without signal in the range) and `nChamberOut` (chambers taken out in the range).
+  * `<name>_channels.csv` (`'gaps',true`): one row per channel with the status at the end of the recording
+    (`beating`, `not beating` = no contraction in the last 30 min with signal, `removed` = chamber taken out and not
+    put back, `signal lost` = technical, `no slice`), `beatingAtEnd`, s with and without signal, chambers taken out,
+    technical failures, number of contractions, last contraction (time in the file, clock time, median amplitude of
+    the last 10 included contractions and in % of the 95th percentile of the recording), `idDate` (date of the
+    experiment ID in the file name: a part of letters + 6 digits yymmdd, e.g. `ABC000101`) and `daysSinceIdDate` at
+    the last contraction (or the end of the signal), `daysInCulture` (labels) and `endComments` (comments of the
+    channel about discarded, removed, not beating, fixed, frozen, … slices). One row per recording and channel makes
+    the slices that died or were taken out countable over an experiment, with day and last amplitude.
   * `_parameters`, `_info`, `_labels` (`_rockerFilter`: rocker artifact per channel and 30-min chunk). Labels per
     channel: `<name>_labels.csv` next to the `.mdd` file (saved by the GUI).
 * **Index** `mda_index.csv` (one row per recording; the same file for MATLAB and Python): size and time (UTC) of the
@@ -284,7 +296,8 @@ its results as well.
 * **Report** `reports/mda_report_<date>_<time>.txt` per pass: for every analysed recording and channel the number of
   contractions, capture (% of the stimuli followed by a contraction), extra beats (% of the detected contractions),
   mean amplitude in the first and last bin with ≥ 10 contractions and flags (no contractions, capture < 90 %, extra
-  beats > 10 %, amplitude change > 30 %; `'flagCapture'`, `'flagExtraBeats'`, `'flagAmplitudeChange'`).
+  beats > 10 %, amplitude change > 30 %; `'flagCapture'`, `'flagExtraBeats'`, `'flagAmplitudeChange'`); periods
+  without signal by type and the channels that do not end beating.
 * **Skipped**: files changed in the last 10 min (`'minFileAgeMinutes'`), names starting with `.` (rsync temporary
   files, hidden folders), recordings without `Recording stopped` in the log file (status `running`; analysed when
   unchanged for 30 h, `'incompleteAfterHours'`), recordings without log file (`noLog`). A lock file
@@ -299,6 +312,32 @@ its results as well.
 * Tested on 31 recordings (729 MB, rat, rabbit, pig, human, schedule files up to 2 h, single channel, sharp
   electrode) on one Mac: MATLAB 149 s, Python 69 s; results of MATLAB and Python identical (116 result files, max. relative
   difference 3e-10).
+
+## Periods without signal: chamber taken out, sensor board failures (`mda_signalGaps`; Python `signal_gaps`)
+```matlab
+G = mda_signalGaps('recording.mdd')          % one row per period and channel
+```
+Without a sensor board the controller repeats the last value of the channel: the signal stays at exactly the same
+number, while a connected sensor never gives identical values for seconds (noise of the AD converter). A period without
+signal = at least 2 s (`'minSeconds'`) of identical consecutive raw samples; periods of a channel less than 0.5 s apart
+are one (`'mergeSeconds'`). Types:
+* `chamber out`: one channel, the chamber was taken out (and put back at `to`, unless `untilEnd`). Why is not in the
+  signal: see the comments of the log file (`_gaps.csv` lists those within 5 min).
+* `board group`: ≥ 3 channels of the same group (1–4 or 5–8) lose the signal within 1 s (`'simultaneous'`), or 2
+  channels within 0.1 s (`'simultaneousPair'`) – faster than a person can take chambers out (with two hands, two
+  chambers at once). A defective sensor board can disturb all boards of its group, so the chambers were probably not
+  taken out at all.
+* `controller`: the same with channels of both groups (controller, connection). `saturated`: the value held is the
+  limit of the AD converter. `no signal`: the whole recording (no chamber in this channel).
+
+Periods that begin with the file (`fromStart`, chamber put in later) are grouped by their end (signal back). Further
+columns: `duration`, `nSimultaneous`, `spread` (s between the first and the last channel of the event), `value`
+(value held), `levelBefore` / `levelAfter` (10th percentile of the 5 s before / after the period: diastolic level;
+`levelChange` shows another preload or another slice after putting the chamber back) and `spikeBefore` / `spikeAfter`
+(spike when the chamber is taken out / put back). In a sample of 88 daily recordings with periods without signal, 19
+of 21 technical events (2–4 channels) had a spread ≤ 0.01 s (max. 0.42 s, 3 channels); of 606 chambers taken out one
+after the other, 2 followed within 1 s (0.36 and 0.6 s: both hands, end of the experiment), none within 1–2.3 s
+(median 5.3 s).
 
 ## Stimulation protocols (`'protocol'`, `'groupBy'`; GUI: **Protocols ...**)
 Protocols such as force-frequency (FFR), refractory period (RP, S1-S2), stimulation threshold (ST), post-rest
@@ -533,6 +572,7 @@ lower plot, the trend and all exports.
 | `mda_readMdd.m` | file reader (data, stimuli, rocker state, log file, overview) |
 | `mda_logEntries.m` | entries of the log file (comments, events, settings) |
 | `mda_clockTime.m` | clock time of the log entries (12-hour time stamps of software 2.0.7717–2.0.7769 corrected) |
+| `mda_signalGaps.m` | periods without signal (chamber taken out, sensor board group / controller failures, empty channels) |
 | `mda_calibrationFactor.m`, `mda_zeroForce.m` | AU → µN (calibration, extended sensor mode); zero force of a channel |
 | `mda_analyzeChannel.m` | filtering, detection, stimulus assignment, parameters |
 | `mda_rockerFilter.m` | removal of the periodic rocker artifact (option `rockerFilter`) |

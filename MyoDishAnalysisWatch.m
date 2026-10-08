@@ -24,6 +24,17 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %       protocol, channel and group, protocolResults (FFR, ST thresholds, refractory periods, PRP)
 %   <name>_events.csv ('events', true): all entries of the log file (comments, stimulation and rocker settings,
 %       recording, calibration, schedule, warnings) with category, clock time and time in the file
+%   <name>_gaps.csv ('gaps', true): periods without force signal (mda_signalGaps): chamber taken out ('chamber out'),
+%       sensor board group or controller failures (>= 2 channels within 1 s), saturation, channels without a chamber
+%       ('no signal'); with clock times and the comments of the log file within 5 min of the start or end. The summary
+%       gets the columns noSignal_s (s without signal in the range) and nChamberOut (chambers taken out in the range).
+%   <name>_channels.csv ('gaps', true): one row per channel: status at the end of the recording ('beating', 'not
+%       beating' = no contraction in the last 30 min with signal, 'removed' = chamber taken out and not put back,
+%       'signal lost' = technical, 'no slice'), beatingAtEnd, s with and without signal, chambers taken out, technical
+%       failures, contractions, last contraction (time, clock time, median amplitude of the last 10 included
+%       contractions, in % of the 95th percentile of the recording), date of the experiment ID in the file name
+%       (6 digits yymmdd, e.g. ABC000101) and days since this date at the last contraction (or the end of the signal),
+%       daysInCulture (labels), comments about the slice's end (discarded, removed, not beating, fixed, frozen, ...).
 %   Labels per channel (metadata): <name>_labels.csv next to the .mdd file (saved by the GUI), if present.
 % resultsFolder/mda_index.csv
 %   one row per recording: file (path relative to rawFolder), bytes, modified (time of the .mdd file, UTC), logBytes, status (ok / error /
@@ -58,6 +69,7 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   'thinFactor', n          (default 10)       'thinMode', m   'nth' (default) | 'median'
 %   'compress', tf           <name>_contractions.csv.gz (default false)
 %   'events', tf             <name>_events.csv and comments in the summary (default true)
+%   'gaps', tf               <name>_gaps.csv, <name>_channels.csv, summary columns noSignal_s, nChamberOut (default true)
 %   'flagCapture', 'flagExtraBeats', 'flagAmplitudeChange'   report flags (default 90, 10, 30 %)
 %   'quiet', tf              no messages
 %   all other name/value pairs: analysis options of MyoDishAnalysis for all recordings, e.g. 'rockerFilter', true,
@@ -76,7 +88,7 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 W = struct('interval', 0, 'reanalyze', 'outdated', 'retryErrors', false, 'fromDate', '', 'filter', '', ...
     'maxFiles', inf, 'dryRun', false, 'minFileAgeMinutes', 10, 'incompleteAfterHours', 30, 'binMinutes', 60, ...
     'includeProtocols', false, 'protocolMarginSeconds', 0, 'protocols', true, 'contractions', 'all', ...
-    'thinFactor', 10, 'thinMode', 'nth', 'compress', false, 'events', true, ...
+    'thinFactor', 10, 'thinMode', 'nth', 'compress', false, 'events', true, 'gaps', true, ...
     'flagCapture', 90, 'flagExtraBeats', 10, 'flagAmplitudeChange', 30, 'quiet', false);
 wNames = fieldnames(W);
 args = {};
@@ -289,7 +301,20 @@ if W.events
     writetable(E, fullfile(outDir, [n '_events.csv']));
     outputs{end+1} = [n '_events.csv'];
 end
+G = [];
+if W.gaps
+    try
+        G = mda_signalGaps(H);
+        Gw = gapsOut(G, H, E);
+        writetable(Gw, fullfile(outDir, [n '_gaps.csv']));
+        outputs{end+1} = [n '_gaps.csv'];
+    catch ME
+        G = [];
+        msgs{end+1} = sprintf('gaps: %s: %s', ME.identifier, ME.message);
+    end
+end
 S = [];
+C = [];
 nC = 0;
 if ~isempty(fr)
     [C, S, info] = MyoDishAnalysis(f, [], fr, to, 'labels', labels, 'metadata', meta, 'quiet', true, args{:});
@@ -299,6 +324,8 @@ if ~isempty(fr)
     [~, iC] = ismember(C.range, labels);
     C = addvars(C, binLabels(iC), 'After', 'range', 'NewVariableNames', 'bin');
     S = addComments(S, E);
+    if W.gaps, S = addGaps(S, G); end
+    Call = C;
     if W.includeProtocols, Wkeep = Wp; else, Wkeep = []; end
     C = sampleContractions(C, labels, Wkeep, W);
     mda_writeResults(fullfile(outDir, [n '.csv']), C, S, info);
@@ -313,6 +340,13 @@ if ~isempty(fr)
     msgs = [info.notes(:)', msgs];
 else
     msgs{end+1} = 'no time outside the stimulation protocols';
+    Call = [];
+end
+CH = [];
+if W.gaps && istable(G)
+    CH = channelStatus(H, Call, G, E, n);
+    writetable(CH, fullfile(outDir, [n '_channels.csv']));
+    outputs{end+1} = [n '_channels.csv'];
 end
 if W.protocols && istable(P) && height(P) > 0
     try
@@ -327,7 +361,148 @@ row.status = 'ok';
 row.nContractions = nC;
 row.outputs = strjoin(outputs, '; ');
 row.message = clean(strjoin(msgs, ' | '));
-block = reportBlock(rel, H, S, W);
+block = reportBlock(rel, H, S, W, CH, G);
+end
+
+
+function Gw = gapsOut(G, H, E)
+% periods without signal with clock times and the comments of the log file within 5 min of their start or end (this
+% channel or all channels)
+Gw = G;
+nG = height(G);
+cf = repmat({''}, nG, 1); ct = cf; txt = cf;
+cm = [];
+if istable(E) && height(E) > 0, cm = E(strcmp(E.category, 'comment'), :); end
+for r = 1:nG
+    cf{r} = timeLabel(H, G.from(r), G.from(r));
+    ct{r} = timeLabel(H, G.to(r), G.to(r));
+    if ~isempty(cm)
+        near = abs(cm.t_file - G.from(r)) <= 300;
+        if ~G.untilEnd(r), near = near | abs(cm.t_file - G.to(r)) <= 300; end
+        k = find(near & (cm.channel == G.channel(r) | cm.channel == 0));
+        txt{r} = strjoin(cellfun(@clean, cm.text(k)', 'UniformOutput', false), ' | ');
+    end
+end
+Gw = addvars(Gw, cf, ct, 'After', 'duration', 'NewVariableNames', {'clockFrom', 'clockTo'});
+Gw.comments = txt;
+end
+
+
+function S = addGaps(S, G)
+% columns noSignal_s (s without signal of the channel in the range) and nChamberOut (chambers taken out in the range)
+noSig = zeros(height(S), 1); nOut = zeros(height(S), 1);
+if istable(G) && height(G) > 0
+    for r = 1:height(S)
+        g = G(G.channel == S.channel(r), :);
+        if height(g) == 0, continue; end
+        noSig(r) = sum(max(0, min(g.to, S.to(r)) - max(g.from, S.from(r))));
+        nOut(r) = sum(strcmp(g.type, 'chamber out') & ~g.fromStart & g.from >= S.from(r) & g.from <= S.to(r));
+    end
+end
+S.noSignal_s = noSig;
+S.nChamberOut = nOut;
+end
+
+
+function T = channelStatus(H, C, G, E, name)
+% one row per channel: status at the end of the recording, signal, gaps, last contraction, comments about the end
+chs = H.dataChannels(:);
+nCh = numel(chs);
+TT = H.totalSeconds;
+status = repmat({''}, nCh, 1); beatEnd = false(nCh, 1);
+sig = zeros(nCh, 1); noSig = zeros(nCh, 1); nOut = zeros(nCh, 1); nTech = zeros(nCh, 1);
+firstS = nan(nCh, 1); lastS = nan(nCh, 1); nCon = zeros(nCh, 1); tLast = nan(nCh, 1); clk = repmat({''}, nCh, 1);
+aLast = nan(nCh, 1); aMax = nan(nCh, 1); aPct = nan(nCh, 1); dId = nan(nCh, 1); dCul = nan(nCh, 1);
+endTxt = repmat({''}, nCh, 1);
+idTxt = idDate(name);
+cm = [];
+if istable(E) && height(E) > 0, cm = E(strcmp(E.category, 'comment'), :); end
+rxEnd = ['discard|remov|not beating|no beat|stopped beating|dead|died|infect|contamin|fix|froz|moved|taken out|' ...
+    'replac|end of exp|sharp|imaging|histo|rna|pcr'];
+for i = 1:nCh
+    c = chs(i);
+    g = G(G.channel == c, :);
+    noSig(i) = sum(g.duration);
+    sig(i) = max(0, TT - noSig(i));
+    nOut(i) = sum(strcmp(g.type, 'chamber out') & ~g.fromStart);
+    nTech(i) = sum(ismember(g.type, {'board group', 'controller', 'saturated'}));
+    if istable(C) && height(C) > 0
+        cc = C(C.channel == c, :);
+    else
+        cc = table();
+    end
+    nCon(i) = height(cc);
+    if any(strcmp(g.type, 'no signal'))
+        status{i} = 'no slice';
+    else
+        firstS(i) = 0; lastS(i) = TT;
+        k = find(g.fromStart & ~g.untilEnd, 1); if ~isempty(k), firstS(i) = g.to(k); end
+        k = find(g.untilEnd & ~g.fromStart, 1); if ~isempty(k), lastS(i) = g.from(k); end
+        if height(cc) > 0, tLast(i) = max(cc.t_peak); end
+        beatEnd(i) = ~isnan(tLast(i)) && lastS(i) - tLast(i) <= 1800;
+        if ~isempty(k) && strcmp(g.type{k}, 'chamber out')
+            status{i} = 'removed';
+        elseif ~isempty(k)
+            status{i} = 'signal lost';
+        elseif beatEnd(i)
+            status{i} = 'beating';
+        else
+            status{i} = 'not beating';
+        end
+    end
+    if height(cc) > 0
+        inc = cc(cc.included, :);
+        if height(inc) == 0, inc = cc; end
+        inc = sortrows(inc, 't_peak');
+        aLast(i) = median(inc.amplitude(max(1, end-9):end), 'omitnan');
+        aMax(i) = mprctile(inc.amplitude, 95);
+        if aMax(i) > 0, aPct(i) = 100 * aLast(i) / aMax(i); end
+        [~, j] = max(cc.t_peak);
+        clk{i} = timeLabel(H, tLast(i), tLast(i));
+        if ismember('daysInCulture', cc.Properties.VariableNames), dCul(i) = cc.daysInCulture(j); end
+    end
+    tRef = tLast(i); if isnan(tRef), tRef = lastS(i); end
+    if ~isempty(idTxt) && ~isnan(H.recordingStart) && ~isnan(tRef)
+        dId(i) = H.recordingStart + tRef / 86400 - datenum(idTxt, 'yyyy-mm-dd');
+    end
+    if ~isempty(cm)
+        k = find((cm.channel == c | cm.channel == 0) & ~cellfun(@isempty, regexpi(cm.text, rxEnd, 'once')));
+        endTxt{i} = strjoin(cellfun(@clean, cm.text(k)', 'UniformOutput', false), ' | ');
+    end
+end
+T = table(chs, status, beatEnd, sig, noSig, nOut, nTech, firstS, lastS, nCon, tLast, clk, aLast, aMax, aPct, ...
+    repmat({idTxt}, nCh, 1), dId, dCul, endTxt, 'VariableNames', {'channel', 'status', 'beatingAtEnd', 'signal_s', ...
+    'noSignal_s', 'nChamberOut', 'nTechnical', 'firstSignal_s', 'lastSignal_s', 'nContractions', ...
+    'lastContraction_s', 'lastContractionClock', 'lastAmplitude', 'maxAmplitude', 'lastAmplitude_pctMax', ...
+    'idDate', 'daysSinceIdDate', 'daysInCulture', 'endComments'});
+end
+
+
+function d = idDate(name)
+% date of the experiment ID in the file name: first part (between '_') of letters + 6 digits yymmdd ('' if none)
+d = '';
+parts = strsplit(name, '_');
+for k = 1:numel(parts)
+    t = regexp(parts{k}, '^[A-Za-z]*(\d{6})$', 'tokens', 'once');
+    if isempty(t), continue; end
+    v = sscanf(t{1}, '%2d%2d%2d');
+    if v(2) >= 1 && v(2) <= 12 && v(3) >= 1 && v(3) <= 31 && v(3) <= eomday(2000 + v(1), v(2))
+        d = sprintf('%04d-%02d-%02d', 2000 + v(1), v(2), v(3));
+        return;
+    end
+end
+end
+
+
+function p = mprctile(x, q)
+% prctile of a vector (NaN ignored), as the Statistics Toolbox
+x = sort(x(~isnan(x)));
+n = numel(x);
+p = nan;
+if n == 0, return; end
+if n == 1, p = x(1); return; end
+pos = 100 * ((1:n)' - 0.5) / n;
+p = interp1(pos, x(:), min(max(q, pos(1)), pos(end)));
 end
 
 
@@ -501,7 +676,7 @@ end
 end
 
 
-function block = reportBlock(rel, H, S, W)
+function block = reportBlock(rel, H, S, W, CH, G)
 start = '';
 if ~isnan(H.recordingStart)
     sec = round((H.recordingStart - 719529) * 86400);
@@ -509,8 +684,10 @@ if ~isnan(H.recordingStart)
 end
 lines = {sprintf('%s  (%.2f h, %d channels%s)', rel, H.totalSeconds / 3600, numel(H.dataChannels), start), ...
     '  channel  contractions  capture%  extra%  amplitude first/last range (uN)  change%  flags'};
+if nargin < 5, CH = []; G = []; end
 if ~istable(S) || height(S) == 0
-    block = sprintf('%s\n  no time outside the stimulation protocols\n', lines{1});
+    gl = gapLines(CH, G);
+    block = sprintf('%s\n', lines{1}, '  no time outside the stimulation protocols', gl{:});
     return;
 end
 for ch = unique(S.channel)'
@@ -534,7 +711,29 @@ for ch = unique(S.channel)'
     lines{end+1} = sprintf('  %7d  %12d  %8s  %6s  %15s / %-15s  %7s  %s', ch, nInc, f1(cap), f1(extra), f1(a1), ...
         f1(a2), f1(chg), strjoin(flags, ', ')); %#ok<AGROW>
 end
+lines = [lines, gapLines(CH, G)];
 block = sprintf('%s\n', lines{:});
+end
+
+
+function lines = gapLines(CH, G)
+% report: periods without signal by type, channels that do not end beating
+lines = {};
+if nargin < 2 || ~istable(G) || ~istable(CH), return; end
+types = {'chamber out', 'board group', 'controller', 'saturated'};
+parts = {};
+for k = 1:numel(types)
+    n = sum(strcmp(G.type, types{k}));
+    if n > 0, parts{end+1} = sprintf('%d %s', n, types{k}); end %#ok<AGROW>
+end
+if ~isempty(parts), lines{end+1} = ['  signal gaps: ' strjoin(parts, ', ')]; end
+parts = {};
+for i = 1:height(CH)
+    if ~strcmp(CH.status{i}, 'beating')
+        parts{end+1} = sprintf('ch%d %s', CH.channel(i), CH.status{i}); %#ok<AGROW>
+    end
+end
+if ~isempty(parts), lines{end+1} = ['  end of recording: ' strjoin(parts, ', ')]; end
 end
 
 
@@ -633,9 +832,10 @@ end
 
 function s = optionsText(args, W)
 % canonical text of the options that change the results (index column 'options'; same text as in Python)
-keys = {'binminutes', 'protocols', 'contractions', 'compress', 'events', 'includeprotocols'};
+keys = {'binminutes', 'protocols', 'contractions', 'compress', 'events', 'includeprotocols', 'gaps'};
 vals = {valueText(W.binMinutes), valueText(logical(W.protocols)), valueText(char(W.contractions)), ...
-    valueText(logical(W.compress)), valueText(logical(W.events)), valueText(logical(W.includeProtocols))};
+    valueText(logical(W.compress)), valueText(logical(W.events)), valueText(logical(W.includeProtocols)), ...
+    valueText(logical(W.gaps))};
 if ~W.includeProtocols, keys{end+1} = 'protocolmarginseconds'; vals{end+1} = valueText(W.protocolMarginSeconds); end
 if strcmp(W.contractions, 'thinned')
     keys(end+1:end+2) = {'thinfactor', 'thinmode'}; vals(end+1:end+2) = {valueText(W.thinFactor), valueText(char(W.thinMode))};

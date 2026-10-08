@@ -165,15 +165,16 @@ def test_command_line(raw, tmp_path):
                        "--workers", "2"]) == 0
     X = W.read_index(res)
     assert (X["status"] == "ok").all()
-    assert X.loc[0, "options"] == ("binminutes=5; compress=1; contractions=thinned; events=1; includeprotocols=0; "
-                                   "protocolmarginseconds=0; protocols=0; rockerfilter=1; thinfactor=5; thinmode=median")
+    assert X.loc[0, "options"] == ("binminutes=5; compress=1; contractions=thinned; events=1; gaps=1; "
+                                   "includeprotocols=0; protocolmarginseconds=0; protocols=0; rockerfilter=1; "
+                                   "thinfactor=5; thinmode=median")
     assert os.path.isfile(os.path.join(res, "A", "example9_ratVentricle_contractions.csv.gz"))
 
 
 def test_helpers():
     assert W.parse_date("2026-10-08") == W.parse_date("08.10.2026") == W.parse_date("261008")
     assert W.options_text({"Threshold": [300, float("nan")], "rocker": "stopped", "rockerFilter": True}) == \
-        ("binminutes=60; compress=0; contractions=all; events=1; includeprotocols=0; protocolmarginseconds=0; "
+        ("binminutes=60; compress=0; contractions=all; events=1; gaps=1; includeprotocols=0; protocolmarginseconds=0; "
          "protocols=1; rocker=stopped; rockerfilter=1; threshold=[300 NaN]")
     assert W.event_category("comment", "Started parallel recording: x") == "recording"
     assert W.event_category("comment", "start FFR protocol") == "protocol"

@@ -24,6 +24,17 @@ Per recording (results_folder/<subfolder of raw_folder>/):
       and group, protocolResults (FFR, ST thresholds, refractory periods, PRP).
   <name>_events.csv (events=True): all entries of the log file (comments, stimulation and rocker settings, recording,
       calibration, schedule, warnings) with category, clock time and time in the file.
+  <name>_gaps.csv (gaps=True): periods without force signal (signal_gaps): chamber taken out ('chamber out'), sensor
+      board group or controller failures (>= 2 channels within 1 s), saturation, channels without a chamber ('no
+      signal'); with clock times and the comments of the log file within 5 min of the start or end. The summary gets
+      the columns noSignal_s (s without signal in the range) and nChamberOut (chambers taken out in the range).
+  <name>_channels.csv (gaps=True): one row per channel: status at the end of the recording ('beating', 'not beating' =
+      no contraction in the last 30 min with signal, 'removed' = chamber taken out and not put back, 'signal lost' =
+      technical, 'no slice'), beatingAtEnd, s with and without signal, chambers taken out, technical failures,
+      contractions, last contraction (time, clock time, median amplitude of the last 10 included contractions, in % of
+      the 95th percentile of the recording), date of the experiment ID in the file name (6 digits yymmdd, e.g.
+      ABC000101) and days since this date at the last contraction (or the end of the signal), daysInCulture (labels),
+      comments about the slice's end (discarded, removed, not beating, fixed, frozen, ...).
   Labels per channel (metadata): <name>_labels.csv next to the .mdd file (saved by the GUI), if present.
 results_folder/mda_index.csv
   one row per recording: file (path relative to raw_folder), bytes, modified (time of the .mdd file, UTC), logBytes,
@@ -47,8 +58,9 @@ retry_errors, from_date (only files modified on/after this date: 'yyyy-mm-dd', '
 (regular expression on the relative path), max_files (per pass), dry_run (list only), min_file_age_minutes,
 incomplete_after_hours, bin_minutes (60), include_protocols (False), protocol_margin_seconds (0: excluded after the end
 of a protocol as well), protocols (True), contractions ('all'), thin_factor (10), thin_mode ('nth'), compress (False),
-events (True), workers (1; > 1: recordings analysed in parallel processes), flag_capture (90), flag_extra_beats (10),
-flag_amplitude_change (30), quiet. All other keywords are analysis options of myodish_analysis (e.g.
+events (True), gaps (True: <name>_gaps.csv, <name>_channels.csv, summary columns noSignal_s, nChamberOut), workers
+(1; > 1: recordings analysed in parallel processes), flag_capture (90), flag_extra_beats (10), flag_amplitude_change
+(30), quiet. All other keywords are analysis options of myodish_analysis (e.g.
 rockerFilter=True, rocker='stopped', threshold=300), applied to all recordings.
 
 Run it once a day by the scheduler of the operating system (cron / launchd / Windows task scheduler), e.g.
@@ -79,6 +91,7 @@ from .log_entries import log_entries
 from .options import options as make_options
 from .protocols import find_protocols
 from .read_mdd import read_header
+from .signal_gaps import signal_gaps
 from .write_results import write_results
 
 INDEX_NAME = "mda_index.csv"
@@ -89,7 +102,8 @@ LOCK_HOURS = 12.0  # an older lock file is ignored (watcher crashed)
 WATCH_DEFAULTS = dict(interval=0.0, reanalyze="outdated", retry_errors=False, from_date=None, filter=None,
                       max_files=None, dry_run=False, min_file_age_minutes=10.0, incomplete_after_hours=30.0,
                       bin_minutes=60.0, include_protocols=False, protocol_margin_seconds=0.0, protocols=True,
-                      contractions="all", thin_factor=10, thin_mode="nth", compress=False, events=True, workers=1,
+                      contractions="all", thin_factor=10, thin_mode="nth", compress=False, events=True, gaps=True,
+                      workers=1,
                       flag_capture=90.0, flag_extra_beats=10.0, flag_amplitude_change=30.0, quiet=False)
 _TIME_FMT = "%Y-%m-%d %H:%M:%S"
 _SET_BY_WATCHER = ("output", "labels", "metadata", "protocol", "groupby")  # not allowed as analysis options
@@ -156,7 +170,7 @@ def options_text(analysis_options, o=None):
     o = dict(WATCH_DEFAULTS, **(o or {}))
     d = {"binminutes": o["bin_minutes"], "protocols": bool(o["protocols"]), "contractions": str(o["contractions"]),
          "compress": bool(o["compress"]), "events": bool(o["events"]),
-         "includeprotocols": bool(o["include_protocols"])}
+         "includeprotocols": bool(o["include_protocols"]), "gaps": bool(o["gaps"])}
     if not o["include_protocols"]:
         d["protocolmarginseconds"] = o["protocol_margin_seconds"]
     if str(o["contractions"]) == "thinned":
@@ -414,7 +428,17 @@ def _analyse(f, rel, H, res, row, o, aopts):
         E.insert(4, "category", [event_category(c, t) for c, t in zip(E["code"], E["text"])])
         _for_csv(E).to_csv(os.path.join(outDir, n + "_events.csv"), index=False)
         outputs.append(n + "_events.csv")
+    G = None
+    if o["gaps"]:
+        try:
+            G = signal_gaps(H)
+            _for_csv(_gaps_out(G, H, E)).to_csv(os.path.join(outDir, n + "_gaps.csv"), index=False)
+            outputs.append(n + "_gaps.csv")
+        except Exception as ex:  # noqa: BLE001
+            G = None
+            msgs.append(f"gaps: {type(ex).__name__}: {ex}")
     S = None
+    Call = None
     nC = 0
     if len(fr):
         C, S, info = myodish_analysis(f, None, fr, to, labels=labels, metadata=meta, quiet=True, **aopts)
@@ -423,6 +447,9 @@ def _analyse(f, rel, H, res, row, o, aopts):
         S.insert(int(S.columns.get_loc("range")) + 1, "bin", [binOf[r] for r in S["range"]])
         C.insert(int(C.columns.get_loc("range")) + 1, "bin", [binOf[r] for r in C["range"]])
         _add_comments(S, E)
+        if o["gaps"]:
+            _add_gaps(S, G)
+        Call = C
         C = _sample(C, labels, W if o["include_protocols"] else None, o)
         write_results(os.path.join(outDir, n + ".csv"), C, S, info)
         cf = os.path.join(outDir, n + "_contractions.csv")
@@ -436,6 +463,11 @@ def _analyse(f, rel, H, res, row, o, aopts):
         msgs = list(info.get("notes", [])) + msgs
     else:
         msgs.append("no time outside the stimulation protocols")
+    CH = None
+    if o["gaps"] and G is not None:
+        CH = _channel_status(H, Call, G, E, n)
+        _for_csv(CH).to_csv(os.path.join(outDir, n + "_channels.csv"), index=False)
+        outputs.append(n + "_channels.csv")
     if o["protocols"] and P is not None and len(P):
         try:
             myodish_analysis(f, None, protocol="all", metadata=meta, quiet=True,
@@ -444,7 +476,170 @@ def _analyse(f, rel, H, res, row, o, aopts):
         except Exception as ex:  # noqa: BLE001
             msgs.append(f"protocols: {type(ex).__name__}: {ex}")
     row.update(status="ok", nContractions=nC, outputs="; ".join(outputs), message=_clean(" | ".join(msgs)))
-    return row, _report_block(rel, H, S, o)
+    return row, _report_block(rel, H, S, o, CH, G)
+
+
+def _gaps_out(G, H, E):
+    """periods without signal with clock times and the comments of the log file within 5 min of their start or end
+    (this channel or all channels)."""
+    Gw = G.copy()
+    if E is not None and len(E):
+        cm = E[E["category"] == "comment"]
+        t, ch, tx = cm["t_file"].to_numpy(float), cm["channel"].to_numpy(float), cm["text"].astype(str).tolist()
+    else:
+        t, ch, tx = np.zeros(0), np.zeros(0), []
+    cf, ct, txt = [], [], []
+    for a, b, c, ue in zip(G["from"].to_numpy(float), G["to"].to_numpy(float), G["channel"].to_numpy(float),
+                           G["untilEnd"].to_numpy(bool)):
+        cf.append(_time_label(H, a, a))
+        ct.append(_time_label(H, b, b))
+        near = np.abs(t - a) <= 300
+        if not ue:
+            near = near | (np.abs(t - b) <= 300)
+        k = np.flatnonzero(near & ((ch == c) | (ch == 0)))
+        txt.append(" | ".join(_clean(tx[i]) for i in k))
+    pos = int(Gw.columns.get_loc("duration")) + 1
+    Gw.insert(pos, "clockFrom", cf)
+    Gw.insert(pos + 1, "clockTo", ct)
+    Gw["comments"] = txt
+    return Gw
+
+
+def _add_gaps(S, G):
+    """columns noSignal_s (s without signal of the channel in the range) and nChamberOut (chambers taken out)."""
+    noSig, nOut = [], []
+    for a, b, c in zip(S["from"].to_numpy(float), S["to"].to_numpy(float), S["channel"].to_numpy(float)):
+        if G is None or not len(G):
+            noSig.append(0.0)
+            nOut.append(0.0)
+            continue
+        g = G[G["channel"].to_numpy(float) == c]
+        gf, gt = g["from"].to_numpy(float), g["to"].to_numpy(float)
+        noSig.append(float(np.sum(np.maximum(0.0, np.minimum(gt, b) - np.maximum(gf, a)))))
+        nOut.append(float(np.sum((g["type"].to_numpy() == "chamber out") & ~g["fromStart"].to_numpy(bool)
+                                 & (gf >= a) & (gf <= b))))
+    S["noSignal_s"] = noSig
+    S["nChamberOut"] = nOut
+
+
+_RX_END = re.compile(r"discard|remov|not beating|no beat|stopped beating|dead|died|infect|contamin|fix|froz|moved|"
+                     r"taken out|replac|end of exp|sharp|imaging|histo|rna|pcr", re.IGNORECASE)
+
+
+def _channel_status(H, C, G, E, name):
+    """one row per channel: status at the end of the recording, signal, gaps, last contraction, comments about the
+    end."""
+    TT = float(H.totalSeconds)
+    idTxt = _id_date(name)
+    if E is not None and len(E):
+        cm = E[E["category"] == "comment"]
+        cch, ctx = cm["channel"].to_numpy(float), cm["text"].astype(str).tolist()
+    else:
+        cch, ctx = np.zeros(0), []
+    rows = []
+    for c in [int(x) for x in np.ravel(H.dataChannels)]:
+        g = G[G["channel"].to_numpy(float) == c]
+        typ = g["type"].to_numpy()
+        fs_, ue = g["fromStart"].to_numpy(bool), g["untilEnd"].to_numpy(bool)
+        noSig = float(np.sum(g["duration"].to_numpy(float)))
+        r = dict(channel=c, status="", beatingAtEnd=False, signal_s=max(0.0, TT - noSig), noSignal_s=noSig,
+                 nChamberOut=float(np.sum((typ == "chamber out") & ~fs_)),
+                 nTechnical=float(np.sum(np.isin(typ, ["board group", "controller", "saturated"]))),
+                 firstSignal_s=math.nan, lastSignal_s=math.nan, nContractions=0.0, lastContraction_s=math.nan,
+                 lastContractionClock="", lastAmplitude=math.nan, maxAmplitude=math.nan,
+                 lastAmplitude_pctMax=math.nan, idDate=idTxt, daysSinceIdDate=math.nan, daysInCulture=math.nan,
+                 endComments="")
+        cc = C[C["channel"].to_numpy(float) == c] if C is not None and len(C) else None
+        r["nContractions"] = float(len(cc)) if cc is not None else 0.0
+        if np.any(typ == "no signal"):
+            r["status"] = "no slice"
+        else:
+            r["firstSignal_s"], r["lastSignal_s"] = 0.0, TT
+            k = np.flatnonzero(fs_ & ~ue)
+            if k.size:
+                r["firstSignal_s"] = float(g["to"].iat[k[0]])
+            k = np.flatnonzero(ue & ~fs_)
+            if cc is not None and len(cc):
+                r["lastContraction_s"] = float(cc["t_peak"].max())
+            if k.size:
+                r["lastSignal_s"] = float(g["from"].iat[k[0]])
+            r["beatingAtEnd"] = (not math.isnan(r["lastContraction_s"])) and \
+                r["lastSignal_s"] - r["lastContraction_s"] <= 1800
+            if k.size and typ[k[0]] == "chamber out":
+                r["status"] = "removed"
+            elif k.size:
+                r["status"] = "signal lost"
+            elif r["beatingAtEnd"]:
+                r["status"] = "beating"
+            else:
+                r["status"] = "not beating"
+        if cc is not None and len(cc):
+            inc = cc[cc["included"].to_numpy(bool)]
+            if not len(inc):
+                inc = cc
+            inc = inc.sort_values("t_peak", kind="stable")
+            amp = inc["amplitude"].to_numpy(float)
+            r["lastAmplitude"] = float(np.nanmedian(amp[-10:])) if np.any(~np.isnan(amp[-10:])) else math.nan
+            r["maxAmplitude"] = _prctile(amp, 95)
+            if r["maxAmplitude"] > 0:
+                r["lastAmplitude_pctMax"] = 100 * r["lastAmplitude"] / r["maxAmplitude"]
+            j = int(np.argmax(cc["t_peak"].to_numpy(float)))
+            r["lastContractionClock"] = _time_label(H, r["lastContraction_s"], r["lastContraction_s"])
+            if "daysInCulture" in cc.columns:
+                r["daysInCulture"] = float(cc["daysInCulture"].iat[j])
+        tRef = r["lastContraction_s"] if not math.isnan(r["lastContraction_s"]) else r["lastSignal_s"]
+        if idTxt and not math.isnan(H.recordingStart) and not math.isnan(tRef):
+            d = _dt.date.fromisoformat(idTxt)
+            r["daysSinceIdDate"] = H.recordingStart + tRef / 86400 - (d.toordinal() + 366)
+        k = [i for i in range(len(ctx)) if (cch[i] == c or cch[i] == 0) and _RX_END.search(ctx[i])]
+        r["endComments"] = " | ".join(_clean(ctx[i]) for i in k)
+        rows.append(r)
+    return pd.DataFrame(rows)
+
+
+def _id_date(name):
+    """date of the experiment ID in the file name: first part (between '_') of letters + 6 digits yymmdd ('' if
+    none)."""
+    for part in name.split("_"):
+        m = re.fullmatch(r"[A-Za-z]*(\d{6})", part)
+        if not m:
+            continue
+        y, mo, d = int(m.group(1)[:2]), int(m.group(1)[2:4]), int(m.group(1)[4:])
+        try:
+            return _dt.date(2000 + y, mo, d).isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
+def _prctile(x, p):
+    """MATLAB prctile of a vector (NaN ignored)"""
+    x = np.sort(np.asarray(x, float)[~np.isnan(np.asarray(x, float))])
+    n = x.size
+    if n == 0:
+        return math.nan
+    if n == 1:
+        return float(x[0])
+    q = 100 * (np.arange(1, n + 1) - 0.5) / n
+    return float(np.interp(min(max(p, q[0]), q[-1]), q, x))
+
+
+def _gap_lines(CH, G):
+    """report: periods without signal by type, channels that do not end beating."""
+    lines = []
+    if CH is None or G is None:
+        return lines
+    parts = []
+    for t in ("chamber out", "board group", "controller", "saturated"):
+        n = int(np.sum(G["type"].to_numpy() == t)) if len(G) else 0
+        if n:
+            parts.append(f"{n} {t}")
+    if parts:
+        lines.append("  signal gaps: " + ", ".join(parts))
+    parts = [f"ch{int(c)} {st}" for c, st in zip(CH["channel"], CH["status"]) if st != "beating"]
+    if parts:
+        lines.append("  end of recording: " + ", ".join(parts))
+    return lines
 
 
 def _protocol_windows(P, margin):
@@ -592,7 +787,7 @@ def _sample(C, labels, W, o):
     return out.iloc[o2].reset_index(drop=True)
 
 
-def _report_block(rel, H, S, o):
+def _report_block(rel, H, S, o, CH=None, G=None):
     start = ""
     if not math.isnan(H.recordingStart):
         sec = int(mround((H.recordingStart - 719529.0) * 86400))
@@ -600,7 +795,7 @@ def _report_block(rel, H, S, o):
     lines = [f"{rel}  ({H.totalSeconds / 3600:.2f} h, {len(H.dataChannels)} channels{start})",
              "  channel  contractions  capture%  extra%  amplitude first/last range (uN)  change%  flags"]
     if S is None or not len(S):
-        return lines[0] + "\n  no time outside the stimulation protocols\n"
+        return "\n".join([lines[0], "  no time outside the stimulation protocols"] + _gap_lines(CH, G)) + "\n"
     for ch in sorted(S["channel"].unique()):
         s = S[S["channel"] == ch]
         nDet, nInc = s["nDetected"].sum(), s["nContractions"].sum()
@@ -622,7 +817,7 @@ def _report_block(rel, H, S, o):
             flags.append("amplitude change > %s %%" % _g(o["flag_amplitude_change"]))
         lines.append("  %7d  %12d  %8s  %6s  %15s / %-15s  %7s  %s" % (
             ch, nInc, _f1(cap), _f1(extra), _f1(a1), _f1(a2), _f1(chg), ", ".join(flags)))
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines + _gap_lines(CH, G)) + "\n"
 
 
 # ------------------------------------------------------------------------------------------------ helpers

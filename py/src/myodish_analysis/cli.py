@@ -173,6 +173,8 @@ def watch_main(argv=None):
                     help="--contractions thinned: every n-th contraction (default) or median of blocks of n")
     ap.add_argument("--compress", action="store_true", help="contractions as <name>_contractions.csv.gz")
     ap.add_argument("--no-events", action="store_true", help="no <name>_events.csv (entries of the log file)")
+    ap.add_argument("--no-gaps", action="store_true",
+                    help="no <name>_gaps.csv / _channels.csv (periods without signal: chamber out, board failures)")
     ap.add_argument("--workers", type=int, default=1, help="recordings analysed in parallel (processes, default 1)")
     ap.add_argument("--rocker", choices=["any", "stopped", "moving"])
     ap.add_argument("--beats", choices=["all", "stimulated"])
@@ -200,7 +202,8 @@ def watch_main(argv=None):
           min_file_age_minutes=a.min_age, incomplete_after_hours=a.incomplete_after, bin_minutes=a.bin_minutes,
           protocols=not a.no_protocols, include_protocols=a.include_protocols,
           protocol_margin_seconds=a.protocol_margin, contractions=a.contractions, thin_factor=a.thin_factor,
-          thin_mode=a.thin_mode, compress=a.compress, events=not a.no_events, workers=a.workers, quiet=a.quiet, **kw)
+          thin_mode=a.thin_mode, compress=a.compress, events=not a.no_events, gaps=not a.no_gaps,
+          workers=a.workers, quiet=a.quiet, **kw)
     return 0
 
 

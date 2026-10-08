@@ -5,6 +5,16 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Added
+- Periods without signal (2026-10-08): `mda_signalGaps` / `signal_gaps` find periods of identical consecutive raw
+  samples (≥ 2 s; the controller repeats the last value when a sensor board is missing): `chamber out` (one channel),
+  `board group` (≥ 3 channels of group 1–4 or 5–8 within 1 s, or 2 within 0.1 s: technical, a defective board
+  disturbs its group; two chambers taken out with both hands stay `chamber out`), `controller` (both groups),
+  `saturated`, `no signal` (whole file); spread of the event, levels before / after (diastolic level, change after
+  putting the chamber back) and spikes. Watcher (`'gaps',true`): `<name>_gaps.csv` with clock times and nearby
+  comments, summary columns `noSignal_s` and `nChamberOut`, `<name>_channels.csv` with the status of every channel at
+  the end of the recording (beating, not beating, removed, signal lost, no slice), last contraction and amplitude,
+  days since the date of the experiment ID and comments about the end of the slice; report lines. Tests
+  `mda_testSignalGaps.m`, `py/tests/test_signal_gaps.py`.
 - Watcher (2026-10-08): `MyoDishAnalysisWatch` / `mda-watch` (`myodish_analysis.watch`) analyses the new and changed
   recordings of a folder and its subfolders: every contraction of the whole recording, summary per time bin (clock-time
   labels), stimulation protocols with protocol results; index `mda_index.csv` shared by MATLAB and Python (recordings
