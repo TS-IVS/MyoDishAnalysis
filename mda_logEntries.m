@@ -46,7 +46,7 @@ ok = ~cellfun(@isempty, num);
 if any(ok)
     N = str2double(vertcat(num{ok}));
     ms = N(:,7); ms(isnan(ms)) = 0;
-    clk(ok) = datetime(N(:,1), N(:,2), N(:,3), N(:,4), N(:,5), N(:,6) + ms / 1000);
+    clk(ok) = datetime(N(:,1), N(:,2), N(:,3), N(:,4), N(:,5), N(:,6), ms);   %integer ms: exact (2026-10-08)
 end
 clk.Format = 'yyyy-MM-dd HH:mm:ss';
 

@@ -60,6 +60,8 @@ MATLAB and Python versions have the same version number and give the same result
     options); export with SEM, min and max.
 
 ### Changed
+- `mda_logEntries`: clock time from the integer milliseconds of the log file (was seconds + ms / 1000 as a float, so
+  that `.SSS` sometimes showed 1 ms less than Python and the log file).
 - RP protocol results: a numerically zero S1 template (flat signal, mean of the baseline-corrected traces ±1e-12 µN)
   is "no S1 contraction" in both versions (MATLAB continued with +7e-12, Python stopped with 0 / −2e-13; found by
   comparing the watcher results of 31 recordings).
