@@ -2,17 +2,19 @@
 
     E = log_entries(log_file)          log_file = <name>_log.log next to the .mdd file
 
-E.clockTime   datetime: system time of the entry (real-world date and time; NaT if not readable)
+E.clockTime   datetime: system time of the entry (real-world date and time; NaT if not readable; 12-hour time
+              stamps of MyoDish software 2.0.7717-2.0.7769 corrected, see clock_time)
 E.t_file      s: dataLogTime of the entry = time in the .mdd file (as used by all MyoDish analysis scripts)
 E.channel     channel number of the entry (0 = not channel-specific)
 E.code        e.g. 'comment', 'Event', 'rockerSpeed', 'Calibration'
 E.text        value / comment text
 E.isComment   True for comments (code 'comment')
+E.attrs['clock']   info of clock_time (format '24h' / '12h', nCorrected, ambiguous, source, note)
 
 Lines (UTF-16 or UTF-8): systemTime;dataLogTime_ms;channel;code;value, e.g.
   2022 03 07 09:44:35:717;1025;0;comment;start rockerSpeedTest
 
-TS 2026-10-06 (port of mda_logEntries.m, TS 2026-10-05)
+TS 2026-10-06 (port of mda_logEntries.m, TS 2026-10-05; 12-hour time stamps 2026-10-08)
 """
 from __future__ import annotations
 
@@ -23,6 +25,8 @@ import re
 
 import numpy as np
 import pandas as pd
+
+from .clock_time import clock_time
 
 _NUM = re.compile(r"^[+-]?((\d+(\.\d*)?)|(\.\d+))([eEdD][+-]?\d+)?$")
 
@@ -85,6 +89,14 @@ _LINE = re.compile(r"^([^;]*);([^;]*);([^;]*);([^;]*);(.*)$")
 _CLOCK = re.compile(r"^(\d+) (\d+) (\d+) (\d+):(\d+):(\d+):?(\d*)")
 
 
+def parse_clock_numbers(s):
+    """'yyyy mm dd HH:MM:SS:fff' --> [y, mo, d, h, mi, s, ms] (NaN for all if not readable; ms NaN if missing)."""
+    m = _CLOCK.match(s.strip())
+    if not m:
+        return [math.nan] * 7
+    return [float(x) for x in m.groups()[:6]] + [float(m.group(7)) if m.group(7) else math.nan]
+
+
 def parse_clock(s):
     """'yyyy mm dd HH:MM:SS:fff' --> datetime (None if not readable)."""
     m = _CLOCK.match(s.strip())
@@ -107,6 +119,7 @@ def log_entries(log_file):
     if txt is None:
         return empty
     rows = []
+    nums = []
     for line in split_lines(txt):
         m = _LINE.match(line)
         if not m:
@@ -119,9 +132,21 @@ def log_entries(log_file):
         if math.isnan(ch):
             ch = 0.0
         code = tok[3].strip()
-        rows.append((parse_clock(tok[0]), t / 1000.0, ch, code, tok[4].strip(), code.lower() == "comment"))
+        rows.append([None, t / 1000.0, ch, code, tok[4].strip(), code.lower() == "comment"])
+        nums.append(parse_clock_numbers(tok[0]))
     if not rows:
         return empty
+    # 12-hour time stamps (software 2.0.7717-2.0.7769) corrected, see clock_time (2026-10-08)
+    ver = [r[4] for r in rows if (r[3].lower() == "programinfo" and "version" in r[4].lower())
+           or r[3].lower() == "programversion"]
+    file_time = None
+    mdd = re.sub(r"_log\.log$", ".mdd", log_file, flags=re.IGNORECASE)
+    if mdd != log_file and os.path.isfile(mdd):
+        file_time = _dt.datetime.fromtimestamp(os.path.getmtime(mdd))
+    clk, info = clock_time(nums, [r[1] for r in rows], ver, file_time, [r[4] for r in rows])
+    for r, c in zip(rows, clk):
+        r[0] = c
     E = pd.DataFrame(rows, columns=cols)
     E["clockTime"] = pd.to_datetime(E["clockTime"])
+    E.attrs["clock"] = info
     return E

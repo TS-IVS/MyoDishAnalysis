@@ -28,7 +28,8 @@ FILE FORMAT (MyoDish software; facts from the Seidel lab's importMyoDishData)
 
 OUTPUT (S, a Struct with the field names of the MATLAB version)
   file facts: file, logFile, samplingRate, nChannelsInFile, dataChannels (physical channel numbers, 1-based),
-              hasStimChannel, totalSeconds, recordingStart (MATLAB datenum of file time 0, NaN if unknown),
+              hasStimChannel, totalSeconds, recordingStart (MATLAB datenum of file time 0, NaN if unknown; 12-hour
+              time stamps of software 2.0.7717-2.0.7769 corrected, see clock_time),
               extendedSensorIntervals, notes, offsetLog / calibrationLog ([time channel value] rows; time -Inf =
               logged before the recording start), rockerSpeedLog ([time rpm]), calibrationApplied,
               extendedSensorFactor, rockerSource ('status channel' or 'log'), rockerLogIntervals ([from to] in s
@@ -47,9 +48,12 @@ import os
 
 import numpy as np
 
-from ._matlab import Struct, datenum, mround
+import datetime as _dt
+
+from ._matlab import Struct, datetime_to_datenum, mround
+from .clock_time import clock_time
 from .calibration_factor import calibration_factor
-from .log_entries import read_log_text, split_lines, sscanf_floats, str2double
+from .log_entries import parse_clock_numbers, read_log_text, split_lines, sscanf_floats, str2double
 from .options import options as _options
 
 import re as _re
@@ -93,8 +97,10 @@ def read_header(mdd_file, opts=None):
     H.logFile = os.path.join(p, n + "_log.log")
     H.notes = []
 
-    L = read_log(H.logFile)
+    L = read_log(H.logFile, _dt.datetime.fromtimestamp(os.path.getmtime(H.file)))
     H.recordingStart = L.startDatenum
+    if L.clockNote:
+        H.notes.append(L.clockNote)  # 12-hour time stamps (2026-10-08)
     H.programVersion = L.programVersion
     H.recordingStopped = L.recordingStopped  # True / False / None (2026-10-08)
     H.offsetLog = L.offsetEvents
@@ -446,14 +452,14 @@ def _status_fraction(file, nCh):
 
 
 # =====================================================================================================
-_SYS = _re.compile(r"^\s*([+-]?\d+)\s*([+-]?\d+)\s*([+-]?\d+)\s*([+-]?\d+):([+-]?\d+):([+-]?\d+)(?::([+-]?\d+))?")
 
 
-def read_log(log_file):
-    """the facts needed from the MyoDish log file (lines: systemTime;dataLogTime_ms;channel;code;value)."""
+def read_log(log_file, file_time=None):
+    """the facts needed from the MyoDish log file (lines: systemTime;dataLogTime_ms;channel;code;value).
+    file_time: last change of the .mdd file (decides AM/PM of 12-hour time stamps if the log cannot)."""
     L = Struct(samplingRate=math.nan, recordingDuration=math.nan, nChannelsController=math.nan,
                singleChannelMode=None, extendedSensorModeEvents=np.zeros((0, 2)), startDatenum=math.nan,
-               programVersion="", offsetEvents=np.zeros((0, 3)), calibrationEvents=np.zeros((0, 3)),
+               programVersion="", clockNote="", offsetEvents=np.zeros((0, 3)), calibrationEvents=np.zeros((0, 3)),
                rockerSpeedEvents=np.zeros((0, 2)), recordingStopped=None)
     txt = read_log_text(log_file)
     if txt is None:
@@ -461,7 +467,8 @@ def read_log(log_file):
     lines = split_lines(txt)
     nValid = 0
     tStart = tStop = tStartPar = tStopPar = math.nan
-    sysStart = sysStartPar = sysFirst = ""
+    kStart = kStartPar = None
+    sysAll, tAll, textAll, versions = [], [], [], []  # all valid entries (clock time)
     # 2026-10-08: state of the last 'Recording' entry (1 started, 0 stopped) for this file (name in the entry), for
     # the main recording and for parallel recordings
     own = os.path.splitext(os.path.basename(log_file))[0]
@@ -479,10 +486,12 @@ def read_log(log_file):
         if math.isnan(tsec):
             continue
         nValid += 1
-        if not sysFirst:
-            sysFirst = f[0].strip(); tFirst = tsec
+        sysAll.append(f[0].strip()); tAll.append(tsec)
+        if nValid == 1:
+            tFirst = tsec
         code = f[3].strip()
         value = ";".join(f[4:]).strip()
+        textAll.append(value)
         lc = code.lower(); lv = value.lower()
         if lc == "samplingrate recording":
             v = str2double(value)
@@ -495,10 +504,10 @@ def read_log(log_file):
                 # recording that was stopped and started again is appended to the same .mdd file.
                 if par:
                     if math.isnan(lineStartPar) or tsec < tMaxPar - 1:
-                        tStartPar = tsec; sysStartPar = f[0].strip(); lineStartPar = i; tMaxPar = tsec
+                        tStartPar = tsec; kStartPar = nValid - 1; lineStartPar = i; tMaxPar = tsec
                 else:
                     if math.isnan(lineStart) or tsec < tMax - 1:
-                        tStart = tsec; sysStart = f[0].strip(); lineStart = i; tMax = tsec
+                        tStart = tsec; kStart = nValid - 1; lineStart = i; tMax = tsec
             elif "stopped" in lv:
                 if par:
                     tStopPar = tsec
@@ -534,6 +543,9 @@ def read_log(log_file):
                 L.nChannelsController = v
         elif lc == "programinfo" and "version" in lv:
             L.programVersion = value
+            versions.append(value)
+        elif lc == "programversion":  # 2021-2022: 'ProgramVersion;2.0.7769.26061'
+            versions.append(value)
         elif "singlechannelmode" in lc or (lc == "event" and "singlechannelmode" in lv):
             L.singleChannelMode = not ("off" in lv or "false" in lv or lv == "0")
         if not math.isnan(lineStart):
@@ -548,7 +560,7 @@ def read_log(log_file):
             break
     # entries of the main recording have priority over 'parallel recording' entries (schedule files)
     if math.isnan(tStart) and math.isnan(tStop):
-        tStart = tStartPar; tStop = tStopPar; sysStart = sysStartPar
+        tStart = tStartPar; tStop = tStopPar; kStart = kStartPar
     if not math.isnan(tStart) and not math.isnan(tStop) and tStop > tStart:
         L.recordingDuration = tStop - tStart
     elif not math.isnan(tStop):
@@ -569,16 +581,15 @@ def read_log(log_file):
     L.extendedSensorModeEvents = ext[:, :2].copy()
     L.offsetEvents = offs[:, :3].copy()
     L.calibrationEvents = cal[:, :3].copy()
+    # clock time of all entries, 12-hour time stamps (software 2.0.7717-2.0.7769) corrected (2026-10-08); file time 0
+    # = clock time of the 'Recording started' entry - its dataLogTime
+    clk, info = clock_time([parse_clock_numbers(x) for x in sysAll], tAll, versions, file_time, textAll)
+    L.clockNote = info["note"]
     tSys = tStart
-    if not sysStart:
-        sysStart = sysFirst; tSys = tFirst
-    m = _SYS.match(sysStart)  # e.g. 2026 08 04 05:59:00:983
-    if m:
-        v = [int(x) if x is not None else 0 for x in m.groups()]
+    if kStart is None:
+        kStart = 0; tSys = tFirst
+    if clk[kStart] is not None:
         if math.isnan(tSys):
             tSys = 0.0
-        try:
-            L.startDatenum = datenum(v[0], v[1], v[2], v[3], v[4], v[5] + v[6] / 1000.0) - tSys / 86400.0
-        except ValueError:
-            pass
+        L.startDatenum = datetime_to_datenum(clk[kStart]) - tSys / 86400.0
     return L

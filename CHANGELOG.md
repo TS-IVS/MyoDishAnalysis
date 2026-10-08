@@ -59,6 +59,19 @@ MATLAB and Python versions have the same version number and give the same result
     texts, title, axis labels and legend position; **Edit figure ...** (MATLAB plot tools / matplotlib figure
     options); export with SEM, min and max.
 
+### Fixed
+- 12-hour time stamps (2026-10-08): MyoDish software 2.0.7717–2.0.7769 (builds of 16.02.–09.04.2021; one setup used
+  2.0.7769 until 2024) wrote the system time of the log file with a 12-hour clock and without AM/PM (17:04 as 05:04).
+  New `mda_clockTime` / `clock_time` derive AM/PM from the continuous dataLogTime (offset clock time − dataLogTime
+  shared by most entries; entries with stale or frozen dataLogTime in chronological order), from
+  `Started/Stopped parallel recording: … HH:mm:ss` entries, or, if all entries of a recording lie on the same side of
+  noon/midnight, from the time of the .mdd file (within 15 min of the end); otherwise the times stay as written and a
+  note says so. Used by `mda_logEntries` (clock time of all entries; info in `E.Properties.UserData`, Python
+  `E.attrs['clock']`) and `mda_readMdd` (`recordingStart`, note in `notes`). 24-hour logs are never changed.
+  Archived logs 2020–2026 (16,205): 2,043 with 12-hour time stamps, 1,191 corrected; in 483 the recording
+  start was 12 h off (clock time of the contractions, days in culture, watcher bins). MATLAB and Python identical on
+  2,640 logs. Tests `mda_testClockTime.m`, `py/tests/test_clock_time.py`.
+
 ### Changed
 - `mda_logEntries`: clock time from the integer milliseconds of the log file (was seconds + ms / 1000 as a float, so
   that `.SSS` sometimes showed 1 ms less than Python and the log file).

@@ -499,6 +499,11 @@ lower plot, the trend and all exports.
 * Rocker movement causes a periodic artifact (see "Rocker artifact"): remove it with `'rockerFilter',true`, or use
   `'rocker','stopped'` (GUI: "only contractions with rocker at rest") for analyses during rocker stops.
 * "Rise time 90 %" = `TTP90` (10 % of the amplitude → peak). `riseTime10_90` (10 % → 90 %) is reported in addition.
+* **Clock time of old recordings**: MyoDish software 2.0.7717–2.0.7769 (Feb–Apr 2021 builds; on one setup until 2024)
+  wrote the clock time of the log file with a 12-hour clock without AM/PM. `mda_clockTime` / `clock_time` correct it
+  (AM/PM from the dataLogTime, from `parallel recording` entries or from the time of the .mdd file); if a recording
+  lies entirely before or after noon and nothing else decides, the times stay as written and the file notes say
+  "AM/PM of the recording unknown". Keep the file times of the .mdd files when copying (e.g. `rsync -t`).
 
 ## Files
 | file | purpose |
@@ -508,6 +513,7 @@ lower plot, the trend and all exports.
 | `MyoDishAnalysisWatch.m` | automatic analysis of new recordings of a folder (index, results, report) |
 | `mda_readMdd.m` | file reader (data, stimuli, rocker state, log file, overview) |
 | `mda_logEntries.m` | entries of the log file (comments, events, settings) |
+| `mda_clockTime.m` | clock time of the log entries (12-hour time stamps of software 2.0.7717–2.0.7769 corrected) |
 | `mda_calibrationFactor.m`, `mda_zeroForce.m` | AU → µN (calibration, extended sensor mode); zero force of a channel |
 | `mda_analyzeChannel.m` | filtering, detection, stimulus assignment, parameters |
 | `mda_rockerFilter.m` | removal of the periodic rocker artifact (option `rockerFilter`) |

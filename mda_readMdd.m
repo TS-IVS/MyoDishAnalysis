@@ -34,7 +34,8 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %
 % OUTPUT (S)
 %   file facts: file, logFile, samplingRate, nChannelsInFile, dataChannels, hasStimChannel, totalSeconds,
-%               recordingStart (datenum of file time 0, NaN if unknown), extendedSensorIntervals, notes,
+%               recordingStart (datenum of file time 0, NaN if unknown; 12-hour time stamps of software 2.0.7717-
+%               2.0.7769 corrected, see mda_clockTime), extendedSensorIntervals, notes,
 %               offsetLog / calibrationLog ([time channel value] of the 'Offset' / 'Calibration' entries of the log;
 %               time -Inf = logged before the recording start), calibrationApplied, extendedSensorFactor,
 %               rockerSpeedLog ([time rpm]), rockerSource ('status channel' or 'log'), rockerLogIntervals
@@ -49,6 +50,7 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %
 % TS 2026-10-05 (condensed from importMyoDishData, readRecordingInfoFromMyoDishLogFile,
 % readSamplingRateFromMyoDishLogFile; identical data and stimulus times)
+% 2026-10-08: recordingStart from mda_clockTime (12-hour time stamps)
 
 if nargin < 3, toSeconds = []; end
 if nargin < 4 || isempty(opts), opts = mda_options(); end
@@ -86,8 +88,9 @@ H.bytes = d.bytes;
 H.logFile = fullfile(p, [n '_log.log']);
 H.notes = {};
 
-L = readLog(H.logFile);
+L = readLog(H.logFile, d.datenum);
 H.recordingStart = L.startDatenum;
+if ~isempty(L.clockNote), H.notes{end+1} = L.clockNote; end   %12-hour time stamps (2026-10-08)
 H.programVersion = L.programVersion;
 H.recordingStopped = L.recordingStopped; %1 / 0 / NaN (2026-10-08)
 H.offsetLog = L.offsetEvents;          %[time channel value]: sensor signal without load ('Offset' entries)
@@ -446,10 +449,12 @@ end
 
 
 % =====================================================================================================
-function L = readLog(logFile)
+function L = readLog(logFile, fileTime)
 % the facts needed from the MyoDish log file (lines: systemTime;dataLogTime_ms;channel;code;value)
+% fileTime: datenum of the last change of the .mdd file (decides AM/PM of 12-hour time stamps if the log cannot)
+if nargin < 2, fileTime = []; end
 L = struct('samplingRate',nan,'recordingDuration',nan,'nChannelsController',nan,'singleChannelMode',[], ...
-    'extendedSensorModeEvents',zeros(0,2),'startDatenum',nan,'programVersion','', ...
+    'extendedSensorModeEvents',zeros(0,2),'startDatenum',nan,'programVersion','','clockNote','', ...
     'offsetEvents',zeros(0,3),'calibrationEvents',zeros(0,3),'rockerSpeedEvents',zeros(0,2), ...
     'recordingStopped',nan);
 if ~exist(logFile,'file'), return; end
@@ -468,7 +473,8 @@ end
 lines = regexp(txt, '\r?\n', 'split');
 nValid = 0;
 tStart = nan; tStop = nan; tStartPar = nan; tStopPar = nan;
-sysStart = ''; sysStartPar = ''; sysFirst = ''; tFirst = nan;
+kStart = nan; kStartPar = nan; tFirst = nan;
+sysAll = cell(numel(lines), 1); textAll = sysAll; tAll = nan(numel(lines), 1); versions = {};   %all valid entries (clock time)
 ext = zeros(0,3); offs = zeros(0,4); cal = zeros(0,4); rck = zeros(0,3);  %last column: line number
 lineStart = nan; lineStartPar = nan;
 tMax = -inf; tMaxPar = -inf;                        %latest dataLogTime since the chosen start line
@@ -483,9 +489,11 @@ for i = 1:numel(lines)
     tsec = str2double(f{2}) / 1000;
     if isnan(tsec), continue; end
     nValid = nValid + 1;
-    if isempty(sysFirst), sysFirst = strtrim(f{1}); tFirst = tsec; end
+    sysAll{nValid} = strtrim(f{1}); tAll(nValid) = tsec;
+    if nValid == 1, tFirst = tsec; end
     code = strtrim(f{4});
     value = strtrim(strjoin(f(5:end), ';'));
+    textAll{nValid} = value;
     if strcmpi(code,'samplingRate Recording')
         v = str2double(value); if ~isnan(v), L.samplingRate = v; end
     elseif strcmpi(code,'Recording')
@@ -495,11 +503,11 @@ for i = 1:numel(lines)
             % that was stopped and started again is appended to the same .mdd file (dataLogTime continues).
             if par
                 if isnan(lineStartPar) || tsec < tMaxPar - 1
-                    tStartPar = tsec; sysStartPar = strtrim(f{1}); lineStartPar = i; tMaxPar = tsec;
+                    tStartPar = tsec; kStartPar = nValid; lineStartPar = i; tMaxPar = tsec;
                 end
             else
                 if isnan(lineStart) || tsec < tMax - 1
-                    tStart = tsec; sysStart = strtrim(f{1}); lineStart = i; tMax = tsec;
+                    tStart = tsec; kStart = nValid; lineStart = i; tMax = tsec;
                 end
             end
         elseif contains(value,'stopped','IgnoreCase',true)
@@ -530,7 +538,9 @@ for i = 1:numel(lines)
     elseif strcmpi(code,'nChannels')
         v = str2double(value); if ~isnan(v), L.nChannelsController = v; end
     elseif strcmpi(code,'programInfo') && contains(value,'Version','IgnoreCase',true)
-        L.programVersion = value;
+        L.programVersion = value; versions{end+1} = value; %#ok<AGROW>
+    elseif strcmpi(code,'programVersion')         %2021-2022: 'ProgramVersion;2.0.7769.26061'
+        versions{end+1} = value; %#ok<AGROW>
     elseif contains(code,'singleChannelMode','IgnoreCase',true) || ...
             (strcmpi(code,'Event') && contains(value,'singleChannelMode','IgnoreCase',true))
         v = lower(value);
@@ -549,7 +559,7 @@ elseif ~isnan(lastPar)
 end
 % entries of the main recording have priority over 'parallel recording' entries (schedule files)
 if isnan(tStart) && isnan(tStop)
-    tStart = tStartPar; tStop = tStopPar; sysStart = sysStartPar;
+    tStart = tStartPar; tStop = tStopPar; kStart = kStartPar;
 end
 if ~isnan(tStart) && ~isnan(tStop) && tStop > tStart
     L.recordingDuration = tStop - tStart;
@@ -569,12 +579,19 @@ L.rockerSpeedEvents = rck(:,1:2);
 L.extendedSensorModeEvents = ext(:,1:2);
 L.offsetEvents = offs(:,1:3);
 L.calibrationEvents = cal(:,1:3);
+% clock time of all entries, 12-hour time stamps (software 2.0.7717-2.0.7769) corrected (2026-10-08); file time 0
+% = clock time of the 'Recording started' entry - its dataLogTime
+sysAll = sysAll(1:nValid); textAll = textAll(1:nValid); tAll = tAll(1:nValid);
+N = nan(nValid, 7);
+num = regexp(sysAll, '^(\d+) (\d+) (\d+) (\d+):(\d+):(\d+):?(\d*)', 'tokens', 'once');
+okN = ~cellfun(@isempty, num);
+if any(okN), N(okN,:) = str2double(vertcat(num{okN})); end
+[clk, info] = mda_clockTime(N, tAll, versions, fileTime, textAll);
+L.clockNote = info.note;
 tSys = tStart;
-if isempty(sysStart), sysStart = sysFirst; tSys = tFirst; end
-v = sscanf(sysStart, '%d %d %d %d:%d:%d:%d');      %e.g. 2026 08 04 05:59:00:983
-if numel(v) >= 6
-    if numel(v) < 7, v(7) = 0; end
+if isnan(kStart), kStart = 1; tSys = tFirst; end
+if ~isnat(clk(kStart))
     if isnan(tSys), tSys = 0; end
-    L.startDatenum = datenum(v(1),v(2),v(3),v(4),v(5),v(6)+v(7)/1000) - tSys/86400;
+    L.startDatenum = datenum(clk(kStart)) - tSys/86400;
 end
 end
