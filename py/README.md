@@ -127,7 +127,7 @@ and `mda_py_reference_helpers` (write the `.mat` files in `tests/reference/`).
 * GUI: plots are saved as `.png` / `.jpg` / `.tif` (3000 px wide, 300 dpi) or `.pdf` (vector graphic, editable in Inkscape /
   Illustrator) instead of `.fig`. SVG is not offered because Qt writes the plot lines as non-scaling strokes, which Inkscape,
   Illustrator and cairo draw incorrectly. Zoom and pan use the mouse (wheel: zoom the time axis, shift + wheel: move,
-  double-click: whole window; arrow keys as in MATLAB). There is no figure toolbar. Closing the main window closes its
+  double-click: whole window; arrow keys and the buttons under the force plot as in MATLAB). There is no figure toolbar. Closing the main window closes its
   other windows. **Edit figure ...** of the overlay window opens a matplotlib window (toolbar: *Edit axis, curve and
   image parameters*; save as .png / .pdf / .svg) instead of a MATLAB figure with the plot tools.
 * GUI script access: `win.open_ep(file)`, `win.EP`, `win.api_set_range()`, `win.api_results()`, `win.api_zero_at()`,

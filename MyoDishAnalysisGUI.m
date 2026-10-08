@@ -19,6 +19,8 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %    = extend it by half its length on that side, up / down = zoom in / out. Mouse pointer over the overview: its
 %    time axis; otherwise the force plot: beyond the loaded window, the loaded window follows (read again; blue
 %    window in the overview) and the overview moves along when the window leaves its zoomed part.
+%    The buttons under the force plot do the same for the force plot: left / right (shift + click: extend on that side),
+%    zoom in / zoom out (middle).
 % 2. The force plot shows the loaded window (force - zero force, if the zero force is known): detected contractions
 %    (red = selected, grey = excluded by the filters, black x = excluded by you), stimuli (blue ticks), rocker moving
 %    (grey background). The stimulus plot below shows the current of every stimulus pulse (mA; green = extra pulse,
@@ -34,6 +36,8 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %    Stimuli ('stimuli: auto / MyoDish / ext. trigger'): MyoDish pulses of the channel or the external trigger pulses
 %    of the status channel (external stimulator at the external controller unit, one chamber; auto = trigger pulses
 %    if the window has no MyoDish pulses).
+%    'Trend ...': rolling mean / median of a parameter over long periods, also over several files in a row; one
+%    channel or several channels overlaid (channel list: 'several channels ...').
 %    'Overlay contractions': mean beat of the selected contractions (aligned at the stimulus or the peak) or the time
 %    course of the range (t = 0 at the first stimulus); other channels of the same range by checkboxes; colour, line
 %    width, line style and SD / SEM / range band per group; editable title, axis labels and legend; 'Edit figure ...'
@@ -54,7 +58,8 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 % Parameter definitions: mda_parameters / README. Command line version: MyoDishAnalysis.
 % Requires MATLAB R2019b or newer, no toolboxes.
 % Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05 (EP recordings 2026-10-06, protocols 2026-10-07;
-% threshold per channel, arrow keys, overlay of channels / styles / bands 2026-10-07)
+% threshold per channel, arrow keys, overlay of channels / styles / bands 2026-10-07; navigation buttons, trend of several
+% channels 2026-10-09)
 
 if nargin < 1, mddFile = ''; end
 if nargin < 2, metadata = []; end
@@ -86,6 +91,7 @@ altPt = [nan nan];                 %force plot: position of the last right click
 hTr = []; trFiles = []; trData = []; trCache = [];   %trend window: handles, files (concatenated), contractions, cache
 hPr = []; prRes = [];              %protocol window: handles; results (contractions, summary, info)
 trSampling = '';                   %trend: description of the sampling of the last calculation
+trChans = []; trMulti = [];        %trend: channels shown (several = overlaid); last set of several channels
 refThr = 3;                        %reference beat: a contraction deviates if its deviation > refThr SD
 refWhich = 2;                      %  ... measured 1 = absolute, 2 = normalized to amplitude 1 (shape), 3 = either
 refExclude = false;                %  deviating contractions excluded from the selection
@@ -116,11 +122,13 @@ dragX0 = []; hDrag = [];
 Od = [];                           %detailed overview of a zoomed part of the file
 ovXL = [];                         %time axis of the overview ([] = whole file)
 tmr = [];                          %timer: reads the detailed overview after zooming
+shiftDown = false;                 %shift key held (shift + click on the arrow buttons under the force plot)
 
 % ------------------------------------------------------------------ figure and controls
 fig = figure('Name', 'MyoDishAnalysis', 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
     'Position', [40 40 1450 880], 'MenuBar', 'none', 'ToolBar', 'figure', 'WindowButtonDownFcn', @onMouseDown, ...
-    'WindowScrollWheelFcn', @onScroll, 'WindowKeyPressFcn', @onKey, 'DeleteFcn', @onClose);
+    'WindowScrollWheelFcn', @onScroll, 'WindowKeyPressFcn', @onKey, 'WindowKeyReleaseFcn', @onKeyRelease, ...
+    'DeleteFcn', @onClose);
 movegui(fig, 'onscreen');
 dflt = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
 
@@ -145,9 +153,19 @@ uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Protocols ...', 'Posit
 hInfo = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.903 0.945 0.095 0.045]);
 
 axOv = axes(fig, 'Position', [0.05 0.845 0.70 0.075], 'FontSize', 9);
-axMain = axes(fig, 'Position', [0.05 0.45 0.70 0.345], 'FontSize', 10, 'XTickLabel', {});
+axMain = axes(fig, 'Position', [0.05 0.477 0.70 0.318], 'FontSize', 10, 'XTickLabel', {});
 axStim = axes(fig, 'Position', [0.05 0.315 0.70 0.105], 'FontSize', 9, 'XTickLabel', {});
 axPar = axes(fig, 'Position', [0.05 0.07 0.70 0.2], 'FontSize', 10);
+% buttons under the force plot (as the arrow keys): move left / right (shift + click: extend), zoom in / out
+nb = {'Style', 'pushbutton', 'Units', 'normalized', 'FontSize', 9, 'BackgroundColor', 'w'};
+uicontrol(fig, nb{:}, 'String', char(9664), 'Position', [0.05 0.4485 0.022 0.026], 'Callback', @(~,~) onNavButton('leftarrow'), ...
+    'TooltipString', 'move the time axis to the left by half its length (shift + click: extend it to the left; key: left arrow)');
+uicontrol(fig, nb{:}, 'String', char([8594 8592]), 'Position', [0.373 0.4485 0.026 0.026], 'Callback', @(~,~) onNavButton('uparrow'), ...
+    'TooltipString', 'zoom in: half the time span around the centre (key: up arrow)');
+uicontrol(fig, nb{:}, 'String', char([8592 8594]), 'Position', [0.401 0.4485 0.026 0.026], 'Callback', @(~,~) onNavButton('downarrow'), ...
+    'TooltipString', 'zoom out: twice the time span (key: down arrow)');
+uicontrol(fig, nb{:}, 'String', char(9654), 'Position', [0.728 0.4485 0.022 0.026], 'Callback', @(~,~) onNavButton('rightarrow'), ...
+    'TooltipString', 'move the time axis to the right by half its length (shift + click: extend it to the right; key: right arrow)');
 uicontrol(fig, 'Style', 'text', 'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w', 'String', 'Lower plot:', ...
     'HorizontalAlignment', 'right', 'Position', [0.05 0.272 0.05 0.025]);
 hPar = uicontrol(fig, 'Style', 'popupmenu', 'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w', ...
@@ -240,11 +258,13 @@ hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.
 % functions for scripts / tests: api = fig.UserData; api.setRange([t1 t2]); api.toggleAt(t);
 % [contractions, summary] = api.results();  api.epRecording(matFile) (show; '' = remove);  EP = api.epRecordingData();
 % api.overlayChannels([1 2 3]) (overlay of the analysed range in these channels); [groups, h] = api.overlay();
-% api.key('rightarrow', {'shift'}) (arrow key as typed in the force plot)
+% api.key('rightarrow', {'shift'}) (arrow key as typed in the force plot); api.navButton('rightarrow', true) (button under
+% the force plot, true = shift + click); R = api.trend([1 3]) (trend window: these channels calculated and overlaid)
 fig.UserData = struct('setRange', @apiSetRange, 'toggleAt', @toggleContraction, 'results', @apiResults, ...
     'setLabels', @apiSetLabels, 'labels', @apiLabels, 'zeroAt', @apiZeroAt, ...
     'epRecording', @openEP, 'epRecordingData', @apiEP, ...
-    'overlayChannels', @setOverlayChannels, 'overlay', @apiOverlay, 'key', @apiKey);
+    'overlayChannels', @setOverlayChannels, 'overlay', @apiOverlay, 'key', @apiKey, 'navButton', @navButton, ...
+    'trend', @apiTrend);
 
 emptyPlots();
 if ~isempty(mddFile)
@@ -1028,8 +1048,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'Callback', @(~,~) trAddSeries(), 'TooltipString', 'all files <name>_<number>.mdd in the folder of the open file');
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Remove', 'Position', [x0+0.23 0.655 0.07 0.045], 'Callback', @(~,~) trRemove());
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Channel', 'HorizontalAlignment', 'left', 'Position', [x0 0.6 0.07 0.035]);
-        pC = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', arrayfun(@(c) sprintf('Ch %d', c), H.dataChannels, 'UniformOutput', false), ...
-            'Value', max(1, find(H.dataChannels == ch, 1)), 'Position', [x0+0.07 0.605 0.08 0.035], 'Callback', @(~,~) calcTrend(true));
+        if isempty(trChans) || ~all(ismember(trChans, H.dataChannels)), trChans = ch; end
+        trMulti = trMulti(ismember(trMulti, H.dataChannels));
+        [itC, vC] = trChannelItems();
+        pC = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', itC, 'Value', vC, 'Position', [x0+0.07 0.605 0.08 0.035], ...
+            'Callback', @(~,~) trChannel(), 'TooltipString', ['channel of the trend; ''several channels ...'' = several channels ' ...
+            'overlaid (one colour per channel)']);
         pR = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', {'whole files', 'selected range (open file only)'}, 'Position', [x0+0.16 0.605 0.14 0.035]);
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Sampling', 'HorizontalAlignment', 'left', 'Position', [x0 0.55 0.07 0.035]);
         pM = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', {'all contractions', 'short windows (W s every T min)', ...
@@ -1073,6 +1097,66 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function clearTrend()
         hTr = []; trData = [];
+    end
+
+    function [items, val] = trChannelItems()
+        % channel list of the trend window: single channels, the last set of several channels (overlay), 'several ...'
+        items = arrayfun(@(c) sprintf('Ch %d', c), reshape(H.dataChannels, 1, []), 'UniformOutput', false);
+        if numel(trMulti) > 1
+            items{end+1} = ['Ch ' strjoin(arrayfun(@num2str, trMulti, 'UniformOutput', false), '+')];
+        end
+        if numel(trChans) > 1, val = numel(items); else, val = max(1, find(H.dataChannels == trChans, 1)); end
+        items{end+1} = 'several channels ...';
+    end
+
+    function trChannel()
+        % channel list changed: one channel, the set of several channels, or 'several channels ...' (checkboxes)
+        nC = numel(H.dataChannels); v = hTr.pC.Value;
+        if v == numel(hTr.pC.String)
+            sel = trChooseChannels();
+            if numel(sel) > 1, trMulti = sel; trChans = sel; elseif isscalar(sel), trChans = sel; end
+        elseif v <= nC
+            trChans = H.dataChannels(v);
+        else
+            trChans = trMulti;
+        end
+        [itC, vC] = trChannelItems();
+        hTr.pC.String = itC; hTr.pC.Value = vC;
+        calcTrend(true);
+    end
+
+    function sel = trChooseChannels()
+        % checkboxes: channels of the trend (several = overlaid); [] = cancelled
+        sel = [];
+        chs = reshape(H.dataChannels, 1, []);
+        nC = numel(chs);
+        dlg = dialog('Name', 'Trend: channels', 'Units', 'pixels', 'Position', [300 300 300 100 + 24 * nC]);
+        uicontrol(dlg, 'Style', 'text', 'Units', 'pixels', 'Position', [10 58 + 24 * nC 280 34], 'HorizontalAlignment', 'left', ...
+            'String', 'Channels of the trend (several: overlaid, one colour per channel):');
+        cb = gobjects(1, nC);
+        for k = 1:nC
+            cb(k) = uicontrol(dlg, 'Style', 'checkbox', 'Units', 'pixels', 'Position', [20 50 + 24 * (nC - k) 260 22], ...
+                'String', sprintf('Channel %d', chs(k)), 'Value', ismember(chs(k), trChans));
+        end
+        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [110 12 80 28], 'String', 'OK', 'Callback', @(s,~) closeDialog(s, true));
+        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [200 12 80 28], 'String', 'Cancel', 'Callback', @(s,~) closeDialog(s, false));
+        uiwait(dlg);
+        if ~isvalid(dlg), return; end                       %closed with the window button
+        if isequal(dlg.UserData, true), sel = chs([cb.Value] == 1); end
+        delete(dlg);
+    end
+
+    function R = apiTrend(chans)
+        % scripts / tests: trend window with these channels (several = overlaid), calculated; R.data, R.roll, R.title
+        if isempty(hTr) || ~isvalid(hTr.fig), onTrend(); end
+        trChans = reshape(chans, 1, []);
+        if numel(trChans) > 1, trMulti = trChans; end
+        [itC, vC] = trChannelItems();
+        hTr.pC.String = itC; hTr.pC.Value = vC;
+        calcTrend(false);
+        R = struct('data', trData, 'roll', hTr.roll, 'title', hTr.ax.Title.String, 'legend', {{}}, 'fig', hTr.fig);
+        lg = hTr.ax.Legend;
+        if ~isempty(lg) && isvalid(lg), R.legend = lg.String; end
     end
 
     function trSamplingControls()
@@ -1221,8 +1305,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % onlyCached (channel changed): show the trend only if all files of this channel are in the cache
         if nargin < 1, onlyCached = false; end
         if isempty(trFiles), return; end
-        chList = H.dataChannels;
-        chT = chList(hTr.pC.Value);
+        chTs = reshape(trChans, 1, []);                     %several channels: overlaid
         onlyRange = hTr.pR.Value == 2;
         jobs = {};                                          %{file index, from, to}
         for k = 1:numel(trFiles)
@@ -1250,8 +1333,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if onlyCached
             for j = 1:size(jobs, 1)
                 Fk = trFiles(jobs{j,1});
-                if ismember(chT, Fk.channels) && ~isKey(trCache, trChKey(Fk, chT, jobs{j,2}, jobs{j,3}, sMode))
-                    trData = []; drawTrend(); status(sprintf('Trend: channel %d not calculated yet - press Calculate.', chT)); return;
+                for chT = chTs(ismember(chTs, Fk.channels))
+                    if ~isKey(trCache, trChKey(Fk, chT, jobs{j,2}, jobs{j,3}, sMode))
+                        trData = []; drawTrend(); status(sprintf('Trend: channel %d not calculated yet - press Calculate.', chT)); return;
+                    end
                 end
             end
         end
@@ -1262,16 +1347,17 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         try
             for j = 1:size(jobs, 1)
                 k = jobs{j,1}; Fk = trFiles(k);
-                if ~ismember(chT, Fk.channels)
-                    status(sprintf('Trend: channel %d not in %s.', chT, Fk.name)); done = done + jobs{j,3} - jobs{j,2}; continue;
+                need = chTs(ismember(chTs, Fk.channels));
+                if isempty(need)
+                    status(sprintf('Trend: channel %s not in %s.', strjoin(arrayfun(@num2str, chTs, 'UniformOutput', false), ', '), Fk.name));
+                    done = done + jobs{j,3} - jobs{j,2}; continue;
                 end
-                key = trChKey(Fk, chT, jobs{j,2}, jobs{j,3}, sMode);
-                chans = chT;
+                chans = need;                               %several channels: the file is read once for all of them
                 if hTr.cA.Value && ~onlyCached, chans = Fk.channels(:)'; end   %all channels: the file is read once
                 missing = false;
                 for ch2 = chans, missing = missing || ~isKey(trCache, trChKey(Fk, ch2, jobs{j,2}, jobs{j,3}, sMode)); end
                 if ~missing
-                    Tk = trCache(key); done = done + jobs{j,3} - jobs{j,2};
+                    done = done + jobs{j,3} - jobs{j,2};
                 else
                     oT = trOpts(Fk, chans, sMode);
                     Tk = [];
@@ -1301,10 +1387,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                         end
                         trCache(trChKey(Fk, ch2, jobs{j,2}, jobs{j,3}, sMode)) = T2;
                     end
-                    Tk = trCache(key);
                 end
-                if ~isempty(Tk)
-                    keep = intersect({'t_peak', 'beatType', 'included', 'rockerMoving'}, Tk.Properties.VariableNames, 'stable');
+                for chT = need
+                    Tk = trCache(trChKey(Fk, chT, jobs{j,2}, jobs{j,3}, sMode));
+                    if isempty(Tk), continue; end
+                    keep = intersect({'t_peak', 'channel', 'beatType', 'included', 'rockerMoving'}, Tk.Properties.VariableNames, 'stable');
                     pn = intersect(plotList(:,1)', Tk.Properties.VariableNames, 'stable');
                     Tk = Tk(:, [keep, pn]);
                     Tk.t_since_start = Tk.t_peak + Fk.offset;
@@ -1318,9 +1405,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             return;
         end
         if ishandle(wb), delete(wb); end
-        if isempty(parts), trData = []; else, trData = vertcat(parts{:}); end
-        trData = sortrows(trData, 't_since_start');
+        if isempty(parts), trData = []; else, trData = sortrows(vertcat(parts{:}), 't_since_start'); end
         drawTrend();
+        if isempty(trData), status('Trend: no contractions.'); return; end
         status(sprintf('Trend: %d contractions in %d file(s).', height(trData), numel(unique(trData.fileIndex))));
     end
 
@@ -1369,22 +1456,37 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             end
         end
         hp = gobjects(0); nmL = {};
+        hTr.roll = zeros(0, 3);                              %channel, time since start, rolling mean / median
+        multi = numel(trChans) > 1;                          %several channels: overlaid, one colour per channel
+        wMin = str2double(hTr.eW.String); if isnan(wMin) || wMin <= 0, wMin = 10; hTr.eW.String = '10'; end
+        rollName = sprintf('rolling %s (%g min)', hTr.pS.String{hTr.pS.Value}, wMin);
         if have && any(I)
-            if hTr.cS.Value
-                hp(end+1) = plot(axT, t(I), v(I), '.', 'Color', [0.95 0.6 0.6], 'MarkerSize', 5); nmL{end+1} = 'single contractions';
+            chs = trChans(ismember(trChans, trData.channel));
+            pal = trendColors();
+            for pass = 1:2                                   %single contractions first, rolling lines on top
+                for q = 1:numel(chs)
+                    Iq = I & trData.channel == chs(q);
+                    if ~any(Iq), continue; end
+                    if multi, col = pal(mod(q - 1, size(pal, 1)) + 1, :); colS = 1 - 0.45 * (1 - col);
+                    else, col = [0.75 0 0]; colS = [0.95 0.6 0.6]; end
+                    if pass == 1
+                        if hTr.cS.Value
+                            hs = plot(axT, t(Iq), v(Iq), '.', 'Color', colS, 'MarkerSize', 5);
+                            if ~multi, hp(end+1) = hs; nmL{end+1} = 'single contractions'; end %#ok<AGROW>
+                        end
+                        continue;
+                    end
+                    T2 = []; R2 = [];
+                    for f = unique(trData.fileIndex(Iq))'
+                        J = Iq & trData.fileIndex == f;
+                        [tt, rr] = trRolling(t(J), v(J), wMin, hTr.pS.Value == 2);
+                        T2 = [T2; tt; nan]; R2 = [R2; rr; nan]; %#ok<AGROW>
+                    end
+                    hp(end+1) = plot(axT, T2, R2, '-', 'Color', col, 'LineWidth', 2); %#ok<AGROW>
+                    if multi, nmL{end+1} = sprintf('Ch %d', chs(q)); else, nmL{end+1} = rollName; end %#ok<AGROW>
+                    hTr.roll = [hTr.roll; repmat(chs(q), numel(T2), 1), T2, R2];
+                end
             end
-            wMin = str2double(hTr.eW.String); if isnan(wMin) || wMin <= 0, wMin = 10; hTr.eW.String = '10'; end
-            T2 = []; R2 = [];
-            for f = unique(trData.fileIndex(I))'
-                J = I & trData.fileIndex == f;
-                [tt, rr] = trRolling(t(J), v(J), wMin, hTr.pS.Value == 2);
-                T2 = [T2; tt; nan]; R2 = [R2; rr; nan]; %#ok<AGROW>
-            end
-            hp(end+1) = plot(axT, T2, R2, '-', 'Color', [0.75 0 0], 'LineWidth', 2);
-            nmL{end+1} = sprintf('rolling %s (%g min)', hTr.pS.String{hTr.pS.Value}, wMin);
-            hTr.roll = [T2 R2];
-        else
-            hTr.roll = zeros(0, 2);
         end
         hTr.cmtTxt = gobjects(0);
         if hTr.cK.Value                                     %comments (labels only when 30 or fewer are visible, see trTicks)
@@ -1406,9 +1508,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         xlim(axT, [0, max(1, last.offset + last.dur)]); ylim(axT, yl0);
         ylabel(axT, sprintf('%s (%s)', pn, unit), 'Interpreter', 'none');
         if ~isempty(hp), legend(axT, hp, nmL, 'Location', 'northeast', 'FontSize', 8); end
-        chList = H.dataChannels;
-        if have
-            title(axT, sprintf('Channel %d, %d contractions (%d shown), %d file(s), sampling: %s', chList(hTr.pC.Value), height(trData), ...
+        if have && multi
+            title(axT, sprintf('Channels %s (%s), %d contractions (%d shown), %d file(s), sampling: %s', ...
+                strjoin(arrayfun(@num2str, trChans, 'UniformOutput', false), ', '), rollName, height(trData), nnz(I), ...
+                numel(trFiles), trSampling), 'FontWeight', 'normal', 'FontSize', 9);
+        elseif have
+            title(axT, sprintf('Channel %d, %d contractions (%d shown), %d file(s), sampling: %s', trChans(1), height(trData), ...
                 nnz(I), numel(trFiles), trSampling), 'FontWeight', 'normal', 'FontSize', 9);
         else
             title(axT, 'press Calculate (detects the contractions in the listed files)', 'FontWeight', 'normal', 'FontSize', 9);
@@ -1483,13 +1588,14 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         D.file = reshape({trFiles(D.fileIndex).name}, [], 1);
         st = [trFiles(D.fileIndex).start]';
         D.clockTime = datetime(st + D.t_peak / 86400, 'ConvertFrom', 'datenum', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS');
-        D = movevars(D, {'file', 't_since_start', 'clockTime'}, 'Before', 1);
+        D = movevars(D, {'file', 'channel', 't_since_start', 'clockTime'}, 'Before', 1);
         vn = D.Properties.VariableNames;
         vn(strcmp(vn, 't_peak')) = {'t_file_s'}; vn(strcmp(vn, 't_since_start')) = {'t_since_start_s'};
         D.Properties.VariableNames = vn;
         D.fileIndex = [];
         k = hTr.pP.Value;
-        R = array2table(hTr.roll(~isnan(hTr.roll(:,1)), :), 'VariableNames', {'t_since_start_s', matlab.lang.makeValidName(['rolling_' plotList{k,1}])});
+        R = array2table(hTr.roll(~isnan(hTr.roll(:,2)), :), 'VariableNames', {'channel', 't_since_start_s', ...
+            matlab.lang.makeValidName(['rolling_' plotList{k,1}])});
         stTxt = cell(numel(trFiles), 1);
         for f = 1:numel(trFiles)
             if trFiles(f).startKnown, stTxt{f} = datestr(trFiles(f).start, 'yyyy-mm-dd HH:MM:SS'); else, stTxt{f} = 'unknown'; end
@@ -1857,6 +1963,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % left / right arrow: move the time axis by half its length; shift: extend it by half its length on that side;
         % up / down arrow: zoom in / out. Mouse over the overview: the overview; otherwise the force plot (beyond the
         % loaded window the loaded window follows and is read again)
+        shiftDown = strcmp(evt.Key, 'shift') || any(strcmp(evt.Modifier, 'shift'));
         if isempty(H) || ~any(strcmp(evt.Key, {'leftarrow', 'rightarrow', 'uparrow', 'downarrow'})), return; end
         co = fig.CurrentObject;                            %arrow keys of edit fields and lists stay theirs
         if ~isempty(co) && isprop(co, 'Style') && any(strcmp(co.Style, {'edit', 'popupmenu', 'listbox', 'slider'})), return; end
@@ -1872,6 +1979,22 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if isempty(S), return; end
         xl = navStep(xlim(axMain), evt.Key, ext, [0 H.totalSeconds], 0.3);
         navigateTo(xl);
+    end
+
+    function onKeyRelease(~, evt)
+        if strcmp(evt.Key, 'shift'), shiftDown = false; end
+    end
+
+    function onNavButton(key)
+        % buttons under the force plot: as the arrow keys in the force plot; shift + click on the left / right button
+        % extends the time axis instead of moving it
+        ext = any(strcmp(key, {'leftarrow', 'rightarrow'})) && (shiftDown || any(strcmp(fig.CurrentModifier, 'shift')));
+        navButton(key, ext);
+    end
+
+    function navButton(key, ext)
+        if isempty(H) || isempty(S), status('Load a time window first.'); return; end
+        navigateTo(navStep(xlim(axMain), key, ext, [0 H.totalSeconds], 0.3));
     end
 
     function navigateTo(xl)
@@ -3458,6 +3581,13 @@ end
 end
 
 
+function c = trendColors()
+% colours of the channels in the trend window when several channels are overlaid (MATLAB default line colours + grey)
+c = [0 0.447 0.741; 0.85 0.325 0.098; 0.929 0.694 0.125; 0.494 0.184 0.556; 0.466 0.674 0.188; 0.301 0.745 0.933; ...
+    0.635 0.078 0.184; 0.35 0.35 0.35];
+end
+
+
 function xn = navStep(xl, key, ext, lim, minSpan)
 % time axis after an arrow key: left / right = move by half the span, with ext (shift) = extend by half the span on
 % that side; up / down = zoom in / out around the centre (span / 2, x 2); limited to lim and >= minSpan
@@ -3548,8 +3678,11 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       'Force plot: red = selected contractions, grey = excluded by the filters (rocker / stimulated only), x = excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.', ...
       'Cursor in the force plot: "drag = select time range" or "click = exclude / include contraction". Zoom/pan: mouse wheel or figure toolbar (switch the tool off afterwards).', ...
       'Arrow keys (click into a plot first): left / right = move the time axis by half its length, shift + left / right = extend it by half its length on that side, up / down = zoom in / out. Mouse pointer over the overview: its time axis; otherwise the force plot - beyond the loaded window the loaded window follows (read again, blue in the overview) and a zoomed overview moves along.', ...
+      'Buttons under the force plot: the same for the force plot - left / right arrow button = move by half the length (shift + click: extend on that side), middle buttons = zoom in (half the span) / zoom out (twice the span).', ...
       '', ...
       'Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak, or the time course of the analysed range (t = 0 at the first stimulus of each group). Press again (or Add current selection in the overlay window) to add another selection as a new group; Channels (same range) ...: tick channels to add them for the analysed range (same settings, threshold and zero force of each channel). Per group (list): legend text, colour, line width, line style and a transparent band (mean +- SD, +- SEM or range). Title, axis labels and legend position are editable below the plot (empty = automatic); Edit figure ... opens a copy with the MATLAB plot tools.', ...
+      '', ...
+      'Trend ...: rolling mean / median of a parameter over long periods and several files in a row (_0, _1, ...); sampling: all contractions, short windows or rocker stops. Channel list: one channel, or several channels ... (checkboxes) = overlaid, one colour per channel (the file is read once for all of them).', ...
       '', ...
       'Save / Export (menu or right click on a plot): plots as .png / .jpg / .tif / .fig, plotted data (visible time range) as .xlsx / .csv / .txt; overview: picture only.', ...
       '', ...

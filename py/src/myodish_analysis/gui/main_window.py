@@ -77,6 +77,11 @@ def _plot_list():
     return L
 
 
+
+def _shift_held():
+    """shift key held (shift + click on the arrow buttons under the force plot)"""
+    return bool(QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier)
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, mdd_file=None, metadata=None):
         super().__init__()
@@ -108,6 +113,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.last_dir = ""
         self.alt_pt = (math.nan, math.nan)  # last right click in the force plot
         self.tr_cache = {}
+        self.tr_chans, self.tr_multi = [], []  # trend: channels shown (several = overlaid), last set
         self.plot_list = _plot_list()
         self.win_overlay = self.win_trend = self.win_ref = self.win_comments = self.win_labels = None
         self.win_protocols = None
@@ -196,10 +202,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pStim = self.stim.p
         self.glTop.addItem(self.pOv, row=0, col=0)
         self.glTop.addItem(self.pMain, row=1, col=0)
-        self.glTop.addItem(self.pStim, row=2, col=0)
+        self.glTop.addItem(self._nav_buttons(), row=2, col=0)
+        self.glTop.addItem(self.pStim, row=3, col=0)
         self.glTop.ci.layout.setRowStretchFactor(0, 9)
         self.glTop.ci.layout.setRowStretchFactor(1, 40)
-        self.glTop.ci.layout.setRowStretchFactor(2, 13)
+        self.glTop.ci.layout.setRowStretchFactor(2, 0)
+        self.glTop.ci.layout.setRowFixedHeight(2, 24)
+        self.glTop.ci.layout.setRowStretchFactor(3, 13)
         self.stim.attach()
         self.glTop.setMinimumHeight(330)
         left.addWidget(self.glTop, 62)
@@ -1284,6 +1293,50 @@ class MainWindow(QtWidgets.QMainWindow):
         if not view.rect().contains(pos):
             return False
         return plot.vb.sceneBoundingRect().contains(view.mapToScene(pos))
+
+    def _nav_buttons(self):
+        """buttons under the force plot (as the arrow keys): left / right = move by half the span (shift + click:
+        extend on that side), middle = zoom in / out. Returns the proxy item for the plot layout."""
+        row = QtWidgets.QWidget()
+        row.setStyleSheet("background: transparent")
+        hl = QtWidgets.QHBoxLayout(row)
+        hl.setContentsMargins(62, 1, 50, 1)  # aligned with the plot area (left axis 62 px, right axis 50 px)
+        hl.setSpacing(4)
+        self.bNav = {}
+        for key, text, tip in (
+                ("left", "\u25C0", "move the time axis to the left by half its length (shift + click: extend it to the "
+                                    "left; key: left arrow)"),
+                (None, None, None),
+                ("up", "\u2192\u2190", "zoom in: half the time span around the centre (key: up arrow)"),
+                ("down", "\u2190\u2192", "zoom out: twice the time span (key: down arrow)"),
+                (None, None, None),
+                ("right", "\u25B6", "move the time axis to the right by half its length (shift + click: extend it to "
+                                     "the right; key: right arrow)")):
+            if key is None:
+                hl.addStretch(1)
+                continue
+            b = QtWidgets.QPushButton(text)
+            b.setFixedSize(34, 22)
+            b.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)  # the arrow keys stay with the plots
+            b.setStyleSheet("QPushButton { background: white; border: 1px solid #aaa; border-radius: 3px; font-size: 9pt }"
+                            " QPushButton:pressed { background: #ddd }")
+            b.setToolTip(tip)
+            b.clicked.connect((lambda k: (lambda *_: self.on_nav_button(k)))(key))
+            hl.addWidget(b)
+            self.bNav[key] = b
+        proxy = QtWidgets.QGraphicsProxyWidget()
+        proxy.setWidget(row)
+        return proxy
+
+    def on_nav_button(self, key, ext=None):
+        """button under the force plot: as the arrow key in the force plot; shift + click on the left / right button
+        extends the time axis instead of moving it (ext: given by tests)"""
+        if ext is None:
+            ext = key in ("left", "right") and _shift_held()
+        if self.H is None or self.S is None:
+            self.status("Load a time window first.")
+            return
+        self.navigate_to(nav_step(self.pMain.vb.viewRange()[0], key, ext, (0.0, float(self.H.totalSeconds)), 0.3))
 
     def on_key(self, key, ext):
         """left / right arrow: move the time axis by half its length; ext (shift): extend it by half its length on

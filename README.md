@@ -62,6 +62,8 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    mouse pointer over the overview they move its zoomed time axis; otherwise the force plot: beyond the loaded window,
    the loaded window follows (same length, longer when extended; read again, blue window in the overview) and a zoomed
    overview moves along. The analysed range is then the new loaded window.
+   **Buttons under the force plot** do the same with the mouse: ◀ / ▶ (bottom left / right) move the time axis by half
+   its length, shift + click extends it on that side; →← / ←→ (middle) zoom in (half the span) / out (twice the span).
 2. **Force plot**: force − zero force (if the zero force is known, see "Zero force"; otherwise the sensor signal).
    Red = selected contractions, grey = excluded by the filters, x = excluded by you,
    blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.
@@ -104,6 +106,9 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    Analysing only every n-th contraction would not save time (the whole signal must be read and filtered anyway).
    *All channels in one pass*: the file is read once for all channels (~1.5 × the time of one channel); afterwards
    switching the channel shows its trend without recalculation.
+   **Several channels**: *several channels ...* in the channel list (checkboxes) overlays their trends (one colour per
+   channel, legend Ch n; the file is read once for all of them); the set stays in the list (e.g. *Ch 1+3+5*), single
+   channels shown from the cache. Export: column `channel` in both sheets.
    **Calculate** detects the contractions in all listed files (threshold, filters, zero force and rocker filter of the
    main window); afterwards parameter, window and display change without recalculation. Save figure / Export data (all
    contractions with file, time since start and clock time; rolling curve; file list with gaps).

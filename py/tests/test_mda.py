@@ -348,6 +348,61 @@ def test_gui_starts_without_file():
 
 
 @pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
+def test_gui_nav_buttons_trend_channels(monkeypatch):
+    """buttons under the force plot (shift + click extends) and the trend of several channels (overlay)"""
+    pytest.importorskip("PySide6")
+    pytest.importorskip("pyqtgraph")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtWidgets
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])  # noqa: F841
+    from myodish_analysis.gui import main_window as mw
+    from myodish_analysis.gui.trend import TrendWindow
+    w = mw.MainWindow(os.path.join(EX, "example3_humanVentricle.mdd"))
+    tw = None
+    try:
+        w.eFrom.setText("0")
+        w.eTo.setText("60")
+        w.on_load()
+        w.bNav["right"].click()
+        assert (w.S.fromSeconds, w.S.toSeconds) == (30, 90)
+        monkeypatch.setattr(mw, "_shift_held", lambda: True)
+        w.bNav["right"].click()
+        assert (w.S.fromSeconds, w.S.toSeconds) == (30, 120)
+        w.bNav["up"].click()  # zoom: shift does not matter
+        assert list(w.pMain.vb.viewRange()[0]) == [52.5, 97.5] and w.S.toSeconds == 120
+        monkeypatch.setattr(mw, "_shift_held", lambda: False)
+        w.bNav["down"].click()
+        assert list(w.pMain.vb.viewRange()[0]) == [30, 120]
+        w.bNav["left"].click()
+        assert (w.S.fromSeconds, w.S.toSeconds) == (0, 90)
+        # trend: channels 1 and 3 overlaid (one calculation, file read once), then channel 3 alone from the cache
+        tw = TrendWindow(w)
+        tw.pM.setCurrentIndex(0)
+        tw.set_channels([1, 3])
+        assert tw.pC.currentText() == "Ch 1+3" and tw.pC.itemText(tw.pC.count() - 1) == "several channels ..."
+        tw.calc(False)
+        assert sorted(tw.data["channel"].unique().tolist()) == [1, 3]
+        assert sorted(set(tw.roll[:, 0].tolist())) == [1, 3]
+        assert [lbl.text for _, lbl in tw.p.legend.items] == ["Ch 1", "Ch 3"]
+        names, tabs = tw.export_tables()
+        assert names == ["contractions", "rolling", "files"]
+        assert list(tabs[0].columns[:3]) == ["file", "channel", "t_since_start_s"]
+        assert list(tabs[1].columns[:2]) == ["channel", "t_since_start_s"] and set(tabs[1]["channel"]) == {1, 3}
+        n3 = int((tw.data["channel"] == 3).sum())
+        tw.set_channels([3])
+        tw.calc(True)
+        assert tw.data["channel"].unique().tolist() == [3] and len(tw.data) == n3
+        assert tw.pC.currentText() == "Ch 3" and tw.pC.findText("Ch 1+3") >= 0
+        c, _, _ = mw.myodish_analysis(w.H.file, [3], [0.0], [float(w.H.totalSeconds)], quiet=True,
+                                      **tw._opts(tw.files[0], [3], 0))  # same as channel 3 alone
+        assert len(c) == n3
+    finally:
+        if tw is not None:
+            tw.close()
+        w.close()
+        w.deleteLater()
+
+
 def test_gui_threshold_keys_overlay():
     pytest.importorskip("PySide6")
     pytest.importorskip("pyqtgraph")

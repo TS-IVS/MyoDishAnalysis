@@ -661,7 +661,10 @@ def help_text():
         "Arrow keys: left / right = move the time axis by half its length, shift + left / right = extend it by half "
         "its length on that side, up / down = zoom in / out. Mouse pointer over the overview: its time axis; otherwise "
         "the force plot - beyond the loaded window the loaded window follows (read again, blue in the overview) and a "
-        "zoomed overview moves along.", "",
+        "zoomed overview moves along.",
+        "Buttons under the force plot: the same for the force plot - left / right arrow button = move by half the "
+        "length (shift + click: extend on that side), middle buttons = zoom in (half the span) / zoom out (twice the "
+        "span).", "",
         "Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak, or "
         "the time course of the analysed range (t = 0 at the first stimulus of each group). Press again (or Add "
         "current selection in the overlay window) to add another selection as a new group; Channels (same range) ...: "
@@ -671,6 +674,9 @@ def help_text():
         "range). Title, axis labels and legend position are editable below the plot (empty = automatic); Edit figure "
         "... opens a copy as a matplotlib figure (toolbar: edit axes, curves and legend; save as .png / .pdf / .svg).",
         "",
+        "Trend ...: rolling mean / median of a parameter over long periods and several files in a row (_0, _1, ...); "
+        "sampling: all contractions, short windows or rocker stops. Channel list: one channel, or several channels ... "
+        "(checkboxes) = overlaid, one colour per channel (the file is read once for all of them).", "",
         "Save / Export (menu or right click on a plot): plots as .png / .jpg / .tif (300 dpi) / .pdf, plotted data "
         "(visible time range) as .xlsx / .csv / .txt; overview: picture only.", "",
         "Labels ...: labels per channel (setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, "

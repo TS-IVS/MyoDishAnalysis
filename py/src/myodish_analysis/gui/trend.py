@@ -2,7 +2,7 @@
 daily files _0, _1, _2 ... of a culture). Sampling: all contractions, short windows (W s every T min) or rocker stops
 only. Port of the trend part of MyoDishAnalysisGUI.m.
 
-TS 2026-10-06
+TS 2026-10-06 (several channels overlaid 2026-10-09)
 """
 from __future__ import annotations
 
@@ -26,6 +26,14 @@ from .timeaxis import fmt_clock
 from .widgets import PURPLE, rects, rot_labels, time_plot, vlines
 
 MU = "µ"
+# colours of the channels when several channels are overlaid (MATLAB default line colours + grey; trendColors in
+# MyoDishAnalysisGUI.m)
+TREND_COLORS = [(0, 0.447, 0.741), (0.85, 0.325, 0.098), (0.929, 0.694, 0.125), (0.494, 0.184, 0.556),
+                (0.466, 0.674, 0.188), (0.301, 0.745, 0.933), (0.635, 0.078, 0.184), (0.35, 0.35, 0.35)]
+
+
+def _rgb(c):
+    return tuple(int(round(255 * x)) for x in c)
 
 
 def rolling(t, v, w_s, use_median):
@@ -55,7 +63,11 @@ class TrendWindow(QtWidgets.QWidget):
         self.files = []
         self.data = None
         self.sampling = ""
-        self.roll = np.zeros((0, 2))
+        self.roll = np.zeros((0, 3))  # channel, time since start, rolling mean / median
+        chs = [int(c) for c in win.H.dataChannels]
+        if not win.tr_chans or not all(c in chs for c in win.tr_chans):
+            win.tr_chans = [int(win.ch)]
+        win.tr_multi = [c for c in win.tr_multi if c in chs]
         self._yl0 = [0.0, 1.0]
         self._cmt = []
         self._cmt_items = []
@@ -90,9 +102,10 @@ class TrendWindow(QtWidgets.QWidget):
         g = QtWidgets.QGridLayout()
         g.addWidget(QtWidgets.QLabel("Channel"), 0, 0)
         self.pC = QtWidgets.QComboBox()
-        self.pC.addItems([f"Ch {c}" for c in win.H.dataChannels])
-        self.pC.setCurrentIndex(max(0, [int(c) for c in win.H.dataChannels].index(win.ch)))
-        self.pC.activated.connect(lambda *_: self.calc(True))
+        self.pC.setToolTip("channel of the trend; 'several channels ...' = several channels overlaid (one colour per "
+                           "channel)")
+        self._channel_items()
+        self.pC.activated.connect(self.on_channel)
         g.addWidget(self.pC, 0, 1)
         self.pR = QtWidgets.QComboBox()
         self.pR.addItems(["whole files", "selected range (open file only)"])
@@ -174,6 +187,69 @@ class TrendWindow(QtWidgets.QWidget):
         self.files = self.file_info([win.H.file])
         self.list_files()
         self.draw()
+
+    # ---------------------------------------------------------------- channels
+    def _channel_items(self):
+        """channel list: single channels, the last set of several channels (overlay), 'several channels ...'"""
+        w = self.win
+        items = [f"Ch {int(c)}" for c in w.H.dataChannels]
+        if len(w.tr_multi) > 1:
+            items.append("Ch " + "+".join(str(c) for c in w.tr_multi))
+        idx = len(items) - 1 if len(w.tr_chans) > 1 else max(0, [int(c) for c in w.H.dataChannels].index(w.tr_chans[0]))
+        items.append("several channels ...")
+        self.pC.blockSignals(True)
+        self.pC.clear()
+        self.pC.addItems(items)
+        self.pC.setCurrentIndex(idx)
+        self.pC.blockSignals(False)
+
+    def on_channel(self, *_):
+        """one channel, the set of several channels, or 'several channels ...' (checkboxes)"""
+        w = self.win
+        v = self.pC.currentIndex()
+        n_ch = len(w.H.dataChannels)
+        if v == self.pC.count() - 1:
+            sel = self.choose_channels()
+            if sel is not None and len(sel) > 1:
+                w.tr_multi = sel
+                w.tr_chans = list(sel)
+            elif sel is not None and len(sel) == 1:
+                w.tr_chans = list(sel)
+        elif v < n_ch:
+            w.tr_chans = [int(w.H.dataChannels[v])]
+        else:
+            w.tr_chans = list(w.tr_multi)
+        self._channel_items()
+        self.calc(True)
+
+    def choose_channels(self):
+        """checkboxes: channels of the trend (several = overlaid); None = cancelled"""
+        w = self.win
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Trend: channels")
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lay.addWidget(QtWidgets.QLabel("Channels of the trend (several: overlaid, one colour per channel):"))
+        cbs = []
+        for c in w.H.dataChannels:
+            cb = QtWidgets.QCheckBox(f"Channel {int(c)}")
+            cb.setChecked(int(c) in w.tr_chans)
+            lay.addWidget(cb)
+            cbs.append((int(c), cb))
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok |
+                                        QtWidgets.QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return None
+        return [c for c, cb in cbs if cb.isChecked()]
+
+    def set_channels(self, chans):
+        """scripts / tests: channels of the trend (several = overlaid)"""
+        self.win.tr_chans = [int(c) for c in chans]
+        if len(self.win.tr_chans) > 1:
+            self.win.tr_multi = list(self.win.tr_chans)
+        self._channel_items()
 
     # ---------------------------------------------------------------- files
     def _sampling_controls(self, *_):
@@ -315,7 +391,7 @@ class TrendWindow(QtWidgets.QWidget):
         w = self.win
         if not self.files:
             return
-        chT = int(w.H.dataChannels[self.pC.currentIndex()])
+        chTs = [int(c) for c in w.tr_chans]  # several channels: overlaid
         jobs = []
         for k, Fk in enumerate(self.files):
             if self.pR.currentIndex() == 1:
@@ -349,11 +425,12 @@ class TrendWindow(QtWidgets.QWidget):
         if only_cached:
             for k, a, b in jobs:
                 Fk = self.files[k]
-                if chT in Fk.channels and self._key(Fk, chT, a, b, mode) not in cache:
-                    self.data = None
-                    self.draw()
-                    w.status(f"Trend: channel {chT} not calculated yet - press Calculate.")
-                    return
+                for chT in chTs:
+                    if chT in Fk.channels and self._key(Fk, chT, a, b, mode) not in cache:
+                        self.data = None
+                        self.draw()
+                        w.status(f"Trend: channel {chT} not calculated yet - press Calculate.")
+                        return
         total = sum(b - a for _, a, b in jobs)
         dlg = QtWidgets.QProgressDialog("Detecting contractions ...", "Cancel", 0, 1000, self)
         dlg.setWindowTitle("Trend")
@@ -364,17 +441,16 @@ class TrendWindow(QtWidgets.QWidget):
         try:
             for k, a0, b0 in jobs:
                 Fk = self.files[k]
-                if chT not in Fk.channels:
-                    w.status(f"Trend: channel {chT} not in {Fk.name}.")
+                need = [c for c in chTs if c in Fk.channels]
+                if not need:
+                    w.status(f"Trend: channel {', '.join(str(c) for c in chTs)} not in {Fk.name}.")
                     done += b0 - a0
                     continue
-                key = self._key(Fk, chT, a0, b0, mode)
-                chans = [chT]
+                chans = list(need)  # several channels: the file is read once for all of them
                 if self.cA.isChecked() and not only_cached:
                     chans = list(Fk.channels)
                 missing = any(self._key(Fk, c2, a0, b0, mode) not in cache for c2 in chans)
                 if not missing:
-                    Tk = cache[key]
                     done += b0 - a0
                 else:
                     o = self._opts(Fk, chans, mode)
@@ -406,9 +482,11 @@ class TrendWindow(QtWidgets.QWidget):
                             _, iu = np.unique(mround(T2["t_peak"].to_numpy() * 1e4), return_index=True)
                             T2 = T2.iloc[np.sort(iu)].reset_index(drop=True)  # peaks exactly at a block border
                         cache[self._key(Fk, c2, a0, b0, mode)] = T2
-                    Tk = cache[key]
-                if Tk is not None and len(Tk):
-                    keep = [c for c in ("t_peak", "beatType", "included", "rockerMoving") if c in Tk.columns]
+                for chT in need:
+                    Tk = cache[self._key(Fk, chT, a0, b0, mode)]
+                    if Tk is None or not len(Tk):
+                        continue
+                    keep = [c for c in ("t_peak", "channel", "beatType", "included", "rockerMoving") if c in Tk.columns]
                     pn = [nm for nm, _ in w.plot_list if nm in Tk.columns]
                     Tk = Tk[keep + pn].copy()
                     Tk["t_since_start"] = Tk["t_peak"].to_numpy() + Fk.offset
@@ -426,6 +504,9 @@ class TrendWindow(QtWidgets.QWidget):
         self.data = pd.concat(parts, ignore_index=True).sort_values("t_since_start", kind="stable") \
             .reset_index(drop=True) if parts else None
         self.draw()
+        if self.data is None:
+            w.status("Trend: no contractions.")
+            return
         n = 0 if self.data is None else len(self.data)
         nf = 0 if self.data is None else self.data["fileIndex"].nunique()
         w.status(f"Trend: {n} contractions in {nf} file(s).")
@@ -475,28 +556,46 @@ class TrendWindow(QtWidgets.QWidget):
                 tg = pg.TextItem(f"no data\n{fmt_clock(Fk.gap, True, False)}", color=(89, 89, 89), anchor=(0.5, 0.5))
                 p.addItem(tg)
                 tg.setPos((g0 + Fk.offset) / 2, sum(yl0) / 2)
+        self.roll = np.zeros((0, 3))  # channel, time since start, rolling mean / median
+        multi = len(w.tr_chans) > 1  # several channels: overlaid, one colour per channel
+        try:
+            wMin = float(self.eW.text())
+            if wMin <= 0:
+                raise ValueError
+        except ValueError:
+            wMin = 10.0
+            self.eW.setText("10")
+        roll_name = f"rolling {self.pS.currentText()} ({wMin:g} min)"
         if have and I.any():
-            if self.cS.isChecked():
-                p.addItem(pg.ScatterPlotItem(t[I], v[I], symbol="o", size=3, pen=None, brush=(242, 153, 153)))
-            try:
-                wMin = float(self.eW.text())
-                if wMin <= 0:
-                    raise ValueError
-            except ValueError:
-                wMin = 10.0
-                self.eW.setText("10")
-            T2, R2 = [], []
+            chv = D["channel"].to_numpy()
+            chs = [c for c in w.tr_chans if c in set(chv.tolist())]
             fi = D["fileIndex"].to_numpy()
-            for f in np.unique(fi[I]):
-                J = I & (fi == f)
-                tt_, rr = rolling(t[J], v[J], wMin * 60, self.pS.currentIndex() == 1)
-                T2 += list(tt_) + [np.nan]
-                R2 += list(rr) + [np.nan]
-            p.plot(np.array(T2), np.array(R2), pen=pg.mkPen((191, 0, 0), width=2), connect="finite",
-                   name=f"rolling {self.pS.currentText()} ({wMin:g} min)")
-            self.roll = np.c_[T2, R2]
-        else:
-            self.roll = np.zeros((0, 2))
+            rows = []
+            for pss in (1, 2):  # single contractions first, rolling lines on top
+                for q, c in enumerate(chs):
+                    Iq = I & (chv == c)
+                    if not Iq.any():
+                        continue
+                    if multi:
+                        col = TREND_COLORS[q % len(TREND_COLORS)]
+                        col_s = tuple(1 - 0.45 * (1 - x) for x in col)
+                    else:
+                        col, col_s = (0.75, 0, 0), (0.95, 0.6, 0.6)
+                    if pss == 1:
+                        if self.cS.isChecked():
+                            p.addItem(pg.ScatterPlotItem(t[Iq], v[Iq], symbol="o", size=3, pen=None, brush=_rgb(col_s)))
+                        continue
+                    T2, R2 = [], []
+                    for f in np.unique(fi[Iq]):
+                        J = Iq & (fi == f)
+                        tt_, rr = rolling(t[J], v[J], wMin * 60, self.pS.currentIndex() == 1)
+                        T2 += list(tt_) + [np.nan]
+                        R2 += list(rr) + [np.nan]
+                    p.plot(np.array(T2), np.array(R2), pen=pg.mkPen(_rgb(col), width=2), connect="finite",
+                           name=f"Ch {c}" if multi else roll_name)
+                    rows.append(np.c_[np.full(len(T2), c, float), T2, R2])
+            if rows:
+                self.roll = np.vstack(rows)
         if self.cK.isChecked():
             for Fk in self.files:
                 cm = Fk.comments
@@ -515,8 +614,11 @@ class TrendWindow(QtWidgets.QWidget):
         self._cmt_items = []
         p.vb.setRange(xRange=(0, max(1, last.offset + last.dur)), yRange=yl0, padding=0)
         p.setLabel("left", f"{nm} ({unit})")
-        if have:
-            p.setTitle(f"Channel {int(w.H.dataChannels[self.pC.currentIndex()])}, {len(D)} contractions "
+        if have and multi:
+            p.setTitle(f"Channels {', '.join(str(c) for c in w.tr_chans)} ({roll_name}), {len(D)} contractions "
+                       f"({int(I.sum())} shown), {len(self.files)} file(s), sampling: {self.sampling}", size="9pt")
+        elif have:
+            p.setTitle(f"Channel {w.tr_chans[0]}, {len(D)} contractions "
                        f"({int(I.sum())} shown), {len(self.files)} file(s), sampling: {self.sampling}", size="9pt")
         else:
             p.setTitle("press Calculate (detects the contractions in the listed files)", size="9pt")
@@ -609,19 +711,26 @@ class TrendWindow(QtWidgets.QWidget):
         file = ask_file(self.win, "data", "trend")
         if not file:
             return
+        names, tabs = self.export_tables()
+        write_tables(self.win, file, names, tabs)
+
+    def export_tables(self):
+        """sheets of the export: contractions (with channel), rolling (per channel), files"""
         D = self.data.copy()
         fi = D["fileIndex"].to_numpy()
         D.insert(0, "file", [self.files[i].name for i in fi])
         st = np.array([self.files[i].start for i in fi], float)
-        D.insert(1, "t_since_start_s", D.pop("t_since_start"))
-        D.insert(2, "clockTime", datenum_to_timestamps(st + D["t_peak"].to_numpy() / 86400))
+        D.insert(1, "channel", D.pop("channel"))
+        D.insert(2, "t_since_start_s", D.pop("t_since_start"))
+        D.insert(3, "clockTime", datenum_to_timestamps(st + D["t_peak"].to_numpy() / 86400))
         D = D.rename(columns={"t_peak": "t_file_s"}).drop(columns=["fileIndex"])
         nm = self.win.plot_list[self.pP.currentIndex()][0]
-        R = pd.DataFrame(self.roll[~np.isnan(self.roll[:, 0])] if self.roll.size else np.zeros((0, 2)),
-                         columns=["t_since_start_s", f"rolling_{nm}"])
+        R = pd.DataFrame(self.roll[~np.isnan(self.roll[:, 1])] if self.roll.size else np.zeros((0, 3)),
+                         columns=["channel", "t_since_start_s", f"rolling_{nm}"])
+        R["channel"] = R["channel"].astype(int)
         Fi = pd.DataFrame({"file": [F.name for F in self.files],
                            "recordingStart": [datenum_to_timestamps(F.start).strftime("%Y-%m-%d %H:%M:%S")
                                               if F.startKnown else "unknown" for F in self.files],
                            "duration_s": [F.dur for F in self.files], "offset_s": [F.offset for F in self.files],
                            "gapBefore_s": [F.gap for F in self.files], "sampling": [self.sampling] * len(self.files)})
-        write_tables(self.win, file, ["contractions", "rolling", "files"], [D, R, Fi])
+        return ["contractions", "rolling", "files"], [D, R, Fi]

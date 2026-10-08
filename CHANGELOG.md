@@ -5,6 +5,11 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Added
+- GUI (MATLAB and Python, 2026-10-09): buttons under the force plot – ◀ / ▶ move the time axis by half its length
+  (shift + click: extend it on that side), →← / ←→ zoom in / out, as the arrow keys. Trend window: *several channels
+  ...* in the channel list overlays the trends of several channels (one colour per channel, read once; export with
+  column `channel`). API `navButton`, `trend` (MATLAB), `on_nav_button`, `TrendWindow.set_channels`,
+  `export_tables` (Python).
 - Periods without signal (2026-10-08): `mda_signalGaps` / `signal_gaps` find periods of identical consecutive raw
   samples (≥ 2 s; the controller repeats the last value when a sensor board is missing): `chamber out` (one channel),
   `board group` (≥ 3 channels of group 1–4 or 5–8 within 1 s, or 2 within 0.1 s: technical, a defective board
