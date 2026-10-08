@@ -201,8 +201,11 @@ def event_category(code, text):
     c = str(code).strip().lower()
     t = str(text).strip().lower()
     if c == "comment":
-        if re.match(r"^(started|stopped) (parallel )?recording", t):
+        if re.match(r"^(started|stopped) (parallel )?recording", t) or t.startswith("approaching 2 gb limit"):
             return "recording"
+        if re.match(r'^(jump to \d+\s*bpm|s\d+ beat|\d+([.,]\d+)?\s*(hz|ma|bpm|ms)$|pause\s*\d+\s*sec|restored stimulation|'
+                    r'keeping pulse settings|stimfrequency\s*\d+|"?rocker stop time)', t):
+            return "protocol"  # steps written by the schedule files
         if "schedule" in t or t.startswith("saved settings"):
             return "schedule"
         if re.match(r"^(start|end|stop)\b", t) or re.search(r"\b(started|ended)$", t):

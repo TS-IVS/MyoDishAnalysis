@@ -131,6 +131,21 @@ pass = all(ismember({'clockTime', 't_file', 'channel', 'code', 'category', 'text
     all(strcmp(E.category(strcmp(E.text, 'addition of 100nM Iso')), 'comment')) && ...
     strcmp(r1.comments{r1.channel == 3}, 'addition of 100nM Iso') && r1.nComments(r1.channel == 1) == 0;
 ok = check(ok, pass, 'events file with categories, comments per channel in the summary');
+raw5 = fullfile(root, 'raw5');
+f5 = copyRec(ex, 'example9_ratVentricle', raw5, true);
+L5 = readUtf16(strrep(f5, '.mdd', '_log.log'));
+add = {'jump to 60 bpm', 'S2 beat 300 ms', '50 mA', 'Pause 180seconds', 'Approaching 2 GB limit. Changing datafile2.', ...
+    'ZI: MX1.6-1.8 Dexa100nM'};
+fid = fopen(strrep(f5, '.mdd', '_log.log'), 'w');
+fprintf(fid, '%s', L5);
+for k = 1:numel(add), fprintf(fid, '2000 01 01 15:50:%02d:000;%d;0;comment;%s\n', k, 100000 + k, add{k}); end
+fclose(fid);
+res8 = fullfile(root, 'res8');
+MyoDishAnalysisWatch(raw5, res8, q{:}, 'protocols', false);
+E8 = readCsv(fullfile(res8, 'example9_ratVentricle_events.csv'));
+[~, iE] = ismember(add, E8.text);
+ok = check(ok, all(iE > 0) && isequal(E8.category(iE)', {'protocol', 'protocol', 'protocol', 'protocol', 'recording', 'comment'}), ...
+    'schedule steps written as comments: category protocol');
 
 % thinned contractions: every 10th / block medians; extra beats complete
 resN = fullfile(root, 'resN'); resM = fullfile(root, 'resM');

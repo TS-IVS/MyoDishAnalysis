@@ -181,6 +181,10 @@ def test_helpers():
     assert W.event_category("comment", "addition of 100nM Iso") == "comment"
     assert W.event_category("stimFrequency", "1") == "stimulation"
     assert W.event_category("Event", "extended sensor mode off") == "calibration"
+    for t in ("jump to 60 bpm", "S2 beat 300 ms", "50 mA", "0.5 Hz", "Pause 180seconds", "restored stimulation"):
+        assert W.event_category("comment", t) == "protocol", t
+    assert W.event_category("comment", "Approaching 2 GB limit. Changing datafile2.") == "recording"
+    assert W.event_category("comment", "ZI: MX1.6-1.8 Dexa100nM") == "comment"
     assert W.mda_version() == "1.0.0-beta.1" or "-" not in mda.__version__
     assert len(W.code_fingerprint()) == 8
     for f in ("example1_rabbitVentricle", "example9_ratVentricle"):

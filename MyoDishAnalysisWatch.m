@@ -478,7 +478,11 @@ stim = {'stimfrequency', 'stimcurrent', 'chargeduration', 'dechargeduration', 'c
     'stimpulse', 'stimpulses', 'stimpolarisation', 'stimpolarity', 'polarity', 'pauseduration', 'sequence', ...
     'stimsequence', 'spikethresh'};
 if strcmp(c, 'comment')
-    if ~isempty(regexp(t, '^(started|stopped) (parallel )?recording', 'once')), c = 'recording';
+    if ~isempty(regexp(t, '^(started|stopped) (parallel )?recording', 'once')) || startsWith(t, 'approaching 2 gb limit')
+        c = 'recording';
+    elseif ~isempty(regexp(t, ['^(jump to \d+\s*bpm|s\d+ beat|\d+([.,]\d+)?\s*(hz|ma|bpm|ms)$|pause\s*\d+\s*sec|' ...
+            'restored stimulation|keeping pulse settings|stimfrequency\s*\d+|"?rocker stop time)'], 'once'))
+        c = 'protocol';                                 %steps written by the schedule files
     elseif contains(t, 'schedule') || startsWith(t, 'saved settings'), c = 'schedule';
     elseif ~isempty(regexp(t, '^(start|end|stop)\>', 'once')) || ~isempty(regexp(t, '\<(started|ended)$', 'once'))
         c = 'protocol';
