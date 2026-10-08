@@ -217,6 +217,8 @@ def read_ep_recording(ep_file, H, opts=None, **kw):
         info.append(f"{tA.size} LabChart stimuli, no .mdd stimuli")
     elif isinstance(A.mddChannel, float) and math.isnan(A.mddChannel):
         info.append(f"{A.nMatched} of {tA.size} stimuli matched (.mdd: {A.nMdd})")
+    elif A.mddChannel == 0:  # external trigger pulses of the .mdd file
+        info.append(f"{A.nMatched} of {tA.size} stimuli matched (ext. trigger: {A.nMdd})")
     else:
         info.append(f"{A.nMatched} of {tA.size} stimuli matched (ch {int(A.mddChannel)}: {A.nMdd})")
     info.append(f"offset {A.offset:.4f} s, drift {(A.slope - 1) * 1e6:+.0f} ppm, rms {A.rms * 1000:.1f} ms")

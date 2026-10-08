@@ -16,8 +16,10 @@ absolute deviation, the longer latency not when aligned at the 50 % upstroke. Th
 MATLAB test uses rng(3)); the criteria are the same. tests/compare_matlab.py compares with MATLAB on identical signals.
 Stimulation pause: after a 9 s pause with rocker movement until 1.2 s before the stimulus, F_dia (amplitude 1000 uN)
 and the rocker state of the first contraction come from the 0.5 s before its stimulus (option pauseDiastoleWindow).
+External trigger pulses: a temporary 9-channel .mdd file with external trigger pulses only (status bit 14 without
+channel / current): read as channel 0, one entry per pulse, stimuli with option externalTrigger 'auto' / 'on'.
 
-TS 2026-10-06 (port of mda_test.m, TS 2026-10-05)
+TS 2026-10-06 (port of mda_test.m, TS 2026-10-05; external trigger 2026-10-08)
 """
 from __future__ import annotations
 
@@ -185,8 +187,79 @@ def selftest(verbose=True, seed=3):
         f"1000; whole window {a0[p][0]:.1f}), rocker moving {int(rm[p][0])} (whole window {int(rm0[p][0])}), other "
         f"contractions unchanged   {_pass(okS)}")
     ok = ok and okS
+
+    # external trigger pulses (2026-10-08): status bit 14 without channel / current (external stimulator at the
+    # external controller unit), temporary .mdd file, see mda_test.m
+    okX = _external_trigger_test(out)
+    ok = ok and okX
     out("selftest: all tests passed." if ok else "selftest: TEST FAILED.")
     return bool(ok)
+
+
+def _external_trigger_test(out):
+    """temporary .mdd (9 channels, 400 Hz, 30 s; contractions in channel 1 150 ms after each external trigger pulse,
+    one pulse 2 samples long, rocker bit set throughout): stim.channel 0, one entry per pulse; stimuli of the analysed
+    channel with externalTrigger 'auto' / 'on', not with 'off'; with a MyoDish pulse in the window 'auto' keeps the
+    MyoDish pulses (externalTriggerTest of mda_test.m)."""
+    import os
+    import tempfile
+
+    from .read_mdd import read_mdd
+    fs = 400
+    n = 30 * fs
+    tt = np.arange(n) / fs
+    trig = np.arange(1, 29, dtype=float)
+    X = np.zeros((9, n), np.int16)
+    F = np.full(n, 2000.0)
+    for a0 in trig:
+        a = a0 + 0.05
+        m = (tt >= a) & (tt < a + 0.1)
+        F[m] = 2000 + 1000 * (tt[m] - a) / 0.1
+        m = (tt >= a + 0.1) & (tt < a + 0.4)
+        F[m] = 3000 - 1000 * (tt[m] - a - 0.1) / 0.3
+    X[0] = np.round(F).astype(np.int16)
+    code = np.full(n, 16384, np.uint16)  # rocker bit
+    iT = np.round(trig * fs).astype(int)
+    code[iT] = 24576  # bit 14 + 15
+    code[iT[4] + 1] = 24576  # one pulse 2 samples long
+    X[8] = code.view(np.int16)
+    L = ["systemTime;dataLogTime;channel;code;value", "2026 01 01 06:00:00:000;0;0;nChannels;9",
+         "2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd",
+         "2026 01 01 06:00:00:000;0;0;samplingRate Recording;400"]
+    for c in range(1, 9):
+        L += [f"2026 01 01 06:00:00:000;0;{c};Calibration;1000", f"2026 01 01 06:00:00:000;0;{c};Offset;0"]
+    L.append("2026 01 01 06:00:30:000;30000;0;Recording;stopped: x.mdd")
+    with tempfile.TemporaryDirectory() as d:
+        mdd = os.path.join(d, "xtrig.mdd")
+        X.T.astype("<i2").tofile(mdd)
+        with open(os.path.join(d, "xtrig_log.log"), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(L) + "\n")
+        try:
+            S = read_mdd(mdd, 0, 30)
+            o = options(externalTrigger="auto")
+
+            def nst(B):
+                return int(np.sum(B["beatType"] == "stimulated"))
+            Ba, Ca = analyze_channel(S, 1, [0.5, 29.5], o)
+            Bf, _ = analyze_channel(S, 1, [0.5, 29.5], options(o, externalTrigger="off"))
+            Sm = S.copy()
+            Sm.stim = Struct(S.stim)
+            Sm.stim.time = np.r_[S.stim.time, 0.2]
+            Sm.stim.channel = np.r_[S.stim.channel, 3]  # one MyoDish pulse (channel 3)
+            Bm, _ = analyze_channel(Sm, 1, [0.5, 29.5], o)
+            Bo, _ = analyze_channel(Sm, 1, [0.5, 29.5], options(o, externalTrigger="on"))
+            st = np.asarray(S.stim.time, float)
+            okX = bool(st.size == 28 and np.all(np.asarray(S.stim.channel) == 0) and np.all(S.stim.external)
+                       and np.max(np.abs(st - trig)) < 1e-9 and Ca.stimChannel == 0 and len(Ba) == 28 and nst(Ba) == 28
+                       and abs(np.median(Ba["stimToPeak"]) - 0.15) < 0.02 and nst(Bf) == 0 and nst(Bm) == 0
+                       and nst(Bo) == 28)
+            out(f"external trigger pulses (bit 14 without channel): {st.size} pulses read (expected 28, channel 0), "
+                f"stimulated contractions: auto {nst(Ba)}, off {nst(Bf)}, auto with a MyoDish pulse {nst(Bm)}, on "
+                f"{nst(Bo)} (expected 28 / 0 / 0 / 28), stimToPeak {np.median(Ba['stimToPeak']):.3f} s   {_pass(okX)}")
+        except Exception as e:  # noqa: BLE001
+            okX = False
+            out(f"external trigger pulses: {e}   FAILED")
+    return okX
 
 
 def main():

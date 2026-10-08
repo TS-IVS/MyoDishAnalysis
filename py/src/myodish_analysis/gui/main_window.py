@@ -14,9 +14,11 @@
    shift + wheel = move, double-click = whole loaded window. Right click: zero force, reference beat, save / export.
 3. Stimulus plot (current per pulse, interval to the previous pulse), table (mean, SD, n of the selected contractions,
    extra / missed beats) and lower plot (one parameter per contraction). Detection threshold per channel (auto or
-   manual). Overlay contractions: mean beat (stimulus / peak) or time course of the range (t = 0 at the first
-   stimulus), other channels of the same range by checkboxes, colour / width / line style / SD-SEM-range band per
-   group, editable title, axis labels and legend, editable matplotlib copy (overlay.py).
+   manual). Stimuli: MyoDish pulses or external trigger pulses (external stimulator at the external controller unit;
+   auto = trigger pulses if the window has no MyoDish pulses). Overlay contractions: mean beat (stimulus / peak) or
+   time course of the range (t = 0 at the first stimulus), other channels of the same range by checkboxes, colour /
+   width / line style / SD-SEM-range band per group, editable title, axis labels and legend, editable matplotlib copy
+   (overlay.py).
 4. + EP recording ...: LabChart .mat export aligned to the stimuli; AP parameters per contraction.
 5. Protocols ...: stimulation protocols found in the log file ('start ... protocol' / 'end ... protocol'): contractions
    grouped by pacing frequency, S2 interval, stimulus current, rest interval, pulse duration or rocker speed; summary
@@ -315,9 +317,19 @@ class MainWindow(QtWidgets.QMainWindow):
                              "rocker_filter")
         self.cbRel = QtWidgets.QCheckBox("time axis: 0 = start of the loaded window")
         self.cbRel.setToolTip("display only; From/To, tables and exports keep the time in the file (s)")
-        for cb in (self.cbRocker, self.cbStim):
-            cb.toggled.connect(self.on_filter)
-            pv.addWidget(cb)
+        self.cXT = QtWidgets.QComboBox()
+        self.cXT.addItems(["stimuli: auto", "stimuli: MyoDish", "stimuli: ext. trigger"])
+        self.cXT.setToolTip("stimulus times: MyoDish pulses of the channel, or the external trigger pulses of the "
+                            "status channel (external stimulator at the external controller unit: one chamber, any "
+                            "data channel). auto = external trigger pulses if the window has no MyoDish pulses")
+        self.cXT.activated.connect(self.on_filter)
+        self.cbRocker.toggled.connect(self.on_filter)
+        pv.addWidget(self.cbRocker)
+        self.cbStim.toggled.connect(self.on_filter)
+        hs = QtWidgets.QHBoxLayout()
+        hs.addWidget(self.cbStim)
+        hs.addWidget(self.cXT)
+        pv.addLayout(hs)
         self.cbRF.toggled.connect(self.on_rocker_filter)
         pv.addWidget(self.cbRF)
         self.cbRel.toggled.connect(self.on_rel_time)
@@ -590,6 +602,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_filter(self, *_):
         self.opts.rocker = "stopped" if self.cbRocker.isChecked() else "any"
         self.opts.beats = "stimulated" if self.cbStim.isChecked() else "all"
+        self.opts.externalTrigger = ("auto", "off", "on")[self.cXT.currentIndex()]
         if self.S is not None:
             self.analyze(False)
 
@@ -1024,7 +1037,8 @@ class MainWindow(QtWidgets.QMainWindow):
             hh.setSectionResizeMode(j, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
         txt = (f"Range {self.range[0]:.2f} - {self.range[1]:.2f} s ({self.range[1] - self.range[0]:.1f} s)\n"
                f"{int(Sm.nContractions)} of {int(Sm.nDetected)} contractions selected ({int(Sm.nStimulated)} "
-               f"stimulated, {int(Sm.nExtraBeats)} extra)\n{int(Sm.nStimuli)} stimuli ({Sm.stimFrequency:.2f} Hz), "
+               f"stimulated, {int(Sm.nExtraBeats)} extra)\n{int(Sm.nStimuli)} stimuli"
+               f"{' (ext. trigger)' if self.C.stimChannel == 0 else ''} ({Sm.stimFrequency:.2f} Hz), "
                f"{int(Sm.nMissedBeats)} without contraction\n{self.label_line(Sm)}")
         if self.C.rockerFilter is not None:
             txt += "\n" + self.rocker_line(self.C.rockerFilter)
@@ -1075,6 +1089,8 @@ class MainWindow(QtWidgets.QMainWindow):
         J = J[o]
         tS = np.asarray(S.stim.time, float)[J]
         cur = np.asarray(S.stim.current, float)[J]
+        if C.stimChannel == 0:  # external trigger pulses: no current
+            cur = np.ones(cur.size)
         ok = np.asarray(S.stim.currentReached, bool)[J]
         ex = np.asarray(S.stim.isExtraPulse, bool)[J]
         iv = np.r_[np.nan, np.diff(tS)] * 1000
@@ -1098,8 +1114,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.C is None or self.S is None:
             return
         tS, cur, ok, ex, iv = self.stim_data()
+        isExt = self.C.stimChannel == 0  # external trigger pulses: bars of height 1, no current
+        if isExt:
+            p.setLabel("left", "ext.")
+        p.getAxis("left").setStyle(showValues=not isExt)
         if tS.size == 0:
-            set_title(p, f"no stimulus pulses on channel {self.C.stimChannel}", 8)
+            msg = "no external trigger pulses" if isExt else f"no stimulus pulses on channel {self.C.stimChannel}"
+            set_title(p, msg, 8)
             return
         for m, col in ((~ex, RED), (ex, GREEN)):
             if m.any():
@@ -1114,8 +1135,12 @@ class MainWindow(QtWidgets.QMainWindow):
             r = (float(fin.min()), float(fin.max()))
             dd = max(r[1] - r[0], 0.2 * r[1] + 1)
             tw.vb2.setYRange(r[0] - 0.25 * dd, r[1] + 0.35 * dd, padding=0)
-        set_title(p, f"stimuli channel {self.C.stimChannel}: current (red bars, mA; green = extra pulse, x = current not "
-                  "reached), interval to the previous pulse (blue, ms)", 8)
+        if isExt:
+            set_title(p, "external trigger pulses (external stimulator; red bars), interval to the previous pulse "
+                      "(blue, ms)", 8)
+        else:
+            set_title(p, f"stimuli channel {self.C.stimChannel}: current (red bars, mA; green = extra pulse, x = "
+                      "current not reached), interval to the previous pulse (blue, ms)", 8)
         if target is None:
             self.stim_labels()
         else:
@@ -1146,7 +1171,7 @@ class MainWindow(QtWidgets.QMainWindow):
         f = QtGui.QFont()
         f.setPointSize(7)
         for k in v:
-            lab = f"{cur[k]:g}" + (" ?!" if not ok[k] else "")
+            lab = "ext" if self.C.stimChannel == 0 else f"{cur[k]:g}" + (" ?!" if not ok[k] else "")
             t = pg.TextItem(lab, color=RED, anchor=(0.5, 1))
             t.setFont(f)
             t.setPos(tS[k], min(cur[k] + 0.04 * (ylL[1] - ylL[0]), ylL[1]))

@@ -388,13 +388,15 @@ def export_plot_data(win, which):
     elif which == "stimuli":
         tS, cur, ok, ex, iv = win.stim_data()
         I = (tS >= xl[0]) & (tS <= xl[1])
+        if C.stimChannel == 0:  # external trigger pulses: no current
+            cur = np.full(cur.size, np.nan)
         T = pd.DataFrame({"t_file_s": tS[I], "current_mA": cur[I], "currentReached": ok[I], "extraPulse": ex[I],
                           "intervalToPreviousPulse_ms": iv[I]})
         if win.rel_time:
             T["t_window_s"] = T["t_file_s"] - S.fromSeconds
         if clk is not None:
             T["clockTime"] = clk(T["t_file_s"].to_numpy())
-        names.append(f"stimuli_ch{C.stimChannel}")
+        names.append("stimuli_extTrigger" if C.stimChannel == 0 else f"stimuli_ch{C.stimChannel}")
         tabs.append(T)
     elif which == "parameter":
         if B is None:
@@ -675,7 +677,10 @@ def help_text():
         "treatment, concentration, concentrationUnit, daysInCulture, cultureStart, comment, analyst) - columns of the "
         "exported tables; saved as <name>_labels.csv next to the .mdd file and loaded automatically.", "",
         "Detection: peaks with a prominence >= threshold (auto: 0.3 x typical amplitude, >= 30 uN; per channel: auto "
-        "or a manual value, kept when you switch channels and used for All channels, Protocols and Trend). A "
+        "or a manual value, kept when you switch channels and used for All channels, Protocols and Trend). Stimuli "
+        "(list next to \"only stimulated contractions\"): the MyoDish pulses of the channel, or the external trigger "
+        "pulses of the status channel (external stimulator at the external controller unit, which carries one chamber: "
+        "any data channel); auto = external trigger pulses if the loaded window has no MyoDish pulses. A "
         "contraction within 25 ms ... min(stimulus interval, 1 s) after a stimulus of the channel is \"stimulated\", "
         "otherwise \"extra\".", "",
         "Reference beat (right click in the force plot): the mean shape (+- SD) of the selected contractions becomes "

@@ -15,8 +15,10 @@ function ok = mda_test()
 % absolute deviation, the longer latency not when aligned at the 50 % upstroke.
 % Stimulation pause: after a 9 s pause with rocker movement until 1.2 s before the stimulus, F_dia (amplitude 1000 uN)
 % and the rocker state of the first contraction come from the 0.5 s before its stimulus (option pauseDiastoleWindow).
+% External trigger pulses: a temporary 9-channel .mdd file with external trigger pulses only (status bit 14 without
+% channel / current): read as channel 0, one entry per pulse, stimuli with option externalTrigger 'auto' / 'on'.
 %
-% TS 2026-10-05 (stimulation pause 2026-10-07)
+% TS 2026-10-05 (stimulation pause 2026-10-07, external trigger 2026-10-08)
 
 dt = 0.005;
 t = 0:dt:20;
@@ -155,7 +157,64 @@ fprintf(['stimulation pause 9 s, rocker moving until 1.2 s before the stimulus: 
     'whole window %.1f), rocker moving %d (whole window %d), other contractions unchanged   %s\n'], B.amplitude(p), ...
     B0.amplitude(p), B.rockerMoving(p), B0.rockerMoving(p), passStr(okS));
 ok = ok && okS;
+
+% external trigger pulses (2026-10-08): status bit 14 without channel / current (external stimulator at the external
+% controller unit). Temporary .mdd (9 channels, 400 Hz, 30 s; contractions in channel 1 150 ms after each pulse, one
+% pulse 2 samples long, rocker bit set throughout as at the external controller unit): stim.channel 0, one entry per
+% pulse; stimuli of the analysed channel with 'auto' / 'on', not with 'off'; with a MyoDish pulse in the window 'auto'
+% keeps the MyoDish pulses
+okX = externalTriggerTest();
+ok = ok && okX;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
+end
+
+function okX = externalTriggerTest()
+fs = 400; n = 30 * fs; tt = (0:n-1) / fs;
+trig = 1:28;                                       %trigger times (s)
+X = zeros(9, n, 'int16');
+F = 2000 * ones(1, n);
+for k = 1:numel(trig)
+    a = trig(k) + 0.05;
+    I = tt >= a & tt < a + 0.1; F(I) = 2000 + 1000 * (tt(I) - a) / 0.1;
+    I = tt >= a + 0.1 & tt < a + 0.4; F(I) = 3000 - 1000 * (tt(I) - a - 0.1) / 0.3;
+end
+X(1,:) = int16(round(F));
+code = repmat(uint16(16384), 1, n);                %rocker bit
+iT = round(trig * fs) + 1;
+code(iT) = uint16(24576);                          %bit 14 + 15
+code(iT(5) + 1) = uint16(24576);                   %one pulse 2 samples long
+X(9,:) = typecast(code, 'int16');
+base = [tempname '_xtrig'];
+mdd = [base '.mdd']; lg = [base '_log.log'];
+fid = fopen(mdd, 'w'); fwrite(fid, X, 'int16'); fclose(fid);
+L = {'systemTime;dataLogTime;channel;code;value', '2026 01 01 06:00:00:000;0;0;nChannels;9', ...
+    '2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd', '2026 01 01 06:00:00:000;0;0;samplingRate Recording;400'};
+for c = 1:8
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Calibration;1000', c); %#ok<AGROW>
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Offset;0', c); %#ok<AGROW>
+end
+L{end+1} = '2026 01 01 06:00:30:000;30000;0;Recording;stopped: x.mdd';
+fid = fopen(lg, 'w'); fprintf(fid, '%s\n', L{:}); fclose(fid);
+try
+    S = mda_readMdd(mdd, 0, 30);
+    o = mda_options('externalTrigger', 'auto');
+    nSt = @(B) nnz(strcmp(B.beatType, 'stimulated'));
+    [Ba, Ca] = mda_analyzeChannel(S, 1, [0.5 29.5], o);
+    Bf = mda_analyzeChannel(S, 1, [0.5 29.5], mda_options(o, 'externalTrigger', 'off'));
+    Sm = S; Sm.stim.time(end+1, 1) = 0.2; Sm.stim.channel(end+1, 1) = 3;   %one MyoDish pulse (channel 3)
+    Bm = mda_analyzeChannel(Sm, 1, [0.5 29.5], o);
+    Bo = mda_analyzeChannel(Sm, 1, [0.5 29.5], mda_options(o, 'externalTrigger', 'on'));
+    okX = numel(S.stim.time) == 28 && all(S.stim.channel == 0) && all(S.stim.external) && ...
+        max(abs(S.stim.time(:) - trig(:))) < 1e-9 && Ca.stimChannel == 0 && height(Ba) == 28 && nSt(Ba) == 28 && ...
+        abs(median(Ba.stimToPeak) - 0.15) < 0.02 && nSt(Bf) == 0 && nSt(Bm) == 0 && nSt(Bo) == 28;
+    fprintf(['external trigger pulses (bit 14 without channel): %d pulses read (expected 28, channel 0), stimulated ' ...
+        'contractions: auto %d, off %d, auto with a MyoDish pulse %d, on %d (expected 28 / 0 / 0 / 28), stimToPeak %.3f s   %s\n'], ...
+        numel(S.stim.time), nSt(Ba), nSt(Bf), nSt(Bm), nSt(Bo), median(Ba.stimToPeak), passStr(okX));
+catch ME
+    okX = false;
+    fprintf('external trigger pulses: %s   FAILED\n', ME.message);
+end
+delete(mdd); delete(lg);
 end
 
 function s = passStr(pass)

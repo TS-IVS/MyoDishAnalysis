@@ -77,12 +77,18 @@ def analyze_channel(S, channel, range_=None, opts=None):
     # ------------------------------------------------------------------ stimuli
     stimCh = opts.stimChannel
     stim_ch_all = np.asarray(S.stim.channel)
+    isMD = stim_ch_all > 0  # MyoDish stimulus pulses (0 = external trigger pulse)
     if stimCh is None:
         stimCh = channel
         # files with fewer than 8 data channels (single channel mode): the data rows are numbered 1..n, the stimulus
         # pulses keep the physical channel number. If there are no pulses for this number: the stimulated channel.
-        if len(dataChannels) < 8 and stim_ch_all.size and not np.any(stim_ch_all == channel):
-            stimCh = int(mode(stim_ch_all))
+        if len(dataChannels) < 8 and isMD.any() and not np.any(stim_ch_all == channel):
+            stimCh = int(mode(stim_ch_all[isMD]))
+    # external trigger pulses (external stimulator at the external controller unit: one chamber, no channel number)
+    # as stimuli: 'on', or 'auto' if the window has trigger pulses but no MyoDish pulses (2026-10-08)
+    xt = opts.get("externalTrigger", "auto")
+    if xt == "on" or (xt == "auto" and not isMD.any() and np.any(stim_ch_all == 0)):
+        stimCh = 0
     ST = np.sort(np.asarray(S.stim.time, dtype=float)[stim_ch_all == stimCh])
     CL = float(np.median(np.diff(ST))) if ST.size > 1 else math.nan
     if not isinstance(opts.maxStimToPeak, str):

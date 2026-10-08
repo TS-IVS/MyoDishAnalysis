@@ -38,6 +38,9 @@ OUTPUT (S, a Struct with the field names of the MATLAB version)
               rockerOn (bool, n), stim (Struct of arrays: time, channel, current, currentReached, external,
               isExtraPulse, rockerOn; one entry per stimulus pulse of any channel)
   Single channel files: force has one row = channel 1, stim.channel keeps the physical channel number.
+  External trigger pulses (status bit 14 without channel / current bits, e.g. an external stimulator at the external
+  controller unit): stim.channel = 0 (before 2026-10-08 channel 8); consecutive samples of such a pulse = one pulse;
+  used as stimuli according to the option externalTrigger (analyze_channel).
 
 TS 2026-10-06 (port of mda_readMdd.m, TS 2026-10-05; rocker state from the log 2026-10-07)
 """
@@ -288,8 +291,13 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False):
         idx = np.flatnonzero((code & 49151) != 0)  # any bit except bit 15 = stimulus pulse
         pc = code[idx]
         ch = ((pc >> 9) & 15).astype(int)  # bits 10-13
+        isTrig = (pc & 16383) == 8192  # bit 14 without channel / current (bits 1-13): external trigger pulse
         ch[ch > 8] -= 8
         ch[ch == 0] = 8
+        ch[isTrig] = 0  # no MyoDish channel
+        if idx.size > 1:  # next sample of the same trigger pulse: one pulse
+            dup = isTrig & np.r_[False, isTrig[:-1]] & np.r_[False, np.diff(idx) == 1]
+            idx, pc, ch = idx[~dup], pc[~dup], ch[~dup]
         S.stim.time = (i0 + idx) / fs
         S.stim.channel = ch
         S.stim.current = (pc & 255).astype(float)  # bits 1-8 [mA]

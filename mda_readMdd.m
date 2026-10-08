@@ -25,6 +25,10 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %   - status channel, bits (1-based): 1-8 stimulus current [mA], 9 current not reached, 10-13 stimulated
 %     channel, 14 external trigger, 15 rocker moving (set in every sample while the rocker moves),
 %     16 extra pulse. A stimulus pulse is a sample with any bit other than bit 15 set.
+%   - external trigger pulses (bit 14 without channel and current bits, e.g. TTL pulses of an external stimulator
+%     connected to the external controller unit, which carries one chamber): stim.channel = 0 (before 2026-10-08
+%     read as channel 8); consecutive samples of such a pulse are one pulse. Whether they are the stimuli of the
+%     analysed channel: option 'externalTrigger' (mda_options, mda_analyzeChannel).
 %   - some setups do not transmit the rocker bit (firmware error). If bit 15 is never set while the log file has
 %     rocker speeds > 0 (tested in up to 5 such periods), or if there is no status channel, the rocker state is
 %     taken from the 'rockerSpeed' entries of the log file (moving while rpm > 0, from 'rockerLogDelay' = 0.27 s
@@ -45,7 +49,7 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %   data:       t (1 x n, s; centre of the averaged raw samples, first raw sample = 0 s), dt,
 %               force (numel(dataChannels) x n, uN), rockerOn (1 x n logical),
 %               stim (struct with fields time, channel, current, currentReached, external, isExtraPulse,
-%               rockerOn; one entry per stimulus pulse of any channel)
+%               rockerOn; one entry per stimulus pulse of any channel; channel 0 = external trigger pulse)
 %   Single channel files: force has one row = channel 1, stim.channel keeps the physical channel number.
 %
 % TS 2026-10-05 (condensed from importMyoDishData, readRecordingInfoFromMyoDishLogFile,
@@ -276,8 +280,14 @@ if S.hasStimChannel && nRaw > 0
     idx = find(bitand(code, uint16(49151)) ~= 0);                 %any bit except bit 15 = stimulus pulse
     pc = code(idx);
     ch = double(bitand(bitshift(pc, -9), uint16(15)));            %bits 10-13
+    isTrig = bitand(pc, uint16(16383)) == uint16(8192);           %bit 14 without channel / current (bits 1-13)
     ch(ch > 8) = ch(ch > 8) - 8;
     ch(ch == 0) = 8;
+    ch(isTrig) = 0;                                               %external trigger pulse (no MyoDish channel)
+    if numel(idx) > 1                                             %next sample of the same trigger pulse: one pulse
+        dup = reshape(isTrig, [], 1) & [false; reshape(isTrig(1:end-1), [], 1)] & [false; diff(idx(:)) == 1];
+        idx = idx(~dup); pc = pc(~dup); ch = ch(~dup);
+    end
     S.stim.time = ((i0 + idx(:) - 1) / fs);
     S.stim.channel = ch(:);
     S.stim.current = double(bitand(pc(:), uint16(255)));          %bits 1-8 [mA]

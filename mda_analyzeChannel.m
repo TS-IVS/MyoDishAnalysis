@@ -12,7 +12,8 @@ function [B, C] = mda_analyzeChannel(S, channel, range, opts)
 %
 %   B  table, one row per contraction (see below)
 %   C  struct: filtered signal (t, f), detection threshold, stimulus times of the channel (stimTimes) and
-%      whether each stimulus was followed by a contraction (stimCaptured), all peaks in S (iPeaks); with the option
+%      whether each stimulus was followed by a contraction (stimCaptured), the stimulus channel used (stimChannel;
+%      0 = external trigger pulses, option 'externalTrigger'), all peaks in S (iPeaks); with the option
 %      'rockerFilter': result of mda_rockerFilter (rockerFilter) and the subtracted artifact (rockerArtifact);
 %      referenceBeat: the reference used for the columns refCorrelation, refRMSDeviation..., refMaxDeviation... ([] = none)
 %   With the option referenceBeat, B also contains every parameter relative to the reference: <parameter>_pctRef
@@ -82,13 +83,21 @@ g = gradient(f) / dt;
 
 % ------------------------------------------------------------------ stimuli
 stimCh = opts.stimChannel;
+isMD = S.stim.channel > 0;                          %MyoDish stimulus pulses (0 = external trigger pulse)
 if isempty(stimCh)
     stimCh = channel;
     % files with fewer than 8 data channels (single channel mode): the data rows are numbered 1..n, the stimulus
     % pulses keep the physical channel number. If there are no pulses for this number: the stimulated channel.
-    if numel(S.dataChannels) < 8 && ~isempty(S.stim.channel) && ~any(S.stim.channel == channel)
-        stimCh = mode(S.stim.channel);
+    if numel(S.dataChannels) < 8 && any(isMD) && ~any(S.stim.channel == channel)
+        stimCh = mode(S.stim.channel(isMD));
     end
+end
+% external trigger pulses (external stimulator at the external controller unit: one chamber, no channel number) as
+% stimuli: 'on', or 'auto' if the window has trigger pulses but no MyoDish pulses (2026-10-08)
+xt = 'auto';
+if isfield(opts, 'externalTrigger'), xt = opts.externalTrigger; end
+if strcmp(xt, 'on') || (strcmp(xt, 'auto') && ~any(isMD) && any(S.stim.channel == 0))
+    stimCh = 0;
 end
 ST = sort(S.stim.time(S.stim.channel == stimCh));
 CL = nan;

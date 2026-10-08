@@ -2,7 +2,8 @@
 
     mda FILE.mdd [-c 1 6 8] [--from 600 3000] [--to 660 3060] [--labels baseline drug] [-o results.xlsx]
                   [--rocker stopped] [--beats stimulated] [--threshold 300 ...] [--zero-force z1 z2 ...]
-                  [--rocker-filter] [--metadata labels.csv] [--reference ref.mat] [--set name=value ...]
+                  [--rocker-filter] [--external-trigger auto|on|off] [--metadata labels.csv] [--reference ref.mat]
+                  [--set name=value ...]
                   [--protocol FFR | RP | ST | PRP | PD | rockerSpeed | all | n ...] [--group-by QUANTITY]
                   [--list-protocols] [--show-figures] [--quiet]
 
@@ -61,6 +62,8 @@ def main(argv=None):
                          "default auto")
     ap.add_argument("--zero-force", type=float, nargs="+", help="zero force (uN), one value or one per channel")
     ap.add_argument("--rocker-filter", action="store_true", help="remove the periodic rocker artifact")
+    ap.add_argument("--external-trigger", choices=["auto", "on", "off"],
+                    help="external trigger pulses of the status channel as stimuli (external stimulator); default auto")
     ap.add_argument("--reference", help="reference beat(s) (.mat saved by the GUI or MATLAB) for the comparison")
     ap.add_argument("--protocol", nargs="+", help="stimulation protocol(s) of the log file instead of --from/--to: type "
                     "(FFR, RP, ST, PRP, PD, rockerSpeed), 'all', or numbers of --list-protocols (0-based)")
@@ -95,6 +98,8 @@ def main(argv=None):
         kw["zeroForce"] = a.zero_force
     if a.rocker_filter:
         kw["rockerFilter"] = True
+    if a.external_trigger:
+        kw["externalTrigger"] = a.external_trigger
     if a.reference:
         from .reference_beat import load_reference
         kw["referenceBeat"] = load_reference(a.reference)

@@ -59,6 +59,14 @@ MATLAB and Python versions have the same version number and give the same result
     texts, title, axis labels and legend position; **Edit figure ...** (MATLAB plot tools / matplotlib figure
     options); export with SEM, min and max.
 
+- External trigger pulses as stimuli (2026-10-08, MATLAB and Python): pulses of the status channel with bit 14 and
+  without channel / current bits (external stimulator at the external controller unit, one chamber) are read as
+  `stim.channel = 0` (one pulse also if 2 samples long) and are the stimuli of the analysed channel with the new option
+  `externalTrigger` (`'auto'` default: if the window has no MyoDish pulses; `'on'`, `'off'`; command line
+  `--external-trigger`; GUI list *stimuli: auto / MyoDish / ext. trigger*). Stimulus plot, export and EP alignment
+  (`mddChannel` 0) included. Before, these pulses were read as channel 8 and the contractions of the slice (in
+  channel 1) were all `unpaced`. Self tests with a temporary .mdd file.
+
 ### Fixed
 - 12-hour time stamps (2026-10-08): MyoDish software 2.0.7717–2.0.7769 (builds of 16.02.–09.04.2021; one setup used
   2.0.7769 until 2024) wrote the system time of the log file with a 12-hour clock and without AM/PM (17:04 as 05:04).

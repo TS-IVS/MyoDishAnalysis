@@ -39,6 +39,10 @@ STIMULUS ASSIGNMENT
   maxStimToPeak    'auto' (default: min(stimulus interval, 1 s); 0.9 s if unknown) or a number [s]
   stimChannel      stimulus channel of the analysed data channel (None = same number; single channel files: the
                    channel that was stimulated)
+  externalTrigger  external trigger pulses of the status channel (bit 14 without channel / current, e.g. an external
+                   stimulator at the external controller unit, which carries one chamber) as stimuli: 'auto' (default:
+                   if the window has external trigger pulses but no MyoDish stimulus pulses), 'on' (always; for every
+                   analysed channel, MyoDish pulses ignored), 'off' (never)
 
 DIASTOLIC FORCE
   zeroForce        sensor signal without load [uN] for diastolicForce = F_dia - zeroForce (None = 'Offset' entry of
@@ -88,6 +92,7 @@ _DEFAULTS = dict(
     minStimToPeak=0.025,
     maxStimToPeak="auto",
     stimChannel=None,
+    externalTrigger="auto",
     zeroForce=None,
     samplingRate=None,
     nChannels=None,
@@ -149,6 +154,9 @@ def options(base=None, **changes):
     if isinstance(opts.maxStimToPeak, str):
         opts.maxStimToPeak = "auto"
     opts.downsampling = max(1, mround(float(opts.downsampling)))
+    opts.externalTrigger = str(opts.externalTrigger).lower()
+    if opts.externalTrigger not in ("auto", "on", "off"):
+        raise ValueError("options: 'externalTrigger' must be 'auto', 'on' or 'off'.")
     opts.rockerSource = str(opts.rockerSource).lower()
     if opts.rockerSource not in ("auto", "status", "log"):
         raise ValueError("options: 'rockerSource' must be 'auto', 'status' or 'log'.")

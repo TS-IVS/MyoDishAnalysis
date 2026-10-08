@@ -66,6 +66,9 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    Red = selected contractions, grey = excluded by the filters, x = excluded by you,
    blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.
    Panel *Cursor in the force plot*: *drag = select time range* or *click = exclude / include contraction*.
+   List *stimuli* (next to *only stimulated contractions*): *auto* / *MyoDish* / *ext. trigger* — stimulus times from
+   the MyoDish pulses of the channel or from the external trigger pulses (external stimulator, see "External
+   trigger").
    Mouse wheel: zoom the time axis (shift + wheel: move; double-click: whole loaded window). The figure toolbar
    zoom/pan also works (switch the tool off again to use the mouse modes). Time axis in h:mm:ss or m:ss (decimals
    when zoomed in below ~10 s); checkbox *time axis: 0 = start of the loaded window* shows the time relative to the
@@ -148,7 +151,8 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
 * **Stimuli**: LabChart: |stimulation − median| > max(20 × noise SD, 5 % of the largest pulse), onset of each pulse
   (pulses < 10 ms apart = one). The fixed 2 V threshold of `importSharpElectrodeData` missed the pulses ≤ 14 mA
   (amplitude ≈ 0.125 V/mA, saturated ≥ 40 mA in our recordings) and counts biphasic pulses twice.
-  `.mdd`: stimulus pulses of the status channel; every channel with stimuli is tried (GUI: the shown channel first).
+  `.mdd`: stimulus pulses of the status channel; every channel with stimuli is tried (GUI: the shown channel first),
+  also the external trigger pulses (external stimulator, "ext. trigger").
 * **Offset**: all differences `.mdd` stimulus − LabChart stimulus are counted (bins of 10 ms); every frequent
   difference is refined by iterative matching (tolerance 10 ms) with a straight line (**clock drift**), and the
   one with the most matched stimuli wins. With (nearly) constant pacing, shifts by one stimulus interval match
@@ -235,7 +239,8 @@ Own additional fields are kept as extra columns.
 * Options: `'output','results.xlsx'` (or `.csv`), `'metadata',m` (labels per channel, see above),
   `'rocker','stopped'`, `'beats','stimulated'`, `'threshold',300` (µN), `'zeroForce',[z1 z2 ...]`,
   `'rockerFilter',true` (see "Rocker artifact"; result per channel in `info.rockerFilter` and the sheet
-  `rockerFilter`), `'showFigures',true`, `'quiet',true`; all others see `help mda_options`.
+  `rockerFilter`), `'externalTrigger','auto'|'on'|'off'` (see "External trigger"), `'showFigures',true`,
+  `'quiet',true`; all others see `help mda_options`.
 * `contractions`: one row per detected contraction; `summary`: one row per channel and range
   (counts incl. nExtraBeats, nMissedBeats, extraBeats_percent, missedBeats_percent; mean, SD and n of all parameters
   of the included contractions).
@@ -406,6 +411,20 @@ stimuli in this channel), `t_stim`, `stimToPeak`, `rockerMoving` (rocker moved a
   (n = number of stimuli) or, without stimuli, of the prominences above the largest gap between the sorted
   prominences. The threshold is computed per channel from the analysed window; check it in the GUI or with
   `'showFigures',true`, and set it manually if necessary (`'threshold',µN`).
+
+## External trigger (external stimulator; option `'externalTrigger'`, GUI list *stimuli*)
+With the external controller unit (one chamber) the slice can be paced by an external stimulator whose TTL pulses
+are fed into the MyoDish: the status channel then has bit 14 (external trigger) set without channel and current bits
+(e.g. a sharp-electrode setup with its own stimulator: 1 Hz, 4 Hz and S1-S2 intervals). These pulses are read as
+`stim.channel = 0` (before 2026-10-08 they were read as channel 8, so the contractions of the slice in channel 1 were
+all `unpaced`); a pulse of 2 samples (at USB reconnects) is one pulse. `'externalTrigger'`: `'auto'` (default) = the
+external trigger pulses are the stimuli of the analysed channel if the window has no MyoDish stimulus pulses;
+`'on'` = always (any data channel; MyoDish pulses ignored); `'off'` = never. GUI: list next to *only stimulated
+contractions* (*stimuli: auto / MyoDish / ext. trigger*); the stimulus plot then shows the trigger pulses ("ext") and
+their intervals, and the EP alignment also tries the trigger pulses (`mddChannel` 0). Since the external controller
+unit carries one chamber, any channel with a signal belongs to it: analyse the channel with the slice.
+Test recording (rabbit LV, 2.6 h, 8,691 trigger pulses): with the trigger pulses 30 / 30 contractions stimulated
+at 0.5 Hz (stimulus → peak 99 ms) and 196 / 196 at 4 Hz (91 ms); before, all `unpaced`.
 
 ## Rocker artifact (`'rockerFilter',true`, GUI checkbox; `mda_rockerFilter`)
 While the rocker moves, the dish tilts periodically and each sensor shows an additive periodic signal at the rocker

@@ -372,6 +372,13 @@ def test_gui_threshold_keys_overlay():
         w.on_channel()
         th = w.thr_of([1, 2])
         assert w.C.threshold == 400 and w.eThr.text() == "400" and th[0] == 400 and math.isnan(th[1])
+        # stimuli: external trigger pulses (none in this file) / MyoDish / auto
+        w.cXT.setCurrentIndex(2)
+        w.on_filter()
+        assert w.opts.externalTrigger == "on" and w.C.stimChannel == 0 and w.C.stimTimes.size == 0
+        w.cXT.setCurrentIndex(0)
+        w.on_filter()
+        assert w.opts.externalTrigger == "auto" and w.C.stimChannel == 1 and w.C.stimTimes.size > 0
         # arrow keys: move (loaded window follows), extend, zoom
         w.on_key("right", False)
         assert (w.S.fromSeconds, w.S.toSeconds) == (30, 90)

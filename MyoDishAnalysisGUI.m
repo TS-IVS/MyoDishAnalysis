@@ -31,6 +31,9 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %    contraction over time. 'Export this channel' writes all contractions of the range (column 'included')
 %    and the summary to .xlsx or .csv. 'All channels -> file' analyses the range in all channels with the
 %    same settings (without your manual exclusions). The detection threshold is set per channel (auto or manual).
+%    Stimuli ('stimuli: auto / MyoDish / ext. trigger'): MyoDish pulses of the channel or the external trigger pulses
+%    of the status channel (external stimulator at the external controller unit, one chamber; auto = trigger pulses
+%    if the window has no MyoDish pulses).
 %    'Overlay contractions': mean beat of the selected contractions (aligned at the stimulus or the peak) or the time
 %    course of the range (t = 0 at the first stimulus); other channels of the same range by checkboxes; colour, line
 %    width, line style and SD / SEM / range band per group; editable title, axis labels and legend; 'Edit figure ...'
@@ -211,7 +214,11 @@ hZero = uicontrol(pnl, dflt{:}, 'Style', 'edit', 'String', '', 'Position', [0.52
     'TooltipString', 'empty = Offset entry of the log file');
 hZeroSrc = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.76 0.75 0.23 0.03], 'FontSize', 8);
 hRocker = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'only contractions with rocker at rest', 'Position', [0.03 0.715 0.94 0.035], 'Callback', @onFilter);
-hStim = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'only stimulated contractions', 'Position', [0.03 0.68 0.94 0.035], 'Callback', @onFilter);
+hStim = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'only stimulated contractions', 'Position', [0.03 0.68 0.585 0.035], 'Callback', @onFilter);
+hXT = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'stimuli: auto', 'stimuli: MyoDish', 'stimuli: ext. trigger'}, ...
+    'Position', [0.615 0.682 0.355 0.035], 'Callback', @onFilter, 'TooltipString', ['stimulus times: MyoDish pulses of the channel, or the ' ...
+    'external trigger pulses of the status channel (external stimulator at the external controller unit: one chamber, any data ' ...
+    'channel). auto = external trigger pulses if the window has no MyoDish pulses']);
 hRF = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'remove rocker artifact (periodic)', 'Position', [0.03 0.645 0.94 0.033], ...
     'Callback', @onRockerFilter, 'TooltipString', ['subtracts the periodic signal of the rocker movement (estimated per channel ' ...
     'between the contractions, +-60 s around the window); light grey in the force plot = signal before. See mda_rockerFilter']);
@@ -413,6 +420,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function onFilter(~, ~)
         if hRocker.Value, opts.rocker = 'stopped'; else, opts.rocker = 'any'; end
         if hStim.Value, opts.beats = 'stimulated'; else, opts.beats = 'all'; end
+        xts = {'auto', 'off', 'on'}; opts.externalTrigger = xts{hXT.Value};
         if ~isempty(S), analyze(false); end
     end
 
@@ -1660,11 +1668,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             case 'stimuli'
                 [tS, cur, ok, ex, iv] = stimData();
                 I = tS >= xl(1) & tS <= xl(2);
+                if C.stimChannel == 0, cur(:) = nan; end    %external trigger pulses: no current
                 T = table(tS(I), cur(I), ok(I), ex(I), iv(I), 'VariableNames', ...
                     {'t_file_s', 'current_mA', 'currentReached', 'extraPulse', 'intervalToPreviousPulse_ms'});
                 if relTime, T.t_window_s = T.t_file_s - S.fromSeconds; end
                 if ~isnan(H.recordingStart), T.clockTime = clk(T.t_file_s); end
-                names{end+1} = sprintf('stimuli_ch%d', C.stimChannel); tabs{end+1} = T;
+                if C.stimChannel == 0, nm = 'stimuli_extTrigger'; else, nm = sprintf('stimuli_ch%d', C.stimChannel); end
+                names{end+1} = nm; tabs{end+1} = T;
             case 'parameter'
                 if isempty(B), status('No contractions.'); return; end
                 k = hPar.Value;
@@ -2659,9 +2669,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         hTable.ColumnWidth = cw;
         hTable.Data = d;
+        if C.stimChannel == 0, sSrc = ' (ext. trigger)'; else, sSrc = ''; end
         txt = sprintf(['Range %.2f - %.2f s (%.1f s)\n%d of %d contractions selected (%d stimulated, %d extra)\n' ...
-            '%d stimuli (%.2f Hz), %d without contraction\n%s'], range(1), range(2), diff(range), Sm.nContractions, Sm.nDetected, ...
-            Sm.nStimulated, Sm.nExtraBeats, Sm.nStimuli, Sm.stimFrequency, Sm.nMissedBeats, labelLine(Sm));
+            '%d stimuli%s (%.2f Hz), %d without contraction\n%s'], range(1), range(2), diff(range), Sm.nContractions, Sm.nDetected, ...
+            Sm.nStimulated, Sm.nExtraBeats, Sm.nStimuli, sSrc, Sm.stimFrequency, Sm.nMissedBeats, labelLine(Sm));
         %(the String of a text control reads back as a padded char matrix: append before assigning, not to hCounts.String)
         if ~isempty(C.rockerFilter), txt = sprintf('%s\n%s', txt, rockerLine(C.rockerFilter)); end
         if isfield(C, 'referenceBeat') && ~isempty(C.referenceBeat)
@@ -2894,8 +2905,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         title(axT, '');
         if isempty(C) || isempty(S), return; end
         [tS, cur, ok, ex, iv] = stimData();
+        isExt = C.stimChannel == 0;                         %external trigger pulses: bars of height 1, no current
         if isempty(tS)
-            title(axT, sprintf('no stimulus pulses on channel %d', C.stimChannel), 'FontWeight', 'normal', 'FontSize', 8);
+            if isExt, msg = 'no external trigger pulses'; else, msg = sprintf('no stimulus pulses on channel %d', C.stimChannel); end
+            title(axT, msg, 'FontWeight', 'normal', 'FontSize', 8);
             return;
         end
         for k = 1:2
@@ -2906,7 +2919,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         if any(~ok), plot(axT, tS(~ok), cur(~ok), 'x', 'Color', [0.8 0 0.8], 'MarkerSize', 5, 'HitTest', 'off'); end
         ylim(axT, [0 max(1, max(cur)) * 1.35]);
-        ylabel(axT, 'mA');
+        if isExt, ylabel(axT, 'ext.'); set(axT, 'YTick', []); else, ylabel(axT, 'mA'); set(axT, 'YTickMode', 'auto'); end
         axT.YAxis(1).Exponent = 0;
         yyaxis(axT, 'right');
         plot(axT, tS, iv, '.', 'Color', [0 0.3 1], 'MarkerSize', 9, 'HitTest', 'off');
@@ -2915,8 +2928,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         ylabel(axT, 'ms');
         axT.YAxis(2).Exponent = 0;
         yyaxis(axT, 'left');
-        title(axT, sprintf(['stimuli channel %d: current (red bars, mA; green = extra pulse, x = current not reached), ' ...
-            'interval to the previous pulse (blue, ms)'], C.stimChannel), 'FontWeight', 'normal', 'FontSize', 8);
+        if isExt
+            title(axT, 'external trigger pulses (external stimulator; red bars), interval to the previous pulse (blue, ms)', ...
+                'FontWeight', 'normal', 'FontSize', 8);
+        else
+            title(axT, sprintf(['stimuli channel %d: current (red bars, mA; green = extra pulse, x = current not reached), ' ...
+                'interval to the previous pulse (blue, ms)'], C.stimChannel), 'FontWeight', 'normal', 'FontSize', 8);
+        end
     end
 
     function [tS, cur, ok, ex, iv] = stimData()
@@ -2924,6 +2942,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         J = find(S.stim.channel == C.stimChannel);
         [tS, o] = sort(S.stim.time(J)); J = J(o); tS = tS(:);
         cur = double(S.stim.current(J)); cur = cur(:);
+        if C.stimChannel == 0, cur = ones(size(cur)); end   %external trigger pulses: no current
         ok = S.stim.currentReached(J); ok = ok(:);
         ex = S.stim.isExtraPulse(J); ex = ex(:);
         iv = [nan; diff(tS)] * 1000;
@@ -2945,6 +2964,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if isempty(v) || numel(v) > 40, return; end
         yyaxis(axT, 'left'); ylL = ylim(axT);
         lab = arrayfun(@(k) sprintf('%g', cur(k)), v, 'UniformOutput', false);
+        if C.stimChannel == 0, lab(:) = {'ext'}; end
         lab(~ok(v)) = strcat(lab(~ok(v)), ' ?!');
         h = text(axT, tS(v), min(cur(v) + 0.04 * diff(ylL), ylL(2)), lab, 'Color', [0.85 0 0], ...
             'FontSize', 7, 'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'HitTest', 'off');
@@ -3535,7 +3555,7 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       '', ...
       'Labels ...: labels per channel (setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, treatment, concentration, concentrationUnit, daysInCulture, cultureStart, comment, analyst) - columns of the exported tables; saved as <name>_labels.csv next to the .mdd file and loaded automatically.', ...
       '', ...
-      'Detection: peaks with a prominence >= threshold (auto: 0.3 x typical amplitude, >= 30 uN; per channel: auto or a manual value, kept when you switch channels and used for All channels, Protocols and Trend). A contraction within 25 ms ... min(stimulus interval, 1 s) after a stimulus of the channel is "stimulated", otherwise "extra".', ...
+      'Detection: peaks with a prominence >= threshold (auto: 0.3 x typical amplitude, >= 30 uN; per channel: auto or a manual value, kept when you switch channels and used for All channels, Protocols and Trend). A contraction within 25 ms ... min(stimulus interval, 1 s) after a stimulus of the channel is "stimulated", otherwise "extra". Stimuli (list next to "only stimulated contractions"): the MyoDish pulses of the channel, or the external trigger pulses of the status channel (external stimulator at the external controller unit, which carries one chamber: any data channel); auto = external trigger pulses if the loaded window has no MyoDish pulses.', ...
       '', ...
       'Reference beat (right click in the force plot): the mean shape (+- SD) of the selected contractions becomes the reference of the channel. Every contraction is compared with it, aligned at the stimulus (default; a changed latency counts, contractions without stimulus at the 50 % upstroke) or at the 50 % upstroke (shape only; reference window): refCorrelation (shape correlation), refRMSDeviation_SD (overall) and refMaxDeviation_SD (largest local deviation) in SD of the reference, each also normalized (...Norm: both scaled to amplitude 1 = shape only). Deviating contractions (> x SD) are circled magenta, counted in the table and can be excluded (reference window). Save/load a reference to apply it to other files. Every parameter is also given relative to the mean of the reference contractions (column %ref in the table; <parameter>_pctRef in tables, lower plot, trend and exports; diastolic force: difference in uN, _dRef).', ...
       '', ...

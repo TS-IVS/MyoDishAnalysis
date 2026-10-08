@@ -38,7 +38,8 @@ function EP = mda_readEPRecording(epFile, H, opts, varargin)
 %                    last channel)
 %   'block'          LabChart block (default: the block that overlaps the .mdd recording by the clock times, else 1)
 %   'mddChannel'     MyoDish channel whose stimuli are matched. Default: every channel with stimuli is tried and the
-%                    one with the most matches is used; this channel is preferred on ties.
+%                    one with the most matches is used; this channel is preferred on ties. 0 = the external trigger
+%                    pulses of the .mdd file (external stimulator; tried like a channel)
 %   'stimThreshold'  'auto' (default: max(20 x noise SD, 5 % of the largest pulse), after subtraction of the median)
 %                    or a number (units of the stimulation channel)
 %   'timeOffset'     t0 or [t0 slope]: no matching, t_mdd = t0 + slope * t_LabChart (slope default 1; the clocks of
@@ -190,6 +191,8 @@ if A.nMdd == 0
     info{end+1} = sprintf('%d LabChart stimuli, no .mdd stimuli', numel(tA));
 elseif isnan(A.mddChannel)
     info{end+1} = sprintf('%d of %d stimuli matched (.mdd: %d)', A.nMatched, numel(tA), A.nMdd);
+elseif A.mddChannel == 0                                        %external trigger pulses of the .mdd file
+    info{end+1} = sprintf('%d of %d stimuli matched (ext. trigger: %d)', A.nMatched, numel(tA), A.nMdd);
 else
     info{end+1} = sprintf('%d of %d stimuli matched (ch %d: %d)', A.nMatched, numel(tA), A.mddChannel, A.nMdd);
 end
