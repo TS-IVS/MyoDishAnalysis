@@ -301,8 +301,10 @@ def _scan_and_analyse(raw, res, o, aopts):
 
     workers = int(o["workers"] or 1)
     if workers > 1 and len(jobs) > 1:
+        import multiprocessing
         from concurrent.futures import ProcessPoolExecutor, as_completed
-        with ProcessPoolExecutor(max_workers=workers) as ex:
+        # 'spawn' on all systems (default on macOS and Windows; fork in a multi-threaded process can deadlock)
+        with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn")) as ex:
             futs = [ex.submit(_process, j) for j in jobs]
             for fu in as_completed(futs):
                 store(*fu.result())
