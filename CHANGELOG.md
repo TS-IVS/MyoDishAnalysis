@@ -71,6 +71,8 @@ MATLAB and Python versions have the same version number and give the same result
   Archived logs 2020–2026 (16,205): 2,043 with 12-hour time stamps, 1,191 corrected; in 483 the recording
   start was 12 h off (clock time of the contractions, days in culture, watcher bins). MATLAB and Python identical on
   2,640 logs. Tests `mda_testClockTime.m`, `py/tests/test_clock_time.py`.
+- Python GUI extra: PySide6 6.12.0 is excluded for Python 3.10 / 3.11 (crash at interpreter exit, `free(): invalid
+  size`, after the plots were redrawn; 6.11.2 and Python 3.12 / 3.13 are fine). Found by the CI job ubuntu / 3.10.
 
 ### Changed
 - `mda_logEntries`: clock time from the integer milliseconds of the log file (was seconds + ms / 1000 as a float, so
