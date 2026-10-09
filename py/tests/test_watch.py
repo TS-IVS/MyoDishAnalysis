@@ -68,6 +68,16 @@ def test_first_and_second_pass(raw, tmp_path):
     assert os.path.isfile(os.path.join(res, "A", "example9_ratVentricle_events.csv"))
     assert not os.path.isfile(os.path.join(res, "A", "example9_ratVentricle_protocols_summary.csv"))  # no protocols
     assert not os.path.isfile(os.path.join(res, W.LOCK_NAME))
+    # overview (1-min medians) and slice register
+    O = pd.read_csv(os.path.join(res, "A", "example9_ratVentricle_overview.csv"))
+    C = pd.read_csv(os.path.join(res, "A", "example9_ratVentricle_contractions.csv"))
+    assert len(O) == 12 and O["nBeats"].sum() == len(C) == 333 and list(O["t_from"][:2]) == [0, 60]
+    assert O["window"][0] == "2000-01-01 15:48:46" and abs(O["amplitude"][0] - 755.866666666667) < 1e-6
+    R = pd.read_csv(os.path.join(res, "mda_slices.csv"), keep_default_na=False)
+    a = R[R["experiment"] == "A"].iloc[0]
+    assert len(R) == 9 and a["endStatus"] == "beating at end of data" and a["nBeats"] == 333 and a["species"] == "rat"
+    assert (R.loc[R["experiment"] == "B", "endStatus"] == "protocols only").all() and "slice register: 9 slices" in report
+    assert os.path.isfile(os.path.join(res, "A", "A_slices.csv")) and os.path.isfile(os.path.join(res, "B", "B_slices.csv"))
     X2, report2 = W.watch(raw, res, quiet=True, bin_minutes=5)
     assert report2 == "" and list(X2["analyzed"]) == list(X["analyzed"])
 
@@ -171,16 +181,19 @@ def test_command_line(raw, tmp_path):
     X = W.read_index(res)
     assert (X["status"] == "ok").all()
     assert X.loc[0, "options"] == ("binminutes=5; compress=1; contractions=thinned; events=1; gaps=1; "
-                                   "includeprotocols=0; protocolmarginseconds=0; protocols=0; rockerfilter=1; "
-                                   "thinfactor=5; thinmode=median")
+                                   "includeprotocols=0; overviewseconds=60; protocolmarginseconds=0; protocols=0; "
+                                   "rockerfilter=1; thinfactor=5; thinmode=median")
     assert os.path.isfile(os.path.join(res, "A", "example9_ratVentricle_contractions.csv.gz"))
+    O = pd.read_csv(os.path.join(res, "A", "example9_ratVentricle_overview.csv"))
+    assert len(O) and {"window", "t_from", "t_to", "nBeats", "beatsPerMinute", "amplitude"} <= set(O.columns)
+    assert os.path.isfile(os.path.join(res, "mda_slices.csv"))
 
 
 def test_helpers():
     assert W.parse_date("2026-10-08") == W.parse_date("08.10.2026") == W.parse_date("261008")
     assert W.options_text({"Threshold": [300, float("nan")], "rocker": "stopped", "rockerFilter": True}) == \
-        ("binminutes=60; compress=0; contractions=all; events=1; gaps=1; includeprotocols=0; protocolmarginseconds=0; "
-         "protocols=1; rocker=stopped; rockerfilter=1; threshold=[300 NaN]")
+        ("binminutes=60; compress=0; contractions=all; events=1; gaps=1; includeprotocols=0; overviewseconds=60; "
+         "protocolmarginseconds=0; protocols=1; rocker=stopped; rockerfilter=1; threshold=[300 NaN]")
     assert W.event_category("comment", "Started parallel recording: x") == "recording"
     assert W.event_category("comment", "start FFR protocol") == "protocol"
     assert W.event_category("comment", "FFR protocol ended") == "protocol"

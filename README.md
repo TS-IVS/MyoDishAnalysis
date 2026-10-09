@@ -325,8 +325,16 @@ its results as well.
     `'thinFactor'` successive contractions of the same type and rocker state, `'thinMode','median'`; extra beats and,
     with `'includeProtocols'`, the contractions in the protocols are always complete) or `'none'`. Columns
     `sampledEvery` (number of contractions represented by the row) and `sampleMode` (`singleBeat` / `median`).
-    `'compress',true`: `<name>_contractions.csv.gz` (pandas reads it directly; MATLAB: `gunzip` first). Trends from
-    the summary (all contractions): every n-th contraction can alias the rocker modulation of the amplitude.
+    `'compress',true`: `<name>_contractions.csv.gz` (a double click unpacks it on macOS and Windows; pandas reads it
+    directly; MATLAB: `gunzip` first; one file per recording). Trends from the summary (all contractions): every n-th
+    contraction can alias the rocker modulation of the amplitude.
+  * `<name>_overview.csv` (`'overviewSeconds'`, default 60; 0 = none): medians of **all** contractions per 1-min
+    window (file time, split at the ranges), channel, beat type, rocker state and inclusion, with `window` (clock time
+    of its start), `t_from`, `t_to`, `nBeats`, `beatsPerMinute` and the median of every parameter. About 1/30 (0.5 Hz)
+    to 1/60 (1 Hz) of the rows of all contractions (8-h recording, 7 channels: 242,270 contractions, 99 MB →
+    6,949 rows, 2.8 MB); opens in Excel. Medians of fixed windows instead of blocks of n successive contractions:
+    where stimulated and extra beats alternate (spontaneous rate above the pacing rate), blocks of one beat type stay
+    short. For an archive: all contractions compressed (`'compress',true`) and the overview uncompressed.
   * `<name>_protocols_*.csv`: every contraction in the protocols, summary per protocol, channel and group,
     `protocolResults` (if the log file contains protocols).
   * `<name>_events.csv` (`'events',true`): all entries of the log file with clock time, time in the file, channel,
@@ -334,17 +342,21 @@ its results as well.
   * `<name>_gaps.csv` (`'gaps',true`, default): periods without force signal (`mda_signalGaps` / `signal_gaps`, see
     below) with clock times and the comments of the log file within 5 min of their start or end. The summary gets
     the columns `noSignal_s` (s without signal in the range) and `nChamberOut` (chambers taken out in the range).
-  * `<name>_channels.csv` (`'gaps',true`): one row per channel with the status at the end of the recording
-    (`beating`, `not beating` = no contraction in the last 30 min with signal, `removed` = chamber taken out and not
-    put back, `signal lost` = technical, `no slice`), `beatingAtEnd`, s with and without signal, chambers taken out,
+  * `<name>_channels.csv` (`'gaps',true`): one row per channel with recording, `recordingStart`, `fileLength_s` and
+    the status at the end of the recording (`beating`, `not beating` = no contraction in the last 30 min with signal
+    outside the stimulation protocols, `protocols only` = no time outside the protocols, not analysed, `removed` =
+    chamber taken out and not put back, `signal lost` = technical, `no slice`), `beatingAtEnd`, s with and without
+    signal, chambers taken out,
     technical failures, number of contractions, last contraction (time in the file, clock time, median amplitude of
     the last 10 included contractions and in % of the 95th percentile of the recording), `idDate` (date of the
     experiment ID in the file name: a part of letters + 6 digits yymmdd, e.g. `ABC000101`) and `daysSinceIdDate` at
-    the last contraction (or the end of the signal), `daysInCulture` (labels) and `endComments` (comments of the
-    channel about discarded, removed, not beating, fixed, frozen, … slices). One row per recording and channel makes
-    the slices that died or were taken out countable over an experiment, with day and last amplitude.
+    the last contraction (or the end of the signal), `daysInCulture`, the labels `setupID`, `sliceID`, `species`,
+    `sampleID`, `cultureStart` and `endComments` (comments of the channel about discarded, removed, not beating,
+    fixed, frozen, … slices).
   * `_parameters`, `_info`, `_labels` (`_rockerFilter`: rocker artifact per channel and 30-min chunk). Labels per
     channel: `<name>_labels.csv` next to the `.mdd` file (saved by the GUI).
+* **Slice register** (`'register',true`, default; `mda_sliceRegister` / `slice_register`, see below):
+  `<experiment>/<experiment>_slices.csv` and `mda_slices.csv` (all experiments), updated after every pass.
 * **Index** `mda_index.csv` (one row per recording; the same file for MATLAB and Python): size and time (UTC) of the
   `.mdd` file, size of the log file, status (`ok`, `error`, `running`, `noLog`), version, implementation, fingerprint
   of the core functions, options, analysis time, number of contractions, message. With `'reanalyze','outdated'`
@@ -363,7 +375,8 @@ its results as well.
   after 12 h (or delete it).
 * **Daily**: the scheduler of the operating system (cron / launchd / Windows task scheduler) with `mda-watch ...` or
   `matlab -batch "MyoDishAnalysisWatch(...)"`; or `'interval', 24` (one pass every 24 h, MATLAB stays busy).
-* Further options: `'filter'` (regular expression on the relative path), `'maxFiles'`, `'protocols',false`,
+* Further options: `'newSliceHours'` (slice register, default 2), `'filter'` (regular expression on the relative
+  path), `'maxFiles'`, `'protocols',false`,
   `'quiet',true`; all other name/value pairs are analysis options of `MyoDishAnalysis` for all recordings (e.g.
   `'rockerFilter',true`: rocker artifact removed in chunks of 30 min with 60 s context, result per chunk in
   `_rockerFilter.csv`). Python only: `--workers n` analyses n recordings in parallel (archives).
@@ -396,6 +409,33 @@ columns: `duration`, `nSimultaneous`, `spread` (s between the first and the last
 of 21 technical events (2–4 channels) had a spread ≤ 0.01 s (max. 0.42 s, 3 channels); of 606 chambers taken out one
 after the other, 2 followed within 1 s (0.36 and 0.6 s: both hands, end of the experiment), none within 1–2.3 s
 (median 5.3 s).
+
+## Slice register (`mda_sliceRegister`; Python `slice_register`)
+```matlab
+R = mda_sliceRegister('/data/myodish/results')     % all experiments; also written by the watcher after each pass
+```
+One row per **slice**: a channel of a setup from putting the slice in until it was taken out, the signal was lost or
+the data end. Built from the watcher results (`_channels.csv`, `_gaps.csv`, `_overview.csv`), written to
+`<experiment>/<experiment>_slices.csv` (experiment = subfolder of the results and raw folder) and `mda_slices.csv`
+(all experiments). The recordings of one setup (series: file name up to its number, e.g. `rigA_sampleX_0`,
+`rigA_sampleX_1`, …) are followed channel by channel in the order of their start. A **new slice** begins with the first
+signal of a channel, after a chamber-out period with a comment such as *new slice*, *replaced*, *exchanged*,
+*getauscht*, when the label `sliceID` changes, and after a recording without signal in this channel or ≥ 2 h without
+signal (`'newSliceHours'`) – unless a comment within 5 min of the start or end of that period says the slice was put
+back (*moved back*, *put back*, *reinserted*, *wieder eingesetzt*; counted in `nPutBack`). Shorter chamber-out periods (medium change, looking at the slice) belong to the slice; technical
+periods (board group, controller, saturated) do not end it. Which slice was put back is not in the signal: a slice
+exchanged within 2 h without comment or label stays one row (documentation by the control software will close this
+gap).
+
+Columns: `experiment`, `series`, `channel`, `slice`, labels (`setupID`, `sampleID`, `species`, `sliceID`), `idDate`,
+`startTime`, `endTime`, `daysInSetup`, `startReason`, `insertedLater` (not with the first signal of the series: possibly
+another preparation, another species), `endStatus` (`removed`, `beating at end of data`, `not beating at end of data`,
+`signal lost`, `protocols only`, `replaced (other sliceID)`), `beatingAtEnd`, `lastBeat`, `lastAmplitude` (last 1-min
+window with contractions), `maxAmplitude` (95th percentile of the 1-min amplitudes), `lastAmplitude_pctMax`,
+`nBeats`, `dayStart` / `dayEnd` (days since the label `cultureStart` or since 00:00 of `idDate`; not for slices
+inserted later without `cultureStart`), `daySource`, `nRecordings`, `firstRecording`, `lastRecording`, `nChamberOut`,
+`outHours`, `longestOut_min`, `nPutBack`, `nTechnical`, `endComments`. With `endStatus`, `lastAmplitude_pctMax` and `dayEnd` the
+slices that died or were taken out can be counted and classified (e.g. dead vs. weak) with a criterion chosen later.
 
 ## Stimulation protocols (`'protocol'`, `'groupBy'`; GUI: **Protocols ...**)
 Protocols such as force-frequency (FFR), refractory period (RP, S1-S2), stimulation threshold (ST), post-rest
@@ -651,6 +691,7 @@ lower plot, the trend and all exports.
 | `mda_logEntries.m` | entries of the log file (comments, events, settings) |
 | `mda_clockTime.m` | clock time of the log entries (12-hour time stamps of software 2.0.7717–2.0.7769 corrected) |
 | `mda_signalGaps.m` | periods without signal (chamber taken out, sensor board group / controller failures, empty channels) |
+| `mda_sliceRegister.m` | slice register from the watcher results (one row per slice: start, end, end status, last amplitude, days) |
 | `mda_calibrationFactor.m`, `mda_zeroForce.m` | AU → µN (calibration, extended sensor mode); zero force of a channel |
 | `mda_analyzeChannel.m` | filtering, detection, stimulus assignment, parameters |
 | `mda_rockerFilter.m` | removal of the periodic rocker artifact (option `rockerFilter`) |
@@ -667,6 +708,7 @@ lower plot, the trend and all exports.
 | `mda_labels.m`, `mda_addLabels.m` | labels per channel (metadata) |
 | `mda_test.m` | self test (parameters, rocker filter) |
 | `mda_testWatch.m` | test of the watcher with example recordings |
+| `mda_testClockTime.m`, `mda_testSignalGaps.m`, `mda_testSliceRegister.m` | tests of the clock-time correction, the periods without signal and the slice register |
 | `mda_version.m` | version number |
 | `example_MyoDishAnalysis.m` | examples |
 | `examples/` | anonymized example recordings (`.mdd`, `_log.log`, `_labels.csv`, LabChart `.mat`), see `examples/README.md` |

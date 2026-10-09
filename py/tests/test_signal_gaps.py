@@ -107,3 +107,13 @@ def test_signal_gaps_and_watcher(tmp_path):
     s1 = S[S["channel"] == 1]
     assert abs(s1["noSignal_s"].sum() - 79.95) < 1e-6 and s1["nChamberOut"].sum() == 1
     assert "signal gaps: 6 chamber out, 6 board group, 2 controller, 1 saturated" in report
+    # slice register: one slice per channel with signal; short chamber-out periods and technical periods belong to it
+    R = pd.read_csv(os.path.join(res, "mda_slices.csv"), keep_default_na=False)
+    assert len(R) == 7 and 2 not in set(R["channel"]) and "slice register: 7 slices in 1 experiment(s)" in report
+    r1 = R[R["channel"] == 1].iloc[0]
+    assert r1["nChamberOut"] == 1 and abs(r1["outHours"] - 60 / 3600) < 1e-9 and r1["startReason"] == "first signal"
+    assert abs(r1["dayStart"] - 10 / 24) < 1e-9 and r1["daySource"] == "idDate"
+    r3 = R[R["channel"] == 3].iloc[0]
+    assert r3["endStatus"] == "removed" and r3["endTime"] == "2000-01-01 10:08:20" and "discarded" in r3["endComments"]
+    r4 = R[R["channel"] == 4].iloc[0]
+    assert r4["startTime"] == "2000-01-01 10:00:50" and r4["nChamberOut"] == 1

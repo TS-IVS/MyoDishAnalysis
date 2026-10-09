@@ -7,7 +7,7 @@ function ok = mda_testWatch()
 % direct analysis with MyoDishAnalysis, reanalysis after a change of the options / of the log file, 'reanalyze','new',
 % recordings still running (log file without 'Recording stopped'), without log file, in hidden folders, dry run,
 % filter, lock file; protocol periods excluded / included, thinned contractions (every n-th, block medians),
-% compression, events and comments.
+% compression, events and comments, overview (1-min medians), slice register.
 %
 % TS 2026-10-08 (info table, mda_readResults 2026-10-09)
 
@@ -33,6 +33,17 @@ pass = isequal(X.file', {'A/example9_ratVentricle.mdd', 'B/example7_pigVentricle
     ~isfile(fullfile(res, 'B', 'example7_pigVentricle_summary.csv')) && isfile(fullfile(res, 'A', 'example9_ratVentricle_events.csv')) && ...
     ~isfile(fullfile(res, 'A', 'example9_ratVentricle_protocols_summary.csv')) && ~isfile(fullfile(res, 'mda_watch.lock'));
 ok = check(ok, pass, 'first pass: index, 3 bins with clock time, protocol results, no lock file left');
+O = readCsv(fullfile(res, 'A', 'example9_ratVentricle_overview.csv'));
+C1 = readCsv(fullfile(res, 'A', 'example9_ratVentricle_contractions.csv'));
+R = readCsv(fullfile(res, 'mda_slices.csv'));
+a = R(strcmp(R.experiment, 'A'), :);
+pass = height(O) == 12 && sum(O.nBeats) == height(C1) && height(C1) == 333 && isequal(O.t_from(1:2)', [0 60]) && ...
+    strcmp(O.window{1}, '2000-01-01 15:48:46') && abs(O.amplitude(1) - 755.866666666667) < 1e-6 && ...
+    height(R) == 9 && strcmp(a.endStatus{1}, 'beating at end of data') && a.nBeats == 333 && ...
+    strcmp(a.species{1}, 'rat') && all(strcmp(R.endStatus(strcmp(R.experiment, 'B')), 'protocols only')) && ...
+    contains(report, 'slice register: 9 slices') && isfile(fullfile(res, 'A', 'A_slices.csv')) && ...
+    isfile(fullfile(res, 'B', 'B_slices.csv'));
+ok = check(ok, pass, 'overview (1-min medians, all contractions) and slice register (protocols only)');
 [X2, report2] = MyoDishAnalysisWatch(raw, res, q{:}, 'binMinutes', 5);
 ok = check(ok, isempty(report2) && isequal(X2.analyzed, X.analyzed), 'second pass: nothing to do');
 
@@ -52,7 +63,8 @@ pass = strcmp(R.version, mda_version()) && strcmp(R.implementation, 'MATLAB') &&
 ok = check(ok, pass, 'info table: version, watcher settings, analysis windows (mda_readResults)');
 
 % reanalysis: other options ('new': ignored), changed log file, 'all' with maxFiles
-base = ['binminutes=60; compress=0; contractions=all; events=1; gaps=1; includeprotocols=0; protocolmarginseconds=0; ' ...
+base = ['binminutes=60; compress=0; contractions=all; events=1; gaps=1; includeprotocols=0; overviewseconds=60; ' ...
+    'protocolmarginseconds=0; ' ...
     'protocols=0'];
 X = MyoDishAnalysisWatch(raw, res, q{:}, 'protocols', false, 'reanalyze', 'new', 'rocker', 'stopped');
 ok = check(ok, all(strcmp(X.options, base)), '''reanalyze'',''new'': other options ignored');
@@ -209,7 +221,9 @@ end
 function T = readCsv(f)
 % csv result file with the text columns as text (readtable would turn clock-time labels into datetime)
 o = detectImportOptions(f, 'TextType', 'char');
-txt = intersect(o.VariableNames, {'range', 'bin', 'comments', 'beatType', 'sampleMode', 'category', 'text', 'code'});
+txt = intersect(o.VariableNames, {'range', 'bin', 'comments', 'beatType', 'sampleMode', 'category', 'text', 'code', ...
+    'window', 'experiment', 'series', 'startTime', 'endTime', 'startReason', 'endStatus', 'species', 'sliceID', 'setupID', ...
+    'sampleID', 'idDate', 'lastBeat', 'daySource', 'firstRecording', 'lastRecording', 'endComments'});
 o = setvartype(o, txt, 'char');
 T = readtable(f, o);
 end

@@ -4,6 +4,20 @@ All notable changes. Versions: `MAJOR.MINOR.PATCH` (pre-releases `-beta.N`; Pyth
 MATLAB and Python versions have the same version number and give the same results.
 
 ## [Unreleased]
+### Added
+- Overview and slice register (2026-10-10): watcher file `<name>_overview.csv` (`'overviewSeconds'`, default 60;
+  Python `overview_seconds`, `--overview-seconds`): medians of all contractions per 1-min window, channel, beat type,
+  rocker state and inclusion with `nBeats` and `beatsPerMinute` (1/30 to 1/60 of the rows of all contractions, for
+  Excel). `<name>_channels.csv`: columns recording, recordingStart, fileLength_s and the labels setupID, sliceID,
+  species, sampleID, cultureStart; status `protocols only` (no time outside the stimulation protocols), `not beating`
+  judged at the end of the analysed signal (stimulation protocols at the end excluded). Slice register
+  `mda_sliceRegister` / `slice_register` (watcher `'register'`, `'newSliceHours'`; Python `--no-register`,
+  `--new-slice-hours`): one row per slice over the recordings of a setup (new slice after a recording without
+  signal or >= 2 h without signal unless a comment says 'moved back' / 'put back', after a comment such as 'new
+  slice', or with another sliceID) with start and end time, start reason, end status, last amplitude, days in
+  culture and chamber-out periods; files `<experiment>/<experiment>_slices.csv` and `mda_slices.csv`. The slice
+  register does not change the code fingerprint (no reanalysis). Tests `mda_testSliceRegister.m`,
+  `py/tests/test_slice_register.py`.
 
 ## [1.0.0-beta.2] – 2026-10-09
 Second pre-release for testers (Git tag `v1.0.0-beta.2`, no GitHub release / DOI yet).
