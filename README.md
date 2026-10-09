@@ -72,7 +72,7 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    trigger").
    Mouse wheel: zoom the time axis (shift + wheel: move; double-click: whole loaded window). The figure toolbar
    zoom/pan also works (switch the tool off again to use the mouse modes). Time axis in h:mm:ss or m:ss (decimals
-   when zoomed in below ~10 s); checkbox *time axis: 0 = start of the loaded window* shows the time relative to the
+   when zoomed in below ~10 s); checkbox *time 0 = window start* shows the time relative to the
    window start (display only: From/To, tables and exports keep the time in the file, in s).
    **Threshold, this ch.**: detection threshold of the selected channel, *auto* or a manual value (µN); kept per
    channel when you switch channels and used for All channels, Protocols and Trend (command line: one value per
@@ -85,6 +85,12 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    List **high sensitivity / high specificity** (next to it; auto threshold): *high sensitivity* (default) counts all
    contractions and marks the uncertain ones orange (status line: number of uncertain contractions); *high
    specificity* does not count them. Switching shows the result at once (see "Signal processing and detection").
+   **Rocker artifact ...** (button next to *time 0 = window start*; also menu *Save / Export* and right click in the
+   force plot): extra window with the signal of the loaded window before (grey) and after (black) the rocker filter
+   and the removed periodic artifact (blue; grey background = rocker moving), estimated for the selected channel as
+   for *remove rocker artifact*, also when that is off. Menu of the window: **Save figure** (.png / .jpg / .tif /
+   .fig; Python: .pdf instead of .fig) and **Export data** of the visible time range (signal before / after, artifact,
+   rocker state; table *rockerFilter*: rocker frequency, artifact size, fit; table *info*).
 3. **Stimulus plot** (below the force plot): current of every stimulus pulse of the channel (red bars, mA;
    green = extra pulse; x = current not reached) and the interval to the previous pulse (blue, ms). With 40 pulses
    or fewer in view, the values are written next to the pulses (as `drawStimPulses` 'displayCurrents' /
@@ -122,10 +128,20 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    with their status, stimuli, comments; stimulus pulses (current, interval); the plotted parameter. The overview
    (whole file) can only be saved as a picture. The overlay window has its own **Save figure** / **Export data**
    (mean, SD, SEM, min, max, n and all single traces of every group; time course: the traces) and **Edit figure ...**.
-6. **Export this channel**: all contractions of the range (column `included`) + summary → `.xlsx` / `.csv`.
-   **All channels → file**: the same range and settings in all channels (without manual exclusions;
+6. **Export this channel**: all contractions of the range (column `included`, `manuallyExcluded`) + summary →
+   `.xlsx` / `.csv`. **All channels → file**: the same range and settings in all channels (without manual exclusions;
    computed with the command-line function, i.e. the automatic threshold may differ slightly from the GUI,
-   which uses the loaded window).
+   which uses the loaded window). **Every export** (also the data of a plot, the overlay, the trend, the rocker
+   artifact) contains the table **info**: version and implementation, recording, analysis date, all settings (with
+   the threshold and zero force of the channel), loaded window and analysed range, EP recording (see "Results files").
+   **Open results ...** (button at the top; or `MyoDishAnalysisGUI(resultsFile)`, Python `mda-gui results.xlsx`):
+   opens a results file of the command line, the watcher or the GUI (`.xlsx`, `<name>_info.csv`, `_summary.csv`,
+   `_contractions.csv`): the recording (path in the file; if moved: the same name next to the results file, otherwise
+   a file dialog), all settings (threshold and zero force of the channel, detection mode, rocker filter, filters,
+   stimuli) and the analysis window (several: list of channel, range and time) are restored; contractions excluded by
+   you in an export are excluded again. The contractions are detected again and compared with the file (status line:
+   *the same as here* or the differences; black o = contraction of the file not found again, e.g. results of another
+   version). A reference beat is not stored in the results (create it again).
    **Overlay contractions**: the selected contractions and their mean in an overlay window, aligned at the stimulus
    (default; stimulus = time 0) or at the peak, or the **time course** of the analysed range (t = 0 at the first
    stimulus of each group, since the channels are not stimulated at the same time); baseline = diastolic force
@@ -249,6 +265,14 @@ Own additional fields are kept as extra columns.
   `'rockerFilter',true` (see "Rocker artifact"; result per channel in `info.rockerFilter` and the sheet
   `rockerFilter`), `'externalTrigger','auto'|'on'|'off'` (see "External trigger"), `'showFigures',true`,
   `'quiet',true`; all others see `help mda_options`.
+* Results files (`'output'`; the watcher; GUI exports): sheet / file **info** (key, value) with the version
+  (`version`, `implementation` MATLAB / Python, `software`), the recording (`file`, sampling rate, recording start),
+  `analysisDate`, `createdBy` (MyoDishAnalysis, MyoDishAnalysisWatch, MyoDishAnalysisGUI), the analysed `channels`,
+  `chunkSeconds`, the watcher settings (`watcherOptions`, `watcherCode`) or the GUI window (`loadedWindow_s`,
+  `analysedRange_s`, `epRecording`), every option (`option_<name>`, full precision) and the Offset / Calibration
+  entries of the log file; sheet **thresholds** = analysis windows (per range, channel and chunk of `chunkSeconds`:
+  analysed range `from`–`to`, data read `windowFrom`–`windowTo`, detection threshold). With these the GUI shows
+  exactly the same contractions again (**Open results ...**). `mda_readResults` / `read_results` read them.
 * `contractions`: one row per detected contraction; `summary`: one row per channel and range
   (counts incl. nExtraBeats, nMissedBeats, extraBeats_percent, missedBeats_percent, nUncertain,
   nStimulatedUncertain, nExtraBeatsUncertain, nMissedBeatsUncertain; mean, SD and n of all parameters of the included
@@ -614,7 +638,8 @@ lower plot, the trend and all exports.
 | `mda_protocolResults.m` | characteristic values per protocol and channel (max. captured frequency, FFR ratios, current thresholds, refractory periods, PRP at 15 / 30 / 60 s) |
 | `mda_parameters.m` | names, units and definitions of the parameters |
 | `mda_options.m` | options and defaults |
-| `mda_summarize.m`, `mda_writeResults.m` | summary table, Excel/CSV export |
+| `mda_summarize.m`, `mda_writeResults.m` | summary table, Excel/CSV export (info table: version and all settings) |
+| `mda_readResults.m` | read a results file again (settings, analysis windows, contractions; GUI: Open results) |
 | `mda_labels.m`, `mda_addLabels.m` | labels per channel (metadata) |
 | `mda_test.m` | self test (parameters, rocker filter) |
 | `mda_testWatch.m` | test of the watcher with example recordings |

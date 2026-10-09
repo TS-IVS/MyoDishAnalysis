@@ -81,6 +81,11 @@ def test_one_bin_equals_direct_analysis(raw, tmp_path):
     assert len(Cw) == len(C)
     np.testing.assert_allclose(Cw["t_peak"], C["t_peak"], rtol=0, atol=1e-9)
     np.testing.assert_allclose(Cw["amplitude"], C["amplitude"], rtol=1e-12, equal_nan=True)
+    R = mda.read_results(os.path.join(res, "A", "example9_ratVentricle_info.csv"))  # version, settings, windows
+    assert R["version"] == W.mda_version() and R["implementation"] == "Python"
+    assert R["createdBy"] == "MyoDishAnalysisWatch" and "binminutes=60" in R["extra"]["watcherOptions"]
+    assert len(R["windows"]) >= 1 and (R["windows"]["windowFrom"] <= R["windows"]["from"]).all()
+    assert R["options"].detection == "sensitive" and len(R["contractions"]) == len(Cw)
 
 
 def test_reanalysis_when_options_or_files_change(raw, tmp_path):

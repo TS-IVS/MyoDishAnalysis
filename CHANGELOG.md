@@ -32,6 +32,22 @@ MATLAB and Python versions have the same version number and give the same result
   examples change accordingly (e.g. example 4: channels 6 and 7 without contractions, example 3: 642 peaks of
   channels 3 and 5 at the noise level); MATLAB references ex1, ex3, ex3ref, ex4, ex5, ex6 and protocols
   regenerated.
+- Results show version and all settings and can be opened in the GUI again (2026-10-09): the info table of every
+  results file (command line `'output'`, watcher, GUI exports) has the rows `version`, `implementation`, `createdBy`,
+  `channels`, `chunkSeconds`, watcher settings (`watcherOptions`, `watcherCode`) or the GUI window
+  (`loadedWindow_s`, `analysedRange_s`, `epRecording`) and every option in full precision (`%.15g`; before: 4–5
+  significant digits); new sheet / file `thresholds` = analysis windows (range, channel, `from`, `to`, threshold,
+  data window `windowFrom`, `windowTo`; also `info.thresholds` of `MyoDishAnalysis`). Every data export of the GUI
+  (plots, overlay, trend, rocker artifact) contains the table `info`; *Export this channel* writes the effective
+  threshold and zero force of the channel (before: the GUI defaults) and the analysis window. New `mda_readResults` /
+  `read_results`; GUI **Open results ...** / `MyoDishAnalysisGUI(resultsFile)` / `mda-gui results.xlsx`: recording,
+  settings, analysis window and manual exclusions restored, contractions detected again and compared with the file
+  (black o = only in the file). Checked: MATLAB and Python open their own and each other's results (command line,
+  GUI export) with identical contractions; watcher results via the tests. GUI API `openResults`, `rockerWindow`,
+  `nextFile`, `exportChannel`, `exportPlotData` (MATLAB), `open_results`, `on_rocker_window`, `next_file` (Python).
+- GUI **Rocker artifact ...** (2026-10-09): window with the signal before / after the rocker filter and the removed
+  periodic artifact of the selected channel and loaded window (also when the filter is off); save as figure, export
+  the data of the visible time range (with the result of the filter and the table `info`).
 - Detection modes and uncertain contractions (option `detection`, 2026-10-09): `'sensitive'` (default, *high
   sensitivity*, results as before) counts all contractions and flags the uncertain ones (new column `uncertain` after
   `included`); `'specific'` (*high specificity*) does not count them. Paced channels: certain = locked to the stimuli

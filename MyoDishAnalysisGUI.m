@@ -4,6 +4,8 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %   MyoDishAnalysisGUI            opens a file dialog
 %   MyoDishAnalysisGUI(mddFile)
 %   MyoDishAnalysisGUI(mddFile, metadata)   labels per channel (struct / table / file, see mda_labels)
+%   MyoDishAnalysisGUI(resultsFile)         results of MyoDishAnalysis / watcher / GUI export (.xlsx, _info.csv):
+%                                           recording, settings and analysis window restored (mda_readResults)
 %
 % Labels per channel (setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, treatment, concentration,
 % concentrationUnit, daysInCulture, cultureStart, comment, analyst): button 'Labels ...' (editable table, load / save as .csv). A file
@@ -30,10 +32,14 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %    Zoom / pan with the figure toolbar (switch the zoom / pan tool off again to use the mouse modes).
 % 3. The table shows mean and SD of the selected contractions; the lower plot shows one parameter (list 'Lower plot') per
 %    contraction over time. 'Export this channel' writes all contractions of the range (column 'included')
+%    (every export also contains the table info: version, recording, all settings, window and range; 'Open results ...'
+%    or MyoDishAnalysisGUI(resultsFile) restores recording, settings and analysis window of a results file of
+%    MyoDishAnalysis, the watcher or the GUI and compares the contractions detected again with the file)
 %    and the summary to .xlsx or .csv. 'All channels -> file' analyses the range in all channels with the
 %    same settings (without your manual exclusions). The detection threshold is set per channel (auto or manual).
 %    'high sensitivity' (default) counts all contractions and marks the uncertain ones (orange); 'high specificity'
-%    does not count them (mda_options 'detection').
+%    does not count them (mda_options 'detection'). 'Rocker artifact ...': extra window with the signal before / after
+%    the rocker filter and the removed periodic artifact; save as figure, export the data.
 %    Stimuli ('stimuli: auto / MyoDish / ext. trigger'): MyoDish pulses of the channel or the external trigger pulses
 %    of the status channel (external stimulator at the external controller unit, one chamber; auto = trigger pulses
 %    if the window has no MyoDish pulses).
@@ -60,7 +66,7 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 % Requires MATLAB R2019b or newer, no toolboxes.
 % Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05 (EP recordings 2026-10-06, protocols 2026-10-07;
 % threshold per channel, arrow keys, overlay of channels / styles / bands 2026-10-07; navigation buttons, trend of several
-% channels, detection mode 2026-10-09)
+% channels, detection mode, open results, rocker artifact window 2026-10-09)
 
 if nargin < 1, mddFile = ''; end
 if nargin < 2, metadata = []; end
@@ -69,6 +75,11 @@ if nargin < 2, metadata = []; end
 H = []; S = []; O = []; B = []; C = [];
 ch = 1;
 range = [nan nan];
+winReq = [nan nan];                %loaded window as requested from mda_readMdd (s; exports: open the results again)
+resOnly = [];                      %opened results file: t_peak of its contractions not detected again (black o)
+hRA = [];                          %rocker artifact window
+apiFile = '';                      %scripts / tests: file name for the next save / export dialog (api.nextFile)
+resInfo = '';                      %opened results file: comparison shown in the status line
 manualOff = zeros(0,1);            %t_peak of the contractions excluded by the user
 zeroUser = nan(1, 8);              %zero force per channel entered by the user (NaN = 'Offset' of the log file)
 thrUser = nan(1, 8);               %detection threshold per channel entered by the user (NaN = auto)
@@ -134,9 +145,12 @@ movegui(fig, 'onscreen');
 dflt = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
 
 uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Open .mdd ...', 'Position', [0.005 0.955 0.065 0.035], 'Callback', @onOpen);
+uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Open results ...', 'Position', [0.156 0.955 0.07 0.035], 'Callback', @onOpenResults, ...
+    'TooltipString', ['results file of MyoDishAnalysis, the watcher or an export (.xlsx, _info.csv, ...): recording, settings ' ...
+    'and analysis window are restored, the contractions detected again and compared with the file']);
 uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', '+ EP recording ...', 'Position', [0.072 0.955 0.08 0.035], 'Callback', @onOpenEP, ...
     'TooltipString', 'add an electrophysiological recording (LabChart .mat export, e.g. sharp electrode: voltage + stimulation) aligned to the stimuli of the open .mdd file');
-hFile = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'no file', 'HorizontalAlignment', 'left', 'Position', [0.156 0.952 0.204 0.03]);
+hFile = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'no file', 'HorizontalAlignment', 'left', 'Position', [0.229 0.952 0.131 0.03]);
 uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'Channel', 'HorizontalAlignment', 'right', 'Position', [0.36 0.952 0.04 0.03]);
 hCh = uicontrol(fig, dflt{:}, 'Style', 'popupmenu', 'String', {'-'}, 'Position', [0.405 0.957 0.1 0.033], 'Callback', @onChannel);
 uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'From (s)', 'HorizontalAlignment', 'right', 'Position', [0.505 0.952 0.04 0.03]);
@@ -192,6 +206,7 @@ uimenu(mExp, 'Text', 'Save parameter plot ...', 'MenuSelectedFcn', @(~,~) savePl
 uimenu(mExp, 'Text', 'Export data of the force plot (.xlsx / .csv / .txt) ...', 'Separator', 'on', 'MenuSelectedFcn', @(~,~) exportPlotData('force'));
 uimenu(mExp, 'Text', 'Export data of the stimulus plot ...', 'MenuSelectedFcn', @(~,~) exportPlotData('stimuli'));
 uimenu(mExp, 'Text', 'Export data of the parameter plot ...', 'MenuSelectedFcn', @(~,~) exportPlotData('parameter'));
+uimenu(mExp, 'Text', 'Rocker artifact (removed signal) ...', 'Separator', 'on', 'MenuSelectedFcn', @(~,~) onRockerWindow());
 axNames = {'overview', 'force', 'stimuli', 'parameter'};
 axList = [axOv axMain axStim axPar];
 for iAxMenu = 1:4                                    %(unique names: variables of the main function are shared with the nested functions)
@@ -203,6 +218,7 @@ for iAxMenu = 1:4                                    %(unique names: variables o
             'MenuSelectedFcn', @(~,~) setReference());
         uimenu(cmAxMenu, 'Text', 'Show reference beat / deviating contractions ...', 'MenuSelectedFcn', @(~,~) showReference());
         uimenu(cmAxMenu, 'Text', 'Remove reference beat of this channel', 'MenuSelectedFcn', @(~,~) clearReference());
+        uimenu(cmAxMenu, 'Text', 'Show rocker artifact (removed signal) ...', 'Separator', 'on', 'MenuSelectedFcn', @(~,~) onRockerWindow());
         try cmAxMenu.ContextMenuOpeningFcn = @(src,~) zeroMenuText(src); catch, end   %R2020a+
     end
     hSaveAxMenu = uimenu(cmAxMenu, 'Text', 'Save this plot (.png / .jpg / .tif / .fig) ...', 'MenuSelectedFcn', @(~,~) savePlots(axNames{iAxMenu}));
@@ -245,8 +261,11 @@ hDet = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'high sensitivit
     'Position', [0.615 0.647 0.355 0.035], 'Callback', @onDetection, 'TooltipString', ['auto threshold: high sensitivity counts ' ...
     'all contractions and marks the uncertain ones (orange: neither locked to the stimuli nor large compared with the ' ...
     'typical contraction and the noise before the stimuli); high specificity does not count them (option detection)']);
-hRel = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'time axis: 0 = start of the loaded window', 'Position', [0.03 0.61 0.94 0.033], ...
-    'Callback', @onRelTime, 'TooltipString', 'display only; From/To, tables and exports keep the time in the file (s)');
+hRel = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'time 0 = window start', 'Position', [0.03 0.61 0.585 0.033], ...
+    'Callback', @onRelTime, 'TooltipString', 'time axis: 0 = start of the loaded window (display only; From/To, tables and exports keep the time in the file, s)');
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Rocker artifact ...', 'Position', [0.615 0.609 0.355 0.035], ...
+    'Callback', @(~,~) onRockerWindow(), 'TooltipString', ['periodic signal of the rocker movement that the rocker filter ' ...
+    'removes (estimated for this channel and window, also if the filter is off): extra window, save as figure, export data']);
 hCounts = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.03 0.49 0.94 0.118], 'FontSize', 9);
 hTable = uitable(pnl, 'Units', 'normalized', 'Position', [0.03 0.215 0.94 0.27], 'RowName', [], ...
     'ColumnName', {'parameter','mean','SD','n','unit'}, 'ColumnWidth', {108, 66, 60, 38, 42}, 'FontSize', 9);
@@ -265,14 +284,19 @@ hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.
 % api.overlayChannels([1 2 3]) (overlay of the analysed range in these channels); [groups, h] = api.overlay();
 % api.key('rightarrow', {'shift'}) (arrow key as typed in the force plot); api.navButton('rightarrow', true) (button under
 % the force plot, true = shift + click); R = api.trend([1 3]) (trend window: these channels calculated and overlaid)
+% api.openResults(file, k) (results file, analysis window k); h = api.rockerWindow() (rocker artifact window);
+% api.nextFile(file) (file name of the next save / export dialog), then e.g. api.exportChannel() or a menu of a window
 fig.UserData = struct('setRange', @apiSetRange, 'toggleAt', @toggleContraction, 'results', @apiResults, ...
     'setLabels', @apiSetLabels, 'labels', @apiLabels, 'zeroAt', @apiZeroAt, ...
     'epRecording', @openEP, 'epRecordingData', @apiEP, ...
     'overlayChannels', @setOverlayChannels, 'overlay', @apiOverlay, 'key', @apiKey, 'navButton', @navButton, ...
-    'trend', @apiTrend);
+    'trend', @apiTrend, 'openResults', @openResults, 'rockerWindow', @onRockerWindow, 'nextFile', @apiNextFile, ...
+    'exportChannel', @onExport, 'exportPlotData', @exportPlotData);
 
 emptyPlots();
-if ~isempty(mddFile)
+if ~isempty(mddFile) && ~endsWith(lower(char(mddFile)), '.mdd')   %results file (2026-10-09)
+    openResults(char(mddFile));
+elseif ~isempty(mddFile)
     openFile(char(mddFile));
     if ~isempty(metadata) && ~isempty(H)
         try
@@ -297,19 +321,166 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         openFile(fullfile(pn, fn));
     end
 
+    function onOpenResults(~, ~)
+        [fn, pn] = uigetfile({'*.xlsx;*_info.csv;*_summary.csv;*_contractions.csv;*_contractions.csv.gz', ...
+            'results of MyoDishAnalysis (*.xlsx, *_info.csv, ...)'}, 'Open results');
+        if isequal(fn, 0), return; end
+        openResults(fullfile(pn, fn));
+    end
+
+    function ok = openResults(file, pick)
+        % results file of MyoDishAnalysis / Watch / GUI export (2026-10-09): recording, settings and analysis window
+        % of the results; the contractions are detected again and compared with the file (black o = only in the file)
+        ok = false;
+        try
+            R = mda_readResults(file);
+        catch ME
+            status(['Results: ' ME.message]); return;
+        end
+        if isempty(R.windows) || height(R.windows) == 0, status('Results: no analysis window in the file.'); return; end
+        mdd = R.mddFile;
+        if isempty(mdd) || ~exist(mdd, 'file')          %moved: same name next to the results, or ask
+            [~, n, e] = fileparts(strrep(mdd, '\', '/'));
+            cand = fullfile(fileparts(file), [n e]);
+            if ~isempty(n) && exist(cand, 'file') == 2
+                mdd = cand;
+            else
+                [fn, pn] = uigetfile('*.mdd', sprintf('Recording of the results: %s', [n e]));
+                if isequal(fn, 0), return; end
+                mdd = fullfile(pn, fn);
+            end
+        end
+        W = R.windows;
+        if nargin < 2 || isempty(pick)                  %analysis window: channel, range, chunk
+            pick = 1;
+            if height(W) > 1
+                txt = arrayfun(@(r) sprintf('ch %d   %s   %.1f - %.1f s   (threshold %.0f %sN)', W.channel(r), W.range{r}, ...
+                    W.from(r), W.to(r), W.threshold_uN(r), mu), (1:height(W))', 'UniformOutput', false);
+                [pick, okP] = listdlg('ListString', txt, 'SelectionMode', 'single', 'ListSize', [460 320], ...
+                    'Name', 'Open results', 'PromptString', 'Analysis window (channel, range, time):');
+                if ~okP, return; end
+            end
+        end
+        w = W(pick, :);
+        openFile(mdd);
+        if isempty(H), return; end
+        if ~ismember(w.channel, H.dataChannels), status(sprintf('Results: channel %d is not in %s.', w.channel, H.file)); return; end
+        % settings of the results
+        opts = R.options; opts.referenceBeat = [];
+        hRF.Value = opts.rockerFilter;
+        hDet.Value = 1 + strcmp(opts.detection, 'specific');
+        hRocker.Value = strcmp(opts.rocker, 'stopped');
+        hStim.Value = strcmp(opts.beats, 'stimulated');
+        hXT.Value = find(strcmp({'auto', 'off', 'on'}, opts.externalTrigger), 1);
+        ch = w.channel;
+        hCh.Value = find(H.dataChannels == ch, 1);
+        thrUser(:) = nan; zeroUser(:) = nan;
+        thrUser(ch) = valueOfChannel(opts.threshold, R.channels, ch);
+        zeroUser(ch) = valueOfChannel(opts.zeroForce, R.channels, ch);
+        opts.threshold = 'auto'; opts.zeroForce = [];   %the GUI keeps them per channel
+        showThreshold();
+        if ~isempty(R.labels)
+            try
+                Lbl = mda_labels(R.labels, H.dataChannels);
+            catch
+                status('Results: labels not read.');
+            end
+        end
+        % data window of the analysis, analysed range, contractions excluded by the user (GUI exports)
+        resInfo = '';
+        onLoad([], [], [w.windowFrom w.windowTo]);
+        if isempty(S), return; end
+        if opts.rockerFilter && ~strcmp(R.createdBy, 'MyoDishAnalysisGUI')
+            rfCtx = S; rfCache = {};                    %as MyoDishAnalysis: estimated from the data window itself
+        end
+        range = [max(w.from, S.fromSeconds) min(w.to, S.toSeconds)];
+        Tc = [];
+        if ~isempty(R.contractions) && all(ismember({'channel', 't_peak'}, R.contractions.Properties.VariableNames))
+            Tc = R.contractions(R.contractions.channel == ch & R.contractions.t_peak >= w.from - 1e-9 & ...
+                R.contractions.t_peak <= w.to + 1e-9, :);
+            if ismember('manuallyExcluded', Tc.Properties.VariableNames)
+                manualOff = Tc.t_peak(Tc.manuallyExcluded == 1);
+            end
+        end
+        ep = '';
+        if isfield(R.extra, 'epRecording'), ep = R.extra.epRecording; end
+        analyze(false);
+        resInfo = compareResults(R, Tc);
+        if ~isempty(ep) && exist(ep, 'file'), openEP(ep); end
+        analyze(false);
+        ok = true;
+    end
+
+    function v = valueOfChannel(x, chans, c)
+        % threshold / zero force of channel c from the option value: 'auto' / [] = NaN, one value, one per channel
+        v = nan;
+        if ischar(x) || isempty(x), return; end
+        if isscalar(x), v = x; return; end
+        j = find(chans == c, 1);
+        if ~isempty(j) && j <= numel(x), v = x(j); end
+    end
+
+    function txt = compareResults(R, Tc)
+        % contractions of the results file vs. detected here (same channel and range)
+        src = sprintf('Results (%s %s%s%s):', R.implementation, R.version, ...
+            repmat([', ' R.createdBy], 1, ~isempty(R.createdBy)), repmat([', ' R.analysisDate], 1, ~isempty(R.analysisDate)));
+        if ~strcmp(R.version, mda_version()), src = sprintf('%s version differs from this one (%s)!', src, mda_version()); end
+        resOnly = [];
+        if isempty(Tc)
+            txt = sprintf('%s settings and window applied (no contractions in the file to compare).', src); return;
+        end
+        if ismember('sampleMode', Tc.Properties.VariableNames) && any(strcmp(Tc.sampleMode, 'median'))
+            txt = sprintf('%s settings and window applied (contractions thinned to block medians: not compared).', src);
+            return;
+        end
+        if isempty(B), inR = false(0, 1); else, inR = B.t_peak >= range(1) & B.t_peak <= range(2); end
+        tH = []; if ~isempty(B), tH = B.t_peak(inR); end
+        tol = S.dt / 2;
+        if isempty(tH)
+            d = inf(1, height(Tc)); j = ones(1, height(Tc));
+        else
+            [d, j] = min(abs(Tc.t_peak(:)' - tH(:)), [], 1);   %nearest contraction here for each one of the file
+        end
+        found = d <= tol;
+        resOnly = Tc.t_peak(~found);
+        thinned = ismember('sampledEvery', Tc.Properties.VariableNames) && any(Tc.sampledEvery > 1);
+        nHereOnly = 0;
+        if ~thinned, nHereOnly = numel(tH) - numel(unique(j(found))); end
+        diffU = 0; diffI = 0;
+        if any(found)
+            Bh = B(inR, :); sel = selected(); sel = sel(inR);
+            if ismember('uncertain', Tc.Properties.VariableNames)
+                diffU = nnz(logical(Tc.uncertain(found)) ~= Bh.uncertain(j(found)));
+            end
+            if ismember('included', Tc.Properties.VariableNames) && ~thinned
+                diffI = nnz(logical(Tc.included(found)) ~= sel(j(found)));
+            end
+        end
+        if ~any(~found) && nHereOnly == 0 && diffU == 0 && diffI == 0
+            txt = sprintf('%s %d contractions, the same as here.', src, height(Tc));
+            if thinned, txt = sprintf('%s %d contractions (thinned), all found again.', src, height(Tc)); end
+        else
+            txt = sprintf(['%s DIFFERENCES: %d contraction(s) only in the file (black o), %d only here, flag uncertain ' ...
+                '%d, included %d.'], src, nnz(~found), nHereOnly, diffU, diffI);
+        end
+    end
+
     function openFile(file)
         try
             H = mda_readMdd(file, [], [], opts);
         catch ME
-            status(['Error: ' ME.message]); return;
+            status(['Error: ' ME.message]);
+            if ~isempty(getenv('MDA_DEBUG')), disp(getReport(ME, 'extended')); end
+            return;
         end
         S = []; O = []; B = []; C = []; manualOff = zeros(0,1); zeroUser = nan(1, 8); thrUser = nan(1, 8); Od = []; ovXL = [];
+        resOnly = []; resInfo = ''; winReq = [nan nan];
         hThrMode.Value = 1; hThr.String = '';
         rfCtx = []; rfCache = {}; rfF0 = [];
         if ~isempty(EP), EP = []; showEP(false); end     %the EP recording belongs to the previous file
         [~, n, e] = fileparts(H.file);
         nm = [n e];
-        if numel(nm) > 42, nm = [nm(1:19) '...' nm(end-19:end)]; end
+        if numel(nm) > 30, nm = [nm(1:13) '...' nm(end-13:end)]; end
         hFile.String = nm;
         hFile.TooltipString = H.file;
         hCh.String = arrayfun(@(c) sprintf('Ch %d', c), H.dataChannels, 'UniformOutput', false);
@@ -346,9 +517,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if H.bytes < 150e6, onOverview(); end      %small files: overview right away
     end
 
-    function onLoad(~, ~)
+    function onLoad(~, ~, w)
+        % w (optional): window [from to] in s (results files: exactly the data window of the analysis)
         if isempty(H), status('Open a file first.'); return; end
-        from = str2double(hFrom.String); to = str2double(hTo.String);
+        if nargin >= 3, from = w(1); to = w(2);
+        else, from = str2double(hFrom.String); to = str2double(hTo.String); end
         if isnan(from) || isnan(to), status('From / To must be numbers (s).'); return; end
         if from < 0, from = H.totalSeconds + from; end
         if to < 0, to = H.totalSeconds + to; end
@@ -361,9 +534,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         try
             S = mda_readMdd(H.file, from, to, opts);
         catch ME
-            status(['Error: ' ME.message]); return;
+            status(['Error: ' ME.message]);
+            if ~isempty(getenv('MDA_DEBUG')), disp(getReport(ME, 'extended')); end
+            return;
         end
-        rfCtx = []; rfCache = {}; rfF0 = [];
+        rfCtx = []; rfCache = {}; rfF0 = []; resOnly = [];
+        winReq = [from to];
         hFrom.String = sprintf('%.1f', S.fromSeconds); hTo.String = sprintf('%.1f', S.toSeconds);
         % channel list with the signal range (helps to find the channels with a slice)
         lbl = cell(1, numel(S.dataChannels));
@@ -395,7 +571,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function onChannel(~, ~)
         if isempty(H), return; end
         ch = H.dataChannels(hCh.Value);
-        manualOff = zeros(0,1);
+        manualOff = zeros(0,1); resOnly = []; resInfo = '';
         showThreshold();
         plotOverview();
         if ~isempty(S), analyze(false); end
@@ -1620,6 +1796,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function file = askFile(kind, what)
         % file name dialog; kind 'image' (.png .jpg .tif .fig), 'screenshot' (.png .jpg .tif) or 'data' (.xlsx .csv .txt)
         file = '';
+        if ~isempty(apiFile), file = apiFile; apiFile = ''; return; end
         [p, n] = fileparts(H.file);
         if isempty(lastDir), lastDir = p; end
         switch kind
@@ -1808,8 +1985,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function writeTables(file, names, tabs)
-        % .xlsx: one sheet per table; .csv / .txt: one file per table (<name>_<table>.csv if several)
+        % .xlsx: one sheet per table; .csv / .txt: one file per table (<name>_<table>.csv if several). Always with
+        % the table 'info' (version, file, all settings: mda_writeResults(info); 2026-10-09)
         [p, n, e] = fileparts(file);
+        nData = numel(tabs);
+        names{end+1} = 'info'; tabs{end+1} = mda_writeResults(guiInfo());
         try
             switch lower(e)
                 case '.xlsx'
@@ -1818,11 +1998,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                     files = {file};
                 case {'.csv', '.txt'}
                     if strcmpi(e, '.csv'), dl = ','; else, dl = '\t'; end
-                    if numel(tabs) == 1
-                        files = {file};
-                    else
-                        files = cellfun(@(nm) fullfile(p, [n '_' nm e]), names, 'UniformOutput', false);
-                    end
+                    files = cellfun(@(nm) fullfile(p, [n '_' nm e]), names, 'UniformOutput', false);
+                    if nData == 1, files{1} = file; end  %one data table: the file name chosen
                     for k = 1:numel(tabs), writetable(tabs{k}, files{k}, 'FileType', 'text', 'Delimiter', dl); end
                 otherwise
                     error('unknown file type %s', e);
@@ -1832,6 +2009,114 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         catch ME
             status(['Export: ' ME.message]);
         end
+    end
+
+    function f2 = onRockerWindow()
+        % rocker artifact (2026-10-09): signal of the loaded window before and after the rocker filter and the subtracted
+        % periodic artifact (estimated as for 'remove rocker artifact', also if that is off); save as figure (menu) and
+        % export the data of the visible time range with the result of the filter and the settings
+        f2 = [];
+        if isempty(S) || isempty(C), status('Load a time window first.'); return; end
+        if ~any(S.rockerOn), status('Rocker artifact: the rocker does not move in this window.'); return; end
+        optsC = opts; optsC.zeroForce = zeroUser(ch); optsC.threshold = thrOf(ch);
+        try
+            [~, msg] = rockerFiltered(optsC);
+        catch ME
+            status(['Rocker artifact: ' ME.message]); return;
+        end
+        E = rfCache{ch};
+        row = find(S.dataChannels == ch, 1);
+        t = S.t(:); before = S.force(row, :)'; art = E.art(:); after = before - art;
+        z = mda_zeroForce(S, ch, zeroUser(ch), t);
+        hasZ = ~any(isnan(z));
+        if hasZ, before = before - z(:); after = after - z(:); end
+        if ~isempty(hRA) && isvalid(hRA)
+            f2 = hRA; clf(f2); figure(f2);
+        else
+            f2 = figure('Name', '', 'Color', 'w', 'NumberTitle', 'off', 'Position', [80 120 1100 560]);
+            hRA = f2;
+        end
+        f2.Name = sprintf('Rocker artifact - channel %d', ch);
+        if relTime, tx = t - S.fromSeconds; xlab = 'time in the window (s)'; else, tx = t; xlab = 'time in file (s)'; end
+        a1 = subplot(2, 1, 1, 'Parent', f2); hold(a1, 'on');
+        a2 = subplot(2, 1, 2, 'Parent', f2); hold(a2, 'on');
+        for a = [a1 a2]
+            yl0 = [];
+            if a == a1, yl0 = [min([before; after]) max([before; after])]; else, yl0 = [min(art) max(art)]; end
+            if diff(yl0) <= 0, yl0 = yl0 + [-1 1]; end
+            yl0 = yl0 + [-0.05 0.05] * diff(yl0);
+            on = diff([false S.rockerOn(:)' false]); s1 = find(on == 1); s2 = find(on == -1) - 1;
+            if ~isempty(s1)
+                patch(a, [tx(s1)'; tx(s2)'; tx(s2)'; tx(s1)'], repmat(yl0([1 1 2 2])', 1, numel(s1)), [0.55 0.55 0.55], ...
+                    'FaceAlpha', 0.2, 'EdgeColor', 'none');
+            end
+            ylim(a, yl0);
+        end
+        plot(a1, tx, before, 'Color', [0.7 0.7 0.7], 'LineWidth', 0.5);
+        plot(a1, tx, after, 'k', 'LineWidth', 0.5);
+        plot(a2, tx, art, 'Color', [0 0.3 1], 'LineWidth', 0.8);
+        if hasZ, yu = ['force - zero force (' mu 'N)']; else, yu = ['force (' mu 'N, sensor signal)']; end
+        ylabel(a1, yu); ylabel(a2, ['rocker artifact (' mu 'N)']); xlabel(a2, xlab);
+        legend(a1, {'rocker moving', 'before the rocker filter', 'after (analysed)'}, 'Location', 'northeast', 'Box', 'off');
+        [~, fn, fe] = fileparts(H.file);
+        title(a1, sprintf('%s%s, channel %d (200 Hz signal before the median / mean filters)', fn, fe, ch), ...
+            'Interpreter', 'none', 'FontWeight', 'normal', 'FontSize', 9);
+        title(a2, msg, 'Interpreter', 'none', 'FontWeight', 'normal', 'FontSize', 9);
+        linkaxes([a1 a2], 'x'); xlim(a1, [tx(1) tx(end)]);
+        m = uimenu(f2, 'Text', 'Save / Export');
+        uimenu(m, 'Text', 'Save figure (.png / .jpg / .tif / .fig) ...', 'MenuSelectedFcn', @(~,~) saveRA());
+        uimenu(m, 'Text', 'Export data of the visible time range (.xlsx / .csv / .txt) ...', 'MenuSelectedFcn', @(~,~) exportRA());
+        R = E.R;
+        function saveRA()
+            file = askFile('image', 'rockerArtifact');
+            if isempty(file), return; end
+            f3 = [];
+            try
+                f3 = figure('Visible', 'off', 'Color', 'w', 'Position', f2.Position, 'Name', f2.Name);  %without menus
+                copyobj(findobj(f2, '-depth', 1, {'Type', 'legend', '-or', 'Type', 'axes'}), f3);
+                saveFigureFile(f3, file); status(['Saved: ' file]);
+            catch ME2
+                status(['Save: ' ME2.message]);
+            end
+            if ~isempty(f3) && isvalid(f3), delete(f3); end
+        end
+        function exportRA()
+            file = askFile('data', 'rockerArtifact');
+            if isempty(file), return; end
+            xl = xlim(a2);
+            I = tx >= xl(1) & tx <= xl(2);
+            T = table(t(I), 'VariableNames', {'t_file_s'});
+            if relTime, T.t_window_s = tx(I); end
+            if ~isnan(H.recordingStart)
+                T.clockTime = datetime(H.recordingStart + t(I) / 86400, 'ConvertFrom', 'datenum', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS');
+            end
+            if hasZ, nm = 'force_minus_zero'; else, nm = 'force_signal'; end
+            T.([nm '_before_uN']) = before(I); T.rockerArtifact_uN = art(I); T.([nm '_after_uN']) = after(I);
+            T.rockerMoving = S.rockerOn(I)';
+            if height(T) > 1048000 && endsWith(lower(file), '.xlsx')
+                status(sprintf('%d rows: too many for Excel. Zoom in or export as .csv / .txt.', height(T))); return;
+            end
+            Tr = table(ch, {R.status}, R.f0, R.artifactPP, R.r2, 100 * R.correctedFraction, {R.message}, 'VariableNames', ...
+                {'channel', 'status', 'rockerFrequency_Hz', 'artifact_uN_peakToPeak', 'artifactR2', ...
+                'corrected_percentOfRockerOnTime', 'message'});
+            writeTables(file, {'rockerArtifact', 'rockerFilter'}, {T, Tr});
+        end
+    end
+
+    function I = guiInfo()
+        % file facts and all settings of the current channel and window (info table of every export, 2026-10-09)
+        I = H;
+        I.options = opts;
+        if ~isempty(H)
+            I.options.zeroForce = zeroUser(ch);                 %NaN = Offset of the log file
+            I.options.threshold = thrOf(ch);
+        end
+        I.labels = Lbl;
+        ep = ''; if ~isempty(EP), ep = EP.file; end
+        I.extra = {'createdBy', 'MyoDishAnalysisGUI'; 'channels', sprintf('%d', ch); ...
+            'loadedWindow_s', sprintf('%.15g %.15g', winReq); 'analysedRange_s', sprintf('%.15g %.15g', range); ...
+            'epRecording', ep};
+        if isempty(I.notes), I.notes = {}; end
     end
 
     function onShowTable(~, ~)
@@ -1849,11 +2134,24 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if isempty(B), status('Nothing to export.'); return; end
         [~, n] = fileparts(H.file);
         def = sprintf('%s_ch%d_%.0f-%.0fs.xlsx', n, ch, range(1), range(2));
-        [fn, pn] = uiputfile({'*.xlsx', 'Excel (*.xlsx)'; '*.csv', 'text (*.csv)'}, 'Export contractions', def);
-        if isequal(fn, 0), return; end
+        if ~isempty(apiFile)
+            [pn, fn, fe] = fileparts(apiFile); fn = [fn fe]; apiFile = '';
+        else
+            [fn, pn] = uiputfile({'*.xlsx', 'Excel (*.xlsx)'; '*.csv', 'text (*.csv)'}, 'Export contractions', def);
+            if isequal(fn, 0), return; end
+        end
         T = rangeTable();
         Sm = summaryRow();
-        info = H; info.options = opts; info.labels = Lbl;
+        info = guiInfo();
+        % analysis window (open the results again: same data window, range and threshold)
+        info.thresholds = table(1, ch, range(1), range(2), C.threshold, C.maxStimToPeak, winReq(1), winReq(2), ...
+            'VariableNames', {'range','channel','from','to','threshold_uN','maxStimToPeak_s','windowFrom','windowTo'});
+        if ~isempty(C.rockerFilter)                     %result of the rocker filter (as MyoDishAnalysis)
+            RF = C.rockerFilter;
+            info.rockerFilter = cell2table({'range1', ch, S.fromSeconds, S.toSeconds, RF.status, RF.f0, RF.artifactPP, ...
+                RF.r2, 100 * RF.correctedFraction, RF.message}, 'VariableNames', {'range','channel','from_s','to_s', ...
+                'status','rockerFrequency_Hz','artifact_uN_peakToPeak','artifactR2','corrected_percentOfRockerOnTime','message'});
+        end
         try
             files = mda_writeResults(fullfile(pn, fn), T, Sm, info);
             status(sprintf('Written: %s', strjoin(files, ', ')));
@@ -2527,7 +2825,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             end
         catch ME
             B = []; C = []; cla(axMain); cla(axPar); plotStim(); updateSummary();
-            status(['Error: ' ME.message]); return;
+            status(['Error: ' ME.message]);
+            if ~isempty(getenv('MDA_DEBUG')), disp(getReport(ME, 'extended')); end   %setenv('MDA_DEBUG', '1')
+            return;
         end
         if strcmp(C.thresholdMode, 'auto'), hThr.String = sprintf('%.0f', C.threshold); end
         if isnan(C.zeroForce), hZero.String = ''; else, hZero.String = sprintf('%.0f', C.zeroForce); end
@@ -2545,6 +2845,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             msg = sprintf('%s %d peaks of the rocker movement not counted (not locked to the stimuli).', msg, C.thresholdArtifacts);
         end
         if ~isempty(rfMsg), msg = [msg ' ' rfMsg]; end
+        if ~isempty(resInfo), msg = [resInfo ' ' msg]; end
         status(msg);
     end
 
@@ -2700,6 +3001,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             if any(dv)
                 plot(axMain, B.t_peak(dv), y(dv), 'o', 'Color', [0.9 0 0.9], 'MarkerSize', 11, 'LineWidth', 1.5, 'HitTest', 'off');
             end
+        end
+        if ~isempty(resOnly)                            %opened results: contractions not detected again (black o)
+            ro = resOnly(resOnly >= S.fromSeconds & resOnly <= S.toSeconds);
+            plot(axMain, ro, interp1(C.t, fy, ro), 'ko', 'MarkerSize', 10, 'LineWidth', 1.2, 'HitTest', 'off');
         end
         % comments of the log file (purple; the one jumped to: solid)
         if ~isempty(LE) && height(LE) > 0
@@ -3523,6 +3828,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
     end
 
+    function apiNextFile(file)
+        apiFile = file;
+    end
+
     function apiSetRange(r)
         range = sort(r(1:2));
         refresh(false);
@@ -3699,7 +4008,9 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       '', ...
       'Trend ...: rolling mean / median of a parameter over long periods and several files in a row (_0, _1, ...); sampling: all contractions, short windows or rocker stops. Channel list: one channel, or several channels ... (checkboxes) = overlaid, one colour per channel (the file is read once for all of them).', ...
       '', ...
-      'Save / Export (menu or right click on a plot): plots as .png / .jpg / .tif / .fig, plotted data (visible time range) as .xlsx / .csv / .txt; overview: picture only.', ...
+      'Save / Export (menu or right click on a plot): plots as .png / .jpg / .tif / .fig, plotted data (visible time range) as .xlsx / .csv / .txt; overview: picture only. Every data export contains the table info (version, recording, all settings, threshold and zero force of the channel, window and range).', ...
+      '', ...
+      'Open results ...: a results file of MyoDishAnalysis, the watcher or an export of the GUI (.xlsx, <name>_info.csv, _summary.csv, _contractions.csv): the recording (path in the file; otherwise next to the results file or asked for), the settings and the analysis window (channel, data window, analysed range; several: list) are restored, the contractions are detected again and compared with the file (status line; black o = contraction of the file not found again, e.g. other version). Contractions excluded by you in an export are excluded again.', ...
       '', ...
       'Labels ...: labels per channel (setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, treatment, concentration, concentrationUnit, daysInCulture, cultureStart, comment, analyst) - columns of the exported tables; saved as <name>_labels.csv next to the .mdd file and loaded automatically.', ...
       '', ...
@@ -3711,7 +4022,7 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       '', ...
       'AP parameters (EP recording, mda_analyzeAP), per contraction: AP_dVdtMax (V/s, max. upstroke velocity), AP_RMP (mV, median over 10 ms before the stimulus artefact), AP_Vmax (mV, peak), APD25/50/90 (ms, activation = time of dV/dt max --> 25/50/90 % repolarization). Stimulus artefact = pulse in the stimulation channel (biphasic pulse incl. pause = one pulse) until V_m is no longer saturated and |dV/dt| < 20 V/s; the stimulus onset is the stimulus time. If the upstroke lies within the artefact (foot of the upstroke not near RMP), dV/dt max, V_max, APD25 and APD50 are NaN and APD90 is measured from the stimulus onset (approximate, AP_note). Each AP is evaluated up to the next stimulus (fusion: NaN, note). Markers (<= 60 contractions visible): grey = artefact, green line = RMP, ^ upstroke, v V_max, o APD25/50/90.', ...
       '', ...
-      'Remove rocker artifact: while the rocker moves, each sensor shows a periodic signal (rocker frequency, 60 rpm = 1.21 Hz). It is estimated per channel between the contractions (+-60 s around the window) and subtracted; light grey = signal before. Not possible (message): rocker frequency not found, no periodic artifact, too little time between the contractions (fast pacing). The setting also applies to All channels, Trend and exports.', ...
+      'Remove rocker artifact: while the rocker moves, each sensor shows a periodic signal (rocker frequency, 60 rpm = 1.21 Hz). It is estimated per channel between the contractions (+-60 s around the window) and subtracted; light grey = signal before. Not possible (message): rocker frequency not found, no periodic artifact, too little time between the contractions (fast pacing). The setting also applies to All channels, Trend and exports. Rocker artifact ... (button, menu Save / Export, right click in the force plot): extra window with the signal before / after the filter and the removed artifact (also if the filter is off); menu: save as figure, export the data of the visible time range.', ...
       '', 'Parameters:'}, ...
       cellfun(@(n, u, d) sprintf('%s (%s): %s', n, u, d), P(:,1)', P(:,2)', P(:,3)', 'UniformOutput', false)];
 end

@@ -1,22 +1,27 @@
 """Write contraction table, summary and analysis info to Excel (.xlsx) or text (.csv). Port of mda_writeResults.m.
 
     write_results('results.xlsx', contractions, summary, info)
-        sheets: contractions, summary, parameters (definitions), info (file facts and options), labels,
-        rockerFilter (option rockerFilter: result per channel and time range), protocols (option protocol),
-        protocolResults (characteristic values per protocol and channel)
+        sheets: contractions, summary, parameters (definitions), info (file facts, version and all options),
+        thresholds (analysis windows: data window read, analysed range and detection threshold per channel and
+        chunk; used to open the results in the GUI), labels, rockerFilter (option rockerFilter: result per channel and
+        time range), protocols (option protocol), protocolResults (characteristic values per protocol and channel)
     write_results('results.csv', ...)
-        results_contractions.csv, results_summary.csv, results_parameters.csv, results_info.csv (+ labels,
-        rockerFilter)
+        results_contractions.csv, results_summary.csv, results_parameters.csv, results_info.csv, ...
+    info_table(info)
+        only the info table (key, value): file, ..., software, version, implementation, notes, info['extra'] (rows
+        (key, value), e.g. createdBy, channels, loadedWindow_s), option_<name> for every option, log file entries
 
 Existing sheets of the same name are overwritten.
 
-TS 2026-10-06 (port of mda_writeResults.m, TS 2026-10-05)
+TS 2026-10-06 (port of mda_writeResults.m, TS 2026-10-05; version, implementation, extra rows, thresholds
+sheet 2026-10-09)
 """
 from __future__ import annotations
 
 import datetime as _dt
 import math
 import os
+import re
 
 import numpy as np
 import pandas as pd
@@ -50,6 +55,36 @@ def mat2str(v):
     return "[" + ";".join(" ".join(num2str(x) for x in row) for row in a) + "]"
 
 
+def mda_version():
+    """version of MyoDishAnalysis as in MATLAB ('1.0.0b1' --> '1.0.0-beta.1')."""
+    m = re.fullmatch(r"(\d+\.\d+\.\d+)(?:(a|b|rc)(\d+))?", __version__)
+    if not m:
+        return __version__
+    if not m.group(2):
+        return m.group(1)
+    return "%s-%s.%s" % (m.group(1), {"a": "alpha", "b": "beta", "rc": "rc"}[m.group(2)], m.group(3))
+
+
+def _num15(v):
+    """sprintf('%.15g', v) of MATLAB (options in the info table: full precision, read back by read_results)."""
+    v = float(v)
+    if math.isnan(v):
+        return "NaN"
+    if math.isinf(v):
+        return "Inf" if v > 0 else "-Inf"
+    return f"{v:.15g}"
+
+
+def _mat2str15(a):
+    """mat2str of MATLAB (15 significant digits)."""
+    a = np.asarray(a, dtype=float)
+    if a.size == 1:
+        return _num15(a.ravel()[0])
+    if a.ndim <= 1:
+        return "[" + " ".join(_num15(x) for x in a.ravel()) + "]"
+    return "[" + ";".join(" ".join(_num15(x) for x in row) for row in a) + "]"
+
+
 def _align_of(r):
     return "stimulus" if r.get("align") == "stimulus" else "50 % upstroke"
 
@@ -64,12 +99,14 @@ def _option_text(v):
             f"channel {int(r['channel'])} ({r.get('source', '')}; aligned at the {_align_of(r)})" for r in v)
     if isinstance(v, dict):
         return _option_text([v])
+    if isinstance(v, (bool, np.bool_)):
+        return num2str(v)
     a = np.asarray(v)
     if a.size == 0:
         return ""
     if a.size == 1:
-        return num2str(a.ravel()[0])
-    return mat2str(a)
+        return _num15(a.ravel()[0])
+    return _mat2str15(a)
 
 
 def parameter_table(contractions=None):
@@ -90,8 +127,10 @@ def parameter_table(contractions=None):
 
 def info_table(info):
     o = info["options"]
+    # 2026-10-09: version and implementation as own rows; info['extra'] (rows (key, value)) after the notes
+    extra = [(str(k), str(v)) for k, v in (info.get("extra") or [])]
     keys = ["file", "samplingRate_Hz", "samplingRateSource", "nChannelsInFile", "fileLength_s", "recordingStart",
-            "analysisDate", "software", "notes"]
+            "analysisDate", "software", "version", "implementation", "notes"] + [k for k, _ in extra]
     startStr = ""
     rs = info.get("recordingStart", math.nan)
     if rs is not None and not (isinstance(rs, float) and math.isnan(rs)):
@@ -99,8 +138,8 @@ def info_table(info):
     analysisDate = info.get("analysisDate", _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     vals = [info["file"], num2str(info["samplingRate"]), info["samplingRateSource"], num2str(info["nChannelsInFile"]),
             f"{info['totalSeconds']:.3f}", startStr, analysisDate,
-            f"MyoDishAnalysis (Python) {__version__} (T. Seidel, FAU Erlangen-Nuernberg)",
-            " | ".join(info.get("notes", []))]
+            f"MyoDishAnalysis (Python) {__version__} (T. Seidel, FAU Erlangen-Nuernberg)", mda_version(), "Python",
+            " | ".join(info.get("notes", []))] + [v for _, v in extra]
     for k, v in o.items():
         keys.append("option_" + k)
         vals.append(_option_text(v))
@@ -139,6 +178,9 @@ def write_results(output_file, contractions, summary, info):
     paramTable = parameter_table(contractions)
     infoTable = info_table(info)
     tabs = [("contractions", contractions), ("summary", summary), ("parameters", paramTable), ("info", infoTable)]
+    th = info.get("thresholds")  # analysis windows (myodish_analysis, GUI export)
+    if isinstance(th, pd.DataFrame) and len(th) > 0:
+        tabs.append(("thresholds", th))
     if isinstance(info.get("labels"), pd.DataFrame):
         tabs.append(("labels", info["labels"]))
     rf = info.get("rockerFilter")

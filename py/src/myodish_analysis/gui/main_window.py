@@ -1,6 +1,8 @@
 """Interactive contraction analysis of a MyoDish recording (.mdd). Port of MyoDishAnalysisGUI.m (PySide6 + pyqtgraph).
 
     mda-gui [file.mdd]            (or: python -m myodish_analysis.gui [file.mdd])
+    mda-gui results.xlsx          results of myodish_analysis / watcher / GUI export (.xlsx, _info.csv): recording,
+                                  settings and analysis window restored (read_results)
 
 0. Comments ...: searchable list of the comments of the log file; double-click (or Go to) loads the data around it.
 1. Overview: min/max envelope of the selected channel (green = rocker at rest). Drag = load a time window; mouse wheel
@@ -16,8 +18,11 @@
 3. Stimulus plot (current per pulse, interval to the previous pulse), table (mean, SD, n of the selected contractions,
    extra / missed / uncertain beats) and lower plot (one parameter per contraction). Detection threshold per channel
    (auto or manual); 'high sensitivity' (default) counts all contractions and marks the uncertain ones (orange), 'high
-   specificity' does not count them (option detection). Stimuli: MyoDish pulses or external trigger pulses (external stimulator at the external controller unit;
-   auto = trigger pulses if the window has no MyoDish pulses). Overlay contractions: mean beat (stimulus / peak) or
+   specificity' does not count them (option detection). Rocker artifact ...: window with the signal before / after the
+   rocker filter and the removed artifact (save, export). Stimuli: MyoDish pulses or external trigger pulses (external
+   stimulator at the external controller unit; auto = trigger pulses if the window has no MyoDish pulses). Every data
+   export contains the table info (version, all settings); Open results ... restores recording, settings and analysis
+   window of a results file and compares the contractions. Overlay contractions: mean beat (stimulus / peak) or
    time course of the range (t = 0 at the first stimulus), other channels of the same range by checkboxes, colour /
    width / line style / SD-SEM-range band per group, editable title, axis labels and legend, editable matplotlib copy
    (overlay.py).
@@ -27,8 +32,8 @@
    per group, plot of a parameter against the quantity, export (protocols_window.py).
 See README.md of the MATLAB version for all details; results are the same as with MyoDishAnalysisGUI.
 
-Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-06 (port of MyoDishAnalysisGUI.m; detection mode
-2026-10-09)
+Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-06 (port of MyoDishAnalysisGUI.m; detection mode,
+open results, rocker artifact window 2026-10-09)
 """
 from __future__ import annotations
 
@@ -94,6 +99,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.H = self.S = self.O = self.B = self.C = None
         self.ch = 1
         self.range = [math.nan, math.nan]
+        self.win_req = [math.nan, math.nan]  # loaded window as requested from read_mdd (exports: open the results again)
+        self.res_only = []                  # opened results file: t_peak of its contractions not detected again
+        self.res_info = ""                  # opened results file: comparison shown in the status line
+        self.win_rocker = None              # rocker artifact window
+        self.next_file = ""                 # scripts / tests: file name of the next save / export dialog
         self.manual_off = []                # t_peak of the contractions excluded by the user
         self.zero_user = {}                 # zero force per channel entered by the user (missing / NaN = log file)
         self.thr_user = {}                  # detection threshold per channel entered by the user (missing = auto)
@@ -128,7 +138,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_ui()
         QtWidgets.QApplication.instance().installEventFilter(self)  # arrow keys: navigation on the time axis
         self.empty_plots()
-        if mdd_file:
+        if mdd_file and not str(mdd_file).lower().endswith(".mdd"):  # results file (2026-10-09)
+            self.open_results(str(mdd_file))
+        elif mdd_file:
             self.open_file(str(mdd_file))
             if metadata is not None and self.H is not None:
                 try:
@@ -156,6 +168,9 @@ class MainWindow(QtWidgets.QMainWindow):
         bar.addWidget(btn("+ EP recording ...", self.on_open_ep, "add an electrophysiological recording (LabChart .mat "
                           "export, e.g. sharp electrode: voltage + stimulation) aligned to the stimuli of the open .mdd "
                           "file"))
+        bar.addWidget(btn("Open results ...", self.on_open_results, "results file of MyoDishAnalysis, the watcher or an "
+                          "export (.xlsx, _info.csv, ...): recording, settings and analysis window are restored, the "
+                          "contractions detected again and compared with the file"))
         self.lFile = ElidedLabel("no file")
         self.lFile.setMinimumWidth(120)
         bar.addWidget(self.lFile, 1)
@@ -327,8 +342,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cbRF.setToolTip("subtracts the periodic signal of the rocker movement (estimated per channel between the "
                              "contractions, +-60 s around the window); light grey in the force plot = signal before. See "
                              "rocker_filter")
-        self.cbRel = QtWidgets.QCheckBox("time axis: 0 = start of the loaded window")
-        self.cbRel.setToolTip("display only; From/To, tables and exports keep the time in the file (s)")
+        self.cbRel = QtWidgets.QCheckBox("time 0 = window start")
+        self.cbRel.setToolTip("time axis: 0 = start of the loaded window (display only; From/To, tables and exports keep "
+                              "the time in the file, s)")
         self.cXT = QtWidgets.QComboBox()
         self.cXT.addItems(["stimuli: auto", "stimuli: MyoDish", "stimuli: ext. trigger"])
         self.cXT.setToolTip("stimulus times: MyoDish pulses of the channel, or the external trigger pulses of the "
@@ -354,7 +370,12 @@ class MainWindow(QtWidgets.QMainWindow):
         hr.addWidget(self.cDet)
         pv.addLayout(hr)
         self.cbRel.toggled.connect(self.on_rel_time)
-        pv.addWidget(self.cbRel)
+        ht = QtWidgets.QHBoxLayout()
+        ht.addWidget(self.cbRel)
+        ht.addWidget(btn("Rocker artifact ...", self.on_rocker_window, "periodic signal of the rocker movement that the "
+                         "rocker filter removes (estimated for this channel and window, also if the filter is off): "
+                         "extra window, save as figure, export data"))
+        pv.addLayout(ht)
         self.lCounts = QtWidgets.QLabel("")
         self.lCounts.setWordWrap(True)
         self.lCounts.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
@@ -403,6 +424,8 @@ class MainWindow(QtWidgets.QMainWindow):
         m.addAction("Export data of the force plot (.xlsx / .csv / .txt) ...", lambda: self.export_plot_data("force"))
         m.addAction("Export data of the stimulus plot ...", lambda: self.export_plot_data("stimuli"))
         m.addAction("Export data of the parameter plot ...", lambda: self.export_plot_data("parameter"))
+        m.addSeparator()
+        m.addAction("Rocker artifact (removed signal) ...", self.on_rocker_window)
         hm = self.menuBar().addMenu("Help")
         hm.addAction("Help ...", self.on_help)
 
@@ -444,6 +467,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.H = H
         self.S = self.O = self.B = self.C = None
         self.manual_off = []
+        self.res_only = []
+        self.res_info = ""
+        self.win_req = [math.nan, math.nan]
         self.zero_user = {}
         self.thr_user = {}
         self.cThr.setCurrentIndex(0)
@@ -498,14 +524,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if H.bytes < 150e6:
             self.on_overview()  # small files: overview right away
 
-    def on_load(self):
+    def on_load(self, *_, window=None):
+        """window (optional): [from, to] in s (results files: exactly the data window of the analysis)"""
         H = self.H
         if H is None:
             self.status("Open a file first.")
             return
         try:
-            fr = float(self.eFrom.text())
-            to = float(self.eTo.text())
+            fr = float(self.eFrom.text()) if window is None else float(window[0])
+            to = float(self.eTo.text()) if window is None else float(window[1])
         except ValueError:
             self.status("From / To must be numbers (s).")
             return
@@ -531,6 +558,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rf_ctx = None
         self.rf_cache = {}
         self.rf_f0 = None
+        self.res_only = []
+        self.win_req = [fr, to]
         self.eFrom.setText(f"{S.fromSeconds:.1f}")
         self.eTo.setText(f"{S.toSeconds:.1f}")
         cur = self.cCh.currentIndex()
@@ -569,6 +598,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.ch = int(self.H.dataChannels[self.cCh.currentIndex()])
         self.manual_off = []
+        self.res_only = []
+        self.res_info = ""
         self.show_threshold()
         self.plot_overview()
         if self.S is not None:
@@ -735,6 +766,8 @@ class MainWindow(QtWidgets.QMainWindow):
             msg += f" {C.thresholdArtifacts} peaks of the rocker movement not counted (not locked to the stimuli)."
         if rf_msg:
             msg += " " + rf_msg
+        if self.res_info:
+            msg = self.res_info + " " + msg
         self.status(msg)
 
     def rocker_filtered(self, optsC, ch=None):
@@ -956,6 +989,12 @@ class MainWindow(QtWidgets.QMainWindow):
             if dv.any():
                 p.addItem(pg.ScatterPlotItem(tp[dv], y[dv], symbol="o", size=14, pen=pg.mkPen(MAGENTA, width=1.5),
                                              brush=None))
+        if self.res_only:  # opened results: contractions not detected again (black o)
+            ro = np.asarray(self.res_only, float)
+            ro = ro[(ro >= S.fromSeconds) & (ro <= S.toSeconds)]
+            if ro.size:
+                p.addItem(pg.ScatterPlotItem(ro, np.interp(ro, C.t, fy), symbol="o", size=13,
+                                             pen=pg.mkPen("k", width=1.3), brush=None))
         if self.LE is not None and len(self.LE):
             E = self.LE
             cm = E["isComment"].to_numpy() & (E["t_file"].to_numpy() >= S.fromSeconds) & \
@@ -1583,6 +1622,8 @@ class MainWindow(QtWidgets.QMainWindow):
             m.addAction("Show reference beat / deviating contractions ...", self.show_reference)
             m.addAction("Remove reference beat of this channel", self.clear_reference)
             m.addSeparator()
+            m.addAction("Show rocker artifact (removed signal) ...", self.on_rocker_window)
+            m.addSeparator()
         if name != "ep":
             m.addAction("Save this plot (.png / .jpg / .tif / .pdf) ...", lambda: self.save_plots(name))
             if name != "overview":
@@ -1796,6 +1837,200 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addWidget(t)
         d.show()
 
+    # =================================================================================================== results files
+    def on_open_results(self):
+        fn, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open results", self.last_dir,
+                                                      "results of MyoDishAnalysis (*.xlsx *_info.csv *_summary.csv "
+                                                      "*_contractions.csv *_contractions.csv.gz)")
+        if fn:
+            self.open_results(fn)
+
+    def open_results(self, file, pick=None):
+        """results file of MyoDishAnalysis / watcher / GUI export (2026-10-09): recording, settings and analysis window
+        of the results; the contractions are detected again and compared with the file (black o = only in the file)."""
+        from ..read_results import read_results, value_of_channel
+        try:
+            R = read_results(file)
+        except Exception as e:  # noqa: BLE001
+            self._err("Results: ", e)
+            return False
+        W = R["windows"]
+        if W is None or len(W) == 0:
+            self.status("Results: no analysis window in the file.")
+            return False
+        mdd = R["mddFile"]
+        if not mdd or not os.path.isfile(mdd):  # moved: same name next to the results, or ask
+            nm = os.path.basename(mdd.replace("\\", "/"))
+            cand = os.path.join(os.path.dirname(os.path.abspath(file)), nm)
+            if nm and os.path.isfile(cand):
+                mdd = cand
+            else:
+                mdd, _ = QtWidgets.QFileDialog.getOpenFileName(self, f"Recording of the results: {nm}",
+                                                               os.path.dirname(os.path.abspath(file)),
+                                                               "MyoDish (*.mdd)")
+                if not mdd:
+                    return False
+        if pick is None:  # analysis window: channel, range, chunk
+            pick = 0
+            if len(W) > 1:
+                items = [f"ch {int(W['channel'].iloc[r])}   {W['range'].iloc[r]}   {W['from'].iloc[r]:.1f} - "
+                         f"{W['to'].iloc[r]:.1f} s   (threshold {W['threshold_uN'].iloc[r]:.0f} {MU}N)"
+                         for r in range(len(W))]
+                it, ok = QtWidgets.QInputDialog.getItem(self, "Open results", "Analysis window (channel, range, time):",
+                                                        items, 0, False)
+                if not ok:
+                    return False
+                pick = items.index(it)
+        w = W.iloc[int(pick)]
+        self.open_file(mdd)
+        if self.H is None:
+            return False
+        ch = int(w["channel"])
+        dc = [int(c) for c in self.H.dataChannels]
+        if ch not in dc:
+            self.status(f"Results: channel {ch} is not in {self.H.file}.")
+            return False
+        # settings of the results
+        o = Struct(R["options"])
+        o.referenceBeat = None
+        self.thr_user = {}
+        self.zero_user = {}
+        v = value_of_channel(o.threshold, R["channels"], ch)
+        if not math.isnan(v):
+            self.thr_user[ch] = v
+        v = value_of_channel(o.zeroForce, R["channels"], ch)
+        if not math.isnan(v):
+            self.zero_user[ch] = v
+        o.threshold = "auto"  # the GUI keeps them per channel
+        o.zeroForce = None
+        self.opts = make_options(o)
+        for wdg, val in ((self.cbRF, bool(self.opts.rockerFilter)), (self.cbRocker, self.opts.rocker == "stopped"),
+                         (self.cbStim, self.opts.beats == "stimulated")):
+            wdg.blockSignals(True)
+            wdg.setChecked(val)
+            wdg.blockSignals(False)
+        self.cDet.setCurrentIndex(1 if self.opts.detection == "specific" else 0)
+        self.cXT.setCurrentIndex(("auto", "off", "on").index(self.opts.externalTrigger))
+        self.ch = ch
+        self.cCh.setCurrentIndex(dc.index(ch))
+        self.show_threshold()
+        if isinstance(R["labels"], pd.DataFrame):
+            try:
+                self.Lbl = make_labels(R["labels"], self.H.dataChannels)
+            except Exception:  # noqa: BLE001
+                self.status("Results: labels not read.")
+        # data window of the analysis, analysed range, contractions excluded by the user (GUI exports)
+        self.res_info = ""
+        self.on_load(window=[float(w["windowFrom"]), float(w["windowTo"])])
+        if self.S is None:
+            return False
+        if self.opts.rockerFilter and R["createdBy"] != "MyoDishAnalysisGUI":
+            self.rf_ctx = self.S  # as myodish_analysis: estimated from the data window itself
+            self.rf_cache = {}
+        self.range = [max(float(w["from"]), self.S.fromSeconds), min(float(w["to"]), self.S.toSeconds)]
+        Tc = None
+        T = R["contractions"]
+        if isinstance(T, pd.DataFrame) and {"channel", "t_peak"} <= set(T.columns):
+            tp = T["t_peak"].to_numpy(float)
+            Tc = T[(T["channel"].to_numpy() == ch) & (tp >= float(w["from"]) - 1e-9)
+                   & (tp <= float(w["to"]) + 1e-9)].reset_index(drop=True)
+            if "manuallyExcluded" in Tc.columns:
+                self.manual_off = [float(t) for t, m in zip(Tc["t_peak"], Tc["manuallyExcluded"]) if bool(m)]
+        self.analyze(False)
+        self.res_info = self.compare_results(R, Tc)
+        ep = R["extra"].get("epRecording", "")
+        if ep and os.path.isfile(ep):
+            self.open_ep(ep)
+        self.analyze(False)
+        return True
+
+    def compare_results(self, R, Tc):
+        """contractions of the results file vs. detected here (same channel and range)."""
+        from ..write_results import mda_version
+        src = f"Results ({R['implementation']} {R['version']}" + (f", {R['createdBy']}" if R["createdBy"] else "") + \
+            (f", {R['analysisDate']}" if R["analysisDate"] else "") + "):"
+        if R["version"] != mda_version():
+            src += f" version differs from this one ({mda_version()})!"
+        self.res_only = []
+        if Tc is None or len(Tc) == 0:
+            return f"{src} settings and window applied (no contractions in the file to compare)."
+        if "sampleMode" in Tc.columns and (Tc["sampleMode"].astype(str) == "median").any():
+            return f"{src} settings and window applied (contractions thinned to block medians: not compared)."
+        B = self.B
+        if B is None or len(B) == 0:
+            inR = np.zeros(0, bool)
+            tH = np.zeros(0)
+        else:
+            inR = (B["t_peak"].to_numpy() >= self.range[0]) & (B["t_peak"].to_numpy() <= self.range[1])
+            tH = B["t_peak"].to_numpy()[inR]
+        tf = Tc["t_peak"].to_numpy(float)
+        if tH.size:
+            D = np.abs(tf[None, :] - tH[:, None])
+            j = np.argmin(D, axis=0)
+            d = D[j, np.arange(tf.size)]
+        else:
+            j = np.zeros(tf.size, int)
+            d = np.full(tf.size, np.inf)
+        found = d <= self.S.dt / 2
+        self.res_only = [float(t) for t in tf[~found]]
+        thinned = "sampledEvery" in Tc.columns and (Tc["sampledEvery"].to_numpy(float) > 1).any()
+        n_here = 0 if thinned else int(tH.size - np.unique(j[found]).size)
+        dU = dI = 0
+        if found.any():
+            Bh = B[inR].reset_index(drop=True)
+            sel = self.selected()[inR]
+            if "uncertain" in Tc.columns:
+                dU = int(np.sum(Tc["uncertain"].to_numpy()[found].astype(bool) !=
+                                Bh["uncertain"].to_numpy(bool)[j[found]]))
+            if "included" in Tc.columns and not thinned:
+                dI = int(np.sum(Tc["included"].to_numpy()[found].astype(bool) != sel[j[found]]))
+        if found.all() and n_here == 0 and dU == 0 and dI == 0:
+            if thinned:
+                return f"{src} {len(Tc)} contractions (thinned), all found again."
+            return f"{src} {len(Tc)} contractions, the same as here."
+        return (f"{src} DIFFERENCES: {int((~found).sum())} contraction(s) only in the file (black o), {n_here} only "
+                f"here, flag uncertain {dU}, included {dI}.")
+
+    def gui_info(self):
+        """file facts and all settings of the current channel and window (info table of every export, 2026-10-09)."""
+        info = dict(self.H) if self.H is not None else {}
+        o = Struct(self.opts)
+        if self.H is not None:
+            o.zeroForce = self.zero_of()  # NaN = Offset of the log file
+            o.threshold = self.thr_of()
+        info["options"] = o
+        info["labels"] = self.Lbl
+        ep = self.EP.file if self.EP is not None else ""
+        info["extra"] = [("createdBy", "MyoDishAnalysisGUI"), ("channels", str(self.ch)),
+                         ("loadedWindow_s", " ".join(f"{v:.15g}" for v in self.win_req)),
+                         ("analysedRange_s", " ".join(f"{v:.15g}" for v in self.range)), ("epRecording", ep)]
+        info.setdefault("notes", [])
+        return info
+
+    def on_rocker_window(self):
+        """rocker artifact (2026-10-09): signal of the loaded window before / after the rocker filter and the subtracted
+        periodic artifact (estimated as for 'remove rocker artifact', also if that is off)."""
+        from .dialogs import RockerArtifactWindow
+        if self.S is None or self.C is None:
+            self.status("Load a time window first.")
+            return None
+        if not np.any(self.S.rockerOn):
+            self.status("Rocker artifact: the rocker does not move in this window.")
+            return None
+        optsC = Struct(self.opts)
+        optsC.zeroForce = self.zero_of()
+        optsC.threshold = self.thr_of()
+        try:
+            _, msg = self.rocker_filtered(optsC)
+        except Exception as e:  # noqa: BLE001
+            self._err("Rocker artifact: ", e)
+            return None
+        if self.win_rocker is not None:
+            self.win_rocker.close()
+        self.win_rocker = RockerArtifactWindow(self, msg)
+        self.win_rocker.show()
+        return self.win_rocker
+
     # =================================================================================================== export
     def ask_file(self, kind, what):
         from .dialogs import ask_file
@@ -1807,14 +2042,28 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         n = os.path.splitext(os.path.basename(self.H.file))[0]
         d = os.path.join(self.last_dir, f"{n}_ch{self.ch}_{self.range[0]:.0f}-{self.range[1]:.0f}s.xlsx")
-        fn, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export contractions", d, "Excel (*.xlsx);;text (*.csv)")
+        if self.next_file:
+            fn, self.next_file = self.next_file, ""
+        else:
+            fn, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export contractions", d, "Excel (*.xlsx);;text (*.csv)")
         if not fn:
             return
         T = self.range_table()
         Sm = self.summary_row()
-        info = dict(self.H)
-        info["options"] = self.opts
-        info["labels"] = self.Lbl
+        info = self.gui_info()
+        C = self.C  # analysis window (open the results again: same data window, range and threshold)
+        info["thresholds"] = pd.DataFrame([[1, self.ch, self.range[0], self.range[1], C.threshold, C.maxStimToPeak,
+                                            self.win_req[0], self.win_req[1]]],
+                                          columns=["range", "channel", "from", "to", "threshold_uN", "maxStimToPeak_s",
+                                                   "windowFrom", "windowTo"])
+        RF = C.get("rockerFilter")
+        if RF is not None:  # result of the rocker filter (as myodish_analysis)
+            info["rockerFilter"] = pd.DataFrame([["range1", self.ch, self.S.fromSeconds, self.S.toSeconds, RF.status,
+                                                  RF.f0, RF.artifactPP, RF.r2, 100 * RF.correctedFraction,
+                                                  RF.message]],
+                                                columns=["range", "channel", "from_s", "to_s", "status",
+                                                         "rockerFrequency_Hz", "artifact_uN_peakToPeak", "artifactR2",
+                                                         "corrected_percentOfRockerOnTime", "message"])
         try:
             files = write_results(fn, T, Sm, info)
             self.status("Written: " + ", ".join(files))

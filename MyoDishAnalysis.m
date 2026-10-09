@@ -194,7 +194,7 @@ end
 % ------------------------------------------------------------------ analysis (chunks of <= chunkSeconds)
 pad = opts.maxBeatWindow + 2;
 if opts.rockerFilter, pad = max(pad, 60); end      %context for the estimate of the rocker artifact
-parts = {}; sumParts = {}; thrInfo = zeros(0, 6);
+parts = {}; sumParts = {}; thrInfo = zeros(0, 8);
 rfRows = {}; resParts = {};
 nFig = 0;
 f0cache = [];                                       %rocker frequency per rocker speed, estimated once (all channels)
@@ -231,7 +231,8 @@ for r = 1:nR
             lastB{c} = Bq; lastC{c} = Cq;           %control figure (single chunk)
             Cq.t = []; Cq.f = []; Cq.rockerArtifact = [];   %keep only the small fields of the earlier chunks
             Cs{c,q} = Cq;
-            thrInfo(end+1,:) = [r, channels(c), edges(q), edges(q+1), Cq.threshold, Cq.maxStimToPeak]; %#ok<AGROW>
+            thrInfo(end+1,:) = [r, channels(c), edges(q), edges(q+1), Cq.threshold, Cq.maxStimToPeak, ...
+                max(0, edges(q) - pad), edges(q+1) + pad]; %#ok<AGROW>  data window read (GUI: open the results)
             if opts.rockerFilter && ~isempty(Cq.rockerFilter)
                 RF = Cq.rockerFilter;
                 rfRows(end+1,:) = {labels{r}, channels(c), edges(q), edges(q+1), RF.status, RF.f0, RF.artifactPP, ...
@@ -340,7 +341,10 @@ info.groupBy = groupByR;
 if ~isempty(resParts), info.protocolResults = PR; end
 info.labels = Lbl;
 info.options = opts;
-info.thresholds = array2table(thrInfo, 'VariableNames', {'range','channel','from','to','threshold_uN','maxStimToPeak_s'});
+info.thresholds = array2table(thrInfo, 'VariableNames', {'range','channel','from','to','threshold_uN','maxStimToPeak_s', ...
+    'windowFrom','windowTo'});
+% 2026-10-09: rows of the info table (mda_writeResults) to reproduce the analysis (MyoDishAnalysisGUI: open results)
+info.extra = {'createdBy', 'MyoDishAnalysis'; 'channels', mat2str(channels); 'chunkSeconds', sprintf('%.15g', chunkSeconds)};
 if opts.rockerFilter
     if isempty(rfRows), rfRows = cell(0, 10); end
     info.rockerFilter = cell2table(rfRows, 'VariableNames', {'range','channel','from_s','to_s','status','rockerFrequency_Hz', ...

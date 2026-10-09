@@ -60,7 +60,7 @@ from .protocols import add_empty_group_columns, find_protocols, group_beats
 from .read_mdd import read_mdd
 from .rocker_filter import rocker_filter
 from .summarize import summarize
-from .write_results import write_results
+from .write_results import _mat2str15, _num15, write_results
 
 DATENUM_1970 = 719529.0
 
@@ -203,7 +203,8 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
                 lastB[c] = Bq
                 lastC[c] = Cq
                 Cs[c][q] = Struct({k: v for k, v in Cq.items() if k not in ("t", "f", "rockerArtifact")})
-                thrInfo.append([r + 1, ch, edges[q], edges[q + 1], Cq.threshold, Cq.maxStimToPeak])
+                thrInfo.append([r + 1, ch, edges[q], edges[q + 1], Cq.threshold, Cq.maxStimToPeak,
+                                max(0.0, edges[q] - pad), edges[q + 1] + pad])  # data window read (GUI: open results)
                 if opts.rockerFilter and Cq.rockerFilter is not None:
                     RF = Cq.rockerFilter
                     rfRows.append([labels[r], ch, edges[q], edges[q + 1], RF.status, RF.f0, RF.artifactPP, RF.r2,
@@ -308,7 +309,10 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
             PR = add_labels(PR, Lbl)
         info["protocolResults"] = PR
     info["thresholds"] = pd.DataFrame(thrInfo, columns=["range", "channel", "from", "to", "threshold_uN",
-                                                        "maxStimToPeak_s"])
+                                                        "maxStimToPeak_s", "windowFrom", "windowTo"])
+    # 2026-10-09: rows of the info table (write_results) to reproduce the analysis (GUI: open results)
+    info["extra"] = [("createdBy", "MyoDishAnalysis"), ("channels", _mat2str15(channels)),
+                     ("chunkSeconds", _num15(chunkSeconds))]
     if opts.rockerFilter:
         RFT = pd.DataFrame(rfRows, columns=["range", "channel", "from_s", "to_s", "status", "rockerFrequency_Hz",
                                             "artifact_uN_peakToPeak", "artifactR2", "corrected_percentOfRockerOnTime",

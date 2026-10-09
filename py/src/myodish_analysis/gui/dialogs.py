@@ -1,7 +1,7 @@
 """Dialogs of the GUI: comments of the log file, labels per channel, contraction table, help, file dialogs, saving plots
 (images) and exporting the plotted data. Port of the corresponding parts of MyoDishAnalysisGUI.m.
 
-TS 2026-10-06
+TS 2026-10-06 (info table in every export, open results, rocker artifact window 2026-10-09)
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from ..labels import labels as make_labels
 from ..parameters import PARAMETERS
 from ..zero_force import zero_force
 from .timeaxis import fmt_clock
-from .widgets import TwinPlot, time_plot
+from .widgets import TwinPlot, runs, time_plot
 
 IMAGE_FILTER = "PNG image (*.png);;JPEG image (*.jpg);;TIFF image (*.tif);;PDF vector graphic (*.pdf)"
 SHOT_FILTER = "PNG image (*.png);;JPEG image (*.jpg);;TIFF image (*.tif)"
@@ -27,7 +27,10 @@ DATA_FILTER = "Excel (*.xlsx);;comma separated (*.csv);;tab separated text (*.tx
 
 
 def ask_file(win, kind, what):
-    """file name dialog; kind 'image', 'screenshot' or 'data'."""
+    """file name dialog; kind 'image', 'screenshot' or 'data'. win.next_file (scripts / tests): this file, no dialog."""
+    if getattr(win, "next_file", ""):
+        fn, win.next_file = win.next_file, ""
+        return fn
     H = win.H
     p = os.path.dirname(H.file)
     n = os.path.splitext(os.path.basename(H.file))[0]
@@ -288,9 +291,14 @@ def write_plot_images(win, lst, file, width_px=3000):
 
 # ----------------------------------------------------------------------------------------------- data
 def write_tables(win, file, names, tabs):
-    """.xlsx: one sheet per table; .csv / .txt: one file per table (<name>_<table>.csv if several)."""
+    """.xlsx: one sheet per table; .csv / .txt: one file per table (<name>_<table>.csv if several). Always with the table
+    'info' (version, file, all settings: info_table of write_results; 2026-10-09)."""
+    from ..write_results import info_table
     p, nm = os.path.split(file)
     n, e = os.path.splitext(nm)
+    nData = len(tabs)
+    names = list(names) + ["info"]
+    tabs = list(tabs) + [info_table(win.gui_info())]
     try:
         if e.lower() == ".xlsx":
             with pd.ExcelWriter(file, engine="openpyxl") as xw:
@@ -299,7 +307,9 @@ def write_tables(win, file, names, tabs):
             files = [file]
         elif e.lower() in (".csv", ".txt"):
             sep = "," if e.lower() == ".csv" else "\t"
-            files = [file] if len(tabs) == 1 else [os.path.join(p, f"{n}_{name}{e}") for name in names]
+            files = [os.path.join(p, f"{n}_{name}{e}") for name in names]
+            if nData == 1:
+                files[0] = file  # one data table: the file name chosen
             for f, T in zip(files, tabs):
                 _plain(T, text=True).to_csv(f, sep=sep, index=False)
         else:
@@ -644,6 +654,117 @@ class TableWindow(QtWidgets.QWidget):
 
 
 # ----------------------------------------------------------------------------------------------- help
+class RockerArtifactWindow(QtWidgets.QMainWindow):
+    """rocker artifact (2026-10-09): signal of the loaded window before and after the rocker filter and the subtracted
+    periodic artifact of the selected channel; menu: save as figure, export the data of the visible time range with the
+    result of the filter and the settings (table info)."""
+
+    def __init__(self, win, msg):
+        super().__init__(win)
+        self.win = win
+        S, ch = win.S, win.ch
+        E = win.rf_cache[ch]
+        self.R = E["R"]
+        self.ch = ch
+        row = [int(c) for c in S.dataChannels].index(ch)
+        self.t = np.asarray(S.t, float)
+        self.before = np.asarray(S.force[row], float).copy()
+        self.art = np.asarray(E["art"], float).ravel()
+        self.after = self.before - self.art
+        z = zero_force(S, ch, win.zero_of(), self.t)[0]
+        self.has_z = not np.any(np.isnan(z))
+        if self.has_z:
+            self.before -= z
+            self.after -= z
+        self.rocker = np.asarray(S.rockerOn, bool).ravel()
+        self.tx = self.t - S.fromSeconds if win.rel_time else self.t
+        self.setWindowTitle(f"Rocker artifact - channel {ch}")
+        self.resize(1100, 560)
+        self.gw = pg.GraphicsLayoutWidget()
+        self.gw.setBackground("w")
+        self.setCentralWidget(self.gw)
+        mu = "\u00b5"
+        self.p1 = self.gw.addPlot(row=0, col=0)
+        self.p2 = self.gw.addPlot(row=1, col=0)
+        self.p2.setXLink(self.p1)
+        for p in (self.p1, self.p2):
+            p.getAxis("left").setWidth(78)  # tick labels and axis label side by side
+        name = os.path.basename(win.H.file)
+        self.p1.setTitle(f"{name}, channel {ch} (200 Hz signal before the median / mean filters)", size="9pt")
+        self.p2.setTitle(msg, size="9pt")
+        yu = f"force - zero force ({mu}N)" if self.has_z else f"force ({mu}N, sensor signal)"
+        self.p1.setLabel("left", yu)
+        self.p2.setLabel("left", f"rocker artifact ({mu}N)")
+        self.p2.setLabel("bottom", "time in the window (s)" if win.rel_time else "time in file (s)")
+        a, b = runs(self.rocker)
+        for p, y in ((self.p1, np.r_[self.before, self.after]), (self.p2, self.art)):
+            yl = [float(np.nanmin(y)), float(np.nanmax(y))] if y.size else [0.0, 1.0]
+            if yl[1] <= yl[0]:
+                yl = [yl[0] - 1, yl[1] + 1]
+            d = yl[1] - yl[0]
+            yl = [yl[0] - 0.05 * d, yl[1] + 0.05 * d]
+            if a.size:
+                it = pg.BarGraphItem(x0=self.tx[a], x1=self.tx[b], y0=np.full(a.size, yl[0]),
+                                     height=np.full(a.size, yl[1] - yl[0]), brush=pg.mkBrush(140, 140, 140, 50),
+                                     pen=pg.mkPen(None))
+                it.setZValue(-10)
+                p.addItem(it)
+            p.setYRange(yl[0], yl[1], padding=0)
+            p.showGrid(x=False, y=False)
+        self.p1.addLegend(offset=(-10, 10))
+        c1 = self.p1.plot(self.tx, self.before, pen=pg.mkPen((179, 179, 179), width=1), name="before the rocker filter")
+        c2 = self.p1.plot(self.tx, self.after, pen=pg.mkPen("k", width=1), name="after (analysed)")
+        c3 = self.p2.plot(self.tx, self.art, pen=pg.mkPen((0, 77, 255), width=1))
+        for c in (c1, c2, c3):
+            c.setDownsampling(auto=True, method="peak")
+            c.setClipToView(True)
+        if self.tx.size:
+            self.p1.setXRange(self.tx[0], self.tx[-1], padding=0)
+        m = self.menuBar().addMenu("Save / Export")
+        m.addAction("Save figure (.png / .jpg / .tif / .pdf) ...", self.save_figure)
+        m.addAction("Export data of the visible time range (.xlsx / .csv / .txt) ...", self.export_data)
+
+    def save_figure(self):
+        file = ask_file(self.win, "image", "rockerArtifact")
+        if not file:
+            return
+        try:
+            render_scene(self.gw.scene(), QtCore.QRectF(0, 0, self.gw.width(), self.gw.height()), file)
+            self.win.status("Saved: " + file)
+        except Exception as e:  # noqa: BLE001
+            self.win.status(f"Save: {e}")
+
+    def export_tables(self):
+        xl = self.p2.vb.viewRange()[0]
+        I = (self.tx >= xl[0]) & (self.tx <= xl[1])
+        T = pd.DataFrame({"t_file_s": self.t[I]})
+        if self.win.rel_time:
+            T["t_window_s"] = self.tx[I]
+        H = self.win.H
+        if not math.isnan(H.recordingStart):
+            T["clockTime"] = datenum_to_timestamps(H.recordingStart + self.t[I] / 86400.0)
+        nm = "force_minus_zero" if self.has_z else "force_signal"
+        T[nm + "_before_uN"] = self.before[I]
+        T["rockerArtifact_uN"] = self.art[I]
+        T[nm + "_after_uN"] = self.after[I]
+        T["rockerMoving"] = self.rocker[I]
+        R = self.R
+        Tr = pd.DataFrame([[self.ch, R.status, R.f0, R.artifactPP, R.r2, 100 * R.correctedFraction, R.message]],
+                          columns=["channel", "status", "rockerFrequency_Hz", "artifact_uN_peakToPeak", "artifactR2",
+                                   "corrected_percentOfRockerOnTime", "message"])
+        return ["rockerArtifact", "rockerFilter"], [T, Tr]
+
+    def export_data(self):
+        file = ask_file(self.win, "data", "rockerArtifact")
+        if not file:
+            return
+        names, tabs = self.export_tables()
+        if len(tabs[0]) > 1048000 and file.lower().endswith(".xlsx"):
+            self.win.status(f"{len(tabs[0])} rows: too many for Excel. Zoom in or export as .csv / .txt.")
+            return
+        write_tables(self.win, file, names, tabs)
+
+
 def help_text():
     P = PARAMETERS
     lines = [
@@ -678,7 +799,14 @@ def help_text():
         "sampling: all contractions, short windows or rocker stops. Channel list: one channel, or several channels ... "
         "(checkboxes) = overlaid, one colour per channel (the file is read once for all of them).", "",
         "Save / Export (menu or right click on a plot): plots as .png / .jpg / .tif (300 dpi) / .pdf, plotted data "
-        "(visible time range) as .xlsx / .csv / .txt; overview: picture only.", "",
+        "(visible time range) as .xlsx / .csv / .txt; overview: picture only. Every data export contains the table info "
+        "(version, recording, all settings, threshold and zero force of the channel, window and range).", "",
+        "Open results ...: a results file of MyoDishAnalysis, the watcher or an export of the GUI (.xlsx, "
+        "<name>_info.csv, _summary.csv, _contractions.csv): the recording (path in the file; otherwise next to the "
+        "results file or asked for), the settings and the analysis window (channel, data window, analysed range; "
+        "several: list) are restored, the contractions are detected again and compared with the file (status line; "
+        "black o = contraction of the file not found again, e.g. other version). Contractions excluded by you in an "
+        "export are excluded again.", "",
         "Labels ...: labels per channel (setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, "
         "treatment, concentration, concentrationUnit, daysInCulture, cultureStart, comment, analyst) - columns of the "
         "exported tables; saved as <name>_labels.csv next to the .mdd file and loaded automatically.", "",
@@ -704,7 +832,10 @@ def help_text():
         "AP_Vmax, APD25/50/90, AP_note).", "",
         "Remove rocker artifact: the periodic signal of the rocker (60 rpm = 1.21 Hz) is estimated per channel between "
         "the contractions (+-60 s around the window) and subtracted; light grey = signal before. Not possible "
-        "(message): rocker frequency not found, no periodic artifact, too little time between the contractions.", "",
+        "(message): rocker frequency not found, no periodic artifact, too little time between the contractions. Rocker "
+        "artifact ... (button, menu Save / Export, right click in the force plot): extra window with the signal before "
+        "/ after the filter and the removed artifact (also if the filter is off); menu: save as figure, export the "
+        "data of the visible time range.", "",
         "Parameters:"]
     lines += [f"{n} ({u}): {d}" for n, u, d in P]
     lines += [f"{n} ({u}): {d}" for n, u, d in AP_PARAMETERS]

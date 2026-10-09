@@ -2,17 +2,26 @@ function outFiles = mda_writeResults(outputFile, contractions, summary, info)
 %MDA_WRITERESULTS  Write contraction table, summary and analysis info to Excel (.xlsx) or text (.csv).
 %
 %   mda_writeResults('results.xlsx', contractions, summary, info)
-%       sheets: contractions, summary, parameters (definitions), info (file facts and options), labels,
-%       rockerFilter (option 'rockerFilter': result per channel and time range), protocols (option 'protocol'),
-%       protocolResults (characteristic values per protocol and channel, mda_protocolResults)
+%       sheets: contractions, summary, parameters (definitions), info (file facts, version and all options),
+%       thresholds (analysis windows: data window read, analysed range and detection threshold per channel and chunk;
+%       used to open the results in MyoDishAnalysisGUI), labels, rockerFilter (option 'rockerFilter': result per
+%       channel and time range), protocols (option 'protocol'), protocolResults (characteristic values per protocol
+%       and channel, mda_protocolResults)
 %   mda_writeResults('results.csv', ...)
-%       results_contractions.csv, results_summary.csv, results_parameters.csv, results_info.csv
+%       results_contractions.csv, results_summary.csv, results_parameters.csv, results_info.csv, ...
+%   T = mda_writeResults(info)
+%       only the info table (key, value): file, ..., software, version, implementation, notes, info.extra (rows
+%       {key, value}, e.g. createdBy, channels, loadedWindow_s), option_<name> for every option, log file entries
 %
 % Existing sheets of the same name are overwritten (MATLAB R2020a or newer; older releases: the sheet is
 % written over, rows of a longer old table may remain).
 %
-% TS 2026-10-05
+% TS 2026-10-05 (version, implementation, extra rows, thresholds sheet, info table only 2026-10-09)
 
+if nargin == 1 && isstruct(outputFile)              %info table only (GUI exports of plotted data)
+    outFiles = infoTableOf(outputFile);
+    return;
+end
 [p, n, e] = fileparts(outputFile);
 if isempty(e), e = '.xlsx'; outputFile = fullfile(p, [n e]); end
 
@@ -37,48 +46,9 @@ if istable(contractions)
     end
 end
 
-o = info.options;
-f = fieldnames(o);
-vals = cell(numel(f), 1);
-for k = 1:numel(f)
-    v = o.(f{k});
-    if ischar(v)
-        vals{k} = v;
-    elseif isempty(v)
-        vals{k} = '';
-    elseif isstruct(v)                                    %reference beat(s)
-        vals{k} = sprintf('reference beat: %s', strjoin(arrayfun(@(r) sprintf('channel %d (%s; aligned at the %s)', r.channel, r.source, alignOf(r)), v, 'UniformOutput', false), '; '));
-    elseif isscalar(v)
-        vals{k} = num2str(v);
-    else
-        vals{k} = mat2str(v);
-    end
-end
-keys = [{'file'; 'samplingRate_Hz'; 'samplingRateSource'; 'nChannelsInFile'; 'fileLength_s'; ...
-    'recordingStart'; 'analysisDate'; 'software'; 'notes'}; strcat('option_', f)];   %logOffset/logCalibration: AU
-startStr = '';
-if isfield(info, 'recordingStart') && ~isnan(info.recordingStart)
-    startStr = datestr(info.recordingStart, 'yyyy-mm-dd HH:MM:SS');
-end
-analysisDate = datestr(now, 'yyyy-mm-dd HH:MM:SS');
-if isfield(info, 'analysisDate'), analysisDate = info.analysisDate; end
-infoVals = [{info.file; num2str(info.samplingRate); info.samplingRateSource; num2str(info.nChannelsInFile); ...
-    sprintf('%.3f', info.totalSeconds); startStr; analysisDate; ...
-    ['MyoDishAnalysis ' mda_version() ' (MATLAB, T. Seidel, FAU Erlangen-Nuernberg)']; strjoin(info.notes, ' | ')}; vals];
-% zero force (Offset) and Calibration entries of the log file, per channel (first and last value)
-logKeys = {}; logVals = {};
-if isfield(info, 'offsetLog')
-    lists = {'offsetLog', 'logOffset_ch'; 'calibrationLog', 'logCalibration_ch'};
-    for L = 1:2
-        E = info.(lists{L,1});
-        for ch = unique(E(:,2))'
-            v = E(E(:,2) == ch, 3);
-            logKeys{end+1,1} = sprintf('%s%d', lists{L,2}, ch); %#ok<AGROW>
-            logVals{end+1,1} = strjoin(arrayfun(@num2str, unique(v,'stable')', 'UniformOutput', false), ', '); %#ok<AGROW>
-        end
-    end
-end
-infoTable = table([keys; logKeys], [infoVals; logVals], 'VariableNames', {'key','value'});
+infoTable = infoTableOf(info);
+thr = [];                                           %analysis windows (MyoDishAnalysis, GUI export)
+if isfield(info, 'thresholds') && istable(info.thresholds) && height(info.thresholds) > 0, thr = info.thresholds; end
 
 if strcmpi(e, '.csv')
     outFiles = {fullfile(p, [n '_contractions.csv']), fullfile(p, [n '_summary.csv']), ...
@@ -87,6 +57,10 @@ if strcmpi(e, '.csv')
     writetable(summary, outFiles{2});
     writetable(paramTable, outFiles{3});
     writetable(infoTable, outFiles{4});
+    if ~isempty(thr)
+        outFiles{end+1} = fullfile(p, [n '_thresholds.csv']);
+        writetable(thr, outFiles{end});
+    end
     if isfield(info, 'labels') && istable(info.labels)
         outFiles{end+1} = fullfile(p, [n '_labels.csv']);
         writetable(info.labels, outFiles{end});
@@ -109,6 +83,7 @@ else
     writeSheet(summary, outputFile, 'summary');
     writeSheet(paramTable, outputFile, 'parameters');
     writeSheet(infoTable, outputFile, 'info');
+    if ~isempty(thr), writeSheet(thr, outputFile, 'thresholds'); end
     if isfield(info, 'labels') && istable(info.labels)
         writeSheet(info.labels, outputFile, 'labels');
     end
@@ -122,6 +97,60 @@ else
         writeSheet(info.protocolResults, outputFile, 'protocolResults');
     end
 end
+end
+
+
+function infoTable = infoTableOf(info)
+% key / value table: file facts, software, version, implementation, notes, extra rows, options, log file entries
+o = info.options;
+f = fieldnames(o);
+vals = cell(numel(f), 1);
+for k = 1:numel(f)
+    v = o.(f{k});
+    if ischar(v)
+        vals{k} = v;
+    elseif isempty(v)
+        vals{k} = '';
+    elseif isstruct(v)                                    %reference beat(s)
+        vals{k} = sprintf('reference beat: %s', strjoin(arrayfun(@(r) sprintf('channel %d (%s; aligned at the %s)', r.channel, r.source, alignOf(r)), v, 'UniformOutput', false), '; '));
+    elseif islogical(v) && isscalar(v)
+        vals{k} = num2str(v);
+    elseif isscalar(v)
+        vals{k} = sprintf('%.15g', v);              %full precision: options are read back (mda_readResults)
+    else
+        vals{k} = mat2str(v);
+    end
+end
+% 2026-10-09: version and implementation as own rows; info.extra (rows {key, value}) after the notes
+extra = cell(0, 2);
+if isfield(info, 'extra') && ~isempty(info.extra), extra = info.extra; end
+keys = [{'file'; 'samplingRate_Hz'; 'samplingRateSource'; 'nChannelsInFile'; 'fileLength_s'; ...
+    'recordingStart'; 'analysisDate'; 'software'; 'version'; 'implementation'; 'notes'}; extra(:, 1); ...
+    strcat('option_', f)];                          %logOffset/logCalibration: AU
+startStr = '';
+if isfield(info, 'recordingStart') && ~isempty(info.recordingStart) && ~isnan(info.recordingStart)
+    startStr = datestr(info.recordingStart, 'yyyy-mm-dd HH:MM:SS');
+end
+analysisDate = datestr(now, 'yyyy-mm-dd HH:MM:SS');
+if isfield(info, 'analysisDate'), analysisDate = info.analysisDate; end
+infoVals = [{info.file; num2str(info.samplingRate); info.samplingRateSource; num2str(info.nChannelsInFile); ...
+    sprintf('%.3f', info.totalSeconds); startStr; analysisDate; ...
+    ['MyoDishAnalysis ' mda_version() ' (MATLAB, T. Seidel, FAU Erlangen-Nuernberg)']; mda_version(); 'MATLAB'; ...
+    strjoin(info.notes, ' | ')}; extra(:, 2); vals];
+% zero force (Offset) and Calibration entries of the log file, per channel (first and last value)
+logKeys = {}; logVals = {};
+if isfield(info, 'offsetLog')
+    lists = {'offsetLog', 'logOffset_ch'; 'calibrationLog', 'logCalibration_ch'};
+    for L = 1:2
+        E = info.(lists{L,1});
+        for ch = unique(E(:,2))'
+            v = E(E(:,2) == ch, 3);
+            logKeys{end+1,1} = sprintf('%s%d', lists{L,2}, ch); %#ok<AGROW>
+            logVals{end+1,1} = strjoin(arrayfun(@num2str, unique(v,'stable')', 'UniformOutput', false), ', '); %#ok<AGROW>
+        end
+    end
+end
+infoTable = table([keys; logKeys], [infoVals; logVals], 'VariableNames', {'key','value'});
 end
 
 

@@ -9,7 +9,7 @@ function ok = mda_testWatch()
 % filter, lock file; protocol periods excluded / included, thinned contractions (every n-th, block medians),
 % compression, events and comments.
 %
-% TS 2026-10-08
+% TS 2026-10-08 (info table, mda_readResults 2026-10-09)
 
 ex = fullfile(fileparts(which('MyoDishAnalysis')), 'examples');
 root = tempname;
@@ -45,6 +45,11 @@ Cw = readCsv(fullfile(res, 'A', 'example9_ratVentricle_contractions.csv'));
 pass = height(Cw) == height(C) && max(abs(Cw.t_peak - C.t_peak)) < 1e-6 && ...
     max(abs(Cw.amplitude - C.amplitude) ./ C.amplitude, [], 'omitnan') < 1e-9;
 ok = check(ok, pass, 'one bin (60 min): contractions identical to MyoDishAnalysis(file)');
+R = mda_readResults(fullfile(res, 'A', 'example9_ratVentricle_info.csv'));   %2026-10-09: version, settings, windows
+pass = strcmp(R.version, mda_version()) && strcmp(R.implementation, 'MATLAB') && strcmp(R.createdBy, 'MyoDishAnalysisWatch') ...
+    && isfield(R.extra, 'watcherOptions') && contains(R.extra.watcherOptions, 'binminutes=60') && height(R.windows) >= 1 ...
+    && all(R.windows.windowFrom <= R.windows.from) && strcmp(R.options.detection, 'sensitive') && height(R.contractions) == height(Cw);
+ok = check(ok, pass, 'info table: version, watcher settings, analysis windows (mda_readResults)');
 
 % reanalysis: other options ('new': ignored), changed log file, 'all' with maxFiles
 base = ['binminutes=60; compress=0; contractions=all; events=1; gaps=1; includeprotocols=0; protocolmarginseconds=0; ' ...

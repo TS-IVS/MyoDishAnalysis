@@ -1,12 +1,13 @@
 """GUI of the MyoDishAnalysis (PySide6 + pyqtgraph). Port of MyoDishAnalysisGUI.m.
 
     mda-gui [file.mdd] [--labels labels.csv]
+    mda-gui results.xlsx             (or <name>_info.csv: results of mda / mda-watch / a GUI export, see read_results)
     python -m myodish_analysis.gui [file.mdd]
 
     from myodish_analysis.gui import run
     win = run('file.mdd')            # inside a running Qt application: returns the window
 
-TS 2026-10-06
+TS 2026-10-06 (results files 2026-10-09)
 """
 from __future__ import annotations
 
@@ -45,7 +46,7 @@ def run(mdd_file=None, metadata=None, block=True):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="mda-gui", description="MyoDishAnalysis (interactive)")
-    ap.add_argument("mdd", nargs="?", help=".mdd file")
+    ap.add_argument("mdd", nargs="?", help=".mdd file, or a results file (.xlsx, <name>_info.csv) to open again")
     ap.add_argument("--labels", help="labels per channel (.csv / .xlsx, see labels)")
     a = ap.parse_args(argv)
     run(a.mdd, a.labels)

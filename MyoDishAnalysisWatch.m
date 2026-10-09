@@ -10,7 +10,8 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   again. Python: mda-watch (myodish_analysis.watch), same index and results.
 %
 % RESULTS per recording (resultsFolder/<subfolder of rawFolder>/)
-%   <name>_summary.csv, _contractions.csv(.gz), _parameters.csv, _info.csv, _labels.csv (_rockerFilter.csv)
+%   <name>_summary.csv, _contractions.csv(.gz), _parameters.csv, _info.csv (version, all options, watcher settings),
+%   _thresholds.csv (analysis windows), _labels.csv (_rockerFilter.csv); MyoDishAnalysisGUI(<name>_info.csv) opens them
 %       summary = one row per channel and time range: time bins of 'binMinutes' (default 60 min) without the periods of
 %       the stimulation protocols ('includeProtocols', false, default; a bin with a protocol gives several ranges).
 %       range = clock time of the start of the range, bin = clock time of the start of the bin, nComments / comments =
@@ -83,7 +84,7 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   Daily without an open MATLAB: the scheduler of the operating system with
 %   matlab -batch "MyoDishAnalysisWatch('raw', 'results', 'quiet', true)"   or the Python version (mda-watch).
 %
-% TS 2026-10-08
+% TS 2026-10-08 (watcher settings in the info table 2026-10-09)
 
 W = struct('interval', 0, 'reanalyze', 'outdated', 'retryErrors', false, 'fromDate', '', 'filter', '', ...
     'maxFiles', inf, 'dryRun', false, 'minFileAgeMinutes', 10, 'incompleteAfterHours', 30, 'binMinutes', 60, ...
@@ -318,6 +319,8 @@ C = [];
 nC = 0;
 if ~isempty(fr)
     [C, S, info] = MyoDishAnalysis(f, [], fr, to, 'labels', labels, 'metadata', meta, 'quiet', true, args{:});
+    info.extra(strcmp(info.extra(:, 1), 'createdBy'), 2) = {'MyoDishAnalysisWatch'};   %info table: watcher settings
+    info.extra = [info.extra; {'watcherOptions', row.options; 'watcherCode', row.code}];
     nC = height(C);
     [~, iS] = ismember(S.range, labels);
     S = addvars(S, binLabels(iS), 'After', 'range', 'NewVariableNames', 'bin');

@@ -10,7 +10,8 @@ of the analysis apply to the watcher results as well; with reanalyze="outdated" 
 analysed again.
 
 Per recording (results_folder/<subfolder of raw_folder>/):
-  <name>_summary.csv, _contractions.csv(.gz), _parameters.csv, _info.csv, _labels.csv (_rockerFilter.csv)
+  <name>_summary.csv, _contractions.csv(.gz), _parameters.csv, _info.csv (version, all options, watcher settings),
+  _thresholds.csv (analysis windows), _labels.csv (_rockerFilter.csv); mda-gui <name>_info.csv opens them
       summary = one row per channel and time range: time bins of bin_minutes (default 60 min) without the periods of
       the stimulation protocols (include_protocols=False, default; a bin with a protocol gives several ranges).
       range = clock time of the start of the range, bin = clock time of the start of the bin, nComments / comments =
@@ -67,7 +68,7 @@ Run it once a day by the scheduler of the operating system (cron / launchd / Win
     0 7 * * *  /path/to/venv/bin/mda-watch /data/myodish/raw /data/myodish/results --quiet
 or keep it running with interval=24.
 
-TS 2026-10-08
+TS 2026-10-08 (watcher settings in the info table 2026-10-09)
 """
 from __future__ import annotations
 
@@ -84,7 +85,6 @@ import zlib
 import numpy as np
 import pandas as pd
 
-from . import __version__
 from ._matlab import mround
 from .analysis import myodish_analysis
 from .log_entries import log_entries
@@ -92,7 +92,7 @@ from .options import options as make_options
 from .protocols import find_protocols
 from .read_mdd import read_header
 from .signal_gaps import signal_gaps
-from .write_results import write_results
+from .write_results import mda_version, write_results
 
 INDEX_NAME = "mda_index.csv"
 INDEX_COLUMNS = ["file", "bytes", "modified", "logBytes", "status", "version", "implementation", "code", "options",
@@ -142,16 +142,6 @@ def watch(raw_folder, results_folder, **kw):
             nxt = _dt.datetime.now() + _dt.timedelta(hours=float(o["interval"]))
             print(f"next pass {nxt:%Y-%m-%d %H:%M} (Ctrl+C stops)")
         time.sleep(float(o["interval"]) * 3600)
-
-
-def mda_version():
-    """version of MyoDishAnalysis as in MATLAB ('1.0.0b1' --> '1.0.0-beta.1')."""
-    m = re.fullmatch(r"(\d+\.\d+\.\d+)(?:(a|b|rc)(\d+))?", __version__)
-    if not m:
-        return __version__
-    if not m.group(2):
-        return m.group(1)
-    return "%s-%s.%s" % (m.group(1), {"a": "alpha", "b": "beta", "rc": "rc"}[m.group(2)], m.group(3))
 
 
 def code_fingerprint():
@@ -442,6 +432,8 @@ def _analyse(f, rel, H, res, row, o, aopts):
     nC = 0
     if len(fr):
         C, S, info = myodish_analysis(f, None, fr, to, labels=labels, metadata=meta, quiet=True, **aopts)
+        info["extra"] = [(k, "MyoDishAnalysisWatch" if k == "createdBy" else v) for k, v in info["extra"]] + \
+            [("watcherOptions", row["options"]), ("watcherCode", row["code"])]  # info table: watcher settings
         nC = len(C)
         binOf = dict(zip(labels, bins))
         S.insert(int(S.columns.get_loc("range")) + 1, "bin", [binOf[r] for r in S["range"]])

@@ -466,3 +466,69 @@ def test_gui_threshold_keys_overlay():
         w.deleteLater()
         app.processEvents()
         QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+
+
+@pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
+def test_results_reopened_in_gui_and_rocker_window(tmp_path):
+    """results (version, all settings, analysis windows) of myodish_analysis and of a GUI export are opened in the GUI
+    again: same contractions; rocker artifact window with export (table info) and figure (2026-10-09)"""
+    pytest.importorskip("PySide6")
+    pytest.importorskip("pyqtgraph")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtCore, QtWidgets
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    from myodish_analysis.gui.main_window import MainWindow
+    f = os.path.join(EX, "example3_humanVentricle.mdd")
+    rx = str(tmp_path / "r.xlsx")
+    T, _, _ = mda.myodish_analysis(f, [3, 5], [60, 300], [120, 400], quiet=True, output=rx,
+                                   threshold=[np.nan, 150], detection="specific")
+    R = mda.read_results(rx)
+    assert R["version"] and R["implementation"] == "Python" and R["createdBy"] == "MyoDishAnalysis"
+    assert R["channels"] == [3, 5] and R["options"].detection == "specific"
+    assert np.isnan(R["options"].threshold[0]) and R["options"].threshold[1] == 150
+    assert R["windows"][["windowFrom", "windowTo"]].to_numpy().tolist()[0] == [55, 125]
+    ws = []
+    try:
+        w = MainWindow()
+        ws.append(w)
+        assert w.open_results(rx, pick=1)
+        assert w.ch == 5 and w.thr_user == {5: 150.0} and w.cDet.currentIndex() == 1 and w.range == [60.0, 120.0]
+        assert "the same as here" in w.lStatus.text()
+        # GUI export with a contraction excluded by the user and a zero force, opened again
+        w2 = MainWindow(f)
+        ws.append(w2)
+        w2.on_load(window=[60, 120])
+        w2.cCh.setCurrentIndex(4)
+        w2.on_channel()
+        t0 = float(w2.B["t_peak"].iloc[3])
+        w2.manual_off.append(t0)
+        w2.zero_user[5] = -4000.0
+        w2.analyze(False)
+        w2.next_file = str(tmp_path / "g.csv")
+        w2.on_export()
+        I = pd.read_csv(tmp_path / "g_info.csv", dtype=str, keep_default_na=False).set_index("key")["value"]
+        assert I["createdBy"] == "MyoDishAnalysisGUI" and I["loadedWindow_s"] == "60 120"
+        assert I["option_zeroForce"] == "-4000" and I["option_detection"] == "sensitive"
+        w3 = MainWindow(str(tmp_path / "g_info.csv"))
+        ws.append(w3)
+        assert w3.ch == 5 and w3.zero_user == {5: -4000.0} and w3.manual_off == [t0]
+        assert "the same as here" in w3.lStatus.text()
+        # rocker artifact window: data with the settings (table info), figure
+        rw = w2.on_rocker_window()
+        names, tabs = rw.export_tables()
+        assert names == ["rockerArtifact", "rockerFilter"] and "rockerArtifact_uN" in tabs[0].columns
+        np.testing.assert_allclose(tabs[0]["force_minus_zero_before_uN"] - tabs[0]["rockerArtifact_uN"],
+                                   tabs[0]["force_minus_zero_after_uN"], atol=1e-9)
+        w2.next_file = str(tmp_path / "ra.csv")
+        rw.export_data()
+        assert {"ra_rockerArtifact.csv", "ra_rockerFilter.csv", "ra_info.csv"} <= set(os.listdir(tmp_path))
+        w2.next_file = str(tmp_path / "ra.png")
+        rw.save_figure()
+        assert os.path.getsize(tmp_path / "ra.png") > 10000
+        rw.close()
+    finally:
+        for w in ws:
+            w.close()
+            w.deleteLater()
+        app.processEvents()
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
