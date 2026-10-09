@@ -6,7 +6,7 @@ Each has a command-line function (time range "from – to") and a GUI to view th
 range or single contractions interactively. This file documents the MATLAB version (the reference);
 the Python version (`py/`) gives the same results.
 
-Version 1.0.0-beta.1 (2026-10-07) · Thomas Seidel, Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU) / InVitroSys GmbH.
+Version 1.0.0-beta.2 (2026-10-09) · Thomas Seidel, Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU) / InVitroSys GmbH.
 Public beta version (feedback welcome: GitHub issues or e-mail). Until 2026-10-06 named MyoDishContractionTool (functions MyoDishContractions,
 MyoDishContractionsGUI, mdct_*); now MyoDishAnalysis, MyoDishAnalysisGUI, mda_*.
 Python version with the same results: folder `py/` (see `py/README.md`).
@@ -14,7 +14,7 @@ Python version with the same results: folder `py/` (see `py/README.md`).
 ## Citation and acknowledgement
 MyoDishAnalysis was developed by Thomas Seidel, Institute of Cellular and Molecular
 Physiology, Friedrich-Alexander-Universität Erlangen-Nürnberg / InVitroSys. If you publish results obtained with this
-software, please cite the version you used (Seidel T. MyoDishAnalysis, version 1.0.0-beta.1, 2026; DOI: see
+software, please cite the version you used (Seidel T. MyoDishAnalysis, version 1.0.0-beta.2, 2026; DOI: see
 `CITATION.cff` or the Zenodo record of the release) and mention it in the Methods.
 Copyright (c) 2026 Thomas Seidel. License: GNU General Public License, version 3 or (at your option) any later version
 (GPL-3.0-or-later, file `LICENSE`). Free to use, also commercially (companies, InVitroSys customers). Copies, original

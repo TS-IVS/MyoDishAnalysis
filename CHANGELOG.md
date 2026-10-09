@@ -4,6 +4,10 @@ All notable changes. Versions: `MAJOR.MINOR.PATCH` (pre-releases `-beta.N`; Pyth
 MATLAB and Python versions have the same version number and give the same results.
 
 ## [Unreleased]
+
+## [1.0.0-beta.2] – 2026-10-09
+Second pre-release for testers (Git tag `v1.0.0-beta.2`, no GitHub release / DOI yet).
+
 ### Added
 - GUI, EP recordings (MATLAB and Python, 2026-10-09): **y limits** of the signal and stimulation plot — drag up / down
   in the plot (band = new limits), double-click = automatic, right click *Set y limits ...* / *y limits: automatic

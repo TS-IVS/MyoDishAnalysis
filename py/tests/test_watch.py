@@ -191,7 +191,7 @@ def test_helpers():
         assert W.event_category("comment", t) == "protocol", t
     assert W.event_category("comment", "Approaching 2 GB limit. Changing datafile2.") == "recording"
     assert W.event_category("comment", "ZI: MX1.6-1.8 Dexa100nM") == "comment"
-    assert W.mda_version() == "1.0.0-beta.1" or "-" not in mda.__version__
+    assert W.mda_version() == "1.0.0-beta.2" or "-" not in mda.__version__
     assert len(W.code_fingerprint()) == 8
     for f in ("example1_rabbitVentricle", "example9_ratVentricle"):
         assert mda.read_header(os.path.join(EX, f + ".mdd")).recordingStopped is True
