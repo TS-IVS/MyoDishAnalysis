@@ -653,7 +653,9 @@ def help_text():
         "Overview: min/max of the selected channel over the whole recording (green = rocker at rest). Drag in it to "
         "load a time window (or type From/To and press Load). Mouse wheel: zoom (shift + wheel: move), double-click: "
         "whole file; the zoomed part is re-read in more detail.", "",
-        "Force plot: red = selected contractions, grey = excluded by the filters (rocker / stimulated only), x = "
+        "Force plot: red = selected contractions, orange = uncertain contractions (high sensitivity: neither locked to "
+        "the stimuli nor large compared with the other contractions; not counted with high specificity), grey = "
+        "excluded by the filters (rocker / stimulated only), x = "
         "excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.",
         "Cursor in the force plot: \"drag = select time range\" or \"click = exclude / include contraction\". Mouse "
         "wheel: zoom the time axis (shift + wheel: move); double-click: whole loaded window. Right click: zero force, "

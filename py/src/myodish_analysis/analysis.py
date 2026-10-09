@@ -7,7 +7,8 @@ channels   data channels, e.g. 3 or [1, 2, 5] (None = all channels in the file)
 from_s     start of the analysed time range in s (time in the file; negative = seconds before the end)
 to_s       end of the time range. Lists define several ranges, e.g. from_s=[600, 3000], to_s=[660, 3060]
 
-contractions  DataFrame, one row per detected contraction (also the excluded ones, see column 'included')
+contractions  DataFrame, one row per detected contraction (also the excluded ones, see column 'included'); column
+              'uncertain': contraction found with high sensitivity only (option detection, see options.py)
 summary       DataFrame, one row per channel and range: numbers of contractions/stimuli, mean and SD of all
               parameters of the included contractions
 info          dict: file facts, options, detection threshold per channel and range, notes; with grouped protocols
@@ -213,12 +214,13 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
             B["contraction"] = np.arange(1, len(B) + 1, dtype=float)
             CsC = Cs[c]
             Cm = Struct(CsC[0])
-            st, sc = [], []
+            st, sc, scc = [], [], []
             for x in CsC:
                 k = (x.stimTimes >= x.range[0]) & (x.stimTimes <= x.range[1])
-                st.append(x.stimTimes[k]); sc.append(x.stimCaptured[k])
+                st.append(x.stimTimes[k]); sc.append(x.stimCaptured[k]); scc.append(x.stimCapturedCertain[k])
             Cm.stimTimes = np.concatenate(st)
             Cm.stimCaptured = np.concatenate(sc)
+            Cm.stimCapturedCertain = np.concatenate(scc)
             Cm.threshold = float(np.median([x.threshold for x in CsC]))
             if grouping and groupByR[r].lower() != "none":
                 B, T, Z = group_beats(H, B, Cm, ranges[r], groupByR[r], opts, return_stimuli=True)
@@ -245,8 +247,9 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
             B.insert(0, "range", labels[r])
             parts.append(B)
             if not quiet:
-                print(f"  {labels[r]}, channel {ch}: {len(B)} contractions detected, {int(B['included'].sum())} "
-                      f"included (threshold {Cm.threshold:.0f} uN, {Cm.thresholdMode})")
+                print(f"  {labels[r]}, channel {ch}: {len(B)} contractions detected ({int(B['uncertain'].sum())} "
+                      f"uncertain), {int(B['included'].sum())} included (threshold {Cm.threshold:.0f} uN, "
+                      f"{Cm.thresholdMode})")
                 if (opts.rocker == "stopped" and len(B) > 0 and not B["included"].any()
                         and B["rockerMoving"].astype(bool).all()):
                     print("    the rocker moved during every contraction: rocker='any' includes them")

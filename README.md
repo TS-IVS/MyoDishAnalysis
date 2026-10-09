@@ -64,8 +64,8 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    With the mouse pointer over the overview the keys move its zoomed time axis instead; a zoomed overview moves along
    when the window leaves its visible part. The mouse wheel zooms only the display.
 2. **Force plot**: force − zero force (if the zero force is known, see "Zero force"; otherwise the sensor signal).
-   Red = selected contractions, grey = excluded by the filters, x = excluded by you,
-   blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.
+   Red = selected contractions, orange = uncertain contractions (see *high sensitivity* below), grey = excluded by
+   the filters, x = excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.
    Panel *Cursor in the force plot*: *drag = select time range* or *click = exclude / include contraction*.
    List *stimuli* (next to *only stimulated contractions*): *auto* / *MyoDish* / *ext. trigger* — stimulus times from
    the MyoDish pulses of the channel or from the external trigger pulses (external stimulator, see "External
@@ -79,9 +79,12 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    channel, `'threshold',[NaN 300 NaN ...]`, NaN = auto).
    **Right click → Set as zero force**: the y value of the mouse pointer becomes the zero force of the channel
    (e.g. right-click on the baseline of an empty chamber); "Zero force from the log file" restores the Offset.
-   Checkbox **remove rocker artifact (periodic)**: see "Rocker artifact" below; light grey = signal before the
+   Checkbox **remove rocker artifact**: see "Rocker artifact" below; light grey = signal before the
    correction; the result (artifact size, rocker frequency, or why it was not possible) is shown below the
    checkboxes and in the status line. The setting also applies to All channels, Trend and the exports.
+   List **high sensitivity / high specificity** (next to it; auto threshold): *high sensitivity* (default) counts all
+   contractions and marks the uncertain ones orange (status line: number of uncertain contractions); *high
+   specificity* does not count them. Switching shows the result at once (see "Signal processing and detection").
 3. **Stimulus plot** (below the force plot): current of every stimulus pulse of the channel (red bars, mA;
    green = extra pulse; x = current not reached) and the interval to the previous pulse (blue, ms). With 40 pulses
    or fewer in view, the values are written next to the pulses (as `drawStimPulses` 'displayCurrents' /
@@ -89,7 +92,8 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
 4. **Table**: mean, SD and n (contractions with a value) of the selected contractions; at the end **extra beats**
    (contractions without an adequate stimulus, count and % of the detected contractions) and **missed beats**
    (stimuli without a contraction above the detection threshold, count and % of the stimuli), both over the whole
-   range, independent of the rocker / stimulated filters. **Lower plot**: one parameter per contraction over time, chosen
+   range, independent of the rocker / stimulated filters; **uncertain** contractions (all, stimulated, extra) and
+   uncertain missed beats (stimuli followed only by an uncertain contraction, i.e. missed with *high specificity*). **Lower plot**: one parameter per contraction over time, chosen
    with the list *Lower plot* above it (all parameters, plus stimToPeak and prominence; red = selected, dashed = mean
    of the selected contractions).
    **Trend ...** (next to the list): rolling mean or median (window in min) of a parameter over long periods and
@@ -246,8 +250,10 @@ Own additional fields are kept as extra columns.
   `rockerFilter`), `'externalTrigger','auto'|'on'|'off'` (see "External trigger"), `'showFigures',true`,
   `'quiet',true`; all others see `help mda_options`.
 * `contractions`: one row per detected contraction; `summary`: one row per channel and range
-  (counts incl. nExtraBeats, nMissedBeats, extraBeats_percent, missedBeats_percent; mean, SD and n of all parameters
-  of the included contractions).
+  (counts incl. nExtraBeats, nMissedBeats, extraBeats_percent, missedBeats_percent, nUncertain,
+  nStimulatedUncertain, nExtraBeatsUncertain, nMissedBeatsUncertain; mean, SD and n of all parameters of the included
+  contractions). Column `uncertain` of `contractions`: contraction found with high sensitivity only (option
+  `'detection'`, see "Signal processing and detection").
 
 ## Automatic analysis of new recordings (`MyoDishAnalysisWatch`; Python `mda-watch`)
 ```matlab
@@ -464,6 +470,16 @@ stimuli in this channel), `t_stim`, `stimToPeak`, `rockerMoving` (rocker moved a
   of removed peaks. The threshold is computed per channel from the analysed window; check it in the GUI or with
   `'showFigures',true`, and set it manually if necessary (`'threshold',µN`; a manual threshold switches the rocker
   rules off).
+* Uncertain contractions (auto threshold; option `'detection'`): near the noise level, more real contractions mean
+  more false positives and vice versa. A contraction is *certain* if it is locked to the stimuli (latency within
+  ±min(0.1 s, 0.2 × stimulus interval) of the typical latency) and ≥ 2 × the median rise of the signal in the 0.5 s
+  before the stimuli, or if it is large (≥ 0.7 × typical amplitude and ≥ 3 × that rise); unpaced channels: ≥ 0.5 ×
+  typical amplitude. `'detection','sensitive'` (default, *high sensitivity*) counts the other contractions too and
+  flags them (column `uncertain`; summary counts `nUncertain`, `nStimulatedUncertain`, `nExtraBeatsUncertain`,
+  `nMissedBeatsUncertain`), so one run gives both results: *high specificity* = without the uncertain ones.
+  `'detection','specific'` (*high specificity*) does not count them. The typical amplitude and the noise level are
+  taken from the analysed window: in long windows with very different phases (e.g. a whole force-frequency protocol)
+  small but regular contractions of the weak phase can be flagged; look at the orange markers in the GUI.
 
 ## External trigger (external stimulator; option `'externalTrigger'`, GUI list *stimuli*)
 With the external controller unit (one chamber) the slice can be paced by an external stimulator whose TTL pulses

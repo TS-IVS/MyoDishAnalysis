@@ -8,13 +8,15 @@
    Arrow keys: left / right = move the time axis by half its length, shift + left / right = extend it on that side,
    up / down = zoom in / out; mouse over the overview: its time axis, otherwise the force plot (beyond the loaded
    window the loaded window follows and is read again; the zoomed overview moves along).
-2. Force plot: force - zero force; red = selected contractions, grey = excluded by the filters, x = excluded by you,
-   blue ticks = stimuli, grey background = rocker moving, yellow = analysed range, purple = comments.
+2. Force plot: force - zero force; red = selected contractions, orange = uncertain (high sensitivity), grey = excluded
+   by the filters, x = excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range,
+   purple = comments.
    Cursor mode 'drag = select time range' or 'click = exclude / include contraction'. Wheel = zoom the time axis,
    shift + wheel = move, double-click = whole loaded window. Right click: zero force, reference beat, save / export.
 3. Stimulus plot (current per pulse, interval to the previous pulse), table (mean, SD, n of the selected contractions,
-   extra / missed beats) and lower plot (one parameter per contraction). Detection threshold per channel (auto or
-   manual). Stimuli: MyoDish pulses or external trigger pulses (external stimulator at the external controller unit;
+   extra / missed / uncertain beats) and lower plot (one parameter per contraction). Detection threshold per channel
+   (auto or manual); 'high sensitivity' (default) counts all contractions and marks the uncertain ones (orange), 'high
+   specificity' does not count them (option detection). Stimuli: MyoDish pulses or external trigger pulses (external stimulator at the external controller unit;
    auto = trigger pulses if the window has no MyoDish pulses). Overlay contractions: mean beat (stimulus / peak) or
    time course of the range (t = 0 at the first stimulus), other channels of the same range by checkboxes, colour /
    width / line style / SD-SEM-range band per group, editable title, axis labels and legend, editable matplotlib copy
@@ -25,7 +27,8 @@
    per group, plot of a parameter against the quantity, export (protocols_window.py).
 See README.md of the MATLAB version for all details; results are the same as with MyoDishAnalysisGUI.
 
-Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-06 (port of MyoDishAnalysisGUI.m)
+Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-06 (port of MyoDishAnalysisGUI.m; detection mode
+2026-10-09)
 """
 from __future__ import annotations
 
@@ -58,7 +61,7 @@ from ..summarize import summarize
 from ..write_results import write_results
 from ..zero_force import zero_force
 from .timeaxis import fmt_clock, fmt_duration, fmt_num, nav_step
-from .widgets import (BLUE, GREEN, GREY, MAGENTA, PURPLE, RED, ElidedLabel, PlotArea, TwinPlot, rects, rot_labels, runs, set_title, time_plot,
+from .widgets import (BLUE, GREEN, GREY, MAGENTA, ORANGE, PURPLE, RED, ElidedLabel, PlotArea, TwinPlot, rects, rot_labels, runs, set_title, time_plot,
                       vlines)
 
 MU = "µ"
@@ -320,7 +323,7 @@ class MainWindow(QtWidgets.QMainWindow):
         pv.addLayout(g)
         self.cbRocker = QtWidgets.QCheckBox("only contractions with rocker at rest")
         self.cbStim = QtWidgets.QCheckBox("only stimulated contractions")
-        self.cbRF = QtWidgets.QCheckBox("remove rocker artifact (periodic)")
+        self.cbRF = QtWidgets.QCheckBox("remove rocker artifact")
         self.cbRF.setToolTip("subtracts the periodic signal of the rocker movement (estimated per channel between the "
                              "contractions, +-60 s around the window); light grey in the force plot = signal before. See "
                              "rocker_filter")
@@ -340,7 +343,16 @@ class MainWindow(QtWidgets.QMainWindow):
         hs.addWidget(self.cXT)
         pv.addLayout(hs)
         self.cbRF.toggled.connect(self.on_rocker_filter)
-        pv.addWidget(self.cbRF)
+        self.cDet = QtWidgets.QComboBox()
+        self.cDet.addItems(["high sensitivity", "high specificity"])
+        self.cDet.setToolTip("auto threshold: high sensitivity counts all contractions and marks the uncertain ones "
+                             "(orange: neither locked to the stimuli nor large compared with the other contractions); "
+                             "high specificity does not count them")
+        self.cDet.activated.connect(self.on_detection)
+        hr = QtWidgets.QHBoxLayout()
+        hr.addWidget(self.cbRF)
+        hr.addWidget(self.cDet)
+        pv.addLayout(hr)
         self.cbRel.toggled.connect(self.on_rel_time)
         pv.addWidget(self.cbRel)
         self.lCounts = QtWidgets.QLabel("")
@@ -608,6 +620,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.S is not None:
             self.analyze(False)
 
+    def on_detection(self, *_):
+        self.opts.detection = ("sensitive", "specific")[self.cDet.currentIndex()]
+        if self.S is not None:
+            self.analyze(False)
+
     def on_filter(self, *_):
         self.opts.rocker = "stopped" if self.cbRocker.isChecked() else "any"
         self.opts.beats = "stimulated" if self.cbStim.isChecked() else "all"
@@ -708,6 +725,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.win_ref.draw()
         msg = (f"Channel {self.ch}: {len(self.B)} contractions detected (threshold {C.threshold:.0f} {MU}N, "
                f"{C.thresholdMode}).")
+        if self.B["uncertain"].any():
+            msg += f" {int(self.B['uncertain'].sum())} uncertain (orange)."
         if C.get("noContractions", False):
             lvl = "" if math.isnan(C.noiseLevel) else f" (level before the stimuli {C.noiseLevel:.0f} {MU}N)"
             msg = (f"Channel {self.ch}: no contractions - only peaks of the rocker movement / noise{lvl}, not locked "
@@ -728,7 +747,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dc = [int(c) for c in S.dataChannels]
         row = dc.index(ch)
         key = json.dumps({k: (v if not isinstance(v, np.ndarray) else v.tolist()) for k, v in optsC.items()
-                          if k not in ("zeroForce", "rocker", "beats", "referenceBeat")}, default=str)
+                          if k not in ("zeroForce", "rocker", "beats", "referenceBeat", "detection")}, default=str)
         E = self.rf_cache.get(ch)
         if E is None or E["key"] != key:
             self.status("Rocker filter: estimating the rocker artifact ...")
@@ -923,7 +942,8 @@ class MainWindow(QtWidgets.QMainWindow):
             y = np.array([fy[C.iPeaks[pk[x]]] for x in tp])
             inR = self.in_range()
             man = self.is_manual()
-            sel = B["included"].to_numpy(bool) & inR & ~man
+            unc = B["included"].to_numpy(bool) & inR & ~man & B["uncertain"].to_numpy(bool)  # uncertain: orange
+            sel = B["included"].to_numpy(bool) & inR & ~man & ~B["uncertain"].to_numpy(bool)
             filt = inR & ~B["included"].to_numpy(bool) & ~man
             p.addItem(pg.ScatterPlotItem(tp[~inR], y[~inR], symbol="o", size=3, pen=None, brush=(153, 153, 153)))
             p.addItem(pg.ScatterPlotItem(tp[filt], y[filt], symbol="t", size=8, pen=pg.mkPen((128, 128, 128)),
@@ -931,6 +951,7 @@ class MainWindow(QtWidgets.QMainWindow):
             p.addItem(pg.ScatterPlotItem(tp[man & inR], y[man & inR], symbol="x", size=11, pen=pg.mkPen("k", width=1.5),
                                          brush="k"))
             p.addItem(pg.ScatterPlotItem(tp[sel], y[sel], symbol="t", size=8, pen=pg.mkPen(RED), brush=RED))
+            p.addItem(pg.ScatterPlotItem(tp[unc], y[unc], symbol="t", size=8, pen=pg.mkPen(ORANGE), brush=ORANGE))
             dv = self.deviating() & inR
             if dv.any():
                 p.addItem(pg.ScatterPlotItem(tp[dv], y[dv], symbol="o", size=14, pen=pg.mkPen(MAGENTA, width=1.5),
@@ -957,7 +978,7 @@ class MainWindow(QtWidgets.QMainWindow):
             p.vb.setXRange(old[0], old[1], padding=0)
         p.setLabel("left", f"force - zero force ({MU}N)" if has_zero else f"force ({MU}N, sensor signal; zero "
                    "unknown)")
-        ttl = (f"Channel {self.ch}   (red = selected, grey = excluded by filter, x = excluded by you, blue = stimuli, "
+        ttl = (f"Channel {self.ch}   (red = selected, orange = uncertain, grey = excluded by filter, x = excluded by you, blue = stimuli, "
                "grey background = rocker moving, purple = comments")
         ttl += ", light grey = before rocker filter)" if show_raw else ")"
         set_title(p, ttl)
@@ -984,7 +1005,9 @@ class MainWindow(QtWidgets.QMainWindow):
         tp = B["t_peak"].to_numpy()
         sel = self.selected()
         p.addItem(pg.ScatterPlotItem(tp[~sel], v[~sel], symbol="o", size=4, pen=None, brush=(179, 179, 179)))
-        p.addItem(pg.ScatterPlotItem(tp[sel], v[sel], symbol="o", size=6, pen=None, brush=RED))
+        u = B["uncertain"].to_numpy(bool)
+        p.addItem(pg.ScatterPlotItem(tp[sel & ~u], v[sel & ~u], symbol="o", size=6, pen=None, brush=RED))
+        p.addItem(pg.ScatterPlotItem(tp[sel & u], v[sel & u], symbol="o", size=6, pen=None, brush=ORANGE))
         if sel.any():
             m = nanmean(v[sel])
             p.plot(self.range, [m, m], pen=pg.mkPen(RED, width=1, style=QtCore.Qt.PenStyle.DashLine))
@@ -1021,6 +1044,10 @@ class MainWindow(QtWidgets.QMainWindow):
         rows.append(["extra beats", fmt_num(Sm.extraBeats_percent, 3), "", str(int(Sm.nDetected)), "%"])
         rows.append(["missed beats", f"{int(Sm.nMissedBeats)}", "", str(int(Sm.nStimuli)), "count"])
         rows.append(["missed beats", fmt_num(Sm.missedBeats_percent, 3), "", str(int(Sm.nStimuli)), "%"])
+        rows.append(["uncertain (all)", f"{int(Sm.nUncertain)}", "", str(int(Sm.nDetected)), "count"])
+        rows.append(["uncertain stimulated", f"{int(Sm.nStimulatedUncertain)}", "", str(int(Sm.nStimulated)), "count"])
+        rows.append(["uncertain extra", f"{int(Sm.nExtraBeatsUncertain)}", "", str(int(Sm.nExtraBeats)), "count"])
+        rows.append(["uncertain missed", f"{int(Sm.nMissedBeatsUncertain)}", "", str(int(Sm.nStimuli)), "count"])
         has_ref = self.C.get("referenceBeat") is not None
         if has_ref:
             inR = self.in_range()
@@ -1821,7 +1848,9 @@ class MainWindow(QtWidgets.QMainWindow):
         lines = [f"file\t{os.path.basename(self.H.file)}", f"channel\t{self.ch}",
                  f"range (s)\t{self.range[0]:.2f}\t{self.range[1]:.2f}", f"n contractions\t{int(Sm.nContractions)}",
                  f"extra beats\t{int(Sm.nExtraBeats)}\tof {int(Sm.nDetected)} contractions\t{Sm.extraBeats_percent:.3g} %",
-                 f"missed beats\t{int(Sm.nMissedBeats)}\tof {int(Sm.nStimuli)} stimuli\t{Sm.missedBeats_percent:.3g} %"]
+                 f"missed beats\t{int(Sm.nMissedBeats)}\tof {int(Sm.nStimuli)} stimuli\t{Sm.missedBeats_percent:.3g} %",
+                 f"uncertain\t{int(Sm.nUncertain)}\tstimulated {int(Sm.nStimulatedUncertain)}\textra "
+                 f"{int(Sm.nExtraBeatsUncertain)}\tmissed {int(Sm.nMissedBeatsUncertain)}"]
         for nm in [c for c in self.Lbl.columns if c != "channel"]:
             v = Sm.get(nm, "")
             if isinstance(v, float):

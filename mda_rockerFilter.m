@@ -37,7 +37,7 @@ function [S, R] = mda_rockerFilter(S, channels, opts, Sctx)
 %   detectable; too little time between contractions (fast pacing of slow tissue). Changes of the contraction itself
 %   by the rocker movement (e.g. a modulation of the amplitude) cannot be removed by a subtraction.
 %
-% TS 2026-10-05
+% TS 2026-10-05 (contraction masks independent of the option detection 2026-10-09)
 
 if nargin < 4 || isempty(Sctx), Sctx = S; end
 channels = channels(:)';
@@ -48,6 +48,7 @@ if ~isfield(S, 'rockerArtifact') || ~isequal(size(S.rockerArtifact), size(S.forc
     S.rockerFilterInfo = cell(1, nRow);
 end
 o0 = opts; o0.rockerFilter = false; o0.rocker = 'any'; o0.beats = 'all'; o0.zeroForce = nan;
+o0.detection = 'sensitive';                         %contraction masks: all contractions (independent of the mode)
 thrV = [];                                          %one threshold per channel (MyoDishAnalysis; NaN = auto)
 if isnumeric(opts.threshold) && numel(opts.threshold) > 1
     if numel(opts.threshold) ~= numel(channels), error('mda_rockerFilter: one threshold per channel expected.'); end

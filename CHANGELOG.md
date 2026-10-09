@@ -32,6 +32,23 @@ MATLAB and Python versions have the same version number and give the same result
   examples change accordingly (e.g. example 4: channels 6 and 7 without contractions, example 3: 642 peaks of
   channels 3 and 5 at the noise level); MATLAB references ex1, ex3, ex3ref, ex4, ex5, ex6 and protocols
   regenerated.
+- Detection modes and uncertain contractions (option `detection`, 2026-10-09): `'sensitive'` (default, *high
+  sensitivity*, results as before) counts all contractions and flags the uncertain ones (new column `uncertain` after
+  `included`); `'specific'` (*high specificity*) does not count them. Paced channels: certain = locked to the stimuli
+  (latency within ±min(0.1 s, 0.2 × stimulus interval before the largest contractions) of the typical latency) and
+  ≥ 2 × the median rise before the stimuli (`C.noiseMedian`; unknown: locked suffices), or ≥ 0.7 × typical and
+  ≥ 3 × that rise; unpaced: ≥ 0.5 × typical; manual threshold: not assessed. Summary columns `nUncertain`,
+  `nStimulatedUncertain`, `nExtraBeatsUncertain`, `nMissedBeatsUncertain` (stimuli followed only by an uncertain
+  contraction = missed with `'specific'`; `C.stimCapturedCertain`), also per protocol group; GUI list *high
+  sensitivity / high specificity* next to *remove rocker artifact*, uncertain contractions orange, counts in the
+  table, status line and copied summary. Check on 35 windows (266 channel windows): sensitive − uncertain = specific
+  in every window; clean channels without uncertain contractions. The contraction masks of the rocker filter always
+  use all contractions (independent of the mode). MATLAB reference ex3 case `spec` added; references regenerated.
+- Rocker peaks at high pacing rates (2026-10-09): without a noise level before the stimuli (no intervals ≥ 0.9 s),
+  peaks at the rhythm of the rocker (≥ 60 % of the intervals 1 or ½ rocker period, ≥ 10 intervals), not locked to the
+  stimuli (±min(0.1 s, 0.2 × stimulus interval)) and no 1:1 / 2:1 capture at the rocker period are removed while the
+  rocker moves (< 3 × the median of the largest peaks; locked peaks of partial capture stay). Known limit: pacing at
+  the rocker frequency (60 rpm ≈ 1.2 Hz) cannot be told apart.
 - Periods without signal (2026-10-08): `mda_signalGaps` / `signal_gaps` find periods of identical consecutive raw
   samples (≥ 2 s; the controller repeats the last value when a sensor board is missing): `chamber out` (one channel),
   `board group` (≥ 3 channels of group 1–4 or 5–8 within 1 s, or 2 within 0.1 s: technical, a defective board

@@ -19,8 +19,10 @@ and the rocker state of the first contraction come from the 0.5 s before its sti
 External trigger pulses: a temporary 9-channel .mdd file with external trigger pulses only (status bit 14 without
 channel / current): read as channel 0, one entry per pulse, stimuli with option externalTrigger 'auto' / 'on'.
 Rocker peaks (option rockerArtifacts): rocker movement only, every 4th stimulus answered, every stimulus answered.
+Uncertain contractions (option detection): small peaks between the contractions, not locked to the stimuli.
 
-TS 2026-10-06 (port of mda_test.m, TS 2026-10-05; external trigger 2026-10-08, rocker peaks 2026-10-09)
+TS 2026-10-06 (port of mda_test.m, TS 2026-10-05; external trigger 2026-10-08, rocker peaks, uncertain
+2026-10-09)
 """
 from __future__ import annotations
 
@@ -31,6 +33,7 @@ import numpy as np
 from ._matlab import Struct, colon
 from .analyze_channel import analyze_channel
 from .options import options
+from .summarize import summarize
 from . import reference_beat as rb
 
 
@@ -215,6 +218,30 @@ def selftest(verbose=True, seed=3):
         f"contractions flag {int(noC[0])}) | every 4th stimulus {nR[1, 1]} (expected 24; without {nR[1, 0]}) | every "
         f"stimulus {nR[2, 2]} stimulated, {nR[2, 3]} extra (expected 95, 0; without {nR[2, 0]})   {_pass(okA)}")
     ok = ok and okA
+
+    # uncertain contractions (option detection, 2026-10-09): 0.5 Hz, 300 uN, plus 32 small peaks (120 uN) between the
+    # contractions, not locked to the stimuli: 'sensitive' counts them as uncertain extra beats, 'specific' does not
+    t = colon(0, dt, 200)
+    onset = np.arange(1, 198, 2, dtype=float)
+    F = synthetic_signal(t, onset, amp=[300] * onset.size)
+    ob = onset[::3]
+    bump = ob + 1.1 + 0.3 * (np.arange(1, ob.size + 1) % 3) / 2
+    for b in bump:
+        I = np.abs(t - b) < 0.1
+        F[I] = F[I] + 120 * (1 - np.abs(t[I] - b) / 0.1)
+    S = _S(t, F, onset)
+    o = options(zeroForce=40)
+    B1, C1 = analyze_channel(S, 1, [5, 195], o)
+    B2, _ = analyze_channel(S, 1, [5, 195], options(o, detection="specific"))
+    T1 = summarize(B1, C1, [5, 195])
+    u = B1["uncertain"].to_numpy(bool)
+    okU = bool(len(B1) == 127 and u.sum() == 32 and np.all(B1["beatType"].to_numpy()[u] == "extra") and len(B2) == 95
+               and T1["nUncertain"].iloc[0] == 32 and T1["nExtraBeatsUncertain"].iloc[0] == 32
+               and T1["nStimulatedUncertain"].iloc[0] == 0)
+    out(f"uncertain contractions (option detection): sensitive {len(B1)} (expected 127), uncertain {int(u.sum())} extra "
+        f"beats (expected 32), specific {len(B2)} (expected 95), summary nUncertain {int(T1['nUncertain'].iloc[0])}   "
+        f"{_pass(okU)}")
+    ok = ok and okU
 
     # external trigger pulses (2026-10-08): status bit 14 without channel / current (external stimulator at the
     # external controller unit), temporary .mdd file, see mda_test.m

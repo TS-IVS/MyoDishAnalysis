@@ -11,7 +11,7 @@ function mda_py_reference_files(dataDir, outDir, which)
 % results, raw data of a short window (reader check), the overview and the log entries; the EP case also the alignment
 % and the AP parameters. Compared by tests/test_matlab_reference.py.
 %
-% TS 2026-10-07 (cases: anonymized example recordings; before: lab recordings, 2026-10-06)
+% TS 2026-10-07 (cases: anonymized example recordings; before: lab recordings, 2026-10-06; ex3 'spec' 2026-10-09)
 
 if ischar(which), which = {which}; end
 for w = which(:)'
@@ -35,6 +35,7 @@ for w = which(:)'
             R = runCLI(R, 'rocker', mdd, [], 0, inf, {'rockerFilter', true});
             R = runCLI(R, 'thr', mdd, 6, 100, 300, {'threshold', 300, 'downsampling', 1, 'medianFilterMs', 20, 'meanFilterMs', 10});
             R = runCLI(R, 'thrCh', mdd, [1 3 6], 100, 300, {'threshold', [NaN 300 NaN]});   %threshold per channel (NaN = auto)
+            R = runCLI(R, 'spec', mdd, [], 0, inf, {'detection', 'specific'});   %uncertain contractions not counted
             R = readerCheck(R, mdd, 100, 160);
         case 'ex3ref'  % reference beat (channel 6, 0-120 s, 0.5 Hz) applied to the whole force-frequency protocol
             mdd = fullfile(dataDir, 'example3_humanVentricle.mdd');

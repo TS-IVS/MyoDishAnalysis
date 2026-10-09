@@ -9,14 +9,16 @@ function T = mda_summarize(B, C, range)
 %   range  [from to] in s
 %
 % Columns: channel, from, to, nContractions (included), nDetected, nStimulated, nExtraBeats, nStimuli, nMissedBeats,
-% extraBeats_percent, missedBeats_percent, stimFrequency (Hz, from the median stimulus interval in the range),
+% extraBeats_percent, missedBeats_percent, nUncertain, nStimulatedUncertain, nExtraBeatsUncertain,
+% nMissedBeatsUncertain (uncertain contractions, see mda_analyzeChannel, option 'detection'; missed: stimuli followed
+% only by an uncertain contraction), stimFrequency (Hz, from the median stimulus interval in the range),
 % detectionThreshold (uN), zeroForce (uN, zero of diastolicForce), then <parameter>_mean, <parameter>_SD and
 % <parameter>_n (number of included contractions with a value of this parameter, 2026-10-05) for every parameter.
 % With a reference beat (option referenceBeat): <parameter>_pctRef_mean / _SD (% of the reference) and
 % diastolicForce_dRef / diastolicSignal_dRef _mean / _SD (difference to the reference, uN), 2026-10-06.
 % With AP columns (EP recording, mda_analyzeAP): AP_dVdtMax, AP_RMP, AP_Vmax, APD25, APD50, APD90 _mean / _SD / _n.
 %
-% TS 2026-10-04
+% TS 2026-10-04 (uncertain contractions 2026-10-09)
 
 PI = mda_parameters();
 params = PI(:,1)';
@@ -42,6 +44,14 @@ pExtra = nan; pMissed = nan;
 if T.nDetected > 0, pExtra = 100 * T.nExtraBeats / T.nDetected; end
 if T.nStimuli > 0, pMissed = 100 * T.nMissedBeats / T.nStimuli; end
 T = addvars(T, pExtra, pMissed, 'After', 'nMissedBeats', 'NewVariableNames', {'extraBeats_percent', 'missedBeats_percent'});
+% 2026-10-09: uncertain contractions (column uncertain, option 'detection'): all, stimulated, extra beats, and missed
+% beats that are uncertain (stimuli followed only by an uncertain contraction: missed with 'detection','specific')
+u = inRange & B.uncertain;
+nMU = 0;
+if isfield(C, 'stimCapturedCertain'), nMU = sum(J & C.stimCaptured & ~C.stimCapturedCertain); end
+T = addvars(T, sum(u), sum(u & strcmp(B.beatType, 'stimulated')), sum(u & strcmp(B.beatType, 'extra')), nMU, ...
+    'After', 'missedBeats_percent', 'NewVariableNames', {'nUncertain', 'nStimulatedUncertain', 'nExtraBeatsUncertain', ...
+    'nMissedBeatsUncertain'});
 for k = 1:numel(params)
     v = B.(params{k})(I);
     T.([params{k} '_mean']) = mean(v, 'omitnan');

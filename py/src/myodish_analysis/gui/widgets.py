@@ -20,6 +20,7 @@ BLUE = (0, 77, 255)
 GREEN = (0, 153, 0)
 GREY = (128, 128, 128)
 MAGENTA = (230, 0, 230)
+ORANGE = (255, 140, 0)  # uncertain contractions (high sensitivity)
 
 
 class MouseViewBox(pg.ViewBox):

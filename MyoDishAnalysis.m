@@ -9,7 +9,8 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %   toSeconds    end of the time range. Vectors define several ranges, e.g. baseline and drug:
 %                fromSeconds = [600 3000], toSeconds = [660 3060]
 %
-%   contractions table, one row per detected contraction (also the excluded ones, see column 'included')
+%   contractions table, one row per detected contraction (also the excluded ones, see column 'included'); column
+%                'uncertain': contraction found with high sensitivity only (option 'detection', see mda_options)
 %   summary      table, one row per channel and range: numbers of contractions/stimuli, mean and SD of all
 %                parameters of the included contractions
 %   info         struct: file facts, options, detection threshold per channel and range, notes; with grouped
@@ -245,6 +246,7 @@ for r = 1:nR
         Cm = CsC{1};
         Cm.stimTimes = cell2mat(cellfun(@(x) x.stimTimes(x.stimTimes >= x.range(1) & x.stimTimes <= x.range(2)), CsC(:), 'UniformOutput', false));
         Cm.stimCaptured = cell2mat(cellfun(@(x) x.stimCaptured(x.stimTimes >= x.range(1) & x.stimTimes <= x.range(2)), CsC(:), 'UniformOutput', false));
+        Cm.stimCapturedCertain = cell2mat(cellfun(@(x) x.stimCapturedCertain(x.stimTimes >= x.range(1) & x.stimTimes <= x.range(2)), CsC(:), 'UniformOutput', false));
         Cm.threshold = median(cellfun(@(x) x.threshold, CsC));
         if grouping && ~strcmpi(groupByR{r}, 'none')
             [B, T, Z] = mda_groupBeats(H, B, Cm, ranges(r,:), groupByR{r}, opts);
@@ -276,8 +278,8 @@ for r = 1:nR
         B = [table(repmat(labels(r), height(B), 1), 'VariableNames', {'range'}), B]; %#ok<AGROW>
         parts{end+1} = B; %#ok<AGROW>
         if ~quiet
-            fprintf('  %s, channel %d: %d contractions detected, %d included (threshold %.0f uN, %s)\n', ...
-                labels{r}, channels(c), height(B), sum(B.included), Cm.threshold, Cm.thresholdMode);
+            fprintf('  %s, channel %d: %d contractions detected (%d uncertain), %d included (threshold %.0f uN, %s)\n', ...
+                labels{r}, channels(c), height(B), sum(B.uncertain), sum(B.included), Cm.threshold, Cm.thresholdMode);
             if strcmp(opts.rocker, 'stopped') && height(B) > 0 && ~any(B.included) && all(B.rockerMoving)
                 fprintf('    the rocker moved during every contraction: ''rocker'',''any'' includes them\n');
             end

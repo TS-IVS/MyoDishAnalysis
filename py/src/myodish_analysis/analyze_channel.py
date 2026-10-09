@@ -28,14 +28,22 @@ PROCESSING (see the MATLAB help and README)
      amplitude <= 50 uN or <= 2 x N at the rhythm of the rocker: rocker / noise peaks are removed
      (C.noContractions if none is left); c) otherwise peaks not locked to the stimuli below min(1.5 x N,
      0.5 x typical) (typical if at the rhythm of the rocker) are removed (rocker_noise_rule).
-     C.thresholdArtifacts = removed peaks, C.noiseLevel = N
+     C.thresholdArtifacts = removed peaks, C.noiseLevel = N. Without N (high rates, no intervals >= 0.9 s): peaks at
+     the rhythm of the rocker (>= 60 % of the intervals 1 or 1/2 rocker period), not locked to the stimuli and no
+     1:1 / 2:1 capture at the rocker period are removed while the rocker moves
+  2b. certainty (auto threshold, option detection): paced channels: a contraction is certain if it is locked to the
+     stimuli (latency within +-min(0.1 s, 0.2 x stimulus interval) of the typical latency) and >= 2 x the median rise
+     before the stimuli (C.noiseMedian), or large (>= 0.7 x typical and >= 3 x that median); unpaced: >= 0.5 x
+     typical. Otherwise column uncertain = True ('sensitive', default) or the contraction is not counted
+     ('specific'). C.stimCapturedCertain: stimulus followed by a certain contraction
   3. stimulus assignment: 'stimulated' if the peak follows a stimulus of the channel by minStimToPeak ...
      maxStimToPeak (and is the most prominent peak after this stimulus), otherwise 'extra'; 'unpaced' without stimuli
   4. parameters between the previous and the next peak (at most maxBeatWindow s), see parameters.py. After a
      stimulation pause (stimulus interval >= 2.5 s and >= 1.5 x the interval before) F_dia is searched only from
      pauseDiastoleWindow (0.5 s) before the stimulus (options.py)
 
-TS 2026-10-06 (port of mda_analyzeChannel.m, TS 2026-10-05)
+TS 2026-10-06 (port of mda_analyzeChannel.m, TS 2026-10-05; rocker artifacts, certainty of contractions
+2026-10-09)
 """
 from __future__ import annotations
 
@@ -50,7 +58,7 @@ from .parameters import PARAMETERS
 from .zero_force import zero_force, zero_at
 
 UNITS_FIRST = {"channel": "", "contraction": "", "t_peak": "s", "beatType": "", "t_stim": "s", "stimToPeak": "s",
-               "rockerMoving": "", "included": ""}
+               "rockerMoving": "", "included": "", "uncertain": ""}
 
 
 def analyze_channel(S, channel, range_=None, opts=None):
@@ -115,7 +123,8 @@ def analyze_channel(S, channel, range_=None, opts=None):
     keepLow = np.zeros(prom.size, bool)  # small peaks below a raised threshold that are kept (locked to a stimulus)
     drop = np.zeros(prom.size, bool)  # peaks removed by the rocker / noise level
     noBeats = False  # no contractions (peaks at the rocker / noise level)
-    noiseLvl = math.nan  # rocker / noise level before the stimuli (uN)
+    noiseLvl = math.nan  # rocker / noise level before the stimuli (uN, 90th percentile)
+    noiseMed = math.nan  # median rise before the stimuli (uN; certainty of contractions)
     if not isinstance(opts.threshold, str) and not math.isnan(float(np.ravel(opts.threshold)[0])):
         thr = float(np.ravel(opts.threshold)[0])  # NaN = auto (per-channel thresholds of myodish_analysis)
         thrMode = "manual"
@@ -123,13 +132,15 @@ def analyze_channel(S, channel, range_=None, opts=None):
     else:
         thr, typAmp = auto_threshold(prom, ST.size, opts)
         thrMode = "auto"
+        if ST.size >= 3:  # paced: rocker / noise level before the stimuli
+            noiseLvl, nNoise, noiseMed = pre_stimulus_noise(t, f, ST)
+            if nNoise < 10:
+                noiseLvl = math.nan
+                noiseMed = math.nan
         if opts.get("rockerArtifacts", True) and ST.size >= 3:  # paced: rocker artifacts
             rockerOn = np.asarray(S.rockerOn, bool).ravel()
             thr, keepLow, nArt = artifact_gap_threshold(t[cand], prom, thr, typAmp, ST, rockerOn[cand], CL)
             if rockerOn.mean() >= 0.5:
-                noiseLvl, nNoise = pre_stimulus_noise(t, f, ST)
-                if nNoise < 10:
-                    noiseLvl = math.nan
                 fR = rocker_frequency(S, opts)
                 drop, noBeats = rocker_noise_rule(t[cand], prom, thr, keepLow, typAmp, ST, noiseLvl, rockerOn[cand],
                                                   np.count_nonzero(rockerOn) * dt, fR)
@@ -149,6 +160,35 @@ def analyze_channel(S, channel, range_=None, opts=None):
             blocked[max(0, i - w + 1):min(N, i + w)] = True
     iPk = cand[accepted]
     promPk = prom[accepted]
+    # certainty (option detection, 2026-10-09). Paced: certain = locked to the stimuli (latency within +-hw of the
+    # typical latency, hw = min(0.1 s, 0.2 x stimulus interval before the largest contractions)) and >= 2 x Nm, or
+    # large (>= 0.7 x typical and >= 3 x Nm); Nm = median rise before the stimuli (unknown: locked suffices), typical =
+    # median of the largest contractions (as many as stimuli). Unpaced: certain = >= 0.5 x typical (auto threshold).
+    # 'sensitive': uncertain contractions are counted and flagged (column uncertain); 'specific': they are removed.
+    # Manual threshold: not assessed.
+    certain = np.ones(iPk.size, bool)
+    if thrMode == "auto" and iPk.size:
+        if ST.size >= 3:
+            o = np.argsort(-promPk, kind="stable")
+            top = o[:min(o.size, ST.size)]
+            typC = float(np.median(promPk[top]))
+            lat = _stim_latency(t[iPk], ST)
+            ci = np.full(top.size, np.nan)  # stimulus interval before the largest contractions
+            for q in range(top.size):
+                j = int(np.searchsorted(ST, t[iPk[top[q]]], side="right")) - 1  # last ST <= t
+                if j >= 1:
+                    ci[q] = ST[j] - ST[j - 1]
+            ci = ci[~np.isnan(ci)]
+            hw = min(0.1, 0.2 * float(np.median(ci))) if ci.size else 0.1
+            lk = latency_lock(lat, top, hw)
+            with np.errstate(invalid="ignore"):
+                certain = (lk & ~(promPk < 2 * noiseMed)) | ~(promPk < np.fmax(0.7 * typC, 3 * noiseMed))
+        elif not math.isnan(typAmp):
+            certain = promPk >= 0.5 * typAmp
+    if opts.get("detection", "sensitive") == "specific":
+        iPk = iPk[certain]
+        promPk = promPk[certain]
+        certain = certain[certain]
     nPk = iPk.size
     tPk = t[iPk]
 
@@ -157,6 +197,7 @@ def analyze_channel(S, channel, range_=None, opts=None):
     tStimOfBeat = np.full(nPk, np.nan)
     jStimOfBeat = np.full(nPk, -1)
     stimCaptured = np.zeros(ST.size, bool)
+    stimCapturedCertain = np.zeros(ST.size, bool)  # stimulus followed by a certain contraction
     if ST.size:
         beatType[:] = "extra"
         j = np.full(nPk, -1)
@@ -171,6 +212,7 @@ def analyze_channel(S, channel, range_=None, opts=None):
             tStimOfBeat[k] = ST[jj]
             jStimOfBeat[k] = jj
             stimCaptured[jj] = True
+            stimCapturedCertain[jj] = bool(np.any(certain[ks]))  # captured in the 'specific' mode, too
     # contractions after a stimulation pause (stimulus interval >= 2.5 s and >= 1.5 x the interval before; without a
     # previous stimulus in the data: time since the start of the data; without the interval before: median interval):
     # F_dia is searched only from opts.pauseDiastoleWindow before the stimulus, not during the pause (drift, rocker
@@ -259,6 +301,7 @@ def analyze_channel(S, channel, range_=None, opts=None):
     tStim = tStimOfBeat[sel]
     tPeakSel = tPk[sel]
     promSel = promPk[sel]
+    uncertain = ~certain[sel]
     included = ~np.isnan(V[:, 0])
     if opts.beats == "stimulated":
         included &= beatSel == "stimulated"
@@ -268,7 +311,8 @@ def analyze_channel(S, channel, range_=None, opts=None):
         included &= rockerMoving
     B = pd.DataFrame({"channel": np.full(n, channel, dtype=float), "contraction": np.arange(1, n + 1, dtype=float),
                       "t_peak": tPeakSel, "beatType": pd.Series(list(beatSel), dtype=object), "t_stim": tStim,
-                      "stimToPeak": tPeakSel - tStim, "rockerMoving": rockerMoving, "included": included})
+                      "stimToPeak": tPeakSel - tStim, "rockerMoving": rockerMoving, "included": included,
+                      "uncertain": uncertain})
     for k, nm in enumerate(names):
         B[nm] = V[:, k]
     B["prominence"] = promSel
@@ -294,6 +338,8 @@ def analyze_channel(S, channel, range_=None, opts=None):
     C.thresholdArtifacts = nArt
     C.noContractions = bool(noBeats)
     C.noiseLevel = noiseLvl
+    C.noiseMedian = noiseMed
+    C.stimCapturedCertain = stimCapturedCertain
     C.stimTimes = ST
     C.stimCaptured = stimCaptured
     C.stimInterval = CL
@@ -381,7 +427,8 @@ def pre_stimulus_noise(t, f, ST):
     """rocker / noise level: rise (maximum minus the running minimum) of the filtered signal in the window before
     every stimulus that follows an interval >= 0.9 s (window min(0.5 s, 0.4 x interval), where no contraction is
     expected; a relaxation that is not finished only falls and does not count). N = 90th percentile, n = number of
-    windows (see preStimulusNoise in mda_analyzeChannel.m). TS 2026-10-09"""
+    windows, Nm = median (robust against contractions that reach into some of the windows; see preStimulusNoise in
+    mda_analyzeChannel.m). TS 2026-10-09"""
     t = np.asarray(t, float)
     f = np.asarray(f, float)
     r = np.full(ST.size, np.nan)
@@ -395,16 +442,19 @@ def pre_stimulus_noise(t, f, ST):
             continue
         s = f[i1:i2 + 1]
         r[j] = float(np.max(s - np.minimum.accumulate(s)))
-    return _prctile(r, 90), int(np.count_nonzero(~np.isnan(r)))
+    return _prctile(r, 90), int(np.count_nonzero(~np.isnan(r))), _prctile(r, 50)
 
 
 def rocker_noise_rule(tc, prom, thr, keepLow, typical, ST, N, rocker, tOn, fR):
     """peaks of the rocker movement / noise of paced channels while the rocker moves (see rockerNoiseRule in
     mda_analyzeChannel.m). Latency of the contractions: centre of the 0.2-s window with the most latencies of the
-    largest peaks (as many as stimuli); peaks within +-0.1 s of it are locked. < 50 % of the largest peaks locked
-    and (typical <= 50 uN or (typical <= 2 x N and the peaks at the rhythm of the rocker)): all peaks
-    < 3 x max(typical, N) are dropped, except locked peaks >= max(1.5 x N, N + 50) if there are
-    >= max(3, 5 % of the stimuli) of them and more than by chance; none = no peak left. Otherwise peaks not locked
+    largest peaks (as many as stimuli); peaks within +-0.1 s of it are locked. (< 50 % of the largest peaks locked
+    and (typical <= 50 uN or (typical <= 2 x N and the peaks at the rhythm of the rocker))) or else rockerOnly (N
+    unknown, high rates: >= 60 % of the peak intervals 1 or 1/2 rocker period +-10 %, the median no 1:1 or 2:1
+    multiple of the stimulus interval +-5 %, < max(50 %, chance + 20 %) locked within +-min(0.1 s, 0.2 x stimulus
+    interval)): all peaks < 3 x max(typical, N) (rockerOnly: median of the largest peaks, only while the rocker
+    moves) are dropped, except locked peaks >= max(1.5 x N, N + 50) if there are >= max(3, 5 % of the stimuli) of
+    them and more than by chance; none = no peak left. Otherwise peaks not locked
     with a prominence < min(1.5 x N, 0.5 x typical) are dropped (< min(1.5 x N, typical) if they are at the rhythm
     of the rocker). Returns drop (bool per candidate), none. TS 2026-10-09"""
     tc = np.asarray(tc, float)
@@ -416,30 +466,43 @@ def rocker_noise_rule(tc, prom, thr, keepLow, typical, ST, N, rocker, tOn, fR):
     o = np.argsort(-prom[k], kind="stable")
     top = k[o[:min(k.size, ST.size)]]
     lat = _stim_latency(tc, ST)
-    lv = np.sort(lat[top])
-    lv = lv[~np.isnan(lv)]
-    if lv.size == 0:
+    if np.all(np.isnan(lat[top])):
         return drop, False
-    best = 0
-    latRef = math.nan
-    for x in lv:  # densest 0.2-s window of the latencies
-        c = int(np.count_nonzero((lv >= x) & (lv <= x + 0.2)))
-        if c > best:
-            best = c
-            latRef = x + 0.1
-    with np.errstate(invalid="ignore"):
-        locked = np.abs(lat - latRef) <= 0.1
-    if locked[top].mean() < 0.5 and (typical <= 50 or (typical <= 2 * N and
-                                                       _rocker_rhythm(tc, above & rocker, tOn, fR, 0.7))):
+    locked = latency_lock(lat, top, 0.1)
+    chance = 0.2 / max(float(np.median(np.diff(ST))), 0.2)  # fraction of the time within +-0.1 s of the latency
+    noise = bool(locked[top].mean() < 0.5 and (typical <= 50 or (typical <= 2 * N and
+                                                                 _rocker_rhythm(tc, above & rocker, tOn, fR, 0.7))))
+    # N unknown (high rates, no intervals >= 0.9 s): peaks at the rhythm of the rocker, not of the stimuli. +-0.1 s
+    # covers most of a short stimulus interval: locking here within +-hw, hw = min(0.1 s, 0.2 x median interval)
+    rockerOnly = False
+    if not noise and math.isnan(N) and not math.isnan(fR):
+        d = np.diff(tc[above & rocker]) * fR  # peak intervals in rocker periods
+        if d.size >= 10:
+            atR = (np.abs(d - 1) <= 0.1) | (np.abs(d - 0.5) <= 0.05)
+            CLm = float(np.median(np.diff(ST)))
+            ipi = float(np.median(d)) / fR
+            k2 = mround(ipi / CLm)  # 1:1 or 2:1 capture at the rocker period: undecidable
+            if atR.mean() >= 0.6 and not (1 <= k2 <= 2 and abs(ipi - k2 * CLm) <= 0.05 * ipi):
+                hw = min(0.1, 0.2 * CLm)
+                lockedR = latency_lock(lat, top, hw)
+                chanceR = 2 * hw / max(CLm, 2 * hw)
+                if lockedR[top].mean() < max(0.5, chanceR + 0.2):
+                    rockerOnly = True
+                    locked = lockedR
+                    chance = chanceR
+    if noise or rockerOnly:
         Nn = typical if math.isnan(N) else N
         big = above & (prom >= max(1.5 * Nn, Nn + 50))  # >= 50 uN above the rocker / noise level
         lk = big & locked  # contractions of some stimuli (partial capture)
-        chance = 0.2 / max(float(np.median(np.diff(ST))), 0.2)
         nlk = int(np.count_nonzero(lk))
         if nlk < max(3, 0.05 * ST.size) or nlk <= min(0.6, chance + 0.2) * np.count_nonzero(big):
             lk[:] = False  # not more than by chance
-        lim = 3 * (typical if math.isnan(N) else (N if math.isnan(typical) else max(typical, N)))
-        drop = above & (prom < lim) & ~lk
+        L = typical if math.isnan(N) else (N if math.isnan(typical) else max(typical, N))
+        if rockerOnly:
+            L = float(np.median(prom[top]))  # size of the rocker peaks (typical: of more peaks than exist)
+        drop = above & (prom < 3 * L) & ~lk
+        if rockerOnly:
+            drop &= rocker  # peaks while the rocker is at rest are no rocker peaks
         return drop, not bool(np.any(above & ~drop))
     if not math.isnan(N):
         lim = min(1.5 * N, 0.5 * typical)
@@ -447,6 +510,27 @@ def rocker_noise_rule(tc, prom, thr, keepLow, typical, ST, N, rocker, tOn, fR):
             lim = min(1.5 * N, typical)
         drop = above & ~locked & (prom < lim)
     return drop, False
+
+
+def latency_lock(lat, top, hw):
+    """peaks locked to the stimuli: latency (time since the previous stimulus) within +-hw of the centre of the window
+    of 2 x hw that contains the most latencies of the reference peaks top (indices, e.g. the largest peaks); see
+    latencyLock in mda_analyzeChannel.m"""
+    lat = np.asarray(lat, float)
+    locked = np.zeros(lat.size, bool)
+    lv = np.sort(lat[top])
+    lv = lv[~np.isnan(lv)]
+    if lv.size == 0:
+        return locked
+    best = 0
+    latRef = math.nan
+    for x in lv:
+        c = int(np.count_nonzero((lv >= x) & (lv <= x + 2 * hw)))
+        if c > best:
+            best = c
+            latRef = x + hw
+    with np.errstate(invalid="ignore"):
+        return np.abs(lat - latRef) <= hw
 
 
 def _rocker_rhythm(tc, sel, tOn, fR, minPerCycle):

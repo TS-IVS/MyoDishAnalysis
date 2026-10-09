@@ -19,6 +19,11 @@ DETECTION OF CONTRACTIONS
                    the stimuli that are not locked to the stimuli are dropped (no contractions at all if the largest
                    peaks are not locked and their typical amplitude is <= 50 uN, or <= 2 x that level at the
                    rhythm of the rocker)
+  detection        'sensitive' (default, high sensitivity) | 'specific' (high specificity): auto threshold; a
+                   contraction is uncertain if it is neither locked to the stimuli (and >= 2 x the median rise of
+                   the signal before the stimuli) nor large (>= 0.7 x typical amplitude and >= 3 x that rise;
+                   unpaced: >= 0.5 x typical amplitude). 'sensitive': uncertain contractions are counted and flagged
+                   (column uncertain); 'specific': they are not counted
 
 SELECTION OF CONTRACTIONS (the excluded ones stay in the table with included = False)
   beats            'all' (default) | 'stimulated' (only contractions that follow a stimulus of the channel)
@@ -72,7 +77,7 @@ FILE FORMAT (normally taken from the log file <name>_log.log next to the .mdd fi
   rockerLogDelay   delay of the rocker movement after a 'rockerSpeed' entry of the log file [s] (default 0.27)
 
 TS 2026-10-06 (port of mda_options.m, TS 2026-10-05; rockerSource, pauseDiastoleWindow 2026-10-07;
-rockerArtifacts 2026-10-09)
+rockerArtifacts, detection 2026-10-09)
 """
 from __future__ import annotations
 
@@ -88,6 +93,7 @@ _DEFAULTS = dict(
     minThreshold=30,
     minBeatInterval=0.15,
     rockerArtifacts=True,
+    detection="sensitive",
     beats="all",
     rocker="any",
     downsampling=2,
@@ -153,6 +159,9 @@ def options(base=None, **changes):
             raise ValueError("options: 'threshold' must be 'auto', a positive number or one number per channel "
                              "(NaN = auto).")
         opts.threshold = float(th.ravel()[0]) if th.size == 1 else th.ravel()
+    opts.detection = str(opts.detection).lower()
+    if opts.detection not in ("sensitive", "specific"):
+        raise ValueError("options: 'detection' must be 'sensitive' or 'specific'.")
     opts.beats = str(opts.beats).lower()
     if opts.beats not in ("all", "stimulated"):
         raise ValueError("options: 'beats' must be 'all' or 'stimulated'.")

@@ -19,6 +19,11 @@ function opts = mda_options(varargin)
 %                      before the stimuli that are not locked to the stimuli are dropped (no contractions at all if
 %                      the largest peaks are not locked and their typical amplitude is <= 50 uN, or <= 2 x that
 %                      level at the rhythm of the rocker)
+%   'detection'        'sensitive' (default, high sensitivity) | 'specific' (high specificity): auto threshold; a
+%                      contraction is uncertain if it is neither locked to the stimuli (and >= 2 x the median rise
+%                      of the signal before the stimuli) nor large (>= 0.7 x typical amplitude and >= 3 x that rise;
+%                      unpaced: >= 0.5 x typical amplitude). 'sensitive': uncertain contractions are counted and
+%                      flagged (column uncertain); 'specific': they are not counted
 %
 % SELECTION OF CONTRACTIONS (the excluded ones stay in the table with included = false)
 %   'beats'            'all' (default) | 'stimulated' (only contractions that follow a stimulus of the channel)
@@ -78,7 +83,7 @@ function opts = mda_options(varargin)
 %                      'status' or 'log' forces one source
 %   'rockerLogDelay'   delay of the rocker movement after a 'rockerSpeed' entry of the log file [s] (default 0.27)
 %
-% TS 2026-10-05 (rockerSource, pauseDiastoleWindow 2026-10-07; rockerArtifacts 2026-10-09)
+% TS 2026-10-05 (rockerSource, pauseDiastoleWindow 2026-10-07; rockerArtifacts, detection 2026-10-09)
 
 opts = struct( ...
     'threshold', 'auto', ...
@@ -86,6 +91,7 @@ opts = struct( ...
     'minThreshold', 30, ...
     'minBeatInterval', 0.15, ...
     'rockerArtifacts', true, ...
+    'detection', 'sensitive', ...
     'beats', 'all', ...
     'rocker', 'any', ...
     'downsampling', 2, ...
@@ -153,6 +159,10 @@ elseif ischar(thr0) || isstring(thr0)
     opts.threshold = 'auto';
 elseif ~isnumeric(opts.threshold) || any(opts.threshold(:) <= 0)
     error('mda_options: ''threshold'' must be ''auto'', a positive number or one number per channel (NaN = auto).');
+end
+opts.detection = lower(char(opts.detection));
+if ~ismember(opts.detection, {'sensitive', 'specific'})
+    error('mda_options: ''detection'' must be ''sensitive'' or ''specific''.');
 end
 opts.beats = lower(char(opts.beats));
 if ~ismember(opts.beats,{'all','stimulated'}), error('mda_options: ''beats'' must be ''all'' or ''stimulated''.'); end

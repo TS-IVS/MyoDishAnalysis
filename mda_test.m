@@ -18,8 +18,9 @@ function ok = mda_test()
 % External trigger pulses: a temporary 9-channel .mdd file with external trigger pulses only (status bit 14 without
 % channel / current): read as channel 0, one entry per pulse, stimuli with option externalTrigger 'auto' / 'on'.
 % Rocker peaks (option rockerArtifacts): rocker movement only, every 4th stimulus answered, every stimulus answered.
+% Uncertain contractions (option detection): small peaks between the contractions, not locked to the stimuli.
 %
-% TS 2026-10-05 (stimulation pause 2026-10-07, external trigger 2026-10-08, rocker peaks 2026-10-09)
+% TS 2026-10-05 (stimulation pause 2026-10-07, external trigger 2026-10-08, rocker peaks, uncertain 2026-10-09)
 
 dt = 0.005;
 t = 0:dt:20;
@@ -193,6 +194,29 @@ fprintf(['rocker peaks (option rockerArtifacts): no contractions %d (without the
     'every 4th stimulus %d (expected 24; without %d) | every stimulus %d stimulated, %d extra (expected 95, 0; ' ...
     'without %d)   %s\n'], nR(1,2), nR(1,1), noC(1), nR(2,2), nR(2,1), nR(3,3), nR(3,4), nR(3,1), passStr(okA));
 ok = ok && okA;
+
+% uncertain contractions (option detection, 2026-10-09): 0.5 Hz, 300 uN, plus 32 small peaks (120 uN) between the
+% contractions, not locked to the stimuli: 'sensitive' counts them as uncertain extra beats, 'specific' does not
+t = 0:dt:200;
+onset = 1:2:197;
+F = 100 * ones(size(t));
+for k = 1:numel(onset)
+    I = t >= onset(k) & t < onset(k) + 0.2; F(I) = 100 + 300 * (t(I) - onset(k)) / 0.2;
+    I = t >= onset(k) + 0.2 & t < onset(k) + 0.6; F(I) = 400 - 300 * (t(I) - onset(k) - 0.2) / 0.4;
+end
+bump = onset(1:3:end) + 1.1 + 0.3 * mod(1:numel(onset(1:3:end)), 3) / 2;
+for k = 1:numel(bump), I = abs(t - bump(k)) < 0.1; F(I) = F(I) + 120 * (1 - abs(t(I) - bump(k)) / 0.1); end
+S = struct('dataChannels', 1, 'dt', dt, 't', t, 'force', F, 'rockerOn', false(size(t)), 'fromSeconds', 0, 'toSeconds', 200);
+S.stim = struct('time', (onset - 0.1)', 'channel', ones(numel(onset), 1));
+o = mda_options('zeroForce', 40);
+[B1, C1] = mda_analyzeChannel(S, 1, [5 195], o);
+B2 = mda_analyzeChannel(S, 1, [5 195], mda_options(o, 'detection', 'specific'));
+T1 = mda_summarize(B1, C1, [5 195]);
+okU = height(B1) == 127 && nnz(B1.uncertain) == 32 && all(strcmp(B1.beatType(B1.uncertain), 'extra')) && ...
+    height(B2) == 95 && T1.nUncertain == 32 && T1.nExtraBeatsUncertain == 32 && T1.nStimulatedUncertain == 0;
+fprintf(['uncertain contractions (option detection): sensitive %d (expected 127), uncertain %d extra beats (expected 32), ' ...
+    'specific %d (expected 95), summary nUncertain %d   %s\n'], height(B1), nnz(B1.uncertain), height(B2), T1.nUncertain, passStr(okU));
+ok = ok && okU;
 
 % external trigger pulses (2026-10-08): status bit 14 without channel / current (external stimulator at the external
 % controller unit). Temporary .mdd (9 channels, 400 Hz, 30 s; contractions in channel 1 150 ms after each pulse, one

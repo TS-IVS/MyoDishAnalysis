@@ -25,7 +25,8 @@ group_beats: see the help of mda_groupBeats.m (same quantities, groups, columns;
 stimuli of the channel with role, value and capture, input of protocol_results):
   pacingFrequency, S2interval, stimCurrent, pauseLength, rockerSpeed, pulseDuration, 'log:<code>'.
 
-TS 2026-10-07 (port of mda_protocols.m and mda_groupBeats.m; schedule files 2026-10-07)
+TS 2026-10-07 (port of mda_protocols.m and mda_groupBeats.m; schedule files 2026-10-07; uncertain contractions
+2026-10-09)
 """
 from __future__ import annotations
 
@@ -337,11 +338,14 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
     inR = (tt >= r0) & (tt <= r1)
     Cst = np.asarray(C.stimTimes, dtype=float)
     Ccap = np.asarray(C.stimCaptured, dtype=bool)
+    Ccc = np.asarray(C.get("stimCapturedCertain", C.stimCaptured), dtype=bool)
     captured = np.zeros(nS, bool)
+    capturedCertain = np.zeros(nS, bool)  # followed by a certain contraction (option detection)
     for i in range(nS):
         j = np.flatnonzero(Cst == tt[i])
         if j.size:
             captured[i] = Ccap[j[0]]
+            capturedCertain[i] = Ccc[j[0]]
     inRb = (tPeak >= r0) & (tPeak <= r1)
     keys = []
     for x in list(lbl[inR]) + list(bLbl[inRb]):
@@ -369,6 +373,7 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
         Cg = Struct(dict(C))
         Cg.stimTimes = tt[js]
         Cg.stimCaptured = captured[js]
+        Cg.stimCapturedCertain = capturedCertain[js]
         Bg = B[B["group"].to_numpy() == keys[q]]
         T = summarize(Bg, Cg, [r0, r1])
         pj = prevInt[js]

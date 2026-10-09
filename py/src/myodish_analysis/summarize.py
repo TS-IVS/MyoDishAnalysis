@@ -8,11 +8,12 @@ C       channel info from analyze_channel (stimulus times, threshold)
 range_  [from, to] in s
 
 Columns: channel, from, to, nContractions (included), nDetected, nStimulated, nExtraBeats, nStimuli, nMissedBeats,
-extraBeats_percent, missedBeats_percent, stimFrequency (Hz, from the median stimulus interval in the range),
-detectionThreshold (uN), zeroForce (uN), then <parameter>_mean, <parameter>_SD and <parameter>_n for every parameter;
+extraBeats_percent, missedBeats_percent, nUncertain, nStimulatedUncertain, nExtraBeatsUncertain,
+nMissedBeatsUncertain (uncertain contractions, see analyze_channel, option detection; missed: stimuli followed only by
+an uncertain contraction), stimFrequency (Hz, from the median stimulus interval in the range), detectionThreshold (uN), zeroForce (uN), then <parameter>_mean, <parameter>_SD and <parameter>_n for every parameter;
 with a reference beat <parameter>_pctRef / _dRef _mean / _SD; with AP columns (analyze_ap) _mean / _SD / _n.
 
-TS 2026-10-06 (port of mda_summarize.m, TS 2026-10-04)
+TS 2026-10-06 (port of mda_summarize.m, TS 2026-10-04; uncertain contractions 2026-10-09)
 """
 from __future__ import annotations
 
@@ -44,6 +45,16 @@ def summarize(B, C, range_):
                nMissedBeats=int(np.sum(J & ~np.asarray(C.stimCaptured, bool))))
     row["extraBeats_percent"] = 100 * row["nExtraBeats"] / row["nDetected"] if row["nDetected"] > 0 else math.nan
     row["missedBeats_percent"] = 100 * row["nMissedBeats"] / row["nStimuli"] if row["nStimuli"] > 0 else math.nan
+    # 2026-10-09: uncertain contractions (column uncertain, option detection): all, stimulated, extra beats, and missed
+    # beats that are uncertain (stimuli followed only by an uncertain contraction: missed with detection='specific')
+    u = inRange & B["uncertain"].to_numpy(dtype=bool)
+    nMU = 0
+    if C.get("stimCapturedCertain") is not None:
+        nMU = int(np.sum(J & np.asarray(C.stimCaptured, bool) & ~np.asarray(C.stimCapturedCertain, bool)))
+    row["nUncertain"] = int(np.sum(u))
+    row["nStimulatedUncertain"] = int(np.sum(u & (bt == "stimulated")))
+    row["nExtraBeatsUncertain"] = int(np.sum(u & (bt == "extra")))
+    row["nMissedBeatsUncertain"] = nMU
     row["stimFrequency"] = fStim
     row["detectionThreshold"] = C.threshold
     row["zeroForce"] = zeroF

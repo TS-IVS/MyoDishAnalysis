@@ -44,7 +44,8 @@ function [B, G, Z] = mda_groupBeats(H, B, C, range, by, opts)
 %   Z      the stimuli of the channel (with the 300 s before the range): t, prevInt, nextInt, role, value, step,
 %          group, captured (followed by a contraction), inRange (input of mda_protocolResults)
 %
-% TS 2026-10-07 (S2interval: groups 'other', 'pre-S2'; pauseLength: one group per pause, 'after rest', 'other')
+% TS 2026-10-07 (S2interval: groups 'other', 'pre-S2'; pauseLength: one group per pause, 'after rest', 'other';
+% uncertain contractions 2026-10-09)
 
 if nargin < 6 || isempty(opts), opts = mda_options(); end
 by = char(by);
@@ -164,6 +165,8 @@ inR = tt >= range(1) & tt <= range(2);
 [isC, locC] = ismember(tt, C.stimTimes);
 captured = false(nS, 1);
 captured(isC) = C.stimCaptured(locC(isC));
+capturedCertain = captured;                           %followed by a certain contraction (option 'detection')
+if isfield(C, 'stimCapturedCertain'), capturedCertain(isC) = C.stimCapturedCertain(locC(isC)); end
 keys = unique([lbl(inR); B.group(B.t_peak >= range(1) & B.t_peak <= range(2))], 'stable');
 % order: role (as listed below), then value
 roleOrder = {'', 'S1', 'preS2', 'S2', 'postS2', 'steady', 'afterRest', 'postRest', 'other'};
@@ -187,6 +190,7 @@ for q = 1:numel(keys)
     Cg = C;
     Cg.stimTimes = tt(js);
     Cg.stimCaptured = captured(js);
+    Cg.stimCapturedCertain = capturedCertain(js);
     Bg = B(strcmp(B.group, keys{q}), :);
     T = mda_summarize(Bg, Cg, range);
     T.stimFrequency = 1 / median(prevInt(js), 'omitnan');

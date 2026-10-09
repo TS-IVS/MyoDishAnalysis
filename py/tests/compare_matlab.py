@@ -7,10 +7,12 @@ tests/matlab/mda_py_reference_files.m, mda_py_reference_synthetic.m and mda_py_r
 tests/reference). Cases: helpers, synthetic, ex1 ... ex9, ex3ref (default: all available).
 
 For every table: number of rows, NaN pattern, text columns identical; numbers within rel. 1e-9 (rocker filter 1e-6;
-there a contraction at the edge of a rule may differ, <= 0.1 % of the rows).
+there a contraction at the edge of a rule may differ, <= 0.1 % of the rows, and the flag uncertain of <= 1 % of the
+rows of channels with such a row or a shifted peak).
 Prints one line per comparison and a summary; exit code 1 if anything differs.
 
-TS 2026-10-06 (example recordings 2026-10-07; rows at the edge of a rule with the rocker filter 2026-10-09)
+TS 2026-10-06 (example recordings 2026-10-07; rows at the edge of a rule with the rocker filter, uncertain
+2026-10-09)
 """
 from __future__ import annotations
 
@@ -58,7 +60,8 @@ CLI = {  # key: (channels, from, to, keyword options) as in mda_py_reference_fil
             "ranges": ([3, 6], [60, 400], [120, 460], dict(labels=["a", "b"], rocker="stopped", beats="stimulated")),
             "rocker": (None, 0, math.inf, dict(rockerFilter=True)),
             "thr": (6, 100, 300, dict(threshold=300, downsampling=1, medianFilterMs=20, meanFilterMs=10)),
-            "thrCh": ([1, 3, 6], 100, 300, dict(threshold=[math.nan, 300, math.nan]))},
+            "thrCh": ([1, 3, 6], 100, 300, dict(threshold=[math.nan, 300, math.nan])),
+            "spec": (None, 0, math.inf, dict(detection="specific"))},
     "ex4": {"all": (None, 0, math.inf, {}), "ranges": ([2, 3, 5, 6], [0, 780], [60, 870], dict(labels=["baseline", "iso"]))},
     "ex5": {"all": (None, 0, math.inf, {})},
     "ex6": {"all": (None, 0, math.inf, {}), "rocker": ([1, 4, 6], 0, 745, dict(rockerFilter=True)),
@@ -98,6 +101,7 @@ def cmp_cli(X, T, S, info, name, rtol, rocker=False):
     lines = []
     okS = True
     nOdd = 0
+    chOdd = set()  # channels with a row without partner or a shifted peak (rocker filter)
     if rocker and len(M) != len(P):
         # a contraction at the edge of a rule (e.g. latency +-0.1 s of the stimulus-locked peaks, rockerArtifacts)
         # can flip when peaks moved by one sample (see below): rows without a partner within 2 samples in the
@@ -118,6 +122,7 @@ def cmp_cli(X, T, S, info, name, rtol, rocker=False):
         # the neighbours (parameters between the previous and the next peak, at most maxBeatWindow = 3 s) and the
         # numbering of the later contractions of that channel depend on the odd row
         odd = [k for k, o in zip(keyM, oddM) if o] + [k for k, o in zip(keyP, oddP) if o]
+        chOdd |= {float(k[0]) for k in odd}
 
         def near(keys):
             return np.array([any(c == o[0] and abs(t - o[1]) <= 3.01 for o in odd) for c, t in keys])
@@ -129,6 +134,7 @@ def cmp_cli(X, T, S, info, name, rtol, rocker=False):
     if rocker and len(M) == len(P):
         d = np.abs(M["t_peak"].to_numpy(float) - P["t_peak"].to_numpy(float))
         shifted = d > 1e-9
+        chOdd |= set(M["channel"].to_numpy(float)[shifted].tolist())
         dt = 0.005
         # one sample (on macOS with Accelerate once two samples: three equal samples at the peak)
         okS = bool(np.all(d[shifted] < 2 * dt + 1e-6) and shifted.mean() <= 0.01)
@@ -143,8 +149,20 @@ def cmp_cli(X, T, S, info, name, rtol, rocker=False):
             P.loc[nxt, c] = np.nan
         M = M[~shifted].reset_index(drop=True)
         P = P[~shifted].reset_index(drop=True)
-    ok1, l1 = compare_tables(M, P, name + " contractions", rtol=rtol, atol=rtol,
-                             skip=("clockTime", "contraction") if nOdd else ("clockTime",))
+    skip1 = ("clockTime", "contraction") if nOdd else ("clockTime",)
+    unc = ("nUncertain", "nStimulatedUncertain", "nExtraBeatsUncertain", "nMissedBeatsUncertain")
+    okU, lU = True, []
+    if rocker and chOdd and "uncertain" in M.columns and "uncertain" in P.columns and len(M) == len(P):
+        # the flag uncertain depends on the latencies and sizes of the largest peaks of the channel: a shifted or
+        # missing peak can move the reference latency by one sample and flip a contraction at the edge of the window
+        du = M["uncertain"].to_numpy(float) != P["uncertain"].to_numpy(float)
+        chU = set(M["channel"].to_numpy(float)[du].tolist())
+        okU = bool(du.sum() <= max(1, 0.01 * len(M)) and chU <= chOdd)
+        lU.append(f"{name}: uncertain differs in {int(du.sum())} of {len(M)} contractions (channels "
+                  f"{sorted(int(c) for c in chU)}; channels with a shifted / missing peak {sorted(int(c) for c in chOdd)})")
+        skip1 = skip1 + ("uncertain",)
+    ok1, l1 = compare_tables(M, P, name + " contractions", rtol=rtol, atol=rtol, skip=skip1)
+    ok1, l1 = ok1 and okU, lU + l1
     if "clockTime" in M.columns and len(M) == len(P) and len(M):
         dct = np.nanmax(np.abs(M["clockTime"].to_numpy(float) - P["clockTime"].to_numpy(float))) * 86400
         l1.append(f"{name} contractions: clockTime max diff {dct * 1000:.3f} ms")
@@ -152,9 +170,18 @@ def cmp_cli(X, T, S, info, name, rtol, rocker=False):
     Ms = table_from_struct(X.summary)
     if rocker:  # SDs react most to the few contractions whose peak moved by one sample (BLAS-dependent)
         sd = [c for c in Ms.columns if c.endswith("_SD") and c in S.columns]
-        ok2a, l2a = compare_tables(Ms, S, name + " summary (means)", rtol=1e-2 if nOdd else 5e-3, atol=rtol, skip=sd)
+        uc = [c for c in unc if c in Ms.columns and c in S.columns]
+        ok2a, l2a = compare_tables(Ms, S, name + " summary (means)", rtol=1e-2 if nOdd else 5e-3, atol=rtol,
+                                   skip=tuple(sd) + tuple(uc))
         ok2b, l2b = compare_tables(Ms, S, name + " summary (SDs)", rtol=2e-2, atol=rtol, cols=sd)
         ok2, l2 = ok2a and ok2b, l2a + l2b
+        if uc and len(Ms) == len(S):  # counts of uncertain contractions: <= 1 % of the detected contractions (>= 2)
+            dmax = np.abs(Ms[uc].to_numpy(float) - S[uc].to_numpy(float)).max(axis=1)
+            lim = np.maximum(2, 0.01 * Ms["nDetected"].to_numpy(float))
+            okc = bool(np.all(dmax <= lim))
+            l2.append(f"{name} summary: counts of uncertain contractions differ by at most {int(dmax.max())} "
+                      f"(limit 1 % of the detected contractions, >= 2)")
+            ok2 = ok2 and okc
     else:
         ok2, l2 = compare_tables(Ms, S, name + " summary", rtol=rtol, atol=rtol)
     Mt = table_from_struct(X.thresholds)

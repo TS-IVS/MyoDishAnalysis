@@ -18,7 +18,8 @@ refined with the data of all channels; per rocker-on period blocks of 30 s: leas
 baseline per stretch between two contractions to the samples between the contractions; consistency checks;
 cross-faded blocks; only the periodic part is subtracted.
 
-TS 2026-10-06 (port of mda_rockerFilter.m, TS 2026-10-05)
+TS 2026-10-06 (port of mda_rockerFilter.m, TS 2026-10-05; contraction masks independent of the option
+detection 2026-10-09)
 """
 from __future__ import annotations
 
@@ -76,6 +77,7 @@ def rocker_filter(S, channels, opts, Sctx=None):
         S.rockerFilterInfo = list(S.rockerFilterInfo)
     o0 = Struct(opts)
     o0.rockerFilter = False; o0.rocker = "any"; o0.beats = "all"; o0.zeroForce = math.nan
+    o0.detection = "sensitive"  # contraction masks: all contractions (independent of the mode)
     thrV = None  # one threshold per channel (myodish_analysis; NaN = auto)
     if not isinstance(opts.threshold, str) and np.size(opts.threshold) > 1:
         if np.size(opts.threshold) != len(channels):

@@ -21,10 +21,10 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %    / out (half / twice its length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed
 %    overview moves along when the window leaves its visible part. The mouse wheel zooms only the display.
 % 2. The force plot shows the loaded window (force - zero force, if the zero force is known): detected contractions
-%    (red = selected, grey = excluded by the filters, black x = excluded by you), stimuli (blue ticks), rocker moving
-%    (grey background). The stimulus plot below shows the current of every stimulus pulse (mA; green = extra pulse,
-%    x = current not reached) and the interval to the previous pulse of the channel (ms); numbers are written when
-%    40 pulses or fewer are visible (zoom in).
+%    (red = selected, orange = uncertain (high sensitivity), grey = excluded by the filters, black x = excluded by
+%    you), stimuli (blue ticks), rocker moving (grey background). The stimulus plot below shows the current of every
+%    stimulus pulse (mA; green = extra pulse, x = current not reached) and the interval to the previous pulse of the
+%    channel (ms); numbers are written when 40 pulses or fewer are visible (zoom in).
 %    Cursor mode 'drag = select time range': drag in the force plot to choose the analysed range.
 %    Cursor mode 'click = exclude / include contraction': click on a contraction to exclude it (or include it again).
 %    Zoom / pan with the figure toolbar (switch the zoom / pan tool off again to use the mouse modes).
@@ -32,6 +32,8 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %    contraction over time. 'Export this channel' writes all contractions of the range (column 'included')
 %    and the summary to .xlsx or .csv. 'All channels -> file' analyses the range in all channels with the
 %    same settings (without your manual exclusions). The detection threshold is set per channel (auto or manual).
+%    'high sensitivity' (default) counts all contractions and marks the uncertain ones (orange); 'high specificity'
+%    does not count them (mda_options 'detection').
 %    Stimuli ('stimuli: auto / MyoDish / ext. trigger'): MyoDish pulses of the channel or the external trigger pulses
 %    of the status channel (external stimulator at the external controller unit, one chamber; auto = trigger pulses
 %    if the window has no MyoDish pulses).
@@ -58,7 +60,7 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 % Requires MATLAB R2019b or newer, no toolboxes.
 % Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05 (EP recordings 2026-10-06, protocols 2026-10-07;
 % threshold per channel, arrow keys, overlay of channels / styles / bands 2026-10-07; navigation buttons, trend of several
-% channels 2026-10-09)
+% channels, detection mode 2026-10-09)
 
 if nargin < 1, mddFile = ''; end
 if nargin < 2, metadata = []; end
@@ -236,9 +238,13 @@ hXT = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'stimuli: auto', 
     'Position', [0.615 0.682 0.355 0.035], 'Callback', @onFilter, 'TooltipString', ['stimulus times: MyoDish pulses of the channel, or the ' ...
     'external trigger pulses of the status channel (external stimulator at the external controller unit: one chamber, any data ' ...
     'channel). auto = external trigger pulses if the window has no MyoDish pulses']);
-hRF = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'remove rocker artifact (periodic)', 'Position', [0.03 0.645 0.94 0.033], ...
+hRF = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'remove rocker artifact', 'Position', [0.03 0.645 0.585 0.033], ...
     'Callback', @onRockerFilter, 'TooltipString', ['subtracts the periodic signal of the rocker movement (estimated per channel ' ...
     'between the contractions, +-60 s around the window); light grey in the force plot = signal before. See mda_rockerFilter']);
+hDet = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'high sensitivity', 'high specificity'}, ...
+    'Position', [0.615 0.647 0.355 0.035], 'Callback', @onDetection, 'TooltipString', ['auto threshold: high sensitivity counts ' ...
+    'all contractions and marks the uncertain ones (orange: neither locked to the stimuli nor large compared with the ' ...
+    'typical contraction and the noise before the stimuli); high specificity does not count them (option detection)']);
 hRel = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'time axis: 0 = start of the loaded window', 'Position', [0.03 0.61 0.94 0.033], ...
     'Callback', @onRelTime, 'TooltipString', 'display only; From/To, tables and exports keep the time in the file (s)');
 hCounts = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.03 0.49 0.94 0.118], 'FontSize', 9);
@@ -433,6 +439,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function onRockerFilter(~, ~)
         opts.rockerFilter = logical(hRF.Value);
+        if ~isempty(S), analyze(false); end
+    end
+
+    function onDetection(~, ~)
+        dm = {'sensitive', 'specific'};
+        opts.detection = dm{hDet.Value};
         if ~isempty(S), analyze(false); end
     end
 
@@ -1875,7 +1887,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         lines = {sprintf('file\t%s', [n e]), sprintf('channel\t%d', ch), sprintf('range (s)\t%.2f\t%.2f', range(1), range(2)), ...
             sprintf('n contractions\t%d', Sm.nContractions), ...
             sprintf('extra beats\t%d\tof %d contractions\t%.3g %%', Sm.nExtraBeats, Sm.nDetected, Sm.extraBeats_percent), ...
-            sprintf('missed beats\t%d\tof %d stimuli\t%.3g %%', Sm.nMissedBeats, Sm.nStimuli, Sm.missedBeats_percent)};
+            sprintf('missed beats\t%d\tof %d stimuli\t%.3g %%', Sm.nMissedBeats, Sm.nStimuli, Sm.missedBeats_percent), ...
+            sprintf('uncertain\t%d\tstimulated %d\textra %d\tmissed %d', Sm.nUncertain, Sm.nStimulatedUncertain, ...
+            Sm.nExtraBeatsUncertain, Sm.nMissedBeatsUncertain)};
         ln = setdiff(Lbl.Properties.VariableNames, {'channel'}, 'stable');
         for k = 1:numel(ln)
             v = Sm.(ln{k});
@@ -2521,6 +2535,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         refresh(resetX);
         if ~isempty(hRef) && isvalid(hRef.fig), drawReference(); end
         msg = sprintf('Channel %d: %d contractions detected (threshold %.0f %sN, %s).', ch, height(B), C.threshold, mu, C.thresholdMode);
+        if any(B.uncertain), msg = sprintf('%s %d uncertain (orange).', msg, nnz(B.uncertain)); end
         if isfield(C, 'noContractions') && C.noContractions
             lvl = '';
             if ~isnan(C.noiseLevel), lvl = sprintf(' (level before the stimuli %.0f %sN)', C.noiseLevel, mu); end
@@ -2542,7 +2557,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             msg = 'Rocker filter: the rocker does not move in this window.'; return;
         end
         row = find(S.dataChannels == chX, 1);
-        key = [sprintf('%d|', chX) jsonencode(rmfield(optsC, {'zeroForce', 'rocker', 'beats', 'referenceBeat'}))];
+        key = [sprintf('%d|', chX) jsonencode(rmfield(optsC, {'zeroForce', 'rocker', 'beats', 'referenceBeat', 'detection'}))];
         hit = numel(rfCache) >= chX && ~isempty(rfCache{chX}) && strcmp(rfCache{chX}.key, key);
         if ~hit
             status('Rocker filter: estimating the rocker artifact ...'); drawnow;
@@ -2673,12 +2688,14 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             y = fy(C.iPeaks(loc)); y = y(:);
             inR = B.t_peak >= range(1) & B.t_peak <= range(2);
             man = isManual();
-            sel = B.included & inR & ~man;
+            unc = B.included & inR & ~man & B.uncertain;    %uncertain (high sensitivity): orange
+            sel = B.included & inR & ~man & ~B.uncertain;
             filt = inR & ~B.included & ~man;
             plot(axMain, B.t_peak(~inR), y(~inR), '.', 'Color', [0.6 0.6 0.6], 'HitTest', 'off');
             plot(axMain, B.t_peak(filt), y(filt), 'v', 'Color', [0.5 0.5 0.5], 'MarkerSize', 6, 'HitTest', 'off');
             plot(axMain, B.t_peak(man & inR), y(man & inR), 'kx', 'MarkerSize', 10, 'LineWidth', 1.5, 'HitTest', 'off');
             plot(axMain, B.t_peak(sel), y(sel), 'v', 'Color', [0.85 0 0], 'MarkerFaceColor', [0.85 0 0], 'MarkerSize', 6, 'HitTest', 'off');
+            plot(axMain, B.t_peak(unc), y(unc), 'v', 'Color', [1 0.55 0], 'MarkerFaceColor', [1 0.55 0], 'MarkerSize', 6, 'HitTest', 'off');
             dv = deviating() & inR;                     %deviating from the reference beat: magenta circles
             if any(dv)
                 plot(axMain, B.t_peak(dv), y(dv), 'o', 'Color', [0.9 0 0.9], 'MarkerSize', 11, 'LineWidth', 1.5, 'HitTest', 'off');
@@ -2709,7 +2726,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         else
             ylabel(axMain, {['force (' mu 'N, sensor signal)'], 'zero force unknown'});
         end
-        ttl = sprintf('Channel %d   (red = selected, grey = excluded by filter, x = excluded by you, blue = stimuli, grey background = rocker moving, purple = comments)', ch);
+        ttl = sprintf('Channel %d   (red = selected, orange = uncertain, grey = excluded by filter, x = excluded by you, blue = stimuli, grey background = rocker moving, purple = comments)', ch);
         if showRaw, ttl = strrep(ttl, 'purple = comments)', 'purple = comments, light grey = before rocker filter)'); end
         title(axMain, ttl, 'FontWeight', 'normal', 'FontSize', 9);
     end
@@ -2729,7 +2746,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         v = B.(plotList{k,1});
         sel = selected();
         plot(axPar, B.t_peak(~sel), v(~sel), '.', 'Color', [0.7 0.7 0.7], 'MarkerSize', 8);
-        plot(axPar, B.t_peak(sel), v(sel), '.', 'Color', [0.85 0 0], 'MarkerSize', 12);
+        plot(axPar, B.t_peak(sel & ~B.uncertain), v(sel & ~B.uncertain), '.', 'Color', [0.85 0 0], 'MarkerSize', 12);
+        plot(axPar, B.t_peak(sel & B.uncertain), v(sel & B.uncertain), '.', 'Color', [1 0.55 0], 'MarkerSize', 12);
         if any(sel)                                        %mean of the selected contractions over the analysed range
             plot(axPar, range, mean(v(sel), 'omitnan') * [1 1], '--', 'Color', [0.85 0 0], 'LineWidth', 1, 'HitTest', 'off');
         end
@@ -2762,6 +2780,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         d(end+1,:) = {'extra beats', fmtNum(Sm.extraBeats_percent, 3), '', Sm.nDetected, '%'};
         d(end+1,:) = {'missed beats', sprintf('%d', Sm.nMissedBeats), '', Sm.nStimuli, 'count'};
         d(end+1,:) = {'missed beats', fmtNum(Sm.missedBeats_percent, 3), '', Sm.nStimuli, '%'};
+        d(end+1,:) = {'uncertain (all)', sprintf('%d', Sm.nUncertain), '', Sm.nDetected, 'count'};
+        d(end+1,:) = {'uncertain stimulated', sprintf('%d', Sm.nStimulatedUncertain), '', Sm.nStimulated, 'count'};
+        d(end+1,:) = {'uncertain extra', sprintf('%d', Sm.nExtraBeatsUncertain), '', Sm.nExtraBeats, 'count'};
+        d(end+1,:) = {'uncertain missed', sprintf('%d', Sm.nMissedBeatsUncertain), '', Sm.nStimuli, 'count'};
         if isfield(C, 'referenceBeat') && ~isempty(C.referenceBeat)    %deviating from the reference beat (whole range)
             inR = B.t_peak >= range(1) & B.t_peak <= range(2);
             nCmp = sum(inR & ~isnan(B.refMaxDeviation_SD)); nDev = sum(inR & deviating());
@@ -3669,7 +3691,7 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       '', ...
       'Overview: min/max of the selected channel over the whole recording (green = rocker at rest). Drag in it to load a time window (or type From/To and press Load).', ...
       '', ...
-      'Force plot: red = selected contractions, grey = excluded by the filters (rocker / stimulated only), x = excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.', ...
+      'Force plot: red = selected contractions, orange = uncertain contractions (high sensitivity: neither locked to the stimuli nor large compared with the other contractions; not counted with high specificity), grey = excluded by the filters (rocker / stimulated only), x = excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.', ...
       'Cursor in the force plot: "drag = select time range" or "click = exclude / include contraction". Zoom/pan: mouse wheel or figure toolbar (switch the tool off afterwards).', ...
       'Arrow keys (click into a plot first) and the buttons under the force plot change the loaded window (= blue selection in the overview and analysed range; read again): left / right = move it by half its length, shift + left / right (shift + click) = extend it by half its length on that side, up / down (middle buttons) = zoom in / out (half / twice its length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed overview moves along. The mouse wheel zooms only the display.', ...
       '', ...
