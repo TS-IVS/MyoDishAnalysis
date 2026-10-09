@@ -59,9 +59,10 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %    double-click = automatic, right click = type the y limits / automatic (restore view); 'remove stimulus artefact'
 %    replaces the pulses and the artefact after them by straight lines (grey; display only, mda_analyzeAP
 %    'removeArtefacts': the AP parameters are measured on the recorded signal).
-%    Mouse pointer over the force, stimulus, parameter or EP plots: a marker on the curve and the value at that time in
-%    every plot (force, nearest stimulus pulse, parameter of the nearest contraction, EP signal and stimulation); the
-%    plot under the pointer also shows the time and the time since the last stimulus.
+%    Mouse pointer over the force, stimulus, parameter or EP plots: a marker on the curve in every plot and the value at
+%    that time small in its top left corner (force, nearest stimulus pulse, parameter of the nearest contraction, EP
+%    signal and stimulation); the plot under the pointer also shows the time and the time since the last stimulus.
+%    The windows always use light colors (also with a dark theme of MATLAB / the operating system).
 % 5. 'Protocols ...': stimulation protocols found in the log file (comments 'start ... protocol' / 'end ... protocol',
 %    mda_protocols; editable, '+ selected range' adds the range of the main window): the contractions of the ticked
 %    protocols and channels are grouped by pacing frequency, S2 interval, stimulus current, rest interval, pulse
@@ -155,6 +156,7 @@ fig = figure('Name', 'MyoDishAnalysis', 'NumberTitle', 'off', 'Color', 'w', 'Uni
     'Position', [40 40 1450 880], 'MenuBar', 'none', 'ToolBar', 'figure', 'WindowButtonDownFcn', @onMouseDown, ...
     'WindowButtonMotionFcn', @onMouseMove, 'WindowScrollWheelFcn', @onScroll, 'WindowKeyPressFcn', @onKey, 'WindowKeyReleaseFcn', @onKeyRelease, ...
     'DeleteFcn', @onClose);
+lightTheme(fig);
 movegui(fig, 'onscreen');
 dflt = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
 
@@ -291,7 +293,7 @@ uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Show table', 'Position
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Export this channel ...', 'Position', [0.03 0.12 0.46 0.04], 'Callback', @onExport);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'All channels -> file ...', 'Position', [0.51 0.12 0.46 0.04], 'Callback', @onAllChannels);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Copy summary', 'Position', [0.03 0.075 0.46 0.04], 'Callback', @onCopy);
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Help', 'Position', [0.51 0.075 0.46 0.04], 'Callback', @(~,~) helpdlg(helpText(), 'MyoDishAnalysis'));
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Help', 'Position', [0.51 0.075 0.46 0.04], 'Callback', @(~,~) lightTheme(helpdlg(helpText(), 'MyoDishAnalysis')));
 hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.', 'HorizontalAlignment', 'left', 'Position', [0.03 0.003 0.94 0.068], 'FontSize', 9, 'ForegroundColor', [0 0 0.6]);
 
 % functions for scripts / tests: api = fig.UserData; api.setRange([t1 t2]); api.toggleAt(t);
@@ -720,6 +722,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function openOverlayWindow()
         f2 = figure('Name', 'MyoDishAnalysis: overlay', 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
             'Position', [140 90 1200 720], 'DeleteFcn', @(~,~) clearOverlayState());
+        lightTheme(f2);
         movegui(f2, 'onscreen');
         d = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
         axO = axes(f2, 'Position', [0.07 0.2 0.6 0.74]); box(axO, 'on');
@@ -1230,6 +1233,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if isempty(hOv) || ~isvalid(hOv.fig) || isempty(ovG), return; end
         f2 = figure('Name', 'MyoDishAnalysis: overlay (editable copy)', 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
             'Position', [180 120 900 620], 'MenuBar', 'figure', 'ToolBar', 'figure');
+        lightTheme(f2);
         copyOverlayAxes(f2);
         try plotedit(f2, 'on'); catch, end
         status('Editable copy of the overlay: double-click a text, line, axis or the legend to edit it; File > Save As saves it.');
@@ -1244,6 +1248,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         trFiles = trFileInfo({H.file});
         f2 = figure('Name', 'MyoDishAnalysis: trend', 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
             'Position', [110 90 1300 660], 'DeleteFcn', @(~,~) clearTrend());
+        lightTheme(f2);
         d = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
         axT = axes(f2, 'Position', [0.06 0.1 0.6 0.82]); box(axT, 'on');
         x0 = 0.69; w = 0.3;
@@ -1775,6 +1780,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         file = askFile('image', 'trend');
         if isempty(file), return; end
         f2 = figure('Visible', 'off', 'Color', 'w', 'Units', 'pixels', 'Position', [50 50 1200 600]);
+        lightTheme(f2);
         try
             lg = hTr.ax.Legend;
             if ~isempty(lg) && isvalid(lg), c = copyobj([lg hTr.ax], f2); a = c(2); else, a = copyobj(hTr.ax, f2); end
@@ -1859,6 +1865,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         relHeight = struct('overview', 1, 'force', 2.4, 'stimuli', 1, 'parameter', 1.5);
         w = cellfun(@(nm) relHeight.(nm), list);
         f2 = figure('Visible', 'off', 'Color', 'w', 'Units', 'pixels', 'Position', [50 50 1300 120 + 190 * sum(w)]);
+        lightTheme(f2);
         gap = 0.055; bot = 0.07; top = 0.035;
         hAll = 1 - bot - top - gap * (numel(list) - 1);
         y = 1 - top;
@@ -1924,6 +1931,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         file = askFile('image', 'overlay');
         if isempty(file), return; end
         f2 = figure('Visible', 'off', 'Color', 'w', 'Units', 'pixels', 'Position', [50 50 900 620]);
+        lightTheme(f2);
         try
             copyOverlayAxes(f2);
             saveFigureFile(f2, file);
@@ -2055,6 +2063,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             f2 = hRA; clf(f2); figure(f2);
         else
             f2 = figure('Name', '', 'Color', 'w', 'NumberTitle', 'off', 'Position', [80 120 1100 560]);
+            lightTheme(f2);
             hRA = f2;
         end
         f2.Name = sprintf('Rocker artifact - channel %d', ch);
@@ -2094,6 +2103,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             f3 = [];
             try
                 f3 = figure('Visible', 'off', 'Color', 'w', 'Position', f2.Position, 'Name', f2.Name);  %without menus
+                lightTheme(f3);
                 copyobj(findobj(f2, '-depth', 1, {'Type', 'legend', '-or', 'Type', 'axes'}), f3);
                 saveFigureFile(f3, file); status(['Saved: ' file]);
             catch ME2
@@ -2148,6 +2158,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             if isdatetime(c{k}), c{k} = char(c{k}); end
         end
         f2 = figure('Name', sprintf('Channel %d: contractions %.1f - %.1f s', ch, range(1), range(2)), 'Color', 'w', 'MenuBar', 'none');
+        lightTheme(f2);
         uitable(f2, 'Units', 'normalized', 'Position', [0 0 1 1], 'Data', c, 'ColumnName', T.Properties.VariableNames, 'RowName', []);
     end
 
@@ -2418,6 +2429,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         [~, prN, prE] = fileparts(H.file);
         f4 = figure('Name', ['MyoDishAnalysis: protocols - ' prN prE], 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
             'Position', [90 70 1400 760], 'DeleteFcn', @(~,~) clearProtocols());
+        lightTheme(f4);
         dd = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
         axP = axes(f4, 'Position', [0.06 0.47 0.55 0.49]); box(axP, 'on'); grid(axP, 'on');
         tRes = uitable(f4, 'Units', 'normalized', 'Position', [0.01 0.01 0.62 0.37], 'RowName', [], 'FontSize', 9);
@@ -2656,6 +2668,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         file = askFile('image', 'protocols');
         if isempty(file), return; end
         f2 = figure('Visible', 'off', 'Color', 'w', 'Units', 'pixels', 'Position', [50 50 900 600]);
+        lightTheme(f2);
         try
             lg = hPr.ax.Legend;
             if ~isempty(lg) && isvalid(lg), c = copyobj([lg hPr.ax], f2); a = c(2); else, a = copyobj(hPr.ax, f2); end
@@ -2688,6 +2701,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if ~isempty(hCom) && isvalid(hCom.fig), figure(hCom.fig); return; end
         [~, n, e] = fileparts(H.file);
         f2 = uifigure('Name', ['Comments - ' n e], 'Position', [120 120 950 520]);
+        lightTheme(f2);
         g = uigridlayout(f2, [3 5]);
         g.RowHeight = {28, '1x', 22}; g.ColumnWidth = {55, '1x', 230, 110, 80};
         uilabel(g, 'Text', 'Search:');
@@ -2896,17 +2910,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             else
                 set(h.dot, 'Visible', 'off');
             end
-            str = {};
-            if a == axH, str = {Hv(1).time}; end
-            if ~isempty(Hv(q).text), str{end+1} = Hv(q).text; end %#ok<AGROW>
+            str = Hv(q).text;                               %value: small, top left in the plot
+            if a == axH, str = strtrim([Hv(1).time '     ' str]); end   %plot under the pointer: time first
             if isempty(str), set(h.text, 'Visible', 'off'); continue; end
-            if in, xr = Hv(q).x; yr = Hv(q).y; else, xr = x; yr = yl(1) + 0.85 * diff(yl); end
-            yr = min(max(yr, yl(1) + 0.05 * diff(yl)), yl(2) - 0.05 * diff(yl));
-            right = xr > xl(1) + 0.7 * diff(xl);           %text left of the marker near the right edge
-            if right, ha = 'right'; else, ha = 'left'; end
-            if yr > yl(1) + 0.55 * diff(yl), va = 'top'; else, va = 'bottom'; end
-            set(h.text, 'Position', [xr + 0.008 * diff(xl) * (1 - 2 * right), yr, 0], 'String', str, ...
-                'HorizontalAlignment', ha, 'VerticalAlignment', va, 'Visible', 'on');
+            set(h.text, 'String', str, 'Visible', 'on');
         end
     end
 
@@ -2976,8 +2983,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'XLimInclude', 'off', 'YLimInclude', 'off', nh{:});
         h.dot = line(a, nan, nan, 'LineStyle', 'none', 'Marker', 'o', 'MarkerSize', 7, 'MarkerEdgeColor', [0 0 0], ...
             'MarkerFaceColor', [1 0.8 0], 'XLimInclude', 'off', 'YLimInclude', 'off', nh{:});
-        h.text = text(a, nan, nan, '', 'FontSize', 8, 'BackgroundColor', [1 1 0.88], 'EdgeColor', [0.55 0.55 0.55], ...
-            'Margin', 2, 'Interpreter', 'none', 'Clipping', 'on', 'Visible', 'off', nh{:});
+        h.text = text(a, 0.004, 0.985, '', 'Units', 'normalized', 'FontSize', 8, 'Color', [0.1 0.1 0.1], ...
+            'Margin', 1, 'HorizontalAlignment', 'left', 'VerticalAlignment', 'top', ...
+            'Interpreter', 'none', 'Visible', 'off', nh{:});     %fixed position: top left corner of the plot, no box
         setappdata(a, 'mdaHover', h);
     end
 
@@ -3386,6 +3394,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if ~isempty(hRef) && isvalid(hRef.fig), figure(hRef.fig); drawReference(); return; end
         f3 = figure('Name', 'MyoDishAnalysis: reference beat', 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
             'Position', [160 120 1150 560], 'DeleteFcn', @(~,~) clearRefHandle());
+        lightTheme(f3);
         d = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
         a1 = axes(f3, 'Position', [0.06 0.12 0.33 0.78]); a2 = axes(f3, 'Position', [0.45 0.12 0.33 0.78]);
         x0 = 0.81; w = 0.18;
@@ -4041,6 +4050,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if ~isempty(hLblFig) && isvalid(hLblFig), figure(hLblFig); return; end
         hLblFig = figure('Name', 'Labels per channel (metadata)', 'NumberTitle', 'off', 'MenuBar', 'none', 'ToolBar', 'none', ...
             'Color', 'w', 'Units', 'pixels', 'Position', [80 120 1300 360]);
+        lightTheme(hLblFig);
         ut = uitable(hLblFig, 'Units', 'normalized', 'Position', [0.01 0.2 0.98 0.78], 'RowName', [], 'FontSize', 10);
         showLabels(ut, Lbl);
         b = {'Style', 'pushbutton', 'Units', 'normalized', 'FontSize', 10};
@@ -4238,6 +4248,14 @@ end
 end
 
 
+function lightTheme(f)
+% light colors also with the dark theme of MATLAB / the operating system (R2025a+; older releases: no Theme property)
+try
+    f.Theme = 'light';
+catch
+end
+end
+
 function k = nearestSample(t, x)
 % index of the sample of the uniform time vector t nearest to x
 n = numel(t);
@@ -4310,7 +4328,7 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       '', ...
       'Force plot: red = selected contractions, orange = uncertain contractions (high sensitivity: neither locked to the stimuli nor large compared with the other contractions; not counted with high specificity), grey = excluded by the filters (rocker / stimulated only), x = excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.', ...
       'Cursor in the force plot: "drag = select time range" or "click = exclude / include contraction". Zoom/pan: mouse wheel or figure toolbar (switch the tool off afterwards).', ...
-      'Mouse pointer over the force, stimulus, parameter or EP plots: a dashed line and a marker show the value at that time in every plot (force; stimulus pulse nearest to it: current and interval; lower plot: parameter of the nearest contraction; EP signal and stimulation). The plot under the pointer also shows the time and the time since the last stimulus.', ...
+      'Mouse pointer over the force, stimulus, parameter or EP plots: a dashed line and a marker on the curve; the value at that time is shown small in the top left corner of every plot (force; stimulus pulse nearest to it: current and interval; lower plot: parameter of the nearest contraction; EP signal and stimulation). The plot under the pointer also shows the time and the time since the last stimulus.', ...
       'Arrow keys (click into a plot first) and the buttons under the force plot change the loaded window (= blue selection in the overview and analysed range; read again): left / right = move it by half its length, shift + left / right (shift + click) = extend it by half its length on that side, up / down (middle buttons) = zoom in / out (half / twice its length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed overview moves along. The mouse wheel zooms only the display.', ...
       '', ...
       'Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak, or the time course of the analysed range (t = 0 at the first stimulus of each group). Press again (or Add current selection in the overlay window) to add another selection as a new group; Channels (same range) ...: tick channels to add them for the analysed range (same settings, threshold and zero force of each channel). Per group (list): legend text, colour, line width, line style and a transparent band (mean +- SD, +- SEM or range). Title, axis labels and legend position are editable below the plot (empty = automatic); Edit figure ... opens a copy with the MATLAB plot tools.', ...

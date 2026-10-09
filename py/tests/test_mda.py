@@ -563,6 +563,9 @@ def test_gui_ep_ylim_artefacts_mouse_pointer(tmp_path):
         assert Hv[3]["y"] == pytest.approx(float(EP.V[k])) and Hv[3]["text"].endswith(" mV")
         assert Hv[1]["text"].startswith("50 mA, interval 1000 ms") and np.isfinite(Hv[0]["y"])
         assert all(w._hv[id(p)][0].isVisible() for p in w._hover_list())
+        txt = w._hv[id(w.pEPv)][2]  # values: top left in the plot (child of the view box), time first under the pointer
+        assert txt.parentItem() is w.pEPv.vb and txt.toPlainText().startswith("t = 0:21.77")
+        assert w._hv[id(w.pMain)][2].toPlainText() == Hv[0]["text"]
         w.hover(0, "")
         assert not any(w._hv[id(p)][0].isVisible() for p in w._hover_list())
         # stimulus artefacts removed (display): grey straight lines, value marked as replaced

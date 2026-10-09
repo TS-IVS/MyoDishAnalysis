@@ -18,6 +18,10 @@ MATLAB and Python versions have the same version number and give the same result
   culture and chamber-out periods; files `<experiment>/<experiment>_slices.csv` and `mda_slices.csv`. The slice
   register does not change the code fingerprint (no reanalysis). Tests `mda_testSliceRegister.m`,
   `py/tests/test_slice_register.py`.
+### Changed
+- GUI (MATLAB and Python): the values at the mouse pointer are written small in the top left corner of every plot
+  (no boxes next to the pointer); the windows always use light colors, also with a dark theme of MATLAB (R2025a+) or
+  of the operating system (Python: light color scheme, Qt < 6.8: Fusion style with a light palette).
 
 ## [1.0.0-beta.2] – 2026-10-09
 Second pre-release for testers (Git tag `v1.0.0-beta.2`, no GitHub release / DOI yet).

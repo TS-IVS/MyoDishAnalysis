@@ -2505,15 +2505,19 @@ class MainWindow(QtWidgets.QMainWindow):
             line = pg.InfiniteLine(angle=90, movable=False,
                                    pen=pg.mkPen((77, 77, 77), width=1, style=QtCore.Qt.PenStyle.DashLine))
             dot = pg.ScatterPlotItem(size=9, pen=pg.mkPen("k"), brush=pg.mkBrush(255, 204, 0))
-            txt = pg.TextItem("", color=(0, 0, 0), fill=pg.mkBrush(255, 255, 224, 235), border=pg.mkPen((140, 140, 140)))
+            # value: small, fixed in the top left corner of the plot (child of the view box: pixel coordinates; p.clear()
+            # does not remove it)
+            txt = pg.TextItem("", color=(26, 26, 26), anchor=(0, 0))  # no box (the curve stays visible)
             f = QtGui.QFont()
             f.setPointSize(8)
             txt.setFont(f)
+            txt.setParentItem(p.vb)
+            txt.setPos(3, 1)
             for i in (line, dot, txt):
                 i.setZValue(1000)
             it = (line, dot, txt)
             self._hv[id(p)] = it
-        for i in it:
+        for i in it[:2]:
             if i.scene() is None:  # removed by p.clear()
                 p.addItem(i, ignoreBounds=True)
         return it
@@ -2532,18 +2536,13 @@ class MainWindow(QtWidgets.QMainWindow):
             if inside:
                 dot.setData([h["x"]], [h["y"]])
             dot.setVisible(inside)
-            lines = ([time] if p is p_hover else []) + ([h["text"]] if h["text"] else [])
-            if not lines:
+            s_ = h["text"]  # value: small, top left in the plot; plot under the pointer: time first
+            if p is p_hover:
+                s_ = (time + "     " + s_).strip()
+            if not s_:
                 txt.setVisible(False)
                 continue
-            dy = yl[1] - yl[0]
-            xr, yr = (h["x"], h["y"]) if inside else (x, yl[0] + 0.85 * dy)
-            yr = min(max(yr, yl[0] + 0.05 * dy), yl[1] - 0.05 * dy)
-            right = xr > xl[0] + 0.7 * (xl[1] - xl[0])  # text left of the marker near the right edge
-            top = yr > yl[0] + 0.55 * dy
-            txt.setText("\n".join(lines))
-            txt.setAnchor((1 if right else 0, 0 if top else 1))
-            txt.setPos(xr + 0.008 * (xl[1] - xl[0]) * (-1 if right else 1), yr)
+            txt.setText(s_)
             txt.setVisible(True)
         return Hv, time
 

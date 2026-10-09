@@ -74,10 +74,11 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    zoom/pan also works (switch the tool off again to use the mouse modes). Time axis in h:mm:ss or m:ss (decimals
    when zoomed in below ~10 s); checkbox *time 0 = window start* shows the time relative to the
    window start (display only: From/To, tables and exports keep the time in the file, in s).
-   **Mouse pointer** over the force, stimulus, parameter or EP plots (not the overview): a dashed line and a marker
-   show the value at that time in every plot — force, stimulus pulse nearest to it (current, interval), parameter of
-   the lower plot of the nearest contraction, EP signal and stimulation; the plot under the pointer also shows the
-   time and the time since the last stimulus (EP plots: stimuli of the EP recording).
+   **Mouse pointer** over the force, stimulus, parameter or EP plots (not the overview): a dashed line and a marker on
+   the curve in every plot; the value at that time is written small in the top left corner of each plot — force,
+   stimulus pulse nearest to it (current, interval), parameter of the lower plot of the nearest contraction, EP signal
+   and stimulation; the plot under the pointer also shows the time and the time since the last stimulus (EP plots:
+   stimuli of the EP recording). The windows always use light colors (also with a dark theme).
    **Threshold, this ch.**: detection threshold of the selected channel, *auto* or a manual value (µN); kept per
    channel when you switch channels and used for All channels, Protocols and Trend (command line: one value per
    channel, `'threshold',[NaN 300 NaN ...]`, NaN = auto).
