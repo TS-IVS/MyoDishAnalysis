@@ -299,3 +299,19 @@ def test_parallel_workers(raw, tmp_path):
     a = pd.read_csv(str(tmp_path / "r1" / "A" / "example9_ratVentricle_summary.csv"))
     b = pd.read_csv(str(tmp_path / "r2" / "A" / "example9_ratVentricle_summary.csv"))
     pd.testing.assert_frame_equal(a, b)
+
+
+def test_channel_status_contraction_without_signal():
+    """a contraction (artifact) in a channel without signal: status 'no slice', last contraction with clock time
+    (crashed with NaN before, TS 2026-10-10)"""
+    from types import SimpleNamespace
+    H = SimpleNamespace(totalSeconds=600.0, recordingStart=730486.5, dataChannels=np.array([1, 2]))
+    G = pd.DataFrame(dict(channel=[1.0], **{"from": [0.0], "to": [600.0]}, type=["no signal"], fromStart=[True],
+                          untilEnd=[True], duration=[600.0]))
+    C = pd.DataFrame(dict(channel=[1.0, 2.0, 2.0], t_peak=[550.0, 100.0, 590.0], included=[True, True, True],
+                          amplitude=[5.0, 100.0, 120.0]))
+    CH = W._channel_status(H, C, G, None, "rigA_X_0", None, 600.0)
+    r1, r2 = CH.iloc[0], CH.iloc[1]
+    assert r1["status"] == "no slice" and r1["nContractions"] == 1 and r1["lastContraction_s"] == 550
+    assert r1["lastContractionClock"] == "2000-01-01 12:09:10" and not r1["beatingAtEnd"]
+    assert r2["status"] == "beating" and r2["lastContraction_s"] == 590 and r2["lastContractionClock"] == "2000-01-01 12:09:50"

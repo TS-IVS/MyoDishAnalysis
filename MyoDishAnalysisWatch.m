@@ -496,13 +496,13 @@ for i = 1:nCh
         cc = table();
     end
     nCon(i) = height(cc);
+    if height(cc) > 0, tLast(i) = max(cc.t_peak); end  %also without signal (artifacts, e.g. chambers put back)
     if any(strcmp(g.type, 'no signal'))
         status{i} = 'no slice';
     else
         firstS(i) = 0; lastS(i) = TT;
         k = find(g.fromStart & ~g.untilEnd, 1); if ~isempty(k), firstS(i) = g.to(k); end
         k = find(g.untilEnd & ~g.fromStart, 1); if ~isempty(k), lastS(i) = g.from(k); end
-        if height(cc) > 0, tLast(i) = max(cc.t_peak); end
         lastEff = min(lastS(i), tEnd);                 %end of the analysed signal
         beatEnd(i) = ~isnan(tLast(i)) && ~isnan(lastEff) && lastEff - tLast(i) <= 1800;
         if ~isempty(k) && strcmp(g.type{k}, 'chamber out')

@@ -590,6 +590,8 @@ def _channel_status(H, C, G, E, name, L=None, tEnd=math.inf):
         r["endComments"] = ""
         cc = C[C["channel"].to_numpy(float) == c] if C is not None and len(C) else None
         r["nContractions"] = float(len(cc)) if cc is not None else 0.0
+        if cc is not None and len(cc):  # also in a channel without signal (artifacts, e.g. when chambers are put back)
+            r["lastContraction_s"] = float(cc["t_peak"].max())
         if np.any(typ == "no signal"):
             r["status"] = "no slice"
         else:
@@ -598,8 +600,6 @@ def _channel_status(H, C, G, E, name, L=None, tEnd=math.inf):
             if k.size:
                 r["firstSignal_s"] = float(g["to"].iat[k[0]])
             k = np.flatnonzero(ue & ~fs_)
-            if cc is not None and len(cc):
-                r["lastContraction_s"] = float(cc["t_peak"].max())
             if k.size:
                 r["lastSignal_s"] = float(g["from"].iat[k[0]])
             lastEff = min(r["lastSignal_s"], tEnd)  # end of the analysed signal

@@ -18,6 +18,11 @@ MATLAB and Python versions have the same version number and give the same result
   culture and chamber-out periods; files `<experiment>/<experiment>_slices.csv` and `mda_slices.csv`. The slice
   register does not change the code fingerprint (no reanalysis). Tests `mda_testSliceRegister.m`,
   `py/tests/test_slice_register.py`.
+### Fixed
+- Watcher, `<name>_channels.csv` (2026-10-10): a contraction in a channel without signal (artifact, e.g. when the
+  chambers of other channels are put back) stopped the Python watcher with `ValueError: cannot convert float NaN to
+  integer` (MATLAB: `lastContractionClock` NaT). `lastContraction_s` and `lastContractionClock` are now given for every
+  channel with contractions; the status stays `no slice`. Test in `py/tests/test_watch.py`.
 
 ## [1.0.0-beta.3] – 2026-10-10
 Third pre-release for testers (Git tag `v1.0.0-beta.3`): GUI changes only, analysis results identical to 1.0.0-beta.2.
