@@ -165,7 +165,8 @@ uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Comments ...', 'Positi
 uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Protocols ...', 'Position', [0.85 0.955 0.05 0.035], 'Callback', @onProtocols, ...
     'TooltipString', ['stimulation protocols of the log file (FFR, refractory period, threshold, post-rest potentiation ...): ' ...
     'contractions grouped by pacing frequency, S2 interval, current, rest interval ...']);
-hInfo = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.903 0.945 0.095 0.045]);
+hInfo = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.903 0.942 0.096 0.05], ...
+    'FontSize', 7);                                 %file facts (2 lines): smaller, so that they fit
 
 axOv = axes(fig, 'Position', [0.05 0.845 0.70 0.075], 'FontSize', 9);
 axMain = axes(fig, 'Position', [0.05 0.477 0.70 0.318], 'FontSize', 10, 'XTickLabel', {});
