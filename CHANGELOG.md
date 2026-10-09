@@ -4,6 +4,10 @@ All notable changes. Versions: `MAJOR.MINOR.PATCH` (pre-releases `-beta.N`; Pyth
 MATLAB and Python versions have the same version number and give the same results.
 
 ## [Unreleased]
+
+## [1.0.0-beta.3] – 2026-10-10
+Third pre-release for testers (Git tag `v1.0.0-beta.3`): GUI changes only, analysis results identical to 1.0.0-beta.2.
+
 ### Changed
 - GUI (MATLAB and Python): the values at the mouse pointer are written small in the top left corner of every plot
   (no boxes next to the pointer); the windows always use light colors, also with a dark theme of MATLAB (R2025a+) or
