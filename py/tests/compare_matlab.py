@@ -359,6 +359,28 @@ def case_files(case, data, ref):
         lA.append(f"{case} AP parameters: {len(P)} contractions, APD90 in {n_ok}, median APD90 "
                   f"{np.nanmedian(P['APD90']):.1f} ms, dV/dt max {np.nanmedian(P['AP_dVdtMax']):.1f} V/s")
         report(okA, lA, f"{case} AP parameters")
+        if hasattr(R, "epClean"):  # stimulus artefacts removed for the display (2026-10-09)
+            E = R.epClean
+            Vc, RA = mda.remove_artefacts(EP)
+            Rm = np.atleast_2d(np.asarray(E.R, float))
+            lines, ok = [], Rm.shape == RA.shape
+            d = float(np.max(np.abs(Rm - RA))) if ok and Rm.size else (0.0 if ok else math.inf)
+            ok = ok and d <= 1e-9
+            lines.append(f"artefacts: {RA.shape[0]} segments (MATLAB {Rm.shape[0]}), max diff of the times {d:.3g} s")
+            nCh = int(np.sum(Vc != EP.V))
+            vs = float(np.sum(Vc.astype(float)))
+            ok = ok and nCh == int(E.nChanged) and abs(vs - float(E.Vsum)) <= 1e-9 * max(1.0, abs(float(E.Vsum)))
+            lines.append(f"artefacts: {nCh} samples replaced (MATLAB {int(E.nChanged)}), sum {vs!r} vs {float(E.Vsum)!r}")
+            segs = E.segments if isinstance(E.segments, (list, tuple, np.ndarray)) else [E.segments]
+            worst = 0.0
+            for q, sg in enumerate(segs):
+                sg = np.atleast_1d(np.asarray(sg, float)).ravel()
+                kA = int(round((RA[q, 0] - EP.t0) / EP.dt))
+                pv = Vc[kA:kA + sg.size].astype(float)
+                worst = max(worst, float(np.max(np.abs(pv - sg))) if pv.size == sg.size else math.inf)
+            ok = ok and worst == 0
+            lines.append(f"artefacts: first {len(segs)} segments, max diff {worst:.3g} mV")
+            report(ok, lines, f"{case} stimulus artefacts removed (display)")
 
 
 def case_helpers(ref):

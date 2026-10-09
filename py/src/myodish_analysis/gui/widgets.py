@@ -2,7 +2,7 @@
 axis, shift + wheel = move, drag, click, double-click, right click = context menu), plot items with a time axis, a plot
 with a second y axis, and drawing helpers (vertical ticks, rectangles, rotated labels).
 
-TS 2026-10-06
+TS 2026-10-06 (drag with y: EP plots 2026-10-09)
 """
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ class MouseViewBox(pg.ViewBox):
         self.setMenuEnabled(False)
         self.on_wheel = None      # f(x, steps, modifiers)
         self.on_drag = None       # f(phase 'start'|'move'|'finish', x0, x, button)
+        self.on_drag_xy = None    # f(phase, (x0, y0), (x, y), button): instead of on_drag (EP plots: y limits)
         self.on_click = None      # f(x, y, button, double, screen_pos)
 
     def wheelEvent(self, ev, axis=None):
@@ -45,18 +46,17 @@ class MouseViewBox(pg.ViewBox):
         ev.accept()
 
     def mouseDragEvent(self, ev, axis=None):
-        if self.on_drag is None or ev.button() != QtCore.Qt.MouseButton.LeftButton:
+        if (self.on_drag is None and self.on_drag_xy is None) or ev.button() != QtCore.Qt.MouseButton.LeftButton:
             ev.ignore()
             return
         ev.accept()
-        x0 = self.mapToView(ev.buttonDownPos()).x()
-        x = self.mapToView(ev.pos()).x()
-        if ev.isStart():
-            self.on_drag("start", x0, x, ev.button())
-        elif ev.isFinish():
-            self.on_drag("finish", x0, x, ev.button())
+        p0 = self.mapToView(ev.buttonDownPos())
+        p = self.mapToView(ev.pos())
+        phase = "start" if ev.isStart() else ("finish" if ev.isFinish() else "move")
+        if self.on_drag_xy is not None:
+            self.on_drag_xy(phase, (p0.x(), p0.y()), (p.x(), p.y()), ev.button())
         else:
-            self.on_drag("move", x0, x, ev.button())
+            self.on_drag(phase, p0.x(), p.x(), ev.button())
 
     def mouseClickEvent(self, ev):
         if self.on_click is None:

@@ -9,9 +9,9 @@ function mda_py_reference_files(dataDir, outDir, which)
 %
 % Every case saves the contraction and summary tables (table2struct, 'ToScalar'), the thresholds, rocker filter
 % results, raw data of a short window (reader check), the overview and the log entries; the EP case also the alignment
-% and the AP parameters. Compared by tests/test_matlab_reference.py.
+% and the AP parameters (and the stimulus artefacts removed for the display). Compared by tests/test_matlab_reference.py.
 %
-% TS 2026-10-07 (cases: anonymized example recordings; before: lab recordings, 2026-10-06; ex3 'spec' 2026-10-09)
+% TS 2026-10-07 (cases: anonymized example recordings; before: lab recordings, 2026-10-06; ex3 'spec', ex8 epClean 2026-10-09)
 
 if ischar(which), which = {which}; end
 for w = which(:)'
@@ -85,6 +85,10 @@ for w = which(:)'
             [AP, ~] = mda_analyzeAP(EP, B);
             R.ap = table2struct([B(:, {'t_peak', 't_stim', 'beatType'}), AP], 'ToScalar', true);
             R.apChannel = ch;
+            [Vc, RA] = mda_analyzeAP('removeArtefacts', EP);    %stimulus artefacts removed (display; 2026-10-09)
+            kA = round((RA(:, 1) - EP.t0) / EP.dt) + 1; kB = round((RA(:, 2) - EP.t0) / EP.dt) + 1;
+            seg = arrayfun(@(q) double(Vc(kA(q):kB(q))), 1:min(5, numel(kA)), 'UniformOutput', false);
+            R.epClean = struct('R', RA, 'Vsum', sum(double(Vc)), 'nChanged', nnz(Vc ~= EP.V), 'segments', {seg});
             R = runCLI(R, 'all', mdd, [], 0, inf, {});
         case 'protocols'   % protocols found in the log files; analyses per protocol and group (mda_groupBeats)
             mdd = fullfile(dataDir, 'example3_humanVentricle.mdd');

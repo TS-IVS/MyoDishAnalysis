@@ -55,7 +55,13 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %    stimulus pattern, current, clock times, clock drift) and shown below the plots with the same time axis (the window
 %    grows downwards). 'Remove EP recording' hides it. With an EP recording every contraction gets the parameters of
 %    its action potential (mda_analyzeAP: AP_dVdtMax, AP_RMP, AP_Vmax, APD25/50/90, AP_note; table, lower plot,
-%    exports); markers in the EP plot when <= 60 contractions are visible.
+%    exports); markers in the EP plot when <= 60 contractions are visible. EP plots: drag up / down = y limits,
+%    double-click = automatic, right click = type the y limits / automatic (restore view); 'remove stimulus artefact'
+%    replaces the pulses and the artefact after them by straight lines (grey; display only, mda_analyzeAP
+%    'removeArtefacts': the AP parameters are measured on the recorded signal).
+%    Mouse pointer over the force, stimulus, parameter or EP plots: a marker on the curve and the value at that time in
+%    every plot (force, nearest stimulus pulse, parameter of the nearest contraction, EP signal and stimulation); the
+%    plot under the pointer also shows the time and the time since the last stimulus.
 % 5. 'Protocols ...': stimulation protocols found in the log file (comments 'start ... protocol' / 'end ... protocol',
 %    mda_protocols; editable, '+ selected range' adds the range of the main window): the contractions of the ticked
 %    protocols and channels are grouped by pacing frequency, S2 interval, stimulus current, rest interval, pulse
@@ -66,7 +72,8 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 % Requires MATLAB R2019b or newer, no toolboxes.
 % Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05 (EP recordings 2026-10-06, protocols 2026-10-07;
 % threshold per channel, arrow keys, overlay of channels / styles / bands 2026-10-07; navigation buttons, trend of several
-% channels, detection mode, open results, rocker artifact window 2026-10-09)
+% channels, detection mode, open results, rocker artifact window, EP y limits / artefact removal, mouse pointer values
+% 2026-10-09)
 
 if nargin < 1, mddFile = ''; end
 if nargin < 2, metadata = []; end
@@ -116,6 +123,13 @@ epBusy = false;                    %guard: redrawing the EP traces
 epFig0 = [];                       %figure size before / after showing the EP traces, layout factors
 epLis = [];                        %listener: redraw the EP traces when the time axis changes
 epMarks = [];                      %AP markers of the analysed window (mda_analyzeAP)
+epYLim = {[], []};                 %EP plots: y limits of the signal (V_m) and the stimulation ([] = automatic; 2026-10-09)
+epClean = false;                   %EP: stimulus artefacts removed in the signal plot (display, mda_analyzeAP removeArtefacts)
+epVc = []; epArtMask = [];         %  ... signal without the artefacts, replaced samples (EP recording shown)
+hEPclean = gobjects(0);            %  ... checkbox
+dragY0 = [];                       %EP plots: drag = y limits
+hvF = []; hvS = [];                %mouse pointer: plotted force (t, y) and stimulus pulses (t, current, interval, ok)
+hvShown = false;                   %  ... markers visible
 rfCtx = [];                        %rocker filter: context data around the loaded window (+-60 s)
 rfCache = {};                      %rocker filter: per channel {key, artifact, result}
 rfF0 = [];                         %rocker filter: rocker frequency of the loaded window ([rpm Hz] rows)
@@ -139,7 +153,7 @@ shiftDown = false;                 %shift key held (shift + click on the arrow b
 % ------------------------------------------------------------------ figure and controls
 fig = figure('Name', 'MyoDishAnalysis', 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
     'Position', [40 40 1450 880], 'MenuBar', 'none', 'ToolBar', 'figure', 'WindowButtonDownFcn', @onMouseDown, ...
-    'WindowScrollWheelFcn', @onScroll, 'WindowKeyPressFcn', @onKey, 'WindowKeyReleaseFcn', @onKeyRelease, ...
+    'WindowButtonMotionFcn', @onMouseMove, 'WindowScrollWheelFcn', @onScroll, 'WindowKeyPressFcn', @onKey, 'WindowKeyReleaseFcn', @onKeyRelease, ...
     'DeleteFcn', @onClose);
 movegui(fig, 'onscreen');
 dflt = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
@@ -287,9 +301,13 @@ hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.
 % the force plot, true = shift + click); R = api.trend([1 3]) (trend window: these channels calculated and overlaid)
 % api.openResults(file, k) (results file, analysis window k); h = api.rockerWindow() (rocker artifact window);
 % api.nextFile(file) (file name of the next save / export dialog), then e.g. api.exportChannel() or a menu of a window
+% api.epYLim(k, [lo hi]) (y limits of the EP plot k = 1 signal / 2 stimulation; [] = automatic);
+% api.epRemoveArtefacts(true / false); Hv = api.hover(t, 'force' | 'stimuli' | 'parameter' | 'signal' | 'stimulation')
+% (mouse pointer at time t over that plot: markers and values; Hv: one element per plot with x, y, text)
 fig.UserData = struct('setRange', @apiSetRange, 'toggleAt', @toggleContraction, 'results', @apiResults, ...
     'setLabels', @apiSetLabels, 'labels', @apiLabels, 'zeroAt', @apiZeroAt, ...
-    'epRecording', @openEP, 'epRecordingData', @apiEP, ...
+    'epRecording', @openEP, 'epRecordingData', @apiEP, 'epYLim', @epSetYLim, 'epRemoveArtefacts', @epSetClean, ...
+    'hover', @apiHover, ...
     'overlayChannels', @setOverlayChannels, 'overlay', @apiOverlay, 'key', @apiKey, 'navButton', @navButton, ...
     'trend', @apiTrend, 'openResults', @openResults, 'rockerWindow', @onRockerWindow, 'nextFile', @apiNextFile, ...
     'exportChannel', @onExport, 'exportPlotData', @exportPlotData);
@@ -479,6 +497,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         hThrMode.Value = 1; hThr.String = '';
         rfCtx = []; rfCache = {}; rfF0 = [];
         if ~isempty(EP), EP = []; showEP(false); end     %the EP recording belongs to the previous file
+        epVc = []; epArtMask = []; epYLim = {[], []};
         [~, n, e] = fileparts(H.file);
         nm = [n e];
         if numel(nm) > 30, nm = [nm(1:13) '...' nm(end-13:end)]; end
@@ -1859,6 +1878,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                     stimText(a);
             end
             a.UIContextMenu = [];
+            delete(findall(a, 'Tag', 'mdaHover'));         %mouse pointer markers
             a.Units = 'normalized'; a.Position = [0.07 y - hk 0.86 hk];
             if any(strcmp(list{k}, {'force', 'stimuli'})) && (numel(list) == 1 || k == numel(list))
                 set(a, 'XTickLabel', axPar.XTickLabel); xlabel(a, axPar.XLabel.String);
@@ -2223,9 +2243,18 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if strcmp(fig.SelectionType, 'open')               %double-click: whole file / whole loaded window
             if inAxes(axOv) && ~isempty(O)
                 ovXL = []; plotOverview();
+            elseif epFrac > 0 && isvalid(axEPv) && inAxes(axEPv)   %EP plots: y limits automatic (2026-10-09)
+                epSetYLim(1, []);
+            elseif epFrac > 0 && isvalid(axEPs) && inAxes(axEPs)
+                epSetYLim(2, []);
             elseif ~isempty(S) && (inAxes(axMain) || inAxes(axStim) || inAxes(axPar))
                 xlim(axMain, [S.fromSeconds S.toSeconds]);
             end
+            return;
+        end
+        if epFrac > 0 && ~isempty(EP) && isvalid(axEPv) && (inAxes(axEPv) || inAxes(axEPs))
+            if inAxes(axEPv), axY = axEPv; else, axY = axEPs; end   %drag up / down: y limits of this EP plot
+            startDragY(axY);
             return;
         end
         if inAxes(axMain) && ~isempty(S)
@@ -2750,6 +2779,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function startDrag(ax, x)
         dragX0 = x;
         yl = ylim(ax);
+        hoverHide();
         if ishandle(hDrag), delete(hDrag); end
         hDrag = patch(ax, [x x x x], yl([1 1 2 2]), [0.2 0.5 1], 'FaceAlpha', 0.25, 'EdgeColor', [0.2 0.5 1], 'HitTest', 'off');
         set(fig, 'WindowButtonMotionFcn', @(~,~) dragMove(ax), 'WindowButtonUpFcn', @(~,~) dragEnd(ax));
@@ -2760,8 +2790,39 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if ishandle(hDrag), hDrag.XData = [dragX0 x x dragX0]; end
     end
 
+    function startDragY(ax)
+        % EP plots: drag up / down = band of the new y limits (2026-10-09)
+        dragY0 = clampY(ax);
+        xl = xlim(ax);
+        hoverHide();
+        if ishandle(hDrag), delete(hDrag); end
+        hDrag = patch(ax, xl([1 2 2 1]), dragY0 * [1 1 1 1], [0.2 0.5 1], 'FaceAlpha', 0.25, 'EdgeColor', [0.2 0.5 1], ...
+            'HitTest', 'off', 'YLimInclude', 'off');
+        set(fig, 'WindowButtonMotionFcn', @(~,~) dragMoveY(ax), 'WindowButtonUpFcn', @(~,~) dragEndY(ax));
+    end
+
+    function dragMoveY(ax)
+        y = clampY(ax);
+        if ishandle(hDrag), hDrag.YData = [dragY0 dragY0 y y]; end
+    end
+
+    function dragEndY(ax)
+        set(fig, 'WindowButtonMotionFcn', @onMouseMove, 'WindowButtonUpFcn', '');
+        y = clampY(ax);
+        if ishandle(hDrag), delete(hDrag); end
+        yl = ylim(ax);
+        if abs(y - dragY0) < 0.01 * diff(yl), return; end       %a click, not a drag
+        epSetYLim(1 + (ax == axEPs), sort([dragY0 y]));
+    end
+
+    function y = clampY(ax)
+        cp = get(ax, 'CurrentPoint');
+        yl = ylim(ax);
+        y = min(max(cp(1,2), yl(1)), yl(2));
+    end
+
     function dragEnd(ax)
-        set(fig, 'WindowButtonMotionFcn', '', 'WindowButtonUpFcn', '');
+        set(fig, 'WindowButtonMotionFcn', @onMouseMove, 'WindowButtonUpFcn', '');
         x = clampX(ax);
         if ishandle(hDrag), delete(hDrag); end
         xl = xlim(ax);
@@ -2797,6 +2858,149 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         cp = get(ax, 'CurrentPoint');
         xl = xlim(ax);
         x = min(max(cp(1,1), xl(1)), xl(2));
+    end
+
+    % ---------------------------------------------------------------- mouse pointer: values of all plots at its time (2026-10-09)
+    function onMouseMove(~, ~)
+        % pointer over the force, stimulus, parameter or EP plots (not the overview): vertical line, marker on the curve
+        % and value in every plot at the time of the pointer; time (and time since the last stimulus) in the plot under it
+        if isempty(S) || isempty(C) || ~isvalid(fig), return; end
+        axH = [];
+        for a = hoverList()
+            if inAxes(a), axH = a; break; end
+        end
+        if isempty(axH), hoverHide(); return; end
+        cp = get(axH, 'CurrentPoint');
+        hoverAt(cp(1, 1), axH);
+    end
+
+    function L = hoverList()
+        % plots with a marker of the mouse pointer: force, stimuli, parameter (, EP signal, EP stimulation)
+        L = [axMain axStim axPar];
+        if epFrac > 0 && ~isempty(EP) && ~isempty(axEPv) && isvalid(axEPv), L = [L axEPv axEPs]; end
+    end
+
+    function Hv = hoverAt(x, axH)
+        % markers and values at time x (s); axH = plot under the pointer (its text starts with the time)
+        Hv = hoverValues(x, axH);
+        L = hoverList();
+        hvShown = true;
+        for q = 1:numel(L)
+            a = L(q);
+            h = hoverObj(a);
+            xl = xlim(a); yl = ylim(a);
+            set(h.line, 'XData', [x x], 'YData', yl, 'Visible', 'on');
+            in = ~isnan(Hv(q).y) && Hv(q).x >= xl(1) && Hv(q).x <= xl(2);
+            if in
+                set(h.dot, 'XData', Hv(q).x, 'YData', Hv(q).y, 'Visible', 'on');
+            else
+                set(h.dot, 'Visible', 'off');
+            end
+            str = {};
+            if a == axH, str = {Hv(1).time}; end
+            if ~isempty(Hv(q).text), str{end+1} = Hv(q).text; end %#ok<AGROW>
+            if isempty(str), set(h.text, 'Visible', 'off'); continue; end
+            if in, xr = Hv(q).x; yr = Hv(q).y; else, xr = x; yr = yl(1) + 0.85 * diff(yl); end
+            yr = min(max(yr, yl(1) + 0.05 * diff(yl)), yl(2) - 0.05 * diff(yl));
+            right = xr > xl(1) + 0.7 * diff(xl);           %text left of the marker near the right edge
+            if right, ha = 'right'; else, ha = 'left'; end
+            if yr > yl(1) + 0.55 * diff(yl), va = 'top'; else, va = 'bottom'; end
+            set(h.text, 'Position', [xr + 0.008 * diff(xl) * (1 - 2 * right), yr, 0], 'String', str, ...
+                'HorizontalAlignment', ha, 'VerticalAlignment', va, 'Visible', 'on');
+        end
+    end
+
+    function Hv = hoverValues(x, axH)
+        % values at time x: force and EP traces at x (sample nearest to x), stimulus pulse and contraction (parameter of
+        % the lower plot) nearest to x. Hv: force, stimuli, parameter, signal, stimulation (x, y of the marker; NaN =
+        % none; text); Hv(1).time: time of the pointer (time axis as shown) and time since the last stimulus
+        Hv = struct('name', {'force', 'stimuli', 'parameter', 'signal', 'stimulation'}, 'x', nan, 'y', nan, ...
+            'text', '', 'time', '');
+        if ~isempty(hvF) && ~isempty(hvF.t)
+            k = nearestSample(hvF.t, x);
+            Hv(1).x = hvF.t(k); Hv(1).y = hvF.y(k);
+            Hv(1).text = sprintf('%s %sN', fmtNum(Hv(1).y, 4), mu);
+        end
+        if ~isempty(hvS) && ~isempty(hvS.t)
+            [~, j] = min(abs(hvS.t - x));
+            Hv(2).x = hvS.t(j); Hv(2).y = hvS.cur(j);
+            if C.stimChannel == 0, tx = 'ext. trigger'; else, tx = sprintf('%g mA', hvS.cur(j)); end
+            if ~isnan(hvS.iv(j)), tx = sprintf('%s, interval %.0f ms', tx, hvS.iv(j)); end
+            if ~hvS.ok(j), tx = [tx ', current not reached']; end
+            Hv(2).text = tx;
+        end
+        if ~isempty(B) && height(B) > 0
+            kp = hPar.Value;
+            if ismember(plotList{kp,1}, B.Properties.VariableNames)
+                [~, j] = min(abs(B.t_peak - x));
+                vp = B.(plotList{kp,1});
+                Hv(3).x = B.t_peak(j); Hv(3).y = double(vp(j));
+                Hv(3).text = sprintf('%s %s %s', plotList{kp,1}, fmtNum(Hv(3).y, 4), strrep(plotList{kp,2}, 'u', mu));
+            end
+        end
+        if epFrac > 0 && ~isempty(EP)
+            k = round((x - EP.t0) / EP.dt) + 1;
+            if k >= 1 && k <= numel(EP.V)
+                rep = false;
+                if epClean && ~isempty(epVc), yv = epVc(k); rep = epArtMask(k); else, yv = EP.V(k); end
+                Hv(4).x = EP.t0 + (k - 1) * EP.dt; Hv(4).y = double(yv);
+                Hv(4).text = sprintf('%s %s', fmtNum(Hv(4).y, 4), EP.unitV);
+                if rep, Hv(4).text = [Hv(4).text ' (artefact removed)']; end
+                Hv(5).x = Hv(4).x; Hv(5).y = double(EP.stim(k));
+                Hv(5).text = sprintf('%s %s', fmtNum(Hv(5).y, 4), EP.unitStim);
+            end
+        end
+        tz = 0; tMax = H.totalSeconds;
+        if relTime, tz = S.fromSeconds; tMax = S.toSeconds - tz; end
+        dec = 3; if diff(xlim(axMain)) < 1, dec = 4; end
+        Hv(1).time = sprintf('t = %s (%.*f s)', fmtClock(x - tz, tMax >= 3600, true, dec), dec, x - tz);
+        st = C.stimTimes(:);                                 %EP plots: stimuli of the EP recording (its time base)
+        if (isequal(axH, axEPv) || isequal(axH, axEPs)) && ~isempty(EP) && ~isempty(EP.stimTimes), st = EP.stimTimes(:); end
+        j = find(st <= x, 1, 'last');
+        if ~isempty(j) && x - st(j) < 10, Hv(1).time = sprintf('%s, stimulus %+.1f ms', Hv(1).time, 1000 * (x - st(j))); end
+        [Hv.time] = deal(Hv(1).time);
+    end
+
+    function h = hoverObj(a)
+        % line, marker and text of the mouse pointer in the axes a (cla deletes them: created again)
+        h = getappdata(a, 'mdaHover');
+        if ~isempty(h)
+            hh = [h.line h.dot h.text];
+            if all(isgraphics(hh)), return; end
+            delete(hh(isgraphics(hh)));
+        end
+        if a == axStim, yyaxis(axStim, 'left'); end         %current (left axis)
+        nh = {'HitTest', 'off', 'PickableParts', 'none', 'Tag', 'mdaHover'};
+        h = struct();
+        h.line = line(a, [nan nan], [nan nan], 'Color', [0.3 0.3 0.3], 'LineStyle', '--', 'LineWidth', 0.5, ...
+            'XLimInclude', 'off', 'YLimInclude', 'off', nh{:});
+        h.dot = line(a, nan, nan, 'LineStyle', 'none', 'Marker', 'o', 'MarkerSize', 7, 'MarkerEdgeColor', [0 0 0], ...
+            'MarkerFaceColor', [1 0.8 0], 'XLimInclude', 'off', 'YLimInclude', 'off', nh{:});
+        h.text = text(a, nan, nan, '', 'FontSize', 8, 'BackgroundColor', [1 1 0.88], 'EdgeColor', [0.55 0.55 0.55], ...
+            'Margin', 2, 'Interpreter', 'none', 'Clipping', 'on', 'Visible', 'off', nh{:});
+        setappdata(a, 'mdaHover', h);
+    end
+
+    function hoverHide()
+        if ~hvShown, return; end
+        hvShown = false;
+        for a = [axMain axStim axPar axEPv axEPs]
+            if ~isvalid(a), continue; end
+            h = getappdata(a, 'mdaHover');
+            if isempty(h), continue; end
+            hh = [h.line h.dot h.text];
+            set(hh(isgraphics(hh)), 'Visible', 'off');
+        end
+    end
+
+    function Hv = apiHover(t, where)
+        % scripts / tests: mouse pointer at time t over the plot 'force', 'stimuli', 'parameter', 'signal' or
+        % 'stimulation' (EP); '' = pointer outside the plots (markers hidden)
+        if isempty(where), hoverHide(); Hv = []; return; end
+        L = hoverList();
+        q = find(strcmpi({'force', 'stimuli', 'parameter', 'signal', 'stimulation'}, where), 1);
+        if isempty(q) || q > numel(L) || isempty(S), error('MyoDishAnalysisGUI: no plot ''%s'' for the mouse pointer.', where); end
+        Hv = hoverAt(t, L(q));
     end
 
 
@@ -2958,11 +3162,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function plotMain(resetX)
         xlOld = xlim(axMain);
         cla(axMain); hold(axMain, 'on');
+        hvF = [];
         if isempty(C), return; end
         % force - zero force (easier to read); sensor signal if the zero force is unknown
         z0 = mda_zeroForce(S, ch, zeroUser(ch), C.t);
         hasZero = ~any(isnan(z0));
         if hasZero, fy = C.f - z0; else, fy = C.f; end
+        hvF = struct('t', C.t(:), 'y', double(fy(:)));      %values at the mouse pointer
         showRaw = ~isempty(C.rockerArtifact) && any(C.rockerArtifact ~= 0);   %rocker filter: signal before
         if showRaw, fRaw = fy + C.rockerArtifact; else, fRaw = fy; end
         yl = [min([fy fRaw]) max([fy fRaw])];
@@ -3338,7 +3544,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % previous pulse (right, ms), as drawStimPulses ('displayCurrents', 'displayIntervals')
         delete(hStimTxt(isgraphics(hStimTxt))); hStimTxt = gobjects(0);
         drawStim(axStim);
+        hvS = [];
         if isempty(C) || isempty(S), return; end
+        [tS, cur, ok, ~, iv] = stimData();
+        hvS = struct('t', tS, 'cur', cur, 'iv', iv, 'ok', ok);   %values at the mouse pointer
         xlim(axStim, xlim(axMain));
         hStimTxt = stimText(axStim);
     end
@@ -3542,6 +3751,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             status(['EP recording: ' ME.message]); return;
         end
         EP = EPnew;
+        epVc = []; epArtMask = []; epYLim = {[], []};     %artefacts removed / y limits: for this recording
         showEP(true);
         tEP = [EP.t0, EP.t0 + (numel(EP.V) - 1) * EP.dt];
         if isempty(S) || S.t(end) < tEP(1) || S.t(1) > tEP(2)   %no window or no overlap: load the recording's time range
@@ -3595,7 +3805,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function onCloseEP(~, ~)
         if isempty(EP) && epFrac == 0, return; end
-        EP = []; epMarks = []; showEP(false);
+        EP = []; epMarks = []; epVc = []; epArtMask = []; epYLim = {[], []};
+        showEP(false);
         if ~isempty(S), analyze(false); end              %contraction table without the AP columns
         status('EP recording removed.');
     end
@@ -3643,15 +3854,31 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 box(a, 'on'); hold(a, 'on'); grid(a, 'on');
             end
             hEPtxt = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'FontSize', 9, ...
-                'Position', [0.77, 44 * px, 0.225, (dH - 52) * px]);
+                'Position', [0.77, 70 * px, 0.225, (dH - 78) * px]);
+            hEPclean = uicontrol(fig, dflt{:}, 'Style', 'checkbox', 'String', 'remove stimulus artefact', 'Value', epClean, ...
+                'Position', [0.77, 42 * px, 0.225, 24 * px], 'Callback', @(src,~) epSetClean(src.Value), 'TooltipString', ...
+                ['signal plot: the stimulus pulses (stimulation channel) and the artefact after them replaced by straight ' ...
+                'lines (grey), display only: the AP parameters are measured on the recorded signal (mda_analyzeAP removeArtefacts)']);
             hEPclose = uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Remove EP recording', ...
                 'Position', [0.77, 8 * px, 0.12, 30 * px], 'Callback', @onCloseEP);
+            % right click in the EP plots: y limits, artefacts (2026-10-09)
+            for iEP = 1:2
+                cmEP = uicontextmenu(fig);
+                uimenu(cmEP, 'Text', 'Set y limits ...', 'MenuSelectedFcn', @(~,~) epAskYLim(iEP));
+                uimenu(cmEP, 'Text', 'y limits: automatic (restore view)', 'MenuSelectedFcn', @(~,~) epSetYLim(iEP, []));
+                uimenu(cmEP, 'Text', 'Remove stimulus artefact', 'Separator', 'on', 'Tag', 'epClean', ...
+                    'MenuSelectedFcn', @(~,~) epToggleClean());
+                uimenu(cmEP, 'Text', 'Drag up / down in the plot: y limits; double-click: automatic', 'Separator', 'on', 'Enable', 'off');
+                try cmEP.ContextMenuOpeningFcn = @(src,~) epMenuOpening(src); catch, end   %R2020a+
+                if iEP == 1, axEPv.UIContextMenu = cmEP; else, axEPs.UIContextMenu = cmEP; end
+            end
             epLis = addlistener(axMain, 'XLim', 'PostSet', @(~,~) drawEP());
         else
             M = epFig0;
             delete(epLis); epLis = [];
-            delete([axEPv axEPs hEPtxt hEPclose]);
-            axEPv = gobjects(0); axEPs = gobjects(0); hEPtxt = gobjects(0); hEPclose = gobjects(0);
+            cmDel = [axEPv.UIContextMenu axEPs.UIContextMenu];
+            delete([axEPv axEPs hEPtxt hEPclose hEPclean]); delete(cmDel(isgraphics(cmDel)));
+            axEPv = gobjects(0); axEPs = gobjects(0); hEPtxt = gobjects(0); hEPclose = gobjects(0); hEPclean = gobjects(0);
             ctl = findobj(fig, '-depth', 1, '-regexp', 'Type', '^(axes|uicontrol|uipanel)$');
             ctl = ctl(strcmp(get(ctl, 'Units'), 'normalized'));
             for h = ctl'
@@ -3679,14 +3906,24 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             cla(axEPv); cla(axEPs);
             xl = xlim(axMain);
             if isempty(S), xl = EP.t0 + [0, (numel(EP.V) - 1) * EP.dt]; end
-            [tv, v] = epSegment(EP.V, xl);
+            if epClean && isempty(epVc), epComputeClean(); end
+            if epClean && ~isempty(epVc), Vs = epVc; else, Vs = EP.V; end
+            [tv, v, kv] = epSegment(Vs, xl);
             [ts, sv] = epSegment(EP.stim, xl);
             plot(axEPv, tv, v, 'Color', [0 0.3 0.75], 'LineWidth', 0.5, 'HitTest', 'off');
+            if epClean && ~isempty(kv) && ~isempty(epArtMask)  %replaced samples (straight lines): grey
+                g = v; g(~epArtMask(kv)) = nan;
+                if any(~isnan(g)), plot(axEPv, tv, g, 'Color', [0.6 0.6 0.6], 'LineWidth', 1, 'HitTest', 'off'); end
+            end
             plot(axEPs, ts, sv, 'Color', [0.8 0 0], 'LineWidth', 0.5, 'HitTest', 'off');
             set([axEPv axEPs], 'XLimMode', 'manual', 'XLim', xl);
+            epApplyYLim(axEPv, 1, v, 1); epApplyYLim(axEPs, 2, sv, 1e-6);
             ylabel(axEPv, sprintf('%s (%s)', EP.labelV, EP.unitV)); ylabel(axEPs, sprintf('%s (%s)', EP.labelStim, EP.unitStim));
-            if isempty(v), title(axEPv, 'no EP data in this time range', 'FontWeight', 'normal', 'FontSize', 9);
-            else, title(axEPv, ''); end
+            tt = {};
+            if isempty(v), tt{end+1} = 'no EP data in this time range'; end
+            if epClean, tt{end+1} = 'stimulus artefacts removed (grey = straight lines; display only)'; end
+            if ~isempty(epYLim{1}) || ~isempty(epYLim{2}), tt{end+1} = 'fixed y limits (double-click in the plot: automatic)'; end
+            title(axEPv, strjoin(tt, '   |   '), 'FontWeight', 'normal', 'FontSize', 9);
             info = EP.info;
             if drawAPMarks(xl), info{end+1} = 'AP: ^ upstroke, v V_max, o APD25/50/90'; end
             hEPtxt.String = info;
@@ -3697,23 +3934,86 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         epBusy = false;
     end
 
-    function [t, y] = epSegment(x, xl)
+    function [t, y, kIdx] = epSegment(x, xl)
         % samples of x (uniform, EP.t0 + (k-1) * EP.dt in file time) within xl; > 20000 samples: min/max per bin
-        n = numel(x);
+        % (kIdx: indices of the samples, [] for min/max)
+        n = numel(x); kIdx = [];
         k1 = max(1, floor((xl(1) - EP.t0) / EP.dt) + 1); k2 = min(n, ceil((xl(2) - EP.t0) / EP.dt) + 1);
         if k2 < k1, t = []; y = []; return; end
         k = (k1:k2)';
-        nb = 4000;
-        if numel(k) <= 5 * nb
-            t = EP.t0 + (k - 1) * EP.dt; y = double(x(k)); y = y(:);
+        nBin = 4000;
+        if numel(k) <= 5 * nBin
+            t = EP.t0 + (k - 1) * EP.dt; y = double(x(k)); y = y(:); kIdx = k;
         else
-            m = floor(numel(k) / nb) * nb; k = k(1:m);
-            X = reshape(double(x(k)), [], nb);
+            m = floor(numel(k) / nBin) * nBin; k = k(1:m);
+            X = reshape(double(x(k)), [], nBin);
             mn = min(X, [], 1); mx = max(X, [], 1);
             tb = EP.t0 + (k(1:size(X,1):end) - 1) * EP.dt;
             t = reshape([tb(:)'; tb(:)' + (size(X,1) - 1) * EP.dt], [], 1);
             y = reshape([mn; mx], [], 1);
         end
+    end
+
+    function epApplyYLim(a, k, y, dmin)
+        % y limits of the EP plot k: fixed (epYLim) or from the data shown (+-5 %)
+        if ~isempty(epYLim{k}), ylim(a, epYLim{k}); return; end
+        y = y(isfinite(y));
+        if isempty(y), ylim(a, 'auto'); return; end
+        lo = min(y); hi = max(y); d = max(hi - lo, dmin);
+        ylim(a, [lo - 0.05 * d, hi + 0.05 * d]);
+    end
+
+    function epSetYLim(k, lim)
+        % y limits of the EP plot k (1 = signal, 2 = stimulation): [lo hi], or [] = automatic (restore view)
+        if ~isempty(lim)
+            lim = double(lim(:)');
+            if numel(lim) ~= 2 || any(~isfinite(lim)) || lim(2) <= lim(1)
+                status('y limits: two numbers, the lower one first.'); return;
+            end
+        end
+        epYLim{k} = lim;
+        drawEP();
+    end
+
+    function epAskYLim(k)
+        % right click in an EP plot: y limits typed in
+        if isempty(EP) || epFrac == 0, return; end
+        if k == 1, a = axEPv; nm = sprintf('%s (%s)', EP.labelV, EP.unitV); else, a = axEPs; nm = sprintf('%s (%s)', EP.labelStim, EP.unitStim); end
+        yl = ylim(a);
+        answ = inputdlg({'lower limit', 'upper limit'}, ['y limits: ' nm], 1, {sprintf('%.6g', yl(1)), sprintf('%.6g', yl(2))});
+        if isempty(answ), return; end
+        epSetYLim(k, str2double(answ(:))');
+    end
+
+    function epSetClean(on)
+        % 'remove stimulus artefact': EP signal plot without the stimulus artefacts (display only; mda_analyzeAP
+        % 'removeArtefacts'). The AP parameters are measured on the recorded signal.
+        epClean = logical(on);
+        if ~isempty(hEPclean) && isgraphics(hEPclean), hEPclean.Value = epClean; end
+        drawEP();
+        if epClean && ~isempty(epArtMask)
+            status(sprintf(['%d stimulus artefacts removed in the plot (grey = straight lines). Display only: the AP ' ...
+                'parameters are measured on the recorded signal.'], nnz(diff([false; epArtMask]) == 1)));
+        end
+    end
+
+    function epToggleClean()
+        epSetClean(~epClean);
+    end
+
+    function epMenuOpening(cm)
+        h = findobj(cm, 'Tag', 'epClean');
+        if epClean, h.Checked = 'on'; else, h.Checked = 'off'; end
+    end
+
+    function epComputeClean()
+        % signal without the stimulus artefacts and the replaced samples (cache of the EP recording shown)
+        epVc = []; epArtMask = [];
+        if isempty(EP), return; end
+        [epVc, RA] = mda_analyzeAP('removeArtefacts', EP);
+        epArtMask = false(numel(EP.V), 1);
+        kA = round((RA(:, 1) - EP.t0) / EP.dt) + 1; kB = round((RA(:, 2) - EP.t0) / EP.dt) + 1;
+        for q = 1:numel(kA), epArtMask(kA(q):kB(q)) = true; end
     end
 
     function status(msg)
@@ -3938,6 +4238,13 @@ end
 end
 
 
+function k = nearestSample(t, x)
+% index of the sample of the uniform time vector t nearest to x
+n = numel(t);
+if n == 1, k = 1; return; end
+k = min(n, max(1, round((x - t(1)) / (t(n) - t(1)) * (n - 1)) + 1));
+end
+
 function s = fmtNum(x, digits)
 % compact number for the summary table: integers above 1000, otherwise significant digits
 if isnan(x)
@@ -4003,6 +4310,7 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       '', ...
       'Force plot: red = selected contractions, orange = uncertain contractions (high sensitivity: neither locked to the stimuli nor large compared with the other contractions; not counted with high specificity), grey = excluded by the filters (rocker / stimulated only), x = excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.', ...
       'Cursor in the force plot: "drag = select time range" or "click = exclude / include contraction". Zoom/pan: mouse wheel or figure toolbar (switch the tool off afterwards).', ...
+      'Mouse pointer over the force, stimulus, parameter or EP plots: a dashed line and a marker show the value at that time in every plot (force; stimulus pulse nearest to it: current and interval; lower plot: parameter of the nearest contraction; EP signal and stimulation). The plot under the pointer also shows the time and the time since the last stimulus.', ...
       'Arrow keys (click into a plot first) and the buttons under the force plot change the loaded window (= blue selection in the overview and analysed range; read again): left / right = move it by half its length, shift + left / right (shift + click) = extend it by half its length on that side, up / down (middle buttons) = zoom in / out (half / twice its length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed overview moves along. The mouse wheel zooms only the display.', ...
       '', ...
       'Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak, or the time course of the analysed range (t = 0 at the first stimulus of each group). Press again (or Add current selection in the overlay window) to add another selection as a new group; Channels (same range) ...: tick channels to add them for the analysed range (same settings, threshold and zero force of each channel). Per group (list): legend text, colour, line width, line style and a transparent band (mean +- SD, +- SEM or range). Title, axis labels and legend position are editable below the plot (empty = automatic); Edit figure ... opens a copy with the MATLAB plot tools.', ...
@@ -4020,6 +4328,7 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       'Reference beat (right click in the force plot): the mean shape (+- SD) of the selected contractions becomes the reference of the channel. Every contraction is compared with it, aligned at the stimulus (default; a changed latency counts, contractions without stimulus at the 50 % upstroke) or at the 50 % upstroke (shape only; reference window): refCorrelation (shape correlation), refRMSDeviation_SD (overall) and refMaxDeviation_SD (largest local deviation) in SD of the reference, each also normalized (...Norm: both scaled to amplitude 1 = shape only). Deviating contractions (> x SD) are circled magenta, counted in the table and can be excluded (reference window). Save/load a reference to apply it to other files. Every parameter is also given relative to the mean of the reference contractions (column %ref in the table; <parameter>_pctRef in tables, lower plot, trend and exports; diastolic force: difference in uN, _dRef).', ...
       '', ...
       '+ EP recording ...: LabChart export (.mat) of an electrophysiological recording made in parallel, e.g. sharp electrode (voltage + stimulation channel; default: same name as the .mdd file). It is aligned to the stimuli of the .mdd file (stimulus pattern; on constant pacing also stimulus current and clock times; clock drift corrected) and shown below the plots with the same time axis. The text right of the traces gives the matched stimuli and the offset - check it if marked CHECK. Remove EP recording hides it.', ...
+      'EP plots: drag up / down = y limits of that plot, double-click = automatic; right click: Set y limits ... / y limits: automatic (restore view). remove stimulus artefact: the stimulus pulses and the artefact after them (saturation, decay towards the RMP) are replaced by straight lines (grey) - display only, the AP parameters are measured on the recorded signal.', ...
       '', ...
       'AP parameters (EP recording, mda_analyzeAP), per contraction: AP_dVdtMax (V/s, max. upstroke velocity), AP_RMP (mV, median over 10 ms before the stimulus artefact), AP_Vmax (mV, peak), APD25/50/90 (ms, activation = time of dV/dt max --> 25/50/90 % repolarization). Stimulus artefact = pulse in the stimulation channel (biphasic pulse incl. pause = one pulse) until V_m is no longer saturated and |dV/dt| < 20 V/s; the stimulus onset is the stimulus time. If the upstroke lies within the artefact (foot of the upstroke not near RMP), dV/dt max, V_max, APD25 and APD50 are NaN and APD90 is measured from the stimulus onset (approximate, AP_note). Each AP is evaluated up to the next stimulus (fusion: NaN, note). Markers (<= 60 contractions visible): grey = artefact, green line = RMP, ^ upstroke, v V_max, o APD25/50/90.', ...
       '', ...

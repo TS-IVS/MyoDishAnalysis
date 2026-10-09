@@ -23,7 +23,7 @@ from .analyze_channel import analyze_channel  # noqa: E402
 from .rocker_filter import rocker_filter  # noqa: E402
 from . import reference_beat  # noqa: E402
 from .read_ep_recording import read_ep_recording  # noqa: E402
-from .analyze_ap import analyze_ap, AP_PARAMETERS  # noqa: E402
+from .analyze_ap import analyze_ap, remove_artefacts, AP_PARAMETERS  # noqa: E402
 from .summarize import summarize  # noqa: E402
 from .write_results import write_results  # noqa: E402
 from .read_results import read_results  # noqa: E402
@@ -37,5 +37,5 @@ from .watch import watch  # noqa: E402
 
 __all__ = ["options", "parameters", "PARAMETERS", "LABEL_NAMES", "read_mdd", "read_header", "read_data",
            "read_overview", "log_entries", "calibration_factor", "zero_force", "analyze_channel", "rocker_filter",
-           "reference_beat", "read_ep_recording", "analyze_ap", "AP_PARAMETERS", "summarize", "write_results", "read_results",
+           "reference_beat", "read_ep_recording", "analyze_ap", "remove_artefacts", "AP_PARAMETERS", "summarize", "write_results", "read_results",
            "labels", "add_labels", "myodish_analysis", "find_protocols", "group_beats", "protocol_results", "selftest", "watch", "__version__"]

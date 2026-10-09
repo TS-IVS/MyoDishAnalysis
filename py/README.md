@@ -82,7 +82,7 @@ in MATLAB.
 | `mda_rockerFilter` | `rocker_filter()` |
 | `mda_referenceBeat('create' / 'align' / 'compare' / 'relative' / 'traces', …)` | `reference_beat.create()`, `.align()`, `.compare()`, `.relative()`, `.traces()`; `.save_reference()` / `.load_reference()` (`.mat`, interchangeable with MATLAB) |
 | `mda_readEPRecording` | `read_ep_recording()` |
-| `mda_analyzeAP` | `analyze_ap()` |
+| `mda_analyzeAP` | `analyze_ap()`; `mda_analyzeAP('removeArtefacts', EP)`: `remove_artefacts()` |
 | `mda_protocols`, `mda_groupBeats`, `mda_protocolResults` | `find_protocols()`, `group_beats()`, `protocol_results()`; `myodish_analysis(..., protocol=, groupBy=)` (`info['protocolResults']`); `mda FILE --protocol FFR`, `--group-by`, `--list-protocols`; GUI **Protocols ...** |
 | `mda_summarize`, `mda_writeResults` | `summarize()`, `write_results()` |
 | `mda_labels`, `mda_addLabels` | `labels()`, `add_labels()` |
@@ -131,7 +131,8 @@ and `mda_py_reference_helpers` (write the `.mat` files in `tests/reference/`).
   other windows. **Edit figure ...** of the overlay window opens a matplotlib window (toolbar: *Edit axis, curve and
   image parameters*; save as .png / .pdf / .svg) instead of a MATLAB figure with the plot tools.
 * GUI script access: `win.open_ep(file)`, `win.EP`, `win.api_set_range()`, `win.api_results()`, `win.api_zero_at()`,
-  `win.on_key('right', shift)`, `win.overlay_channels([1, 3])`, `win.win_overlay` replace `fig.UserData`.
+  `win.on_key('right', shift)`, `win.overlay_channels([1, 3])`, `win.win_overlay`, `win.ep_set_ylim(1, [-100, 40])`,
+  `win.ep_set_clean(True)`, `win.hover(t, 'signal')` replace `fig.UserData`.
 * The `showFigures` figures of the command line are drawn with matplotlib.
 * Text columns and messages of the result tables are identical (compared). Where MATLAB rounds with `round(x, n)`, Python
   reproduces its rounding: MATLAB rounds a value one ulp below a half away from zero, e.g. `round(1.005, 2)` = 1.01.

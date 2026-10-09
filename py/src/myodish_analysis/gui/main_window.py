@@ -26,14 +26,18 @@
    time course of the range (t = 0 at the first stimulus), other channels of the same range by checkboxes, colour /
    width / line style / SD-SEM-range band per group, editable title, axis labels and legend, editable matplotlib copy
    (overlay.py).
-4. + EP recording ...: LabChart .mat export aligned to the stimuli; AP parameters per contraction.
+4. + EP recording ...: LabChart .mat export aligned to the stimuli; AP parameters per contraction. EP plots: drag up /
+   down = y limits, double-click = automatic, right click = type them / automatic (restore view); 'remove stimulus
+   artefact' = pulses and artefact replaced by straight lines (grey; display only, remove_artefacts).
+   Mouse pointer over the force, stimulus, parameter or EP plots: marker and value at that time in every plot; time and
+   time since the last stimulus in the plot under the pointer.
 5. Protocols ...: stimulation protocols found in the log file ('start ... protocol' / 'end ... protocol'): contractions
    grouped by pacing frequency, S2 interval, stimulus current, rest interval, pulse duration or rocker speed; summary
    per group, plot of a parameter against the quantity, export (protocols_window.py).
 See README.md of the MATLAB version for all details; results are the same as with MyoDishAnalysisGUI.
 
 Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-06 (port of MyoDishAnalysisGUI.m; detection mode,
-open results, rocker artifact window 2026-10-09)
+open results, rocker artifact window, EP y limits / artefact removal, mouse pointer values 2026-10-09)
 """
 from __future__ import annotations
 
@@ -52,7 +56,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from .. import reference_beat as rb
 from .._matlab import Struct, mround, nanmean
 from ..add_labels import add_labels
-from ..analyze_ap import AP_PARAMETERS, analyze_ap
+from ..analyze_ap import AP_PARAMETERS, analyze_ap, remove_artefacts
 from ..analyze_channel import analyze_channel
 from ..analysis import datenum_to_timestamps, myodish_analysis
 from ..labels import labels as make_labels
@@ -84,6 +88,14 @@ def _plot_list():
     L += [(p[0], p[1]) for p in AP_PARAMETERS]
     return L
 
+
+
+def _nearest_sample(t, x):
+    """index of the sample of the uniform time vector t nearest to x"""
+    n = t.size
+    if n == 1:
+        return 0
+    return int(min(n - 1, max(0, mround((x - t[0]) / (t[-1] - t[0]) * (n - 1)))))
 
 
 def _shift_held():
@@ -118,6 +130,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ref_align = "stimulus"
         self.EP = None
         self.ep_marks = None
+        self.ep_ylim = [None, None]         # EP plots: y limits of the signal / stimulation (None = automatic; 2026-10-09)
+        self.ep_clean = False               # EP: stimulus artefacts removed in the signal plot (display only)
+        self.ep_vc = None                   # ... signal without the artefacts
+        self.ep_art_mask = None             # ... replaced samples
+        self._hv = {}                       # mouse pointer: line, marker and text per plot
+        self._hv_shown = False
+        self.hv_f = None                    # mouse pointer: plotted force (t, y)
+        self.hv_s = None                    # ... stimulus pulses (t, current, interval, current reached)
         self.rf_ctx = None
         self.rf_cache = {}
         self.rf_f0 = None
@@ -265,6 +285,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lEP.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.lEP.setFixedWidth(330)
         ev.addWidget(self.lEP, 1)
+        self.cbEPclean = QtWidgets.QCheckBox("remove stimulus artefact")
+        self.cbEPclean.setToolTip("signal plot: the stimulus pulses (stimulation channel) and the artefact after them "
+                                  "replaced by straight lines (grey), display only: the AP parameters are measured on "
+                                  "the recorded signal (analyze_ap.remove_artefacts)")
+        self.cbEPclean.toggled.connect(self.ep_set_clean)
+        ev.addWidget(self.cbEPclean)
         ev.addWidget(btn("Remove EP recording", self.on_close_ep))
         eh.addLayout(ev)
         self.epBox.setVisible(False)
@@ -281,8 +307,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stim.vb2.wheelEvent = lambda ev, axis=None: self.pStim.vb.wheelEvent(ev, axis)
         self.pMain.vb.on_drag = self._drag_main
         self.pMain.vb.on_click = self._click_main
-        for p, nm in ((self.pStim, "stimuli"), (self.pPar, "parameter"), (self.pEPv, "ep"), (self.pEPs, "ep")):
+        for p, nm in ((self.pStim, "stimuli"), (self.pPar, "parameter"), (self.pEPv, "ep_v"), (self.pEPs, "ep_s")):
             p.vb.on_click = (lambda nm_: (lambda x, y, b, d, sp: self._click_other(nm_, x, y, b, d, sp)))(nm)
+        for k, p in ((1, self.pEPv), (2, self.pEPs)):  # EP plots: drag up / down = y limits (2026-10-09)
+            p.vb.on_drag_xy = (lambda k_: (lambda ph, a, b, bt: self._drag_ep(k_, ph, a, b)))(k)
+        # mouse pointer: marker and value in every plot at its time (not over the overview; 2026-10-09)
+        for gl in (self.glTop, self.glPar, self.glEP):
+            sc = gl.scene()
+            sc.sigMouseMoved.connect((lambda sc_: (lambda pos: self._on_mouse_move(sc_, pos)))(sc))
+        self._hv_views = (self.glTop, self.glPar, self.glEP, self.glTop.viewport(), self.glPar.viewport(),
+                          self.glEP.viewport())
         self.pOv.vb.on_wheel = self._wheel_ov
         self.pOv.vb.on_drag = self._drag_ov
         self.pOv.vb.on_click = self._click_ov
@@ -482,6 +516,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.EP is not None:
             self.EP = None
             self.show_ep(False)
+        self.ep_vc = self.ep_art_mask = None
+        self.ep_ylim = [None, None]
         nm = os.path.basename(H.file)
         self.last_dir = os.path.dirname(H.file)
         self.lFile.setText(nm)
@@ -941,6 +977,8 @@ class MainWindow(QtWidgets.QMainWindow):
         old = self.pMain.vb.viewRange()[0]
         p.clear()
         C, S, B = self.C, self.S, self.B
+        if target is None:
+            self.hv_f = None
         if C is None:
             return
         if target is None:
@@ -950,6 +988,8 @@ class MainWindow(QtWidgets.QMainWindow):
         z0, _, _, _ = zero_force(S, self.ch, self.zero_of(), C.t)
         has_zero = not np.any(np.isnan(z0))
         fy = C.f - z0 if has_zero else C.f
+        if target is None:
+            self.hv_f = (np.asarray(C.t, float).ravel(), np.asarray(fy, float).ravel())  # values at the mouse pointer
         art = C.get("rockerArtifact")
         show_raw = art is not None and np.any(art != 0)
         f_raw = fy + art if show_raw else fy
@@ -1192,9 +1232,13 @@ class MainWindow(QtWidgets.QMainWindow):
         p.setLabel("left", "mA")
         p.setLabel("right", "ms")
         set_title(p, "")
+        if target is None:
+            self.hv_s = None
         if self.C is None or self.S is None:
             return
         tS, cur, ok, ex, iv = self.stim_data()
+        if target is None:
+            self.hv_s = (tS, cur, iv, ok)  # values at the mouse pointer
         isExt = self.C.stimChannel == 0  # external trigger pulses: bars of height 1, no current
         if isExt:
             p.setLabel("left", "ext.")
@@ -1350,6 +1394,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def eventFilter(self, obj, ev):
         """arrow keys in this window (not in edit fields, lists and combo boxes): navigation on the time axis"""
         try:
+            if ev.type() == QtCore.QEvent.Type.Leave and self._hv_shown and \
+                    any(obj is v for v in getattr(self, "_hv_views", ())):
+                self.hover_hide()  # mouse pointer left the plots
             if ev.type() == QtCore.QEvent.Type.KeyPress and ev.key() in self._NAV_KEYS and \
                     isinstance(obj, QtWidgets.QWidget) and obj.window() is self and \
                     not isinstance(QtWidgets.QApplication.focusWidget(), self._KEEP_KEYS):
@@ -1596,6 +1643,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if button == QtCore.Qt.MouseButton.RightButton:
             self._context_menu(name, screen_pos)
+        elif double and name in ("ep_v", "ep_s"):  # EP plots: y limits automatic (restore view)
+            self.ep_set_ylim(1 if name == "ep_v" else 2, None)
         elif double and self.S is not None:
             self.pMain.vb.setXRange(self.S.fromSeconds, self.S.toSeconds, padding=0)
 
@@ -1624,7 +1673,18 @@ class MainWindow(QtWidgets.QMainWindow):
             m.addSeparator()
             m.addAction("Show rocker artifact (removed signal) ...", self.on_rocker_window)
             m.addSeparator()
-        if name != "ep":
+        if name in ("ep_v", "ep_s"):  # EP plots: y limits, stimulus artefacts (2026-10-09)
+            k = 1 if name == "ep_v" else 2
+            m.addAction("Set y limits ...", lambda: self.ep_ask_ylim(k))
+            m.addAction("y limits: automatic (restore view)", lambda: self.ep_set_ylim(k, None))
+            m.addSeparator()
+            a = m.addAction("Remove stimulus artefact", lambda: self.ep_set_clean(not self.ep_clean))
+            a.setCheckable(True)
+            a.setChecked(self.ep_clean)
+            m.addSeparator()
+            m.addAction("Drag up / down in the plot: y limits; double-click: automatic").setEnabled(False)
+            m.addSeparator()
+        if not name.startswith("ep"):
             m.addAction("Save this plot (.png / .jpg / .tif / .pdf) ...", lambda: self.save_plots(name))
             if name != "overview":
                 m.addAction("Export data of this plot (.xlsx / .csv / .txt) ...", lambda: self.export_plot_data(name))
@@ -2153,6 +2213,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._err("EP recording: ", e)
             return
         self.EP = EP
+        self.ep_vc = self.ep_art_mask = None  # artefacts removed / y limits: for this recording
+        self.ep_ylim = [None, None]
         self.show_ep(True)
         tEP = (EP.t0, EP.t0 + (EP.V.size - 1) * EP.dt)
         if self.S is None or self.S.t[-1] < tEP[0] or self.S.t[0] > tEP[1]:
@@ -2171,6 +2233,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.EP = None
         self.ep_marks = None
+        self.ep_vc = self.ep_art_mask = None
+        self.ep_ylim = [None, None]
+        self.hover_hide()
         self.show_ep(False)
         if self.S is not None:
             self.analyze(False)
@@ -2211,50 +2276,297 @@ class MainWindow(QtWidgets.QMainWindow):
         xl = self.pMain.vb.viewRange()[0]
         if self.S is None:
             xl = (EP.t0, EP.t0 + (EP.V.size - 1) * EP.dt)
-        tv, v = self._ep_segment(EP.V, xl)
+        if self.ep_clean and self.ep_vc is None:
+            self._ep_compute_clean()
+        Vs = self.ep_vc if (self.ep_clean and self.ep_vc is not None) else EP.V
+        tv, v, kv = self._ep_segment(Vs, xl, with_index=True)
         ts, sv = self._ep_segment(EP.stim, xl)
         if tv.size:
             self.pEPv.plot(tv, v, pen=pg.mkPen((0, 77, 191), width=1))
+        if self.ep_clean and kv is not None and self.ep_art_mask is not None:  # replaced samples (straight lines)
+            g = v.copy()
+            g[~self.ep_art_mask[kv]] = np.nan
+            if np.any(~np.isnan(g)):
+                self.pEPv.plot(tv, g, pen=pg.mkPen((153, 153, 153), width=2), connect="finite")
         if ts.size:
             self.pEPs.plot(ts, sv, pen=pg.mkPen((204, 0, 0), width=1))
         self.pEPv.setLabel("left", f"{EP.labelV} ({EP.unitV})")
         self.pEPs.setLabel("left", f"{EP.labelStim} ({EP.unitStim})")
-        set_title(self.pEPv, "no EP data in this time range" if v.size == 0 else "", 9)
-        if v.size:
-            lo, hi = float(np.min(v)), float(np.max(v))
-            d = max(hi - lo, 1)
-            self.pEPv.vb.setYRange(lo - 0.05 * d, hi + 0.05 * d, padding=0)
-        if sv.size:
-            lo, hi = float(np.min(sv)), float(np.max(sv))
-            d = max(hi - lo, 1e-6)
-            self.pEPs.vb.setYRange(lo - 0.05 * d, hi + 0.05 * d, padding=0)
+        tt = []
+        if v.size == 0:
+            tt.append("no EP data in this time range")
+        if self.ep_clean:
+            tt.append("stimulus artefacts removed (grey = straight lines; display only)")
+        if self.ep_ylim[0] is not None or self.ep_ylim[1] is not None:
+            tt.append("fixed y limits (double-click in the plot: automatic)")
+        set_title(self.pEPv, "   |   ".join(tt), 9)
+        self._ep_apply_ylim(self.pEPv, 0, v, 1)
+        self._ep_apply_ylim(self.pEPs, 1, sv, 1e-6)
         info = list(EP.info)
         if self._draw_ap_marks(xl):
             info.append("AP: ▲ upstroke, ▼ V_max, o APD25/50/90")
         self.lEP.setText("\n".join(info))
         self._x_label()
 
-    def _ep_segment(self, x, xl):
+    def _ep_segment(self, x, xl, with_index=False):
+        """samples of x within xl; > 20000 samples: min/max per bin. with_index: also the sample indices (None for
+        min/max)."""
         EP = self.EP
         n = np.size(x)
-        if n == 0:
-            return np.zeros(0), np.zeros(0)
         k1 = max(0, math.floor((xl[0] - EP.t0) / EP.dt))
         k2 = min(n - 1, math.ceil((xl[1] - EP.t0) / EP.dt))
-        if k2 < k1:
-            return np.zeros(0), np.zeros(0)
-        k = np.arange(k1, k2 + 1)
-        nb = 4000
-        if k.size <= 5 * nb:
-            return EP.t0 + k * EP.dt, np.asarray(x, float)[k]
-        m = (k.size // nb) * nb
-        k = k[:m]
-        X = np.asarray(x, float)[k].reshape(nb, -1)
-        mn = X.min(axis=1)
-        mx = X.max(axis=1)
-        tb = EP.t0 + k[::X.shape[1]] * EP.dt
-        t = np.c_[tb, tb + (X.shape[1] - 1) * EP.dt].ravel()
-        return t, np.c_[mn, mx].ravel()
+        if n == 0 or k2 < k1:
+            out = (np.zeros(0), np.zeros(0), None)
+        else:
+            k = np.arange(k1, k2 + 1)
+            nb = 4000
+            if k.size <= 5 * nb:
+                out = (EP.t0 + k * EP.dt, np.asarray(x, float)[k], k)
+            else:
+                m = (k.size // nb) * nb
+                k = k[:m]
+                X = np.asarray(x, float)[k].reshape(nb, -1)
+                mn = X.min(axis=1)
+                mx = X.max(axis=1)
+                tb = EP.t0 + k[::X.shape[1]] * EP.dt
+                t = np.c_[tb, tb + (X.shape[1] - 1) * EP.dt].ravel()
+                out = (t, np.c_[mn, mx].ravel(), None)
+        return out if with_index else out[:2]
+
+    def _ep_apply_ylim(self, p, k, y, dmin):
+        """y limits of the EP plot k (0 signal, 1 stimulation): fixed (ep_ylim) or from the data shown (+-5 %)"""
+        if self.ep_ylim[k] is not None:
+            p.vb.setYRange(self.ep_ylim[k][0], self.ep_ylim[k][1], padding=0)
+            return
+        y = np.asarray(y, float)
+        y = y[np.isfinite(y)]
+        if y.size:
+            lo, hi = float(y.min()), float(y.max())
+            d = max(hi - lo, dmin)
+            p.vb.setYRange(lo - 0.05 * d, hi + 0.05 * d, padding=0)
+
+    def ep_set_ylim(self, k, lim):
+        """y limits of the EP plot k (1 = signal, 2 = stimulation): (lo, hi), or None = automatic (restore view)"""
+        if lim is not None:
+            lim = [float(v) for v in np.ravel(lim)]
+            if len(lim) != 2 or not all(math.isfinite(v) for v in lim) or lim[1] <= lim[0]:
+                self.status("y limits: two numbers, the lower one first.")
+                return
+        self.ep_ylim[k - 1] = lim
+        self.draw_ep()
+
+    def ep_ask_ylim(self, k):
+        """right click in an EP plot: y limits typed in"""
+        if self.EP is None or not self.epBox.isVisible():
+            return
+        p = self.pEPv if k == 1 else self.pEPs
+        nm = f"{self.EP.labelV} ({self.EP.unitV})" if k == 1 else f"{self.EP.labelStim} ({self.EP.unitStim})"
+        yl = p.vb.viewRange()[1]
+        txt, ok = QtWidgets.QInputDialog.getText(self, "y limits", f"{nm}: lower limit, upper limit",
+                                                 text=f"{yl[0]:.6g}, {yl[1]:.6g}")
+        if not ok:
+            return
+        try:
+            v = [float(x) for x in re.split(r"[,;\s]+", txt.strip()) if x]
+        except ValueError:
+            v = []
+        self.ep_set_ylim(k, v)
+
+    def ep_set_clean(self, on):
+        """'remove stimulus artefact': EP signal plot without the stimulus artefacts (display only;
+        analyze_ap.remove_artefacts). The AP parameters are measured on the recorded signal."""
+        self.ep_clean = bool(on)
+        if self.cbEPclean.isChecked() != self.ep_clean:
+            self.cbEPclean.blockSignals(True)
+            self.cbEPclean.setChecked(self.ep_clean)
+            self.cbEPclean.blockSignals(False)
+        self.draw_ep()
+        if self.ep_clean and self.ep_art_mask is not None:
+            n = int(np.sum(np.diff(np.r_[False, self.ep_art_mask].astype(int)) == 1))
+            self.status(f"{n} stimulus artefacts removed in the plot (grey = straight lines). Display only: the AP "
+                        "parameters are measured on the recorded signal.")
+
+    def _ep_compute_clean(self):
+        """signal without the stimulus artefacts and the replaced samples (cache of the EP recording shown)"""
+        self.ep_vc = self.ep_art_mask = None
+        if self.EP is None:
+            return
+        EP = self.EP
+        Vc, RA = remove_artefacts(EP)
+        mask = np.zeros(np.size(EP.V), bool)
+        for a, b in RA:
+            mask[mround((a - EP.t0) / EP.dt):mround((b - EP.t0) / EP.dt) + 1] = True
+        self.ep_vc = np.asarray(Vc).ravel()
+        self.ep_art_mask = mask
+
+    def _drag_ep(self, k, phase, a, b):
+        """EP plots: drag up / down = band of the new y limits"""
+        if self.EP is None:
+            return
+        p = self.pEPv if k == 1 else self.pEPs
+        xl, yl = p.vb.viewRange()
+        y0 = min(max(a[1], yl[0]), yl[1])
+        y = min(max(b[1], yl[0]), yl[1])
+        if phase in ("start", "move"):
+            self.hover_hide()
+            if self._drag_item is not None:
+                try:
+                    self._drag_item.getViewBox().removeItem(self._drag_item)
+                except Exception:  # noqa: BLE001
+                    pass
+            self._drag_item = rects(p, [xl[0]], [xl[1]], min(y0, y), max(y0, y), (51, 128, 255, 64),
+                                    pen=(51, 128, 255), z=50)
+            p.vb.setRange(xRange=xl, yRange=yl, padding=0)
+            return
+        self._end_drag()
+        if abs(y - y0) < 0.01 * (yl[1] - yl[0]):
+            return  # a click, not a drag
+        self.ep_set_ylim(k, sorted([y0, y]))
+
+    # =================================================================================================== mouse pointer
+    def _hover_list(self):
+        """plots with a marker of the mouse pointer: force, stimuli, parameter (, EP signal, EP stimulation)"""
+        L = [self.pMain, self.pStim, self.pPar]
+        if self.EP is not None and self.epBox.isVisible():
+            L += [self.pEPv, self.pEPs]
+        return L
+
+    def _on_mouse_move(self, scene, pos):
+        """pointer over the force, stimulus, parameter or EP plots (not the overview): vertical line, marker on the curve
+        and value in every plot at the time of the pointer; time (and time since the last stimulus) in the plot under
+        it"""
+        if self.S is None or self.C is None or self._drag_item is not None:
+            return
+        for p in self._hover_list():
+            if p.scene() is scene and p.vb.sceneBoundingRect().contains(pos):
+                self.hover_at(p.vb.mapSceneToView(pos).x(), p)
+                return
+        self.hover_hide()
+
+    def hover_values(self, x, p_hover=None):
+        """values at time x: force and EP traces at x (sample nearest to x), stimulus pulse and contraction (parameter of
+        the lower plot) nearest to x. Returns a list of dicts (force, stimuli, parameter, signal, stimulation: x, y of
+        the marker, NaN = none; text) and the time text (time axis as shown, time since the last stimulus)."""
+        Hv = [dict(name=n, x=math.nan, y=math.nan, text="") for n in ("force", "stimuli", "parameter", "signal",
+                                                                         "stimulation")]
+        if self.hv_f is not None and self.hv_f[0].size:
+            t, y = self.hv_f
+            k = _nearest_sample(t, x)
+            Hv[0].update(x=float(t[k]), y=float(y[k]), text=f"{fmt_num(float(y[k]), 4)} {MU}N")
+        if self.hv_s is not None and self.hv_s[0].size:
+            tS, cur, iv, ok = self.hv_s
+            j = int(np.argmin(np.abs(tS - x)))
+            tx = "ext. trigger" if self.C.stimChannel == 0 else f"{cur[j]:g} mA"
+            if not math.isnan(iv[j]):
+                tx += f", interval {iv[j]:.0f} ms"
+            if not ok[j]:
+                tx += ", current not reached"
+            Hv[1].update(x=float(tS[j]), y=float(cur[j]), text=tx)
+        B = self.B
+        if B is not None and len(B):
+            nm, unit = self.plot_list[max(0, self.cPar.currentIndex())]
+            if nm in B.columns:
+                tp = B["t_peak"].to_numpy(float)
+                j = int(np.argmin(np.abs(tp - x)))
+                v = float(B[nm].to_numpy(float)[j])
+                u = unit.replace("u", MU) if unit.startswith("u") else unit
+                Hv[2].update(x=float(tp[j]), y=v, text=f"{nm} {fmt_num(v, 4)} {u}")
+        EP = self.EP
+        if EP is not None and self.epBox.isVisible():
+            k = mround((x - EP.t0) / EP.dt)
+            if 0 <= k < np.size(EP.V):
+                rep_ = False
+                if self.ep_clean and self.ep_vc is not None:
+                    yv = float(self.ep_vc[k])
+                    rep_ = bool(self.ep_art_mask[k])
+                else:
+                    yv = float(EP.V[k])
+                tk = EP.t0 + k * EP.dt
+                Hv[3].update(x=tk, y=yv, text=f"{fmt_num(yv, 4)} {EP.unitV}" + (" (artefact removed)" if rep_ else ""))
+                ys = float(EP.stim[k])
+                Hv[4].update(x=tk, y=ys, text=f"{fmt_num(ys, 4)} {EP.unitStim}")
+        tz = self.S.fromSeconds if self.rel_time else 0.0
+        tmax = self.S.toSeconds - tz if self.rel_time else self.H.totalSeconds
+        xl = self.pMain.vb.viewRange()[0]
+        dec = 4 if xl[1] - xl[0] < 1 else 3
+        time = f"t = {fmt_clock(x - tz, tmax >= 3600, True, dec)} ({x - tz:.{dec}f} s)"
+        st = np.asarray(self.C.stimTimes, float).ravel()  # EP plots: stimuli of the EP recording (its time base)
+        if EP is not None and (p_hover is self.pEPv or p_hover is self.pEPs) and np.size(EP.stimTimes):
+            st = np.asarray(EP.stimTimes, float).ravel()
+        j = np.flatnonzero(st <= x)
+        if j.size and x - st[j[-1]] < 10:
+            time += f", stimulus {1000 * (x - st[j[-1]]):+.1f} ms"
+        return Hv, time
+
+    def _hover_items(self, p):
+        """line, marker and text of the mouse pointer in the plot p (added again after p.clear())"""
+        it = self._hv.get(id(p))
+        if it is None:
+            line = pg.InfiniteLine(angle=90, movable=False,
+                                   pen=pg.mkPen((77, 77, 77), width=1, style=QtCore.Qt.PenStyle.DashLine))
+            dot = pg.ScatterPlotItem(size=9, pen=pg.mkPen("k"), brush=pg.mkBrush(255, 204, 0))
+            txt = pg.TextItem("", color=(0, 0, 0), fill=pg.mkBrush(255, 255, 224, 235), border=pg.mkPen((140, 140, 140)))
+            f = QtGui.QFont()
+            f.setPointSize(8)
+            txt.setFont(f)
+            for i in (line, dot, txt):
+                i.setZValue(1000)
+            it = (line, dot, txt)
+            self._hv[id(p)] = it
+        for i in it:
+            if i.scene() is None:  # removed by p.clear()
+                p.addItem(i, ignoreBounds=True)
+        return it
+
+    def hover_at(self, x, p_hover):
+        """markers and values at time x (s); p_hover = plot under the pointer (its text starts with the time)"""
+        Hv, time = self.hover_values(x, p_hover)
+        self._hv_shown = True
+        for q, p in enumerate(self._hover_list()):
+            line, dot, txt = self._hover_items(p)
+            xl, yl = p.vb.viewRange()
+            line.setPos(x)
+            line.setVisible(True)
+            h = Hv[q]
+            inside = not math.isnan(h["y"]) and xl[0] <= h["x"] <= xl[1]
+            if inside:
+                dot.setData([h["x"]], [h["y"]])
+            dot.setVisible(inside)
+            lines = ([time] if p is p_hover else []) + ([h["text"]] if h["text"] else [])
+            if not lines:
+                txt.setVisible(False)
+                continue
+            dy = yl[1] - yl[0]
+            xr, yr = (h["x"], h["y"]) if inside else (x, yl[0] + 0.85 * dy)
+            yr = min(max(yr, yl[0] + 0.05 * dy), yl[1] - 0.05 * dy)
+            right = xr > xl[0] + 0.7 * (xl[1] - xl[0])  # text left of the marker near the right edge
+            top = yr > yl[0] + 0.55 * dy
+            txt.setText("\n".join(lines))
+            txt.setAnchor((1 if right else 0, 0 if top else 1))
+            txt.setPos(xr + 0.008 * (xl[1] - xl[0]) * (-1 if right else 1), yr)
+            txt.setVisible(True)
+        return Hv, time
+
+    def hover_hide(self):
+        if not self._hv_shown:
+            return
+        self._hv_shown = False
+        for it in self._hv.values():
+            for i in it:
+                i.setVisible(False)
+
+    def hover(self, t, where):
+        """scripts / tests: mouse pointer at time t over the plot 'force', 'stimuli', 'parameter', 'signal' or
+        'stimulation' (EP); '' = pointer outside the plots (markers hidden). Returns (values, time text)."""
+        if not where:
+            self.hover_hide()
+            return None
+        L = self._hover_list()
+        names = ["force", "stimuli", "parameter", "signal", "stimulation"]
+        q = names.index(where.lower()) if where.lower() in names else 99
+        if q >= len(L) or self.S is None:
+            raise ValueError(f"no plot '{where}' for the mouse pointer")
+        return self.hover_at(float(t), L[q])
 
     def _draw_ap_marks(self, xl):
         M = self.ep_marks

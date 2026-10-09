@@ -2,6 +2,9 @@
 
     A, M = analyze_ap(EP, B, **options)     EP from read_ep_recording, B from analyze_channel (same .mdd)
     AP_PARAMETERS                           (name, unit, definition) of the numeric AP columns
+    Vc, R = remove_artefacts(EP, **options) EP.V with the stimulus artefacts replaced by straight lines (display only;
+                                            R: [tFrom, tTo] of every replaced segment). MATLAB:
+                                            mda_analyzeAP('removeArtefacts', EP)
 
 A  DataFrame with one row per row of B (append with pd.concat([B, A], axis=1)):
      AP_dVdtMax (V/s), AP_RMP (mV), AP_Vmax (mV), APD25/50/90 (ms), t_AP (s), AP_reference ('upstroke' |
@@ -12,8 +15,10 @@ Definitions, stimulus artefact handling, fusion: see the MATLAB help / README "A
 
 OPTIONS: artefactSlope (V/s, 20), upstrokeMin (V/s, 20), minAmplitude (mV, 40), maxFoot (0.3), maxLatency (s, 0.1),
 maxAPD (s, 2), apdFrom ('auto' | 'stimulus' | 'upstroke'), tolerance (s, 0.015)
+remove_artefacts: artefactSlope (V/s, 20), tailSlope (V/s, 2), maxTail (s, 0.01); definition: MATLAB help, REMOVING THE
+ARTEFACTS (pulse, saturation and the decay of the artefact towards the RMP; the AP parameters do not use it)
 
-TS 2026-10-06 (port of mda_analyzeAP.m, TS 2026-10-06)
+TS 2026-10-06 (port of mda_analyzeAP.m, TS 2026-10-06; remove_artefacts 2026-10-09)
 """
 from __future__ import annotations
 
@@ -297,3 +302,91 @@ def analyze_ap(EP, B, **kw):
                 s = s[:-2]
             notes[r] = s
     return table(), M
+
+
+def remove_artefacts(EP, **kw):
+    """stimulus artefacts of EP.V replaced by straight lines (display); port of mda_analyzeAP('removeArtefacts', EP).
+    Returns Vc (EP.V, same dtype, replaced samples) and R (n x 2: tFrom, tTo of every replaced segment; the samples at
+    tFrom and tTo are kept)."""
+    P = dict(artefactSlope=20, tailSlope=2, maxTail=0.01)
+    for k, v in kw.items():
+        m = [n for n in P if n.lower() == k.lower()]
+        if not m:
+            raise ValueError(f"remove_artefacts: unknown option '{k}'.")
+        P[m[0]] = v
+    P = Struct(P)
+    R0 = np.zeros((0, 2))
+    if EP is None or EP.get("V") is None or np.size(EP.V) == 0:
+        return np.zeros(0), R0
+    Vin = np.asarray(EP.V)
+    sAP = np.asarray(EP.get("stimTimes", np.zeros(0)), dtype=float).ravel()
+    if sAP.size == 0:
+        return Vin.copy(), R0
+    sEnd = sAP
+    se = EP.get("stimEnds")
+    if se is not None and np.size(se) == sAP.size:
+        sEnd = np.asarray(se, dtype=float).ravel()
+    V = Vin.astype(float).ravel()
+    nV = V.size
+    dt = float(EP.dt)
+    t0 = float(EP.t0)
+
+    def idx(t):  # 0-based sample index (MATLAB: 1-based)
+        return int(min(nV - 1, max(0, mround((t - t0) / dt))))
+
+    w05 = max(1, mround(0.0005 / dt))  # 0.5 ms
+    mx = V.max(); mn = V.min()  # amplifier limits (as the analysis)
+    satHi = math.inf; satLo = -math.inf
+    if np.count_nonzero(V == mx) >= 10:
+        satHi = float(mx) - 0.5
+    if np.count_nonzero(V == mn) >= 10:
+        satLo = float(mn) + 0.5
+    n30 = mround(0.03 / dt)
+    nTail = mround(P.maxTail / dt)
+    out = V.copy()
+    R = []
+    kBprev = -1
+    for j in range(sAP.size):
+        kOn = idx(sAP[j])
+        kPe = idx(max(sEnd[j], sAP[j]))
+        kLim = nV - 1
+        if j < sAP.size - 1:  # before the next pulse
+            kLim = min(nV - 1, idx(sAP[j + 1]) - 1)
+        k3 = min(kLim, kPe + n30 + w05)
+        if k3 <= kOn + 1:
+            continue
+        seg = V[kOn:k3 + 1]
+        ns = seg.size
+        sm = movmean(seg, w05)
+        dsm = gradient(sm) / dt / 1000  # V/s (mV/ms)
+        sat = (seg >= satHi) | (seg <= satLo)
+        iPe = kPe - kOn
+        iLim = min(ns - 1, iPe + n30)
+        ii = np.arange(ns)
+        c = np.flatnonzero((ii > iPe) & (ii <= iLim) & ~sat & (np.abs(dsm) < P.artefactSlope))
+        iAe = int(c[0]) if c.size else iLim
+        # decay of the artefact towards the RMP: until the RMP, slower than tailSlope, or turning back by > 3 mV
+        kr = np.arange(max(0, kOn - mround(0.0105 / dt)), kOn - w05 + 1)
+        kr = kr[kr > kBprev]
+        if kr.size and not sat[iAe]:
+            rmp = float(np.median(V[kr]))
+            d = float(np.sign(rmp - sm[iAe]))
+            best = iAe
+            for i in range(iAe, min(iLim, iAe + nTail) + 1):
+                if d * (sm[i] - rmp) >= 0:
+                    best = i
+                    break
+                if d * (sm[i] - sm[best]) > 0:
+                    best = i
+                if d * (sm[best] - sm[i]) > 3 or (i > iAe and abs(dsm[i]) < P.tailSlope):
+                    break
+            iAe = best
+        kA = max(0, kOn - 1)
+        kB = kOn + iAe
+        if kB > kA + 1:
+            k = np.arange(kA + 1, kB)
+            out[k] = V[kA] + (V[kB] - V[kA]) * (k - kA) / (kB - kA)
+        R.append((t0 + kA * dt, t0 + kB * dt))
+        kBprev = kB
+    Vc = out.astype(Vin.dtype).reshape(Vin.shape)
+    return Vc, (np.array(R, float) if R else R0)

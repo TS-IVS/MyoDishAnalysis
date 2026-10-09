@@ -4,6 +4,8 @@ function [A, M] = mda_analyzeAP(EP, B, varargin)
 %   [A, M] = mda_analyzeAP(EP, B)                 EP from mda_readEPRecording, B from mda_analyzeChannel (same .mdd)
 %   [A, M] = mda_analyzeAP(EP, B, 'name', value, ...)
 %   P = mda_analyzeAP('parameters')               {name, unit, definition} of the numeric AP columns
+%   [Vc, R] = mda_analyzeAP('removeArtefacts', EP)   EP.V with the stimulus artefacts replaced by straight lines
+%   [Vc, R] = mda_analyzeAP('removeArtefacts', EP, 'name', value, ...)   (display only, see REMOVING THE ARTEFACTS)
 %
 % A  table with one row per row of B (append with [B, A]):
 %      AP_dVdtMax  (V/s)  maximum upstroke velocity (central difference of the raw signal); NaN if the upstroke is not
@@ -44,7 +46,19 @@ function [A, M] = mda_analyzeAP(EP, B, varargin)
 %   'apdFrom'        'auto' (default: upstroke, else stimulus onset) | 'stimulus' | 'upstroke' (NaN without upstroke)
 %   'tolerance'      s, default 0.015: stimulus of a contraction (t_stim) <--> stimulus in the EP recording
 %
-% TS 2026-10-06
+% REMOVING THE ARTEFACTS (display, MyoDishAnalysisGUI 'remove stimulus artefact'; the AP parameters above do not use it)
+%   For every pulse of the stimulation channel (EP.stimTimes / EP.stimEnds) the samples from the pulse onset to the
+%   end of the artefact are replaced by a straight line from the last sample before the pulse to the first sample
+%   after the artefact. End of the artefact: as above (first sample after the pulse end that is not saturated and
+%   where |dV/dt| (0.5 ms moving mean) < 'artefactSlope'; within 30 ms and before the next pulse), then the decay of
+%   the artefact is followed towards the RMP (median over 10 ms before the pulse) for at most 'maxTail': it ends
+%   when the RMP is reached, when the decay is slower than 'tailSlope' or when the signal turns back by > 3 mV (an
+%   upstroke). An upstroke within the artefact cannot be recovered: the line runs to the first sample after it.
+%   Vc   EP.V (same class and size) with the replaced samples;   R   [tFrom tTo] (s, .mdd time) of every replaced
+%        segment (the samples at tFrom and tTo are kept)
+%   Options: 'artefactSlope' V/s, default 20;  'tailSlope' V/s, default 2;  'maxTail' s, default 0.01
+%
+% TS 2026-10-06 (removeArtefacts 2026-10-09)
 
 if ischar(EP) && strcmpi(EP, 'parameters')
     A = {
@@ -55,6 +69,10 @@ if ischar(EP) && strcmpi(EP, 'parameters')
         'APD50',      'ms',  'AP duration: activation --> 50 % repolarization; NaN if the upstroke lies within the stimulus artefact'
         'APD90',      'ms',  'AP duration: activation --> 90 % repolarization; upstroke within the artefact: from the stimulus onset, approximate (AP_note)'
         };
+    return;
+end
+if ischar(EP) && strcmpi(EP, 'removeArtefacts')
+    [A, M] = removeArtefacts(B, varargin{:});
     return;
 end
 
@@ -237,4 +255,73 @@ end
         end
         A.AP_note{r} = strjoin(note, '; ');
     end
+end
+
+
+function [Vc, R] = removeArtefacts(EP, varargin)
+% stimulus artefacts of EP.V replaced by straight lines (display; see REMOVING THE ARTEFACTS in the help)
+P = struct('artefactSlope', 20, 'tailSlope', 2, 'maxTail', 0.01);
+f = fieldnames(P);
+for k = 1:2:numel(varargin)
+    j = find(strcmpi(f, varargin{k}), 1);
+    if isempty(j), error('mda_analyzeAP: unknown option ''%s'' of removeArtefacts.', varargin{k}); end
+    P.(f{j}) = varargin{k+1};
+end
+R = zeros(0, 2);
+if isempty(EP) || ~isfield(EP, 'V') || isempty(EP.V), Vc = []; return; end
+Vc = EP.V;
+sAP = [];
+if isfield(EP, 'stimTimes'), sAP = EP.stimTimes(:); end
+if isempty(sAP), return; end
+sEnd = sAP;
+if isfield(EP, 'stimEnds') && numel(EP.stimEnds) == numel(sAP), sEnd = EP.stimEnds(:); end
+V = double(EP.V(:)); nV = numel(V); dt = EP.dt; t0 = EP.t0;
+idx = @(t) min(nV, max(1, round((t - t0) / dt) + 1));
+w05 = max(1, round(0.0005 / dt));                                 %0.5 ms
+mx = max(V); mn = min(V);                                         %amplifier limits (as the analysis)
+satHi = Inf; satLo = -Inf;
+if nnz(V == mx) >= 10, satHi = mx - 0.5; end
+if nnz(V == mn) >= 10, satLo = mn + 0.5; end
+n30 = round(0.03 / dt); nTail = round(P.maxTail / dt);
+out = V;
+R = nan(numel(sAP), 2);
+kBprev = 0;
+for j = 1:numel(sAP)
+    kOn = idx(sAP(j)); kPe = idx(max(sEnd(j), sAP(j)));
+    kLim = nV;
+    if j < numel(sAP), kLim = min(nV, idx(sAP(j + 1)) - 1); end   %before the next pulse
+    k3 = min(kLim, kPe + n30 + w05);
+    if k3 <= kOn + 1, continue; end
+    seg = V(kOn:k3); ns = numel(seg);
+    sm = movmean(seg, w05);
+    dsm = gradient(sm) / dt / 1000;                               %V/s (mV/ms)
+    sat = seg >= satHi | seg <= satLo;
+    iPe = kPe - kOn + 1;
+    iLim = min(ns, iPe + n30);
+    ii = (1:ns)';
+    iAe = find(ii > iPe & ii <= iLim & ~sat & abs(dsm) < P.artefactSlope, 1);
+    if isempty(iAe), iAe = iLim; end
+    % decay of the artefact towards the RMP: until the RMP, slower than tailSlope, or turning back by > 3 mV (upstroke)
+    kr = max(1, kOn - round(0.0105 / dt)):(kOn - w05);
+    kr = kr(kr > kBprev);
+    if ~isempty(kr) && ~sat(iAe)
+        rmp = median(V(kr));
+        d = sign(rmp - sm(iAe)); best = iAe;
+        for i = iAe:min(iLim, iAe + nTail)
+            if d * (sm(i) - rmp) >= 0, best = i; break; end
+            if d * (sm(i) - sm(best)) > 0, best = i; end
+            if d * (sm(best) - sm(i)) > 3 || (i > iAe && abs(dsm(i)) < P.tailSlope), break; end
+        end
+        iAe = best;
+    end
+    kA = max(1, kOn - 1); kB = kOn + iAe - 1;
+    if kB > kA + 1
+        k = (kA + 1:kB - 1)';
+        out(k) = V(kA) + (V(kB) - V(kA)) * (k - kA) / (kB - kA);
+    end
+    R(j, :) = t0 + ([kA kB] - 1) * dt;
+    kBprev = kB;
+end
+R = R(~isnan(R(:, 1)), :);
+Vc = reshape(cast(out, 'like', EP.V), size(EP.V));
 end

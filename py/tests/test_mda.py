@@ -532,3 +532,68 @@ def test_results_reopened_in_gui_and_rocker_window(tmp_path):
             w.deleteLater()
         app.processEvents()
         QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+
+
+@pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
+def test_gui_ep_ylim_artefacts_mouse_pointer(tmp_path):
+    """EP plots: y limits (fixed / automatic, drag), stimulus artefacts removed for the display, values at the mouse
+    pointer in all plots (2026-10-09)"""
+    pytest.importorskip("PySide6")
+    pytest.importorskip("pyqtgraph")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtCore, QtWidgets
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    from myodish_analysis.gui.main_window import MainWindow
+    f = os.path.join(EX, "example8_rabbitVentricle_EP.mdd")
+    w = MainWindow(f)
+    try:
+        w.show()
+        w.open_ep(f.replace(".mdd", ".mat"))
+        app.processEvents()
+        EP = w.EP
+        st = float(EP.stimTimes[19])
+        w.pMain.vb.setXRange(st - 0.05, st + 0.35, padding=0)
+        app.processEvents()
+        w.draw_ep()
+        # values at the mouse pointer: 5 ms after the stimulus (artefact)
+        Hv, time = w.hover(st + 0.005, "signal")
+        assert [h["name"] for h in Hv] == ["force", "stimuli", "parameter", "signal", "stimulation"]
+        assert time.startswith("t = 0:21.77") and "stimulus +5.0 ms" in time
+        k = int(round((st + 0.005 - EP.t0) / EP.dt))
+        assert Hv[3]["y"] == pytest.approx(float(EP.V[k])) and Hv[3]["text"].endswith(" mV")
+        assert Hv[1]["text"].startswith("50 mA, interval 1000 ms") and np.isfinite(Hv[0]["y"])
+        assert all(w._hv[id(p)][0].isVisible() for p in w._hover_list())
+        w.hover(0, "")
+        assert not any(w._hv[id(p)][0].isVisible() for p in w._hover_list())
+        # stimulus artefacts removed (display): grey straight lines, value marked as replaced
+        Vc, RA = mda.remove_artefacts(EP)
+        w.ep_set_clean(True)
+        m = w.ep_art_mask
+        assert w.cbEPclean.isChecked() and m.sum() == sum(round((b - a) / EP.dt) + 1 for a, b in RA)
+        assert np.array_equal(Vc[~m], EP.V[~m]) and np.array_equal(w.ep_vc, Vc)
+        Hv, _ = w.hover(st + 0.005, "signal")
+        assert Hv[3]["text"].endswith("(artefact removed)") and Hv[3]["y"] == pytest.approx(float(Vc[k]))
+        lo, hi = w.pEPv.vb.viewRange()[1]
+        assert lo > -100 and hi < 40  # without the saturated artefact (+-102 mV)
+        # y limits: fixed, kept when the time axis changes, automatic again (double-click / restore view)
+        w.ep_set_ylim(1, [-100, 40])
+        w.pMain.vb.setXRange(st, st + 0.5, padding=0)
+        app.processEvents()
+        w.draw_ep()
+        assert w.pEPv.vb.viewRange()[1] == pytest.approx([-100, 40])
+        assert "fixed y limits" in w.pEPv.titleLabel.text
+        w._drag_ep(2, "start", (st, 0.5), (st, 0.5))
+        w._drag_ep(2, "finish", (st, 0.5), (st, 2.5))
+        assert w.ep_ylim[1] == pytest.approx([0.5, 2.5]) and w.pEPs.vb.viewRange()[1] == pytest.approx([0.5, 2.5])
+        w._click_other("ep_v", st, 0, QtCore.Qt.MouseButton.LeftButton, True, None)
+        w.ep_set_ylim(2, None)
+        assert w.ep_ylim == [None, None] and "fixed" not in w.pEPv.titleLabel.text
+        w.ep_set_clean(False)
+        assert not w.cbEPclean.isChecked()
+        Hv, _ = w.hover(st + 0.1, "force")
+        assert Hv[3]["y"] == pytest.approx(float(EP.V[int(round((st + 0.1 - EP.t0) / EP.dt))]))
+    finally:
+        w.close()
+        w.deleteLater()
+        app.processEvents()
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)

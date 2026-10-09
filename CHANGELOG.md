@@ -5,6 +5,17 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Added
+- GUI, EP recordings (MATLAB and Python, 2026-10-09): **y limits** of the signal and stimulation plot — drag up / down
+  in the plot (band = new limits), double-click = automatic, right click *Set y limits ...* / *y limits: automatic
+  (restore view)*; kept when the time axis changes (before: automatic, after AP markers frozen). **remove stimulus
+  artefact** (checkbox, right-click menu): pulses and artefact replaced by straight lines (grey) in the signal plot,
+  display only (`mda_analyzeAP('removeArtefacts', EP)`, Python `remove_artefacts`; same end of the artefact as the AP
+  analysis, then the decay towards the RMP for ≤ 10 ms). MATLAB reference ex8 regenerated (`epClean`), compared in
+  `compare_matlab.py`.
+- GUI (MATLAB and Python, 2026-10-09): **mouse pointer** over the force, stimulus, parameter or EP plots: dashed line,
+  marker and value in every plot at that time (force, nearest stimulus pulse, parameter of the nearest contraction,
+  EP signal and stimulation); time and time since the last stimulus in the plot under the pointer. API
+  `epYLim`, `epRemoveArtefacts`, `hover` (MATLAB), `ep_set_ylim`, `ep_set_clean`, `hover` (Python).
 - GUI (MATLAB and Python, 2026-10-09): buttons under the force plot – ◀ / ▶ move the loaded window (= selection in
   the overview, analysed range) by half its length (shift + click: extend it on that side), →← / ←→ zoom it in / out
   (half / twice its length); the arrow keys in the force plot do the same (before: only the display, the window

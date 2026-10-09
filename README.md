@@ -74,6 +74,10 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    zoom/pan also works (switch the tool off again to use the mouse modes). Time axis in h:mm:ss or m:ss (decimals
    when zoomed in below ~10 s); checkbox *time 0 = window start* shows the time relative to the
    window start (display only: From/To, tables and exports keep the time in the file, in s).
+   **Mouse pointer** over the force, stimulus, parameter or EP plots (not the overview): a dashed line and a marker
+   show the value at that time in every plot — force, stimulus pulse nearest to it (current, interval), parameter of
+   the lower plot of the nearest contraction, EP signal and stimulation; the plot under the pointer also shows the
+   time and the time since the last stimulus (EP plots: stimuli of the EP recording).
    **Threshold, this ch.**: detection threshold of the selected channel, *auto* or a manual value (µN); kept per
    channel when you switch channels and used for All channels, Protocols and Trend (command line: one value per
    channel, `'threshold',[NaN 300 NaN ...]`, NaN = auto).
@@ -162,7 +166,14 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    on small screens the plots above are compressed). The text right of the traces gives the matched stimuli,
    offset, clock drift and residual; **CHECK** marks an uncertain alignment. **Remove EP recording** hides it.
    With an EP recording, every contraction also gets its AP parameters (see below; table, lower plot, exports).
+   **y limits** of the EP plots: drag up / down in a plot (band = new limits), double-click = automatic; right click
+   → *Set y limits ...* / *y limits: automatic (restore view)*. The limits stay when the time axis changes.
+   **remove stimulus artefact** (checkbox right of the traces, also in the right-click menu): the stimulus pulses and
+   the artefact after them are replaced by straight lines (grey) in the signal plot — display only, the AP parameters
+   are measured on the recorded signal (see "Removing the artefacts for the display").
    Script access: `api = fig.UserData; api.epRecording(matFile); EP = api.epRecordingData();`
+   `api.epYLim(1, [-100 40])` (1 = signal, 2 = stimulation, `[]` = automatic), `api.epRemoveArtefacts(true)`,
+   `Hv = api.hover(t, 'signal')` (mouse pointer at time t over a plot: markers and values).
 8. **Protocols ...**: stimulation protocols found in the log file (see "Stimulation protocols"), editable
    (From / To, grouping; **+ selected range** adds the range of the main window). Tick protocols and channels,
    choose the contractions (rocker at rest / all / rocker moving) and press **Analyse**: summary per group (table) and
@@ -217,6 +228,19 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
   ~8 ms → upstroke and peak hidden, APD90 only), 2–3 ms in 3. Short pulses (`examples/example8_rabbitVentricle_EP`): clean upstrokes 10–30 ms after the
   stimulus (dV/dt max 107 ± 7 V/s, RMP −85.7 mV, V_max +25 mV, APD90 228 ± 8 ms, n = 192).
 * GUI markers (≤ 60 contractions visible): grey = artefact, green line = RMP, ▲ upstroke, ▼ V_max, ○ APD25/50/90.
+
+### Removing the artefacts for the display (`mda_analyzeAP('removeArtefacts', EP)`; GUI: *remove stimulus artefact*)
+`[Vc, R] = mda_analyzeAP('removeArtefacts', EP)` (Python `remove_artefacts(EP)`) replaces, for every pulse of the
+stimulation channel, the samples from the pulse onset to the end of the artefact by a straight line from the last
+sample before the pulse to the first sample after the artefact. End of the artefact: as for the AP parameters
+(first sample after the pulse end that is not saturated and where |dV/dt| < 20 V/s; within 30 ms and before the next
+pulse), then the decay of the artefact is followed towards the RMP (median over 10 ms before the pulse) for at most
+10 ms until the RMP is reached, the decay is slower than 2 V/s or the signal turns back by > 3 mV (upstroke).
+`R` = `[tFrom tTo]` of every replaced segment. Options `'artefactSlope'` (20 V/s), `'tailSlope'` (2 V/s),
+`'maxTail'` (0.01 s). An upstroke within the artefact cannot be recovered (the line runs to the first sample after
+it). `examples/example8_rabbitVentricle_EP`: 200 pulses (biphasic, 3 ms), 7.5–10.5 ms replaced each (pulse,
+saturation at ±102.4 mV and the decay to about −77 mV); all 192 upstrokes (dV/dt max 11.5–36 ms after the pulse
+onset) lie ≥ 2.5 ms after the replaced part.
 
 ## Labels per channel (metadata)
 For documentation and later pooled analyses, every channel can carry labels that become columns of the
