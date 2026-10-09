@@ -369,7 +369,8 @@ s = [n e];
 end
 
 function plotChannel(C, B, S, range, ttl)
-figure('Name', ttl, 'Color', 'w');
+fh = figure('Name', ttl, 'Color', 'w');
+try fh.Theme = 'light'; catch, end                 %light colors also with a dark theme (R2025a+)
 ax = axes; hold(ax, 'on');
 I = C.t >= range(1) - 2 & C.t <= range(2) + 2;
 yl = [min(C.f(I)) max(C.f(I))]; yl = yl + [-0.05 0.1] * max(1, diff(yl));

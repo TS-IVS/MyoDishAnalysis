@@ -7,7 +7,7 @@
     from myodish_analysis.gui import run
     win = run('file.mdd')            # inside a running Qt application: returns the window
 
-TS 2026-10-06 (results files 2026-10-09)
+TS 2026-10-06 (results files 2026-10-09; light colors also with Qt < 6.8, 2026-10-10)
 """
 from __future__ import annotations
 
@@ -16,12 +16,23 @@ import sys
 
 
 def light(app):
-    """light colors also in the dark mode of macOS / Windows (the plots are white, as in MATLAB); Qt >= 6.8."""
-    from PySide6 import QtCore
+    """light colors also in the dark mode of macOS / Windows (the plots are white, as in MATLAB). Qt >= 6.8: light color
+    scheme; older Qt: Fusion style with a light palette."""
+    from PySide6 import QtCore, QtGui
     try:
         app.styleHints().setColorScheme(QtCore.Qt.ColorScheme.Light)
-    except AttributeError:  # older Qt: system colors
+        return
+    except AttributeError:  # older Qt
         pass
+    app.setStyle("Fusion")
+    pal = QtGui.QPalette()
+    R = QtGui.QPalette.ColorRole
+    for role, c in ((R.Window, "#efefef"), (R.WindowText, "#000000"), (R.Base, "#ffffff"), (R.AlternateBase, "#f5f5f5"),
+                    (R.Text, "#000000"), (R.Button, "#efefef"), (R.ButtonText, "#000000"), (R.ToolTipBase, "#ffffdc"),
+                    (R.ToolTipText, "#000000"), (R.Highlight, "#3874d8"), (R.HighlightedText, "#ffffff"),
+                    (R.PlaceholderText, "#808080"), (R.BrightText, "#ff0000"), (R.Link, "#0b57d0")):
+        pal.setColor(role, QtGui.QColor(c))
+    app.setPalette(pal)
 
 
 def run(mdd_file=None, metadata=None, block=True):
