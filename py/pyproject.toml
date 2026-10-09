@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "myodish-analysis"
-version = "1.0.0b2"
+version = "1.0.0b3"
 description = "Analysis of MyoDish recordings (.mdd): parameters of every single contraction, reference beat, rocker filter, alignment of EP recordings and AP analysis. Python version of the MATLAB MyoDishAnalysis."
 readme = "README.md"
 license = "GPL-3.0-or-later"

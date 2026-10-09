@@ -4,7 +4,7 @@ Python port of the MATLAB **MyoDishAnalysis** (folder above this one): contracti
 single contraction** in MyoDish recordings (`.mdd`), reference beat, rocker filter, alignment of a parallel EP
 recording (LabChart) and AP parameters. It includes a command line (`mda`) and an interactive GUI (`mda-gui`, PySide6 + pyqtgraph).
 
-Version 1.0.0b2 (2026-10-09; = MATLAB version 1.0.0-beta.2, public beta) · Thomas Seidel, Friedrich-Alexander-Universität
+Version 1.0.0b3 (2026-10-10; = MATLAB version 1.0.0-beta.3, public beta) · Thomas Seidel, Friedrich-Alexander-Universität
 Erlangen-Nürnberg (FAU) / InVitroSys GmbH. Until 2026-10-06 named MyoDishContractionTool (Python package
 `myodish_contractions`, commands `mdct`, `mdct-gui`, `mdct-test`); now `myodish_analysis`, `mda`, `mda-gui`, `mda-test`.
 
@@ -14,7 +14,7 @@ installation, usage and the differences.
 
 ## Citation and license
 If you publish results obtained with this software, please cite the version you used (Seidel T. MyoDishAnalysis,
-version 1.0.0-beta.2, 2026; DOI: see `CITATION.cff` or the Zenodo record of the release) and mention it in the Methods.
+version 1.0.0-beta.3, 2026; DOI: see `CITATION.cff` or the Zenodo record of the release) and mention it in the Methods.
 
 Copyright (c) 2026 Thomas Seidel. License: GNU General Public License, version 3 or (at your option) any later version
 (GPL-3.0-or-later, file `LICENSE`). You may use it free of charge, also commercially (companies, InVitroSys customers).

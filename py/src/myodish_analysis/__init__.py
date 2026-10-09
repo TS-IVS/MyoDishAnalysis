@@ -11,7 +11,7 @@ Command line: mda (analysis), mda-gui (interactive), mda-watch (new recordings o
 
 TS 2026-10-06
 """
-__version__ = "1.0.0b2"
+__version__ = "1.0.0b3"
 
 from .options import options  # noqa: E402
 from .parameters import parameters, PARAMETERS, LABEL_NAMES  # noqa: E402
