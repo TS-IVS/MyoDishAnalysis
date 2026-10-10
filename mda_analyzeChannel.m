@@ -285,7 +285,9 @@ for q = 1:n
     A = Fpk - Fdia;
     if k > 1, V(q,ix.peakToPeakInterval) = tPk(k) - tPk(k-1); end
     rockerMoving(q) = any(S.rockerOn(ia:ib));   %replaced below by F_dia ... 90 % relaxation, if available
-    if A <= 0 || ia == 1         %no upstroke within the data (contraction starts before the loaded data)
+    % no upstroke within the data (contraction starts before the loaded data), or a rounding bump of a held value
+    % (e.g. chamber out: plateau above the diastolic level, A ~ 1e-13 uN)
+    if ~(A > 1e-9 * max(1, abs(Fdia))) || ia == 1
         continue;
     end
     up10 = crossUp(f, t, dt, ia, i, Fdia + 0.1*A);
@@ -309,9 +311,11 @@ for q = 1:n
         V(q,ix.CD90) = rel90 - up10;
         % AUC: trapezoid of (F - F_dia) from the 10 % crossing (upstroke) to the 90 % relaxation crossing
         i10 = find(f(ia:i-1) < Fdia + 0.1*A, 1, 'last') + ia;     %first sample above the 10 % level
-        tt = [up10, t(i10:j90-1), rel90];
-        yy = [0.1*A, f(i10:j90-1) - Fdia, Fpost + 0.1*R - Fdia];
-        V(q,ix.AUC) = trapz(tt, yy);
+        if ~isempty(i10)
+            tt = [up10, t(i10:j90-1), rel90];
+            yy = [0.1*A, f(i10:j90-1) - Fdia, Fpost + 0.1*R - Fdia];
+            V(q,ix.AUC) = trapz(tt, yy);
+        end
     end
 end
 V(:,ix.peakToPeakFrequency) = 1 ./ V(:,ix.peakToPeakInterval);

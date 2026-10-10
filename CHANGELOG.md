@@ -23,6 +23,11 @@ MATLAB and Python versions have the same version number and give the same result
   chambers of other channels are put back) stopped the Python watcher with `ValueError: cannot convert float NaN to
   integer` (MATLAB: `lastContractionClock` NaT). `lastContraction_s` and `lastContractionClock` are now given for every
   channel with contractions; the status stays `no slice`. Test in `py/tests/test_watch.py`.
+- `mda_analyzeChannel` / `analyze_channel` (2026-10-10): a held value above the diastolic level (e.g. chamber out)
+  can contain a local maximum from rounding of the filter (amplitude ~1e-13 uN) whose prominence relative to the
+  surrounding signal passes the threshold. Python stopped with `IndexError: index -1 is out of bounds` (AUC); MATLAB
+  kept the peak with NaN timing parameters. An amplitude <= 1e-9 x max(1, |F_dia|) is now treated like no upstroke
+  (parameters NaN, not included); the AUC is skipped if no sample lies below the 10 % level.
 
 ## [1.0.0-beta.3] – 2026-10-10
 Third pre-release for testers (Git tag `v1.0.0-beta.3`): GUI changes only, analysis results identical to 1.0.0-beta.2.

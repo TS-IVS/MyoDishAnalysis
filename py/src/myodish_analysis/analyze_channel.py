@@ -255,7 +255,9 @@ def analyze_channel(S, channel, range_=None, opts=None):
         if k > 0:
             V[q, ix["peakToPeakInterval"]] = tPk[k] - tPk[k - 1]
         rockerMoving[q] = rockerOn[ia:ib + 1].any()  # replaced below by F_dia ... 90 % relaxation, if available
-        if A <= 0 or ia == 0:  # no upstroke within the data (contraction starts before the loaded data)
+        # no upstroke within the data (contraction starts before the loaded data), or a rounding bump of a held value
+        # (e.g. chamber out: plateau above the diastolic level, A ~ 1e-13 uN)
+        if not A > 1e-9 * max(1.0, abs(Fdia)) or ia == 0:
             continue
         up10 = _cross_up(f, t, dt, ia, i, Fdia + 0.1 * A)
         up50 = _cross_up(f, t, dt, ia, i, Fdia + 0.5 * A)
@@ -278,10 +280,11 @@ def analyze_channel(S, channel, range_=None, opts=None):
             V[q, ix["CD90"]] = rel90 - up10
             # AUC: trapezoid of (F - F_dia) from the 10 % crossing (upstroke) to the 90 % relaxation crossing
             below = np.flatnonzero(f[ia:i] < Fdia + 0.1 * A)
-            i10 = below[-1] + ia + 1  # first sample above the 10 % level
-            tt = np.r_[up10, t[i10:j90], rel90]
-            yy = np.r_[0.1 * A, f[i10:j90] - Fdia, Fpost + 0.1 * R - Fdia]
-            V[q, ix["AUC"]] = _trapz(tt, yy)
+            if below.size:
+                i10 = below[-1] + ia + 1  # first sample above the 10 % level
+                tt = np.r_[up10, t[i10:j90], rel90]
+                yy = np.r_[0.1 * A, f[i10:j90] - Fdia, Fpost + 0.1 * R - Fdia]
+                V[q, ix["AUC"]] = _trapz(tt, yy)
     with np.errstate(divide="ignore"):
         V[:, ix["peakToPeakFrequency"]] = 1.0 / V[:, ix["peakToPeakInterval"]]
     # set stimulation interval: stimulus of the contraction (extra contraction: last stimulus before the peak) minus the
