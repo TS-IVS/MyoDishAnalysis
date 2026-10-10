@@ -76,6 +76,7 @@ in MATLAB.
 | `mda_logEntries` | `log_entries()` |
 | `mda_clockTime` | `clock_time()` |
 | `mda_signalGaps` | `signal_gaps()` |
+| `mda_removeSpikes` | `spikes.remove_spikes()` |
 | `mda_sliceRegister` | `slice_register()` |
 | `mda_calibrationFactor`, `mda_zeroForce` | `calibration_factor()`, `zero_force()` |
 | `mda_options`, `mda_parameters` | `options()`, `parameters()` |
@@ -88,7 +89,7 @@ in MATLAB.
 | `mda_summarize`, `mda_writeResults` | `summarize()`, `write_results()` |
 | `mda_labels`, `mda_addLabels` | `labels()`, `add_labels()` |
 | `MyoDishAnalysisWatch` | `watch()`, `mda-watch` (same index `mda_index.csv` and results; see the main README) |
-| `mda_test`, `mda_testWatch`, `mda_testClockTime`, `mda_testSignalGaps`, `mda_testSliceRegister` | `selftest()`, `mda-test`, `tests/test_mda.py`, `tests/test_watch.py`, `tests/test_clock_time.py`, `tests/test_signal_gaps.py`, `tests/test_slice_register.py` |
+| `mda_test`, `mda_testWatch`, `mda_testClockTime`, `mda_testSignalGaps`, `mda_testSliceRegister`, `mda_testSpikes`, `mda_testProtocolEnd` | `selftest()`, `mda-test`, `tests/test_mda.py`, `tests/test_watch.py`, `tests/test_clock_time.py`, `tests/test_signal_gaps.py`, `tests/test_slice_register.py`, `tests/test_spikes.py`, `tests/test_protocol_end.py` |
 
 ## Agreement with MATLAB (R2026a), checked 2026-10-07
 `tests/compare_matlab.py` compares the Python results with MATLAB results of the same calls

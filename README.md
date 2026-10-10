@@ -450,8 +450,16 @@ P = mda_protocols(file)                                              % protocols
 ```
 * **Finding the protocols** (`mda_protocols`): pairs of comments `start … protocol` / `end … protocol` (also
   `start of …`, `… protocol started` / `… ended`). A start is paired with the next end of the same name, otherwise of
-  the same type; several protocols of the same type are numbered (`FFR 1`, `FFR 2`). A start without an end lasts
-  until the next protocol of the same type or the end of the file (note `no end comment`). Type from keywords:
+  the same type; several protocols of the same type are numbered (`FFR 1`, `FFR 2`). **Start without end comment**
+  (2026-10-10): the end is estimated – the start of regular pacing after the protocol start (per stimulated channel
+  the first run of stimuli that lasts > 5 min + one interval with the same interval ± max(5 ms, 2 %), current and
+  pulse duration (log `chargeDuration`); lower median over the channels; pulses < 50 ms after the previous one are
+  no pacing (status channel errors); `mda_protocols(file, minutes)`, 0 = off), otherwise the start of the next
+  protocol (any type) or the end of the file. Note `no end comment: end estimated at 540 s (start of regular pacing:
+  0.5 Hz, 50 mA, > 5 min)` (or `(start of the next protocol '…')`, `(end of the file)`) in the protocol table and in
+  the column `protocolNote` of `protocolResults`. Checked with 125 protocols that have an end comment (end estimated
+  as if it were missing): FFR, ST, RP, PRP mostly within 10 s of the comment (the regular pacing starts a few s before
+  it); PD protocols followed by another protocol within < 5 min end at that protocol. Type from keywords:
   FFR / frequency → `FFR`, refractory / S1S2 → `RP`, threshold / stimCurrent → `ST`, post rest / PRP → `PRP`,
   pulse duration → `PD`, rocker speed → `rockerSpeed`, others `other` (FFR, RP, ST, PRP, PD also as words of a
   name such as `PD_Test_12Steps`). Schedule files loaded by a schedule (log events `Loaded schedule file …` /
@@ -544,6 +552,19 @@ stimuli in this channel), `t_stim`, `stimToPeak`, `rockerMoving` (rocker moved a
 ## Signal processing and detection
 * Data: 400 Hz, 2 samples averaged (200 Hz), moving median 50 ms + moving mean 25 ms (same processing
   as the lab's `GetContractionParameters`). The half-sample delay of the even filter windows is corrected.
+* **Spike artifacts** (option `'spikeRemoval'`, default on; `mda_removeSpikes`, 2026-10-10): when a chamber is taken
+  out or put in, and with electrical interference, the force value can jump within 1–2 raw samples and come back
+  within a few ms (or go on to a new level), often in several channels at once. A spike is a group of jumps
+  (|difference between two raw samples| ≥ J; jumps < 40 ms apart form one group) that lasts ≤ 100 ms, goes beyond the
+  level before *and* after it (median of 20 ms) by ≥ J, and whose largest jump is ≥ 50 % of its largest deviation
+  from the level before (a contraction rises over many samples: at most ~30 % of its amplitude per sample).
+  J = max(50 AU, 8 × median of the non-zero |differences| of the channel), within ± 10 ms of a spike of another
+  channel max(50 AU, J/2). Level changes (steps when a chamber is put in or taken out) are no spikes and stay. The
+  spike samples are replaced by a line from the sample before to the sample after (raw samples, before the
+  averaging); the notes of the analysis list the number per channel (`info.notes`, `info.spikes`), `S.spikes` of
+  `mda_readMdd` the single spikes. `mda_signalGaps` measures the spikes at the periods without signal on the raw
+  data. Checked on 42 recordings of 2020–2026 (no contraction changed in the most suspicious detections) and with
+  spikes added to real recordings.
 * Contractions = local maxima with a prominence ≥ threshold, ≥ 0.15 s apart. Automatic threshold:
   0.3 × typical amplitude (≥ 30 µN); typical amplitude = median of the n largest prominences
   (n = number of stimuli) or, without stimuli, of the prominences above the largest gap between the sorted
@@ -692,6 +713,7 @@ lower plot, the trend and all exports.
 | `mda_logEntries.m` | entries of the log file (comments, events, settings) |
 | `mda_clockTime.m` | clock time of the log entries (12-hour time stamps of software 2.0.7717–2.0.7769 corrected) |
 | `mda_signalGaps.m` | periods without signal (chamber taken out, sensor board group / controller failures, empty channels) |
+| `mda_removeSpikes.m` | spike artifacts of the force channels (chamber taken out / put in, interference; option `spikeRemoval`) |
 | `mda_sliceRegister.m` | slice register from the watcher results (one row per slice: start, end, end status, last amplitude, days) |
 | `mda_calibrationFactor.m`, `mda_zeroForce.m` | AU → µN (calibration, extended sensor mode); zero force of a channel |
 | `mda_analyzeChannel.m` | filtering, detection, stimulus assignment, parameters |

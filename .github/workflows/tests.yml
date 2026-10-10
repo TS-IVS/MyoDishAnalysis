@@ -54,4 +54,4 @@ jobs:
       - uses: matlab-actions/setup-matlab@v2
       - uses: matlab-actions/run-command@v2
         with:
-          command: addpath(pwd); assert(mda_test(), 'mda_test failed'); assert(mda_testClockTime(), 'mda_testClockTime failed'); assert(mda_testSignalGaps(), 'mda_testSignalGaps failed'); assert(mda_testSliceRegister(), 'mda_testSliceRegister failed'); assert(mda_testWatch(), 'mda_testWatch failed')
+          command: addpath(pwd); assert(mda_test(), 'mda_test failed'); assert(mda_testClockTime(), 'mda_testClockTime failed'); assert(mda_testSignalGaps(), 'mda_testSignalGaps failed'); assert(mda_testSliceRegister(), 'mda_testSliceRegister failed'); assert(mda_testSpikes(), 'mda_testSpikes failed'); assert(mda_testProtocolEnd(), 'mda_testProtocolEnd failed'); assert(mda_testWatch(), 'mda_testWatch failed')

@@ -30,6 +30,9 @@ SELECTION OF CONTRACTIONS (the excluded ones stay in the table with included = F
   rocker           'any' (default) | 'stopped' (rocker at rest from F_dia to 90 % relaxation) | 'moving'
 
 SIGNAL PROCESSING (defaults = GetContractionParameters / analyzeMyoDish of the Seidel lab)
+  spikeRemoval     True (default) | False: spike artifacts of the force channels (e.g. when chambers are taken out
+                   or put in, often in several channels) are replaced by a line before the averaging of the raw
+                   samples; level changes (steps) stay (see spikes.remove_spikes)
   downsampling     n raw samples are combined (default 2: mean, 400 Hz --> 200 Hz; n > 2: median)
   medianFilterMs   moving median [ms] (default 50; 0 = off)
   meanFilterMs     moving mean [ms] (default 25; 0 = off)
@@ -96,6 +99,7 @@ _DEFAULTS = dict(
     detection="sensitive",
     beats="all",
     rocker="any",
+    spikeRemoval=True,
     downsampling=2,
     medianFilterMs=50,
     meanFilterMs=25,
@@ -183,6 +187,9 @@ def options(base=None, **changes):
     rf = opts.rockerFilter
     opts.rockerFilter = (rf is True) or (not isinstance(rf, str) and rf is not None and not _is_empty(rf)
                                           and bool(rf == 1)) or (isinstance(rf, str) and rf.lower() in ("on", "true"))
+    sr = opts.spikeRemoval
+    opts.spikeRemoval = (sr is True) or (not isinstance(sr, str) and sr is not None and not _is_empty(sr)
+                                          and bool(sr == 1)) or (isinstance(sr, str) and sr.lower() in ("on", "true"))
     if _is_empty(opts.referenceBeat):
         opts.referenceBeat = None
     elif isinstance(opts.referenceBeat, dict):

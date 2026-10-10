@@ -46,7 +46,7 @@ for i = 1:2:numel(varargin)
     P.(name) = varargin{i+1};
 end
 if isstruct(src), H = src; else, H = mda_readMdd(char(src), [], [], opts); end
-optsFull = mda_options(opts, 'downsampling', 1);
+optsFull = mda_options(opts, 'downsampling', 1, 'spikeRemoval', false);   %levels and spikes at the periods: raw
 fs = H.samplingRate;
 ch = H.dataChannels(:)'; nCh = numel(ch);
 minN = max(2, round(P.minSeconds * fs));

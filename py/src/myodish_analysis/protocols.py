@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 from ._matlab import Struct, mround
-from .log_entries import log_entries, sscanf_floats
+from .log_entries import log_entries, sscanf_floats, str2double
 from .summarize import summarize
 
 _START1 = re.compile(r"^(?:start(?:ing)?|begin(?:ning)?)\s+(?:of\s+)?(?:the\s+)?(.+?)\s*$", re.I)
@@ -106,8 +106,10 @@ def default_group_by(typ):
             "PD": "pulseDuration", "rockerSpeed": "rockerSpeed"}.get(typ, "none")
 
 
-def find_protocols(src):
+def find_protocols(src, regular_minutes=5.0):
+    H = None
     if isinstance(src, dict):
+        H = src
         logFile, T = src["logFile"], src["totalSeconds"]
     elif str(src).lower().endswith(".mdd"):
         from .read_mdd import read_mdd
@@ -168,16 +170,29 @@ def find_protocols(src):
     drop = [math.isnan(s["to"]) and any(x["type"] == s["type"] and not math.isnan(x["to"]) and x["start"] <= s["start"]
                                         < x["to"] for x in st) for s in st]
     st = [s for s, d in zip(st, drop) if not d]
-    # other starts without end: until the next start of the same type or the end of the file; a start followed by
-    # another start of the same type within 10 s is a repeated comment and dropped
+    # a start followed by another start of the same type within 10 s is a repeated comment and dropped
     drop = [False] * len(st)
     for i, s in enumerate(st):
         if math.isnan(s["to"]):
             nxt = [x["start"] for x in st[i + 1:] if x["type"] == s["type"]]
-            s["to"] = nxt[0] if nxt else T
-            s["note"] = "no end comment"
             drop[i] = bool(nxt) and nxt[0] - s["start"] < 10
     st = [s for s, d in zip(st, drop) if not d]
+    # other starts without end: end estimated (2026-10-10) = start of regular pacing (> regular_minutes with the same
+    # stimulus interval, current and pulse duration, after a change within the protocol), otherwise the start of the
+    # next protocol (any type) or the end of the file; note 'no end comment: end estimated ...'
+    for i, s in enumerate(st):
+        if math.isnan(s["to"]):
+            later = [x for x in st if x["start"] > s["start"]]
+            nxt = min(later, key=lambda x: x["start"]) if later else None
+            tLimit = nxt["start"] if nxt else T
+            why = f"start of the next protocol '{nxt['name']}'" if nxt else "end of the file"
+            tEnd = tLimit
+            if H is not None and regular_minutes and regular_minutes > 0:
+                r = regular_pacing_start(H, s["start"], tLimit, 60.0 * float(regular_minutes))
+                if r is not None:
+                    tEnd, why = r
+            s["to"] = tEnd
+            s["note"] = f"no end comment: end estimated at {_g(tEnd)} s ({why})"
     # protocols within a protocol of the same type are not listed separately
     keep = [True] * len(st)
     for i in range(len(st)):
@@ -205,6 +220,82 @@ def find_protocols(src):
     if len(P) == 0:
         P = P.astype({"number": float, "from": float, "to": float})
     return P
+
+
+def regular_pacing_start(H, t0, tLimit, minDur=300.0):
+    """start of regular pacing after t0 (end of a protocol without end comment, see mda_protocols.m): per stimulated
+    channel the first run of stimuli that starts after t0 and before tLimit and lasts > minDur + one interval with the
+    same interval (+-max(5 ms, 2 %)), current and pulse duration (log 'chargeDuration'); a pulse < 50 ms after the
+    previous pulse of the channel is no pacing stimulus (status channel errors). Returns (lower median of the run starts
+    over the channels with such a run, reason text) or None. TS 2026-10-10"""
+    from .read_mdd import read_data
+    T = float(H.totalSeconds)
+    b = min(T, float(tLimit) + minDur + 60.0)
+    if not H.get("hasStimChannel", False) or b <= t0:
+        return None
+    tt, ch, cur = [], [], []
+    a = max(0.0, float(t0) - 120.0)  # from before the start: pacing that continues into the protocol is no new run
+    while a < b:
+        e = min(b, a + 3600.0)
+        S = read_data(H, a, e, 2, stim_only=True)
+        k = (S.stim.time >= a) & (S.stim.time < e)  # chunk boundaries: no pulse twice
+        tt.append(S.stim.time[k]); ch.append(S.stim.channel[k]); cur.append(S.stim.current[k])
+        a = e
+    tt, ch, cur = np.concatenate(tt), np.concatenate(ch), np.concatenate(cur)
+    E = log_entries(H.logFile)
+    starts = []
+    for c in np.unique(ch):
+        k = np.flatnonzero(ch == c)
+        t, I = tt[k], cur[k]
+        keep = np.r_[True, np.diff(t) >= 0.05]
+        t, I = t[keep], I[keep]
+        ep = np.searchsorted(_pulse_duration_changes(E, c), t, side="right")  # pulse duration epoch of every pulse
+        n = t.size
+        i = 0
+        while i < n - 1:
+            isi0 = t[i + 1] - t[i]
+            tol = max(0.005, 0.02 * isi0)
+            j = i + 1
+            while (j + 1 < n and abs(t[j + 1] - t[j] - isi0) <= tol and I[j + 1] == I[i] and I[j] == I[i]
+                   and ep[j + 1] == ep[i] and ep[j] == ep[i]):
+                j += 1
+            if t[i] > t0 and t[i] < tLimit and I[j] == I[i] and ep[j] == ep[i] and t[j] - t[i] > minDur + isi0:
+                starts.append((float(t[i]), float(isi0), float(I[i])))
+                break
+            if t[i] >= tLimit:
+                break
+            i = j
+    if not starts:
+        return None
+    starts.sort()
+    s, isi, I = starts[(len(starts) - 1) // 2]
+    return s, "start of regular pacing: %.3g Hz, %g mA, > %g min" % (1.0 / isi, I, minDur / 60.0)
+
+
+def _pulse_duration_changes(E, c):
+    """times (s, time in the file) at which the pulse duration of channel c changes (log 'chargeDuration' of channel c or
+    0 with another value than the entry before)"""
+    if E is None or len(E) == 0:
+        return np.zeros(0)
+    codes = E["code"].astype(str).str.lower().to_numpy()
+    chs = E["channel"].to_numpy(float)
+    tf = E["t_file"].to_numpy(float)
+    k = np.flatnonzero((codes == "chargeduration") & ((chs == c) | (chs == 0)) & np.isfinite(tf))
+    if k.size < 2:
+        return np.zeros(0)
+    k = k[np.argsort(tf[k], kind="stable")]
+    v = np.array([str2double(x) for x in E["text"].to_numpy()[k]])
+    chg = np.flatnonzero(v[1:] != v[:-1]) + 1
+    return np.sort(tf[k[chg]])
+
+
+def _g(x):
+    """MATLAB sprintf('%g', x) (Inf, NaN)"""
+    if math.isnan(x):
+        return "NaN"
+    if math.isinf(x):
+        return "Inf" if x > 0 else "-Inf"
+    return "%g" % x
 
 
 # =====================================================================================================

@@ -58,6 +58,7 @@ from .clock_time import clock_time
 from .calibration_factor import calibration_factor
 from .log_entries import parse_clock_numbers, read_log_text, split_lines, sscanf_floats, str2double
 from .options import options as _options
+from .spikes import remove_spikes
 
 import re as _re
 
@@ -83,7 +84,8 @@ def read_mdd(mdd_file, from_s=None, to_s=None, opts=None, progress=None):
         return read_overview(S, float(b), progress, t_range)
     if to_s is None:
         to_s = math.inf
-    return read_data(S, float(from_s), float(to_s), opts.downsampling)
+    return read_data(S, float(from_s), float(to_s), opts.downsampling,
+                     spike_removal=bool(opts.get("spikeRemoval", True)))
 
 
 # =====================================================================================================
@@ -239,9 +241,10 @@ def _mat2str(a, prec=15):
 
 
 # =====================================================================================================
-def read_data(H, from_s, to_s, nDS=2, stim_only=False):
+def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False):
     """data between from_s and to_s (see read_mdd); stim_only: stimulus pulses and rocker state only (force not
-    converted, S.force has no columns)."""
+    converted, S.force has no columns); spike_removal: spike artifacts of the force channels removed (remove_spikes;
+    S.spikes: channel, from, to [s], size [AU])."""
     S = Struct(H)
     S.notes = list(H.notes)
     fs = S.samplingRate
@@ -266,11 +269,19 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False):
     S.downsampling = nDS
     S.t = ((i0 + np.arange(n) * nDS) + (nDS - 1) / 2) / fs
 
-    # force channels: mean of nDS samples (nDS = 2: identical to the median used by importMyoDishData)
+    # force channels: spike artifacts removed (option spikeRemoval, see spikes.py), mean of nDS samples (nDS = 2:
+    # identical to the median used by importMyoDishData)
     nData = len(S.dataChannels)
     S.force = np.zeros((nData, 0 if stim_only else n))
+    S.spikes = np.zeros((0, 4))  # channel, from, to (s, time in the file), size (AU)
+    Xr = None
+    if spike_removal and not stim_only and nRaw > 0:
+        Xr, sp = remove_spikes(raw[:nData], fs)
+        if sp.size:
+            S.spikes = np.c_[np.asarray(S.dataChannels, float).ravel()[sp[:, 0].astype(int)], (i0 + sp[:, 1]) / fs,
+                             (i0 + sp[:, 2]) / fs, sp[:, 3]]
     for c in range(0 if stim_only else nData):
-        x = raw[c].astype(float)
+        x = raw[c].astype(float) if Xr is None else Xr[c]
         if nDS == 2:
             x = (x[0::2] + x[1::2]) / 2
         elif nDS > 2:

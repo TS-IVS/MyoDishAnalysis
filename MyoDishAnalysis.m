@@ -196,6 +196,7 @@ pad = opts.maxBeatWindow + 2;
 if opts.rockerFilter, pad = max(pad, 60); end      %context for the estimate of the rocker artifact
 parts = {}; sumParts = {}; thrInfo = zeros(0, 8);
 rfRows = {}; resParts = {};
+spikes = zeros(0, 4);                              %spike artifacts removed ('spikeRemoval'): channel, from, to, size
 nFig = 0;
 f0cache = [];                                       %rocker frequency per rocker speed, estimated once (all channels)
 for r = 1:nR
@@ -207,6 +208,12 @@ for r = 1:nR
     for q = 1:nQ
         % each chunk is read once for all channels; the file header (log file) is not read again
         S = mda_readMdd(H, max(0, edges(q) - pad), edges(q+1) + pad, opts);
+        if isfield(S, 'spikes') && ~isempty(S.spikes)  %within the chunk (the padding belongs to the neighbours)
+            sp = S.spikes;
+            ok = sp(:,2) >= edges(q) & (sp(:,2) < edges(q+1) | (q == nQ & sp(:,2) <= edges(q+1))) & ...
+                ismember(sp(:,1), channels);
+            spikes = [spikes; sp(ok, :)]; %#ok<AGROW>
+        end
         sub = [edges(q), edges(q+1)];
         if q < nQ, sub(2) = sub(2) - 1e-9; end      %half-open chunks: no contraction twice
         if opts.rockerFilter                        %rocker artifact of all channels of this chunk at once
@@ -261,8 +268,13 @@ for r = 1:nR
                     trace = struct('t', Cx.t, 'f', Cx.f, 'tR', Sres.t, 'rockerOn', Sres.rockerOn);
                 end
                 Rr = mda_protocolResults(groupByR{r}, T, Z, trace, opts);
+                pNote = {''};                      %note of the protocol (e.g. 'no end comment: end estimated ...')
+                if istable(protocols) && ismember('note', protocols.Properties.VariableNames)
+                    pNote = protocols.note(r);
+                end
                 resParts{end+1} = [table(labels(r), channels(c), ranges(r,1), ranges(r,2), groupByR(r), ...
-                    'VariableNames', {'range','channel','from','to','groupBy'}), Rr]; %#ok<AGROW>
+                    'VariableNames', {'range','channel','from','to','groupBy'}), Rr, ...
+                    table(pNote, 'VariableNames', {'protocolNote'})]; %#ok<AGROW>
             end
         else
             T = mda_summarize(B, Cm, ranges(r,:));
@@ -333,6 +345,15 @@ if ~isempty(resParts)                              %characteristic values per pr
 end
 
 info = rmfield(H, {'totalSamples','stimRow'});
+if ~isempty(spikes)
+    spikes = unique(spikes, 'rows');                  %ranges that overlap: once
+    [cs, ~, ic] = unique(spikes(:,1));
+    ns = accumarray(ic, 1);
+    spParts = arrayfun(@(c, k) sprintf('channel %d: %d', c, k), cs, ns, 'UniformOutput', false);
+    info.notes{end+1} = sprintf('Spike artifacts removed (option spikeRemoval): %d (%s), largest %g AU.', ...
+        size(spikes, 1), strjoin(spParts', ', '), max(spikes(:,4)));
+end
+info.spikes = spikes;
 info.channels = channels;
 info.ranges = ranges;
 info.rangeLabels = labels;

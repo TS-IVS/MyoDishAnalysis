@@ -167,6 +167,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     if opts.rockerFilter:
         pad = max(pad, 60)  # context for the estimate of the rocker artifact
     parts, sumParts, thrInfo, rfRows, resRows = [], [], [], [], []
+    spikes = []  # spike artifacts removed (option spikeRemoval) in the analysed chunks: channel, from, to, size
     nFig = 0
     f0cache = np.zeros((0, 2))
     for r in range(nR):
@@ -180,6 +181,11 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
         Sres = None  # S2interval results: data of the whole range (traces)
         for q in range(nQ):
             S = read_mdd(H, max(0.0, edges[q] - pad), edges[q + 1] + pad, opts)
+            sp = np.asarray(S.get("spikes", np.zeros((0, 4))), float).reshape(-1, 4)
+            if sp.shape[0]:  # within the chunk (the padding belongs to the neighbours), analysed channels
+                ok = (sp[:, 1] >= edges[q]) & ((sp[:, 1] < edges[q + 1]) | (q == nQ - 1) & (sp[:, 1] <= edges[q + 1]))
+                ok &= np.isin(sp[:, 0], np.asarray(channels, float))
+                spikes.append(sp[ok])
             sub = [edges[q], edges[q + 1]]
             if q < nQ - 1:
                 sub[1] -= 1e-9  # half-open chunks: no contraction twice
@@ -237,8 +243,10 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
                         _, Cx = analyze_channel(Sres, ch, ranges[r], optsC)
                         trace = dict(t=Cx.t, f=Cx.f, tR=Sres.t, rockerOn=Sres.rockerOn)
                     Rr = protocol_results(groupByR[r], T, Z, trace, opts)
+                    pNote = str(protocols["note"].iloc[r]) if protocols is not None and "note" in protocols else ""
                     resRows.append(dict({"range": labels[r], "channel": ch, "from": float(ranges[r, 0]),
-                                         "to": float(ranges[r, 1]), "groupBy": groupByR[r]}, **Rr))
+                                         "to": float(ranges[r, 1]), "groupBy": groupByR[r]}, **Rr,
+                                        protocolNote=pNote))
             else:
                 T = summarize(B, Cm, ranges[r])
                 if grouping:  # same columns as the grouped ranges
@@ -292,6 +300,14 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     contractions.attrs["units"] = units
 
     info = {k: v for k, v in H.items() if k not in ("totalSamples", "stimRow")}
+    info["notes"] = list(H.notes)
+    spikes = np.concatenate(spikes) if spikes else np.zeros((0, 4))
+    if spikes.shape[0]:
+        spikes = np.unique(spikes, axis=0)  # ranges that overlap: once
+        cs, ns = np.unique(spikes[:, 0], return_counts=True)
+        info["notes"].append("Spike artifacts removed (option spikeRemoval): %d (%s), largest %g AU." % (
+            spikes.shape[0], ", ".join("channel %d: %d" % (c, k) for c, k in zip(cs, ns)), np.max(spikes[:, 3])))
+    info["spikes"] = spikes
     info["channels"] = channels
     info["ranges"] = ranges
     info["rangeLabels"] = labels
@@ -300,7 +316,8 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     info["labels"] = Lbl
     info["options"] = opts
     if resRows:
-        PR = pd.DataFrame(resRows, columns=["range", "channel", "from", "to", "groupBy"] + RESULT_COLUMNS)
+        PR = pd.DataFrame(resRows, columns=["range", "channel", "from", "to", "groupBy"] + RESULT_COLUMNS +
+                          ["protocolNote"])
         PR.insert(0, "file", os.path.basename(H.file))
         if hasStart:
             PR = add_labels(PR, Lbl, list(datenum_to_timestamps(rs + (PR["from"].to_numpy() + PR["to"].to_numpy())

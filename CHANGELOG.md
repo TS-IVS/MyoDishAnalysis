@@ -5,6 +5,27 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Added
+- Spike artifacts (2026-10-10): `mda_removeSpikes` / `spikes.remove_spikes`, option `'spikeRemoval'` (default on) of
+  `mda_readMdd` / `read_mdd`. Short (<= 100 ms) excursions with abrupt edges (jumps between two raw samples >=
+  max(50 AU, 8 x noise), largest jump >= 50 % of the excursion) beyond the level before and after them, e.g. when a
+  chamber is taken out or put in or with electrical interference, often in several channels (within +-10 ms of a
+  spike of another channel the threshold is halved), are replaced by a line before the averaging of the raw samples;
+  level changes (steps) stay. `S.spikes` (channel, from, to, size), note of the analysis (number per channel),
+  `info.spikes`. `mda_signalGaps` measures the spikes at the periods without signal on the raw data. Checked on 42
+  recordings of 2020-2026 and with spikes added to real recordings (rat, rabbit, human: 85-97 % found, contraction
+  counts as without the spikes in 17 of 19 channels, median amplitude and CD90 within 0.2 %; without the removal up to
+  9 extra 'contractions' per channel). Tests `mda_testSpikes.m`, `py/tests/test_spikes.py`; MATLAB references of the
+  example recordings with spikes (ex1, ex3, ex3ref, ex4, ex5, ex6) and of the protocols renewed.
+- Protocols without end comment (2026-10-10): the end is estimated (`mda_protocols` / `find_protocols`): start of
+  regular pacing after the protocol start (> 5 min + one interval with the same interval, current and pulse duration
+  (log `chargeDuration`); lower median over the stimulated channels; pulses < 50 ms apart ignored), otherwise the
+  start of the next protocol (any type) or the end of the file. Note `no end comment: end estimated at ... s (...)`;
+  new column `protocolNote` of `protocolResults`; `mda_protocols(file, minutes)` (0 = only next protocol / end of
+  the file). Before: until the next protocol of the same type or the end of the file (e.g. a threshold protocol
+  without end comment excluded a whole day from the summary of the watcher). Checked with 125 protocols with end
+  comment (end estimated as if it were missing): FFR, ST, RP within 10 s in 74 of 75, PRP 21 of 25 (all within 60 s);
+  PD protocols followed by another protocol within < 5 min end at that protocol. Tests `mda_testProtocolEnd.m`,
+  `py/tests/test_protocol_end.py`.
 - Overview and slice register (2026-10-10): watcher file `<name>_overview.csv` (`'overviewSeconds'`, default 60;
   Python `overview_seconds`, `--overview-seconds`): medians of all contractions per 1-min window, channel, beat type,
   rocker state and inclusion with `nBeats` and `beatsPerMinute` (1/30 to 1/60 of the rows of all contractions, for

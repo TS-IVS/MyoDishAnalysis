@@ -76,7 +76,7 @@ if ischar(fromSeconds) && strcmpi(fromSeconds,'overview')
     S = readOverview(S, binSeconds, progressFcn, tRange);
     return;
 end
-S = readData(S, fromSeconds, toSeconds, opts.downsampling);
+S = readData(S, fromSeconds, toSeconds, opts.downsampling, ~isfield(opts, 'spikeRemoval') || opts.spikeRemoval);
 end
 
 
@@ -228,7 +228,8 @@ end
 
 
 % =====================================================================================================
-function S = readData(S, fromSeconds, toSeconds, nDS)
+function S = readData(S, fromSeconds, toSeconds, nDS, spikeRemoval)
+if nargin < 5, spikeRemoval = false; end
 fs = S.samplingRate;
 nCh = S.nChannelsInFile;
 if fromSeconds < 0, fromSeconds = S.totalSeconds + fromSeconds; end
@@ -253,11 +254,21 @@ S.dt = nDS / fs;
 S.downsampling = nDS;
 S.t = ((i0 + (0:n-1) * nDS) + (nDS - 1) / 2) / fs;          %centre of the averaged raw samples
 
-% force channels: mean of nDS samples (nDS = 2: identical to the median used by importMyoDishData)
+% force channels: spike artifacts removed (option 'spikeRemoval', see mda_removeSpikes), mean of nDS samples (nDS = 2:
+% identical to the median used by importMyoDishData)
 nData = numel(S.dataChannels);
 S.force = zeros(nData, n);
+S.spikes = zeros(0, 4);                            %channel, from, to (s, time in the file), size (AU)
+Xr = [];
+if spikeRemoval && nRaw > 0
+    [Xr, sp] = mda_removeSpikes(raw(1:nData, :), fs);
+    if ~isempty(sp)
+        dc = S.dataChannels(:);
+        S.spikes = [dc(sp(:,1)), (i0 + sp(:,2) - 1) / fs, (i0 + sp(:,3) - 1) / fs, sp(:,4)];
+    end
+end
 for c = 1:nData
-    x = double(raw(c,:));
+    if isempty(Xr), x = double(raw(c,:)); else, x = Xr(c,:); end
     if nDS == 2
         x = (x(1:2:end) + x(2:2:end)) / 2;
     elseif nDS > 2

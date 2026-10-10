@@ -96,7 +96,7 @@ def signal_gaps(src, opts=None, min_seconds=2.0, simultaneous=1.0, simultaneous_
     if opts is None:
         opts = _options()
     H = src if isinstance(src, dict) else read_mdd(str(src), opts=opts)
-    opts_full = _options(opts, downsampling=1)
+    opts_full = _options(opts, downsampling=1, spikeRemoval=False)  # levels and spikes at the periods: raw
     fs = H.samplingRate
     ch = [int(c) for c in np.ravel(H.dataChannels)]
     nCh = len(ch)
