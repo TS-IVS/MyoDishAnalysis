@@ -28,6 +28,12 @@ MATLAB and Python versions have the same version number and give the same result
   surrounding signal passes the threshold. Python stopped with `IndexError: index -1 is out of bounds` (AUC); MATLAB
   kept the peak with NaN timing parameters. An amplitude <= 1e-9 x max(1, |F_dia|) is now treated like no upstroke
   (parameters NaN, not included); the AUC is skipped if no sample lies below the 10 % level.
+- Protocol analysis of long protocols (2026-10-10): a refractory-period protocol without end comment and with a gap
+  of many hours in the log extends to the end of the recording (> 10^4 stimuli); `mda_protocolResults` /
+  `protocol_results` (rocker at rest: a mask over all samples per stimulus; leave-one-out template: the sum of all
+  template beats per beat) and `mda_groupBeats` / `group_beats` (stimulus of every contraction: a search over all
+  stimuli per contraction) needed hours or did not finish (watcher hung). Binary search, cumulative sums, `ismember`
+  / one-pass lookups instead; same results.
 
 ## [1.0.0-beta.3] – 2026-10-10
 Third pre-release for testers (Git tag `v1.0.0-beta.3`): GUI changes only, analysis results identical to 1.0.0-beta.2.

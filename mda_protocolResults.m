@@ -185,7 +185,12 @@ end
 S1 = median(p);
 dt = median(diff(t));
 tol = max(0.03, 0.02 * S1);
-atRest = @(a, b) ~stopped || (any(tR >= a & tR <= b) && ~any(rock(tR >= a & tR <= b)));
+if issorted(tR)   %binary search + cumulative sum: O(log N) per call (long protocols: >= 10^4 stimuli), 2026-10-10
+    nRock = [0; cumsum(double(rock))];
+    atRest = @(a, b) ~stopped || restSorted(tR, nRock, a, b);
+else
+    atRest = @(a, b) ~stopped || (any(tR >= a & tR <= b) && ~any(rock(tR >= a & tR <= b)));
+end
 inData = @(a, b) t(1) <= a && t(end) >= b;
 tg = (round(-0.05 / dt):round((S1 - 0.1) / dt))' * dt;
 nTg = numel(tg);
@@ -234,8 +239,9 @@ end
 % noise level: pseudo-S2 on the template beats (leave-one-out template) at every tested interval
 uCI = unique(round(CI(~isnan(resp)) * 1000) / 1000);
 nullV = nan(nT, numel(uCI));
+sumY = sum(Y, 2);
 for k = 1:nT
-    mk = (sum(Y, 2) - Y(:,k)) / (nT - 1);
+    mk = (sumY - Y(:,k)) / (nT - 1);
     for i = 1:numel(uCI)
         [rk, ak] = s2response(Y(:,k), mk, uCI(i), min(uCI(i) + 0.6, S1 - 0.1), [], []);
         if ak >= 0.2 && ~isnan(rk), nullV(k,i) = 100 * rk / (ak * max(mk)); end
@@ -289,4 +295,25 @@ end
             end
         end
     end
+end
+
+
+function ok = restSorted(tR, nRock, a, b)
+% samples of the sorted time base tR in [a, b] exist and the rocker is at rest in all of them (nRock = [0; cumsum of
+% the rocker state]); binary search instead of a mask over all samples (same result as any(tR >= a & tR <= b) &&
+% ~any(rock(tR >= a & tR <= b))). TS 2026-10-10
+N = numel(tR);
+lo = 1; hi = N + 1;                 %first index with tR >= a
+while lo < hi
+    mid = floor((lo + hi) / 2);
+    if tR(mid) < a, lo = mid + 1; else, hi = mid; end
+end
+i0 = lo;
+lo = 1; hi = N + 1;                 %first index with tR > b
+while lo < hi
+    mid = floor((lo + hi) / 2);
+    if tR(mid) <= b, lo = mid + 1; else, hi = mid; end
+end
+i1 = lo - 1;                        %last index with tR <= b
+ok = i1 >= i0 && nRock(i1 + 1) - nRock(i0) == 0;
 end

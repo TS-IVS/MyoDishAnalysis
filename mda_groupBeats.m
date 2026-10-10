@@ -138,12 +138,21 @@ if strcmpi(by, 'pauseLength')                      %one group per pause: equal l
 end
 
 % ------------------------------------------------------------------ group of every contraction
+% stimulus of every contraction: first stimulus with t == t_stim, without t_stim the last stimulus <= t_peak -
+% minStimToPeak (ismember / binary search instead of a search over all stimuli per contraction: long protocols,
+% 2026-10-10)
 k = nan(height(B), 1);
-for i = 1:height(B)
-    if ~isnan(B.t_stim(i))
-        j = find(tt == B.t_stim(i), 1);
+hasS = ~isnan(B.t_stim);
+[isS, locS] = ismember(B.t_stim(hasS), tt);         %lowest index = find(tt == t_stim, 1)
+kS = nan(nnz(hasS), 1); kS(isS) = locS(isS);
+k(hasS) = kS;
+sortedT = issorted(tt);
+for i = find(~hasS)'
+    x = B.t_peak(i) - opts.minStimToPeak;
+    if sortedT
+        j = lastAtMost(tt, x);
     else
-        j = find(tt <= B.t_peak(i) - opts.minStimToPeak, 1, 'last');
+        j = find(tt <= x, 1, 'last');
     end
     if ~isempty(j), k(i) = j; end
 end
@@ -331,4 +340,17 @@ x = x(last);
 kk = discretize(t, [te; inf]);
 ok = ~isnan(kk);
 v(ok) = x(kk(ok));
+end
+
+
+function j = lastAtMost(x, v)
+% index of the last element of the sorted vector x that is <= v ([] if none); binary search (same result as
+% find(x <= v, 1, 'last')). TS 2026-10-10
+lo = 1; hi = numel(x) + 1;          %first index with x > v
+while lo < hi
+    mid = floor((lo + hi) / 2);
+    if x(mid) <= v, lo = mid + 1; else, hi = mid; end
+end
+j = lo - 1;
+if j < 1, j = []; end
 end

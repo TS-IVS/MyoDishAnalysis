@@ -175,9 +175,16 @@ def _s2_results(R, Z, trace, opts):
     dt = float(np.median(np.diff(t)))
     tol = max(0.03, 0.02 * S1)
 
+    sortedR = bool(np.all(np.diff(tR) >= 0))
+    nRock = np.r_[0, np.cumsum(rock)] if sortedR else None
+
     def at_rest(a, b):
         if not stopped:
             return True
+        if sortedR:  # binary search + cumulative sum: O(log N) per call (long protocols: >= 1e4 stimuli), 2026-10-10
+            i0 = int(np.searchsorted(tR, a, side="left"))  # first sample >= a
+            i1 = int(np.searchsorted(tR, b, side="right"))  # after the last sample <= b
+            return i1 > i0 and nRock[i1] - nRock[i0] == 0
         k = (tR >= a) & (tR <= b)
         return bool(k.any()) and not bool(rock[k].any())
 
@@ -258,8 +265,9 @@ def _s2_results(R, Z, trace, opts):
     # noise level: pseudo-S2 on the template beats (leave-one-out template) at every tested interval
     uCI = np.unique([mround(x * 1000) / 1000 for x in CI[~np.isnan(resp)]])
     nullV = []
+    sumY = Y.sum(axis=1)
     for k in range(nT):
-        mk = (Y.sum(axis=1) - Y[:, k]) / (nT - 1)
+        mk = (sumY - Y[:, k]) / (nT - 1)
         for c in uCI:
             rk, ak, _ = s2response(Y[:, k], mk, c, min(c + 0.6, S1 - 0.1))
             if ak >= 0.2 and not math.isnan(rk):

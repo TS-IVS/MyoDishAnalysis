@@ -308,15 +308,16 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
     nB = len(B)
     tStim = B["t_stim"].to_numpy(float)
     tPeak = B["t_peak"].to_numpy(float)
-    k = np.full(nB, -1)
-    for i in range(nB):
-        if not math.isnan(tStim[i]):
-            j = np.flatnonzero(tt == tStim[i])
+    # stimulus of every contraction: first stimulus with t == t_stim, without t_stim the last stimulus <= t_peak -
+    # minStimToPeak (lookups instead of a search over all stimuli per contraction: long protocols, 2026-10-10)
+    k = _first_index(tt, tStim)
+    noStim = np.isnan(tStim)
+    if noStim.any():
+        x = tPeak[noStim] - opts.minStimToPeak
+        if np.all(np.diff(tt) >= 0):
+            k[noStim] = np.searchsorted(tt, x, side="right") - 1  # -1: none
         else:
-            j = np.flatnonzero(tt <= tPeak[i] - opts.minStimToPeak)
-            j = j[-1:]
-        if j.size:
-            k[i] = j[0]
+            k[noStim] = [int(np.flatnonzero(tt <= v)[-1]) if np.any(tt <= v) else -1 for v in x]
     has = k >= 0
     bVal = np.full(nB, np.nan)
     bRole = np.array([""] * nB, dtype=object)
@@ -341,11 +342,10 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
     Ccc = np.asarray(C.get("stimCapturedCertain", C.stimCaptured), dtype=bool)
     captured = np.zeros(nS, bool)
     capturedCertain = np.zeros(nS, bool)  # followed by a certain contraction (option detection)
-    for i in range(nS):
-        j = np.flatnonzero(Cst == tt[i])
-        if j.size:
-            captured[i] = Ccap[j[0]]
-            capturedCertain[i] = Ccc[j[0]]
+    jC = _first_index(Cst, tt)  # first stimulus of the channel with the same time (ismember)
+    hasC = jC >= 0
+    captured[hasC] = Ccap[jC[hasC]]
+    capturedCertain[hasC] = Ccc[jC[hasC]]
     inRb = (tPeak >= r0) & (tPeak <= r1)
     keys = []
     for x in list(lbl[inR]) + list(bLbl[inRb]):
@@ -444,6 +444,21 @@ def _group_median(v, gid):
         k = gid == g
         m[k] = np.median(v[k])
     return m
+
+
+def _first_index(a, v):
+    """index of the first element of a equal to each value of v (-1: none; NaN never matches) - the lowest index of
+    MATLAB ismember(v, a), without a search over a for every value. TS 2026-10-10"""
+    a = np.asarray(a, float).ravel()
+    v = np.asarray(v, float).ravel()
+    out = np.full(v.size, -1, dtype=int)
+    if a.size == 0 or v.size == 0:
+        return out
+    u, first = np.unique(a, return_index=True)  # sorted values (NaN last), index of their first occurrence
+    p = np.clip(np.searchsorted(u, v), 0, u.size - 1)
+    hit = u[p] == v
+    out[hit] = first[p[hit]]
+    return out
 
 
 def _group_labels(byl, val, role, byName):
