@@ -20,9 +20,11 @@ External trigger pulses: a temporary 9-channel .mdd file with external trigger p
 channel / current): read as channel 0, one entry per pulse, stimuli with option externalTrigger 'auto' / 'on'.
 Rocker peaks (option rockerArtifacts): rocker movement only, every 4th stimulus answered, every stimulus answered.
 Uncertain contractions (option detection): small peaks between the contractions, not locked to the stimuli.
+Extra pulses (status channel bit 16): onset gate, pre- / post-pulses, pulse table (extra_pulse_test, port of
+mda_testExtraPulses.m). Diastolic level (option diastolicLevel): median before the pulse vs minimum before the peak.
 
 TS 2026-10-06 (port of mda_test.m, TS 2026-10-05; external trigger 2026-10-08, rocker peaks, uncertain
-2026-10-09)
+2026-10-09; extra pulses, diastolic level 2026-10-10)
 """
 from __future__ import annotations
 
@@ -89,6 +91,22 @@ def selftest(verbose=True, seed=3):
         p = err < 1e-9
         ok = ok and p
         out(f"{nm:<20s} expected {e:9.4f}   calculated {np.mean(v):9.4f}   max. rel. error {err:.1e}   {_pass(p)}")
+
+    # diastolic level (2026-10-10): a dip to 50 uN 0.3 ... 0.25 s before every pulse (outside the window 60 ... 5 ms
+    # before it): median before the pulse (default) 100 uN, amplitude 1000 uN; 'minimum' 50 uN, amplitude 1050 uN
+    F2 = F.copy()
+    for on_ in onset:
+        F2[(t >= on_ - 0.4) & (t < on_ - 0.35)] = 50
+    S2 = _S(t, F2, onset)
+    Bm, _ = analyze_channel(S2, 1, [2, 17], options(noFiltering=True, zeroForce=40))
+    Bn, _ = analyze_channel(S2, 1, [2, 17], options(noFiltering=True, zeroForce=40, diastolicLevel="minimum"))
+    okD = bool(np.all(np.abs(Bm["amplitude"] - 1000) < 1e-9) and np.all(np.abs(Bm["diastolicSignal"] - 100) < 1e-9)
+               and np.all(np.abs(Bm["TTP90"] - 0.18) < 1e-9) and np.all(np.abs(Bn["amplitude"] - 1050) < 1e-9)
+               and np.all(np.abs(Bn["diastolicSignal"] - 50) < 1e-9))
+    out(f"diastolic level: median before the pulse {Bm['diastolicSignal'].mean():.1f} uN (amplitude "
+        f"{Bm['amplitude'].mean():.1f}), minimum {Bn['diastolicSignal'].mean():.1f} uN (amplitude "
+        f"{Bn['amplitude'].mean():.1f}); expected 100 / 1000, 50 / 1050   {_pass(okD)}")
+    ok = ok and okD
 
     # rocker filter: the same contractions every 2 s plus a periodic artifact (60 rpm = 1.2117 Hz, 3 harmonics,
     # 300 uN peak-to-peak = 30 % of the amplitude) while the rocker moves (0-90 s and 100-200 s)
@@ -178,15 +196,17 @@ def selftest(verbose=True, seed=3):
     on = (t >= 13.5) & (t < 17.7)
     F[on] = F[on] + 120 * np.sin(2 * np.pi * 1.2 * t[on])
     S = _S(t, F, onset, on=on)
-    o = options(noFiltering=True, zeroForce=40)
+    o = options(noFiltering=True, zeroForce=40, diastolicLevel="minimum")  # (median before the pulse: not affected)
     B, _ = analyze_channel(S, 1, [0.5, 29.5], o)
     B0, _ = analyze_channel(S, 1, [0.5, 29.5], options(o, pauseDiastoleWindow=np.inf))
+    Bmed, _ = analyze_channel(S, 1, [0.5, 29.5], options(o, pauseDiastoleWindow=np.inf, diastolicLevel="preStimulusMedian"))
     p = np.abs(B["t_stim"].to_numpy() - 18.9) < 1e-9
     a, a0 = B["amplitude"].to_numpy(), B0["amplitude"].to_numpy()
     rm, rm0 = B["rockerMoving"].to_numpy(bool), B0["rockerMoving"].to_numpy(bool)
     okS = bool(len(B) == 20 and len(B0) == 20 and p.sum() == 1 and abs(a[p][0] - 1000) < 1e-6
                and abs(B["diastolicSignal"].to_numpy()[p][0] - 100) < 1e-6 and not rm[p][0] and a0[p][0] > 1050
-               and rm0[p][0] and np.max(np.abs(a[~p] - a0[~p])) < 1e-9 and not rm.any())
+               and rm0[p][0] and np.max(np.abs(a[~p] - a0[~p])) < 1e-9 and not rm.any()
+               and abs(Bmed["amplitude"].to_numpy()[p][0] - 1000) < 1e-6)
     out(f"stimulation pause 9 s, rocker moving until 1.2 s before the stimulus: amplitude {a[p][0]:.1f} uN (expected "
         f"1000; whole window {a0[p][0]:.1f}), rocker moving {int(rm[p][0])} (whole window {int(rm0[p][0])}), other "
         f"contractions unchanged   {_pass(okS)}")
@@ -247,6 +267,9 @@ def selftest(verbose=True, seed=3):
     # external controller unit), temporary .mdd file, see mda_test.m
     okX = _external_trigger_test(out)
     ok = ok and okX
+    # extra pulses (2026-10-10): onset gate, pre- / post-pulses, pulse table (mda_testExtraPulses.m)
+    okE = extra_pulse_test(out)
+    ok = ok and okE
     out("selftest: all tests passed." if ok else "selftest: TEST FAILED.")
     return bool(ok)
 
@@ -315,6 +338,128 @@ def _external_trigger_test(out):
             okX = False
             out(f"external trigger pulses: {e}   FAILED")
     return okX
+
+
+def extra_pulse_test(out=print):
+    """stimulus assignment with extra pulses (port of mda_testExtraPulses.m): temporary 9-channel .mdd (400 Hz) with
+    log file, one contraction per second in channel 1 (linear rise 100 ms, relaxation 300 ms, onset at k + 0.5 s),
+    regular pulses (50 mA) and extra pulses (bit 16) of channel 1; log: pulse durations of channel 1 and of extra
+    pulse #1 (log channel 11), 'Sequence' entries with the programmed extra pulse 30 ms after the regular pulse.
+    k = 5 CCM (regular pulse, post-pulse t30), 6 sub-threshold pre-pulse (pre-pulse t-100), 7 eliciting pre-pulse
+    (elicitedByExtraPulse, regular pulse missed within the contraction), 8 extra beat, 9 missed beat, 10 extra pulse
+    5 ms before the regular pulse (ambiguous), 11 extra pulse only; stimAssignment 'peak' as before."""
+    import os
+    import tempfile
+
+    from .read_mdd import read_mdd
+    fs = 400
+    T = 16
+    n = T * fs
+    tt = np.arange(n) / fs
+    X = np.zeros((9, n), np.int16)
+    F = np.full(n, 2000.0)
+    beats = [k for k in range(1, 15) if k != 9]
+    for k in beats:
+        a = k + 0.5
+        m = (tt >= a) & (tt < a + 0.1)
+        F[m] = 2000 + 1000 * (tt[m] - a) / 0.1
+        m = (tt >= a + 0.1) & (tt < a + 0.4)
+        F[m] = 3000 - 1000 * (tt[m] - a - 0.1) / 0.3
+    X[0] = np.round(F).astype(np.int16)
+    P = [[k + 0.47, 50, 0] for k in (1, 2, 3, 4, 12, 13, 14)]
+    P += [[5.43, 50, 0], [5.46, 60, 1], [6.37, 15, 1], [6.47, 50, 0], [7.47, 20, 1], [7.57, 50, 0], [9.47, 50, 0],
+          [10.465, 25, 1], [10.47, 50, 0], [11.47, 30, 1]]
+    code = np.zeros(n, np.uint16)
+    for t0, cur, ex in P:
+        code[int(round(t0 * fs))] = 512 + cur + (32768 if ex else 0)  # channel 1, current, bit 16
+    X[8] = code.view(np.int16)
+    L = ["systemTime;dataLogTime;channel;code;value", "2026 01 01 06:00:00:000;0;0;nChannels;9",
+         "2026 01 01 06:00:00:000;0;1;chargeDuration;1000", "2026 01 01 06:00:00:000;0;1;pauseDuration;100",
+         "2026 01 01 06:00:00:000;0;1;dechargeDuration;1000", "2026 01 01 06:00:00:000;0;11;chargeDuration;3000",
+         "2026 01 01 06:00:00:000;0;11;pauseDuration;1000", "2026 01 01 06:00:00:000;0;11;dechargeDuration;3000",
+         "2026 01 01 06:00:00:000;0;0;Sequence;Sent stimPeriod 1000",
+         "2026 01 01 06:00:00:000;0;1;Sequence;Added stimTime(s) 470 500#1",
+         "2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd",
+         "2026 01 01 06:00:00:000;0;0;samplingRate Recording;400"]
+    for c in range(1, 9):
+        L += [f"2026 01 01 06:00:00:000;0;{c};Calibration;1000", f"2026 01 01 06:00:00:000;0;{c};Offset;0"]
+    L.append(f"2026 01 01 06:00:{T:02d}:000;{T * 1000};0;Recording;stopped: x.mdd")
+    ok = True
+    with tempfile.TemporaryDirectory() as d:
+        mdd = os.path.join(d, "xpulse.mdd")
+        X.T.astype("<i2").tofile(mdd)
+        with open(os.path.join(d, "xpulse_log.log"), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(L) + "\n")
+        try:
+            S = read_mdd(mdd, 0, T)
+            o = options(noFiltering=True, spikeRemoval=False)
+            B, C = analyze_channel(S, 1, [0.8, 15], o)
+            Sm = summarize(B, C, [0.8, 15]).iloc[0]
+            ton = B["t_onset"].to_numpy(float)
+
+            def row(k):
+                r = np.flatnonzero(np.abs(ton - (k + 0.5)) < 0.003)
+                return int(r[0]) if r.size else None
+
+            def v(col, k):
+                return B[col].iloc[row(k)]
+            X1 = np.asarray(S.extraPulseLog, float)
+            chk = [("reader: 17 pulses, 5 extra pulses (bit 16)",
+                    np.size(S.stim.time) == 17 and int(np.sum(S.stim.isExtraPulse)) == 5),
+                   ("log: programmed extra pulse +30 ms (Sequence)",
+                    bool(np.any((X1[:, 1] == 1) & (X1[:, 2] == 1) & (np.abs(X1[:, 3] - 30) < 1e-9)))),
+                   ("log: pulse durations of channel 1 and 11", np.asarray(S.pulseSettingsLog).shape[0] == 6),
+                   ("13 contractions, 12 stimulated, 1 extra beat",
+                    len(B) == 13 and Sm.nStimulated == 12 and Sm.nExtraBeats == 1),
+                   ("onsets exact (+-3 ms)", all(row(k) is not None for k in beats))]
+            chk.append(("k=1: regular pulse, stimToOnset 30 ms, pulse ID, current, durations",
+                        not v("elicitedByExtraPulse", 1) and abs(v("stimToOnset", 1) - 0.03) < 0.003
+                        and v("stimPulse", 1) == round(1.47 * fs) and v("stimCurrent", 1) == 50
+                        and [v("stimChargeDuration", 1), v("stimPauseDuration", 1), v("stimDechargeDuration", 1)]
+                        == [1000, 100, 1000]))
+            chk.append(("k=5 CCM: regular pulse, post-pulse t30|60|3000|1000|3000",
+                        abs(v("t_stim", 5) - 5.43) < 1e-9 and not v("elicitedByExtraPulse", 5)
+                        and not v("stimAmbiguous", 5) and v("postPulses", 5) == "t30|60|3000|1000|3000"
+                        and v("prePulses", 5) == ""))
+            chk.append(("k=6 sub-threshold pre-pulse: regular pulse, pre-pulse t-100|15|...",
+                        abs(v("t_stim", 6) - 6.47) < 1e-9 and v("prePulses", 6) == "t-100|15|3000|1000|3000"
+                        and not v("stimAmbiguous", 6)))
+            chk.append(("k=7 eliciting pre-pulse: elicitedByExtraPulse, post-pulse t100|50|...",
+                        v("elicitedByExtraPulse", 7) and abs(v("t_stim", 7) - 7.47) < 1e-9 and v("stimCurrent", 7) == 20
+                        and v("stimChargeDuration", 7) == 3000 and v("postPulses", 7) == "t100|50|1000|100|1000"))
+            chk.append(("k=8: extra beat", v("beatType", 8) == "extra" and np.isnan(v("t_stim", 8))))
+            chk.append(("k=10: regular pulse, ambiguous, pre-pulses t-1000 (missed at k=9) & t-5",
+                        abs(v("t_stim", 10) - 10.47) < 1e-9 and v("stimAmbiguous", 10)
+                        and v("prePulses", 10) == "t-1000|50|1000|100|1000&t-5|25|3000|1000|3000"))
+            chk.append(("k=11: extra pulse only -> elicitedByExtraPulse",
+                        v("elicitedByExtraPulse", 11) and not v("stimAmbiguous", 11)))
+            chk.append(("summary: 12 stimuli, 2 missed (1 in a contraction), 5 extra pulses, 2 elicited by them, 1 "
+                        "ambiguous", Sm.nStimuli == 12 and Sm.nMissedBeats == 2 and Sm.nMissedDuringContraction == 1
+                        and Sm.nExtraPulses == 5 and Sm.nElicitedByExtraPulse == 2 and Sm.nAmbiguous == 1))
+            Pt = C.pulses
+            tp = Pt["t"].to_numpy(float)
+            q9 = int(np.flatnonzero(np.abs(tp - 9.47) < 1e-9)[0])
+            q7 = int(np.flatnonzero(np.abs(tp - 7.57) < 1e-9)[0])
+            q5 = int(np.flatnonzero(np.abs(tp - 5.46) < 1e-9)[0])
+            chk.append(("pulse table: 17 rows, outcomes and roles",
+                        len(Pt) == 17 and int(np.sum(Pt["outcome"] == "elicited")) == 12
+                        and Pt["outcome"].iloc[q9] == "noResponse" and Pt["outcome"].iloc[q7] == "duringContraction"
+                        and Pt["role"].iloc[q7] == "post" and Pt["tRel_ms"].iloc[q7] == 100
+                        and abs(Pt["phase"].iloc[q7] - 0.07 / 0.37) < 0.02 and Pt["role"].iloc[q5] == "post"
+                        and bool(Pt["extra"].iloc[q5]) and Pt["pulse"].iloc[q5] == round(5.46 * fs)
+                        and Pt["tRel_ms"].iloc[q5] == 30))
+            Bp, Cp = analyze_channel(S, 1, [0.8, 15], options(o, stimAssignment="peak"))
+            chk.append(("peak assignment: 17 stimuli, no extra pulses",
+                        np.size(Cp.stimTimes) == 17 and np.size(Cp.extraTimes) == 0
+                        and not Bp["elicitedByExtraPulse"].any() and Cp.stimAssignment == "peak"))
+            for name, passed in chk:
+                out(f"{name:<100s} {_pass(bool(passed))}")
+                ok = ok and bool(passed)
+        except Exception as e:  # noqa: BLE001
+            ok = False
+            out(f"extra pulses: {type(e).__name__}: {e}   FAILED")
+    out("extra pulses: all tests passed." if ok else "extra pulses: TEST FAILED.")
+    return ok
 
 
 def main():

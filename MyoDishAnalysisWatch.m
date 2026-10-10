@@ -10,7 +10,9 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   again. Python: mda-watch (myodish_analysis.watch), same index and results.
 %
 % RESULTS per recording (resultsFolder/<subfolder of rawFolder>/)
-%   <name>_summary.csv, _contractions.csv(.gz), _parameters.csv, _info.csv (version, all options, watcher settings),
+%   <name>_summary.csv, _contractions.csv(.gz), _pulses.csv(.gz) (all stimulus pulses, option pulseTable; like the
+%   contractions: not written with 'contractions','none', compressed with 'compress',true), _parameters.csv, _info.csv
+%   (version, all options, watcher settings),
 %   _thresholds.csv (analysis windows), _labels.csv (_rockerFilter.csv); MyoDishAnalysisGUI(<name>_info.csv) opens them
 %       summary = one row per channel and time range: time bins of 'binMinutes' (default 60 min) without the periods of
 %       the stimulation protocols ('includeProtocols', false, default; a bin with a protocol gives several ranges).
@@ -33,7 +35,8 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %       sensor board group or controller failures (>= 2 channels within 1 s), saturation, channels without a chamber
 %       ('no signal'); with clock times and the comments of the log file within 5 min of the start or end. The summary
 %       gets the columns noSignal_s (s without signal in the range) and nChamberOut (chambers taken out in the range).
-%   <name>_channels.csv ('gaps', true): one row per channel: recording, recordingStart, fileLength_s, status at the
+%   <name>_channels.csv ('gaps', true): one row per channel: recording, recordingStart, fileLength_s, calibration
+%       ('Calibration' entries of the log file, AU per mN; several values separated by ';'), status at the
 %       end of the recording ('beating', 'not beating' = no contraction in the last 30 min with signal outside the
 %       stimulation protocols, 'protocols only' = no time outside the protocols (not analysed), 'removed' = chamber
 %       taken out and not put back, 'signal lost' = technical, 'no slice'), beatingAtEnd, s with and without signal,
@@ -90,6 +93,8 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   'quiet', tf              no messages
 %   all other name/value pairs: analysis options of MyoDishAnalysis for all recordings, e.g. 'rockerFilter', true,
 %   'rocker', 'stopped', 'threshold', 300 (not 'output', 'labels', 'metadata', 'protocol', 'groupBy')
+%   'settings', file         analysis options from a settings file (mda_settings) or earlier results; the index
+%                            records its values (a changed file: the recordings are analysed again)
 %
 % EXAMPLES
 %   MyoDishAnalysisWatch('/data/myodish/raw', '/data/myodish/results', 'rockerFilter', true)
@@ -99,7 +104,7 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   Daily without an open MATLAB: the scheduler of the operating system with
 %   matlab -batch "MyoDishAnalysisWatch('raw', 'results', 'quiet', true)"   or the Python version (mda-watch).
 %
-% TS 2026-10-08 (watcher settings in the info table 2026-10-09)
+% TS 2026-10-08 (watcher settings in the info table 2026-10-09; pulse table 2026-10-10)
 
 W = struct('interval', 0, 'reanalyze', 'outdated', 'retryErrors', false, 'fromDate', '', 'filter', '', ...
     'maxFiles', inf, 'dryRun', false, 'minFileAgeMinutes', 10, 'incompleteAfterHours', 30, 'binMinutes', 60, ...
@@ -134,6 +139,7 @@ end
 if ~isscalar(W.overviewSeconds) || ~(W.overviewSeconds >= 0)
     error('MyoDishAnalysisWatch: ''overviewSeconds'': number >= 0 expected (0 = no overview).');
 end
+args = expandSettings(args);                       %settings file: its values (2026-10-10)
 raw = absPath(rawFolder);
 res = absPath(resultsFolder);
 if ~isfolder(raw), error('MyoDishAnalysisWatch: folder not found: %s', raw); end
@@ -328,6 +334,8 @@ if W.includeProtocols, Wcut = []; else, Wcut = Wp; end
 [fr, to, labels, binLabels] = ranges(H, W.binMinutes * 60, Wcut);
 deleteFile(fullfile(outDir, [n '_contractions.csv']));            %results of earlier options
 deleteFile(fullfile(outDir, [n '_contractions.csv.gz']));
+deleteFile(fullfile(outDir, [n '_pulses.csv']));
+deleteFile(fullfile(outDir, [n '_pulses.csv.gz']));
 deleteFile(fullfile(outDir, [n '_overview.csv']));
 E = [];
 if W.events
@@ -372,12 +380,14 @@ if ~isempty(fr)
     if W.includeProtocols, Wkeep = Wp; else, Wkeep = []; end
     C = sampleContractions(C, labels, Wkeep, W);
     mda_writeResults(fullfile(outDir, [n '.csv']), C, S, info);
-    cf = fullfile(outDir, [n '_contractions.csv']);
-    if strcmp(W.contractions, 'none')
-        delete(cf);
-    elseif W.compress
-        gzip(cf);
-        delete(cf);
+    for cf = {fullfile(outDir, [n '_contractions.csv']), fullfile(outDir, [n '_pulses.csv'])}
+        if ~isfile(cf{1}), continue; end            %pulses: option pulseTable
+        if strcmp(W.contractions, 'none')
+            delete(cf{1});
+        elseif W.compress
+            gzip(cf{1});
+            delete(cf{1});
+        end
     end
     outputs = [{[n '.csv']}, outputs];
     msgs = [info.notes(:)', msgs];
@@ -537,13 +547,25 @@ for i = 1:nCh
         endTxt{i} = strjoin(cellfun(@clean, cm.text(k)', 'UniformOutput', false), ' | ');
     end
 end
-T = table(repmat({name}, nCh, 1), repmat({start}, nCh, 1), repmat(TT, nCh, 1), chs, status, beatEnd, sig, noSig, ...
-    nOut, nTech, firstS, lastS, nCon, tLast, clk, aLast, aMax, aPct, repmat({idTxt}, nCh, 1), dId, dCul, ...
+% 'Calibration' entries of the log file per channel (AU per mN; channel 0 = all channels), in the order of time,
+% several values separated by ';' (2026-10-10: changes are flagged in the slice register)
+cal = repmat({''}, nCh, 1);
+if isfield(H, 'calibrationLog') && ~isempty(H.calibrationLog)
+    CL = sortrows(H.calibrationLog, 1);
+    for i = 1:nCh
+        v = CL(CL(:,2) == chs(i) | CL(:,2) == 0, 3);
+        if isempty(v), continue; end
+        v = v([true; diff(v) ~= 0]);
+        cal{i} = strjoin(arrayfun(@(x) sprintf('%.15g', x), v', 'UniformOutput', false), ';');
+    end
+end
+T = table(repmat({name}, nCh, 1), repmat({start}, nCh, 1), repmat(TT, nCh, 1), chs, cal, status, beatEnd, sig, ...
+    noSig, nOut, nTech, firstS, lastS, nCon, tLast, clk, aLast, aMax, aPct, repmat({idTxt}, nCh, 1), dId, dCul, ...
     lab(:,1), lab(:,2), lab(:,3), lab(:,4), lab(:,5), endTxt, 'VariableNames', {'recording', 'recordingStart', ...
-    'fileLength_s', 'channel', 'status', 'beatingAtEnd', 'signal_s', 'noSignal_s', 'nChamberOut', 'nTechnical', ...
-    'firstSignal_s', 'lastSignal_s', 'nContractions', 'lastContraction_s', 'lastContractionClock', 'lastAmplitude', ...
-    'maxAmplitude', 'lastAmplitude_pctMax', 'idDate', 'daysSinceIdDate', 'daysInCulture', 'setupID', 'sliceID', ...
-    'species', 'sampleID', 'cultureStart', 'endComments'});
+    'fileLength_s', 'channel', 'calibration', 'status', 'beatingAtEnd', 'signal_s', 'noSignal_s', 'nChamberOut', ...
+    'nTechnical', 'firstSignal_s', 'lastSignal_s', 'nContractions', 'lastContraction_s', 'lastContractionClock', ...
+    'lastAmplitude', 'maxAmplitude', 'lastAmplitude_pctMax', 'idDate', 'daysSinceIdDate', 'daysInCulture', 'setupID', ...
+    'sliceID', 'species', 'sampleID', 'cultureStart', 'endComments'});
 end
 
 
@@ -985,6 +1007,27 @@ elseif iscell(v)
 else
     s = ['<' class(v) '>'];
 end
+end
+
+function a = expandSettings(args)
+% option 'settings' (settings file, mda_settings): the options of the file that differ from the defaults as name /
+% value pairs, the other options given override them. The index records the values, not the file name: a changed
+% settings file analyses the recordings again (reanalyze 'outdated').
+j = find(strcmpi(args(1:2:end), 'settings'));
+if isempty(j), a = args; return; end
+f = args{2 * j(end)};
+keep = true(size(args)); keep([2*j-1, 2*j]) = false;
+rest = args(keep);
+a = {};
+if isempty(f), a = rest; return; end
+St = mda_settings('load', f);
+D = mda_options();
+given = lower(rest(1:2:end));
+for k = fieldnames(St)'
+    if strcmp(k{1}, 'referenceBeat') || ismember(lower(k{1}), given), continue; end
+    if ~strcmp(valueText(St.(k{1})), valueText(D.(k{1}))), a(end+1:end+2) = {k{1}, St.(k{1})}; end %#ok<AGROW>
+end
+a = [a, rest];
 end
 
 function a = optionArgs(args)

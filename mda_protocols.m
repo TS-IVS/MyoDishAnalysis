@@ -185,6 +185,7 @@ while a < b
     e = min(b, a + 3600);
     S = mda_readMdd(H, a, e, opts);
     k = S.stim.time >= a & S.stim.time < e;   %chunk boundaries: no pulse twice
+    if isfield(S.stim, 'isExtraPulse'), k = k & ~S.stim.isExtraPulse; end   %extra pulses: no pacing (2026-10-10)
     tt = [tt; S.stim.time(k)]; ch = [ch; S.stim.channel(k)]; cur = [cur; S.stim.current(k)]; %#ok<AGROW>
     a = e;
 end

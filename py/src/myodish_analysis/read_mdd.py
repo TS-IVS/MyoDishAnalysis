@@ -31,7 +31,11 @@ OUTPUT (S, a Struct with the field names of the MATLAB version)
               hasStimChannel, totalSeconds, recordingStart (MATLAB datenum of file time 0, NaN if unknown; 12-hour
               time stamps of software 2.0.7717-2.0.7769 corrected, see clock_time),
               extendedSensorIntervals, notes, offsetLog / calibrationLog ([time channel value] rows; time -Inf =
-              logged before the recording start), rockerSpeedLog ([time rpm]), calibrationApplied,
+              logged before the recording start), rockerSpeedLog ([time rpm]), pulseSettingsLog ([time logChannel
+              code value]: chargeDuration (code 1), pauseDuration (2), dechargeDuration (3) entries, us; log channel
+              10k + c = extra pulse #k of channel c), extraPulseLog ([time channel k offset_ms line]: programmed time
+              of the extra pulses relative to the regular pulse of the channel, see extra_pulse_offsets),
+              calibrationApplied,
               extendedSensorFactor, rockerSource ('status channel' or 'log'), rockerLogIntervals ([from to] in s
               with rocker speed > 0 according to the log file)
   data:       t (s; centre of the averaged raw samples, first raw sample = 0 s), dt, force (nData x n, uN),
@@ -85,7 +89,7 @@ def read_mdd(mdd_file, from_s=None, to_s=None, opts=None, progress=None):
     if to_s is None:
         to_s = math.inf
     return read_data(S, float(from_s), float(to_s), opts.downsampling,
-                     spike_removal=bool(opts.get("spikeRemoval", True)))
+                     spike_removal=bool(opts.get("spikeRemoval", True)), opts=opts)
 
 
 # =====================================================================================================
@@ -111,6 +115,10 @@ def read_header(mdd_file, opts=None):
     H.offsetLog = L.offsetEvents
     H.calibrationLog = L.calibrationEvents
     H.rockerSpeedLog = L.rockerSpeedEvents
+    # [time logChannel code value]: pulse durations (us; code 1 charge, 2 pause, 3 decharge; log channel 10k + c =
+    # extra pulse #k of channel c); [time channel k offset_ms line]: programmed extra pulse times (2026-10-10)
+    H.pulseSettingsLog = L.pulseSettingsEvents
+    H.extraPulseLog = L.extraPulseOffsets
 
     # sampling rate: option > log file > 500 Hz for old 8-channel files (software 1.0.x) > 400 Hz
     if opts.samplingRate is not None:
@@ -241,10 +249,10 @@ def _mat2str(a, prec=15):
 
 
 # =====================================================================================================
-def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False):
+def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False, opts=None):
     """data between from_s and to_s (see read_mdd); stim_only: stimulus pulses and rocker state only (force not
     converted, S.force has no columns); spike_removal: spike artifacts of the force channels removed (remove_spikes;
-    S.spikes: channel, from, to [s], size [AU])."""
+    S.spikes: channel, from, to [s], size [AU]); opts: options of the spike removal (advanced settings)."""
     S = Struct(H)
     S.notes = list(H.notes)
     fs = S.samplingRate
@@ -276,7 +284,7 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False):
     S.spikes = np.zeros((0, 4))  # channel, from, to (s, time in the file), size (AU)
     Xr = None
     if spike_removal and not stim_only and nRaw > 0:
-        Xr, sp = remove_spikes(raw[:nData], fs)
+        Xr, sp = remove_spikes(raw[:nData], fs, opts)
         if sp.size:
             S.spikes = np.c_[np.asarray(S.dataChannels, float).ravel()[sp[:, 0].astype(int)], (i0 + sp[:, 1]) / fs,
                              (i0 + sp[:, 2]) / fs, sp[:, 3]]
@@ -479,7 +487,8 @@ def read_log(log_file, file_time=None):
     L = Struct(samplingRate=math.nan, recordingDuration=math.nan, nChannelsController=math.nan,
                singleChannelMode=None, extendedSensorModeEvents=np.zeros((0, 2)), startDatenum=math.nan,
                programVersion="", clockNote="", offsetEvents=np.zeros((0, 3)), calibrationEvents=np.zeros((0, 3)),
-               rockerSpeedEvents=np.zeros((0, 2)), recordingStopped=None)
+               rockerSpeedEvents=np.zeros((0, 2)), recordingStopped=None, pulseSettingsEvents=np.zeros((0, 4)),
+               extraPulseOffsets=np.zeros((0, 5)))
     txt = read_log_text(log_file)
     if txt is None:
         return L
@@ -495,6 +504,9 @@ def read_log(log_file, file_time=None):
     lastOwn = lastMain = lastPar = None
     tFirst = math.nan
     ext, offs, cal, rck = [], [], [], []  # last column: line number
+    pst = []  # pulse durations: time, log channel, code (1-3), value (us), line
+    seqEv = []  # 'Sequence' entries: (time, log channel, line, text)
+    pstCodes = ("chargeduration", "pauseduration", "dechargeduration")
     lineStart = lineStartPar = math.nan
     tMax = tMaxPar = -math.inf  # latest dataLogTime since the chosen start line
     for i, line in enumerate(lines, start=1):
@@ -556,6 +568,12 @@ def read_log(log_file, file_time=None):
             v = str2double(value)
             if not math.isnan(v):
                 rck.append([tsec, v, i])
+        elif lc in pstCodes:  # pulse durations (us) of a channel; channel 10k+c = extra pulse #k
+            ch = str2double(f[2]); v = str2double(value)
+            if not math.isnan(ch) and not math.isnan(v):
+                pst.append([tsec, ch, pstCodes.index(lc) + 1, v, i])
+        elif lc == "sequence":  # stimulus times of the sequence (regular and extra pulses #k)
+            seqEv.append((tsec, str2double(f[2]), i, value))
         elif lc == "nchannels":
             v = str2double(value)
             if not math.isnan(v):
@@ -596,6 +614,13 @@ def read_log(log_file, file_time=None):
         offs[offs[:, 3] < lineStart, 0] = -math.inf
         cal[cal[:, 3] < lineStart, 0] = -math.inf
         rck[rck[:, 2] < lineStart, 0] = -math.inf
+    pst = np.array(pst, dtype=float).reshape(-1, 5)
+    X = extra_pulse_offsets(seqEv)
+    if not math.isnan(lineStart):
+        pst[pst[:, 4] < lineStart, 0] = -math.inf
+        X[X[:, 4] < lineStart, 0] = -math.inf
+    L.pulseSettingsEvents = pst[:, :4].copy()
+    L.extraPulseOffsets = X
     L.rockerSpeedEvents = rck[:, :2].copy()
     L.extendedSensorModeEvents = ext[:, :2].copy()
     L.offsetEvents = offs[:, :3].copy()
@@ -612,3 +637,71 @@ def read_log(log_file, file_time=None):
             tSys = 0.0
         L.startDatenum = datetime_to_datenum(clk[kStart]) - tSys / 86400.0
     return L
+
+
+_RE_ADDED = _re.compile(r"^Added stimTime(?:\(s\))?\s*(.*)$", _re.IGNORECASE)
+_RE_TOKEN = _re.compile(r"^(-?\d+(?:\.\d+)?)(?:#(\d))?$")
+_RE_NUM = _re.compile(r"-?\d+(\.\d+)?")
+
+
+def extra_pulse_offsets(ev):
+    """Programmed time of the extra pulses relative to the regular pulse of the same channel, from the 'Sequence'
+    entries of the log file: 'Sent stimPeriod P' starts a new sequence (all extra pulses cleared); 'Added stimTime(s)
+    a b#k ...' of channel c sets its regular times (numbers) and extra pulse times (#k = extra pulse k, software 2022
+    and 2026); an entry of log channel 10k + c ('Added stimTime e') sets the times of extra pulse k of channel c.
+    Returns rows [time, channel c, k, offset (ms; extra time - nearest regular time of the channel, within the
+    period), line]. Every entry that changes channel c gives the complete set of its extra pulses (rows with the same
+    line); k = 0 / offset NaN: no extra pulses. TS 2026-10-10 (port of mda_readMdd.m)"""
+    rows = []
+    R = [[] for _ in range(8)]  # regular times per channel (ms within the period)
+    E = [[[] for _ in range(9)] for _ in range(8)]  # extra pulse times per channel and k
+    P = math.nan  # period (ms)
+    for t, chn, ln, txt in ev:
+        txt = txt.strip()
+        if txt[:15].lower() == "sent stimperiod":
+            m = _RE_NUM.search(txt)
+            p = float(m.group(0)) if m else math.nan
+            if not math.isnan(p) and p > 0:
+                P = p
+            R = [[] for _ in range(8)]
+            E = [[[] for _ in range(9)] for _ in range(8)]
+            rows.extend([[t, c, 0, math.nan, ln] for c in range(1, 9)])
+            continue
+        m = _RE_ADDED.match(txt)
+        if m is None or math.isnan(chn):
+            continue
+        k0 = int(math.floor(chn / 10)); c = int(chn - 10 * k0)
+        if c < 1 or c > 8 or k0 > 9:
+            continue
+        reg = []; ext = [[] for _ in range(9)]
+        for p in _re.split(r"\s+", m.group(1).strip()):
+            mm = _RE_TOKEN.match(p)
+            if mm is None:
+                continue
+            v = float(mm.group(1))
+            if mm.group(2) is not None and int(mm.group(2)) >= 1:
+                ext[int(mm.group(2)) - 1].append(v)
+            elif k0 > 0:
+                ext[k0 - 1].append(v)
+            else:
+                reg.append(v)
+        if k0 == 0:  # an entry of channel c replaces its sequence
+            R[c - 1] = reg
+            for k in range(9):
+                E[c - 1][k] = ext[k]
+        else:
+            E[c - 1][k0 - 1] = ext[k0 - 1]
+        r = []
+        for k in range(9):
+            for e in E[c - 1][k]:
+                if not R[c - 1]:
+                    continue
+                d = e - np.asarray(R[c - 1], float)
+                if not math.isnan(P):
+                    d = np.mod(d + P / 2, P) - P / 2
+                j = int(np.argmin(np.abs(d)))
+                r.append([t, c, k + 1, float(d[j]), ln])
+        if not r:
+            r = [[t, c, 0, math.nan, ln]]
+        rows.extend(r)
+    return np.array(rows, dtype=float).reshape(-1, 5)

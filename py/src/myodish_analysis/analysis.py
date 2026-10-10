@@ -11,7 +11,10 @@ contractions  DataFrame, one row per detected contraction (also the excluded one
               'uncertain': contraction found with high sensitivity only (option detection, see options.py)
 summary       DataFrame, one row per channel and range: numbers of contractions/stimuli, mean and SD of all
               parameters of the included contractions
-info          dict: file facts, options, detection threshold per channel and range, notes; with grouped protocols
+info          dict: file facts, options, detection threshold per channel and range, notes; info['pulses'] (option
+              pulseTable, default True; sheet / file 'pulses'): one row per stimulus pulse of the analysed channels and
+              ranges (pulse ID, time, extra pulse, current, durations, outcome, role, contraction, coupling interval,
+              time since the last onset, phase; see analyze_channel.pulse_table); with grouped protocols
               (FFR, ST, RP, PRP) info['protocolResults']: characteristic values per protocol and channel (see
               protocol_results.py), also sheet 'protocolResults' of the results file
 
@@ -21,6 +24,8 @@ OPTIONS (keywords)
   metadata=m              labels per channel (dict, DataFrame or .csv/.xlsx file), see labels.py
   showFigures=True        plot the signal with the detected contractions (matplotlib; ranges <= 30 min, <= 16)
   quiet=True              no messages
+  settings='my.csv'       all options from a settings file (settings.py; GUI: Advanced ... -> Save settings ...) or from
+                          the results of an earlier analysis; the other keywords override them
   rocker='stopped', beats='stimulated', threshold=300 (or [t1, t2, ...] per channel, NaN = auto),
   zeroForce=[z1, z2, ...], rockerFilter=True, referenceBeat=R and all other options of options()
   protocol='FFR'          analyse stimulation protocols found in the log file (find_protocols) instead of from_s / to_s:
@@ -166,7 +171,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     pad = opts.maxBeatWindow + 2
     if opts.rockerFilter:
         pad = max(pad, 60)  # context for the estimate of the rocker artifact
-    parts, sumParts, thrInfo, rfRows, resRows = [], [], [], [], []
+    parts, sumParts, thrInfo, rfRows, resRows, pulseParts = [], [], [], [], [], []
     spikes = []  # spike artifacts removed (option spikeRemoval) in the analysed chunks: channel, from, to, size
     nFig = 0
     f0cache = np.zeros((0, 2))
@@ -221,16 +226,31 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
             B["contraction"] = np.arange(1, len(B) + 1, dtype=float)
             CsC = Cs[c]
             Cm = Struct(CsC[0])
-            st, sc, scc = [], [], []
-            for x in CsC:
-                k = (x.stimTimes >= x.range[0]) & (x.stimTimes <= x.range[1])
-                st.append(x.stimTimes[k]); sc.append(x.stimCaptured[k]); scc.append(x.stimCapturedCertain[k])
-            Cm.stimTimes = np.concatenate(st)
-            Cm.stimCaptured = np.concatenate(sc)
-            Cm.stimCapturedCertain = np.concatenate(scc)
+            Cm.stimTimes = _in_range_of(CsC, "stimTimes", "stimTimes")
+            Cm.stimCaptured = _in_range_of(CsC, "stimCaptured", "stimTimes", bool)
+            Cm.stimCapturedCertain = _in_range_of(CsC, "stimCapturedCertain", "stimTimes", bool)
+            Cm.stimDuringContraction = _in_range_of(CsC, "stimDuringContraction", "stimTimes", bool)
+            Cm.extraTimes = _in_range_of(CsC, "extraTimes", "extraTimes")
+            Cm.extraElicited = _in_range_of(CsC, "extraElicited", "extraTimes", bool)
             Cm.threshold = float(np.median([x.threshold for x in CsC]))
+            if opts.pulseTable:  # pulses of the range: contraction numbers of the whole range
+                Pc = [x.get("pulses") for x in CsC]
+                Pc = [x for x in Pc if x is not None and len(x) > 0]
+                if Pc:
+                    Pc = pd.concat(Pc, ignore_index=True)
+                    pos = pd.Series(B["contraction"].to_numpy(float), index=B["t_peak"].to_numpy(float))
+                    pos = pos[~pos.index.duplicated()]
+                    Pc["contraction"] = Pc["t_peak"].map(pos).to_numpy(float)
+                    Pc.insert(0, "range", labels[r])
+                    pulseParts.append(Pc)
             if grouping and groupByR[r].lower() != "none":
-                B, T, Z = group_beats(H, B, Cm, ranges[r], groupByR[r], opts, return_stimuli=True)
+                steadyN = 0  # FFR protocols: steady state per frequency (2026-10-10)
+                if protocols is not None and str(protocols["type"].iloc[r]).upper() == "FFR":
+                    steadyN = int(opts.steadyStateBeats)
+                B, T, Z, gNotes = group_beats(H, B, Cm, ranges[r], groupByR[r], opts, return_stimuli=True,
+                                              steady_n=steadyN, return_notes=True)
+                for nt in gNotes:
+                    H.notes.append("%s, channel %d: %s" % (labels[r], ch, nt))
                 gb = groupByR[r].lower()
                 if gb in ("pacingfrequency", "stimcurrent", "s2interval", "pauselength"):
                     trace = None
@@ -308,6 +328,13 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
         info["notes"].append("Spike artifacts removed (option spikeRemoval): %d (%s), largest %g AU." % (
             spikes.shape[0], ", ".join("channel %d: %d" % (c, k) for c, k in zip(cs, ns)), np.max(spikes[:, 3])))
     info["spikes"] = spikes
+    if opts.pulseTable:  # all stimulus pulses of the analysed channels and ranges (2026-10-10)
+        if pulseParts:
+            info["pulses"] = pd.concat(pulseParts, ignore_index=True)
+            from .analyze_channel import PULSE_UNITS
+            info["pulses"].attrs["units"] = dict({"range": ""}, **PULSE_UNITS)
+        else:
+            info["pulses"] = pd.DataFrame()
     info["channels"] = channels
     info["ranges"] = ranges
     info["rangeLabels"] = labels
@@ -345,6 +372,18 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
         if not quiet:
             print(f"  results written to {output}")
     return contractions, summary, info
+
+
+def _in_range_of(CsC, field, time_field, dtype=float):
+    """values of the field of all chunks (channel info of analyze_channel) whose times lie in the chunk's range"""
+    parts = []
+    for x in CsC:
+        if field not in x or time_field not in x or x[field] is None:
+            continue
+        tt = np.asarray(x[time_field], float).ravel()
+        y = np.asarray(x[field]).ravel()
+        parts.append(y[(tt >= x.range[0]) & (tt <= x.range[1])])
+    return np.concatenate(parts).astype(dtype) if parts else np.zeros(0, dtype)
 
 
 def _plot_channel(C, B, S, range_, ttl):

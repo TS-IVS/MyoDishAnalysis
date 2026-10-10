@@ -192,6 +192,9 @@ def write_results(output_file, contractions, summary, info):
     rr = info.get("protocolResults")
     if isinstance(rr, pd.DataFrame) and len(rr) > 0:
         tabs.append(("protocolResults", rr))
+    pu = info.get("pulses")  # all stimulus pulses of the analysed channels and ranges (option pulseTable, 2026-10-10)
+    if isinstance(pu, pd.DataFrame) and len(pu) > 0:
+        tabs.append(("pulses", pu))
     if e.lower() == ".csv":
         out = []
         for name, T in tabs:
@@ -199,9 +202,15 @@ def write_results(output_file, contractions, summary, info):
             _for_file(T, True).to_csv(f, index=False)
             out.append(f)
         return out
+    out = [output_file]
+    if isinstance(pu, pd.DataFrame) and len(pu) >= 1048576:  # Excel row limit: <name>_pulses.csv
+        tabs = [x for x in tabs if x[0] != "pulses"]
+        f = os.path.join(p, f"{n}_pulses.csv")
+        _for_file(pu, True).to_csv(f, index=False)
+        out.append(f)
     mode = "a" if os.path.isfile(output_file) else "w"
     kw = dict(if_sheet_exists="replace") if mode == "a" else {}
     with pd.ExcelWriter(output_file, engine="openpyxl", mode=mode, **kw) as xw:
         for name, T in tabs:
             _for_file(T, False).to_excel(xw, sheet_name=name, index=False)
-    return [output_file]
+    return out

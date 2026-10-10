@@ -43,13 +43,17 @@ function R = mda_sliceRegister(resultsFolder, experiments, varargin)
 %                      later without cultureStart (they may come from another preparation)
 %      nRecordings, firstRecording, lastRecording, nChamberOut, outHours, longestOut_min, nPutBack (long periods
 %      without signal bridged by a put-back comment), nTechnical (periods),
+%      calibration     'Calibration' values (AU per mN) of the channel in the recordings of the slice (';' separated)
+%      calibrationChanged  1 if the calibration changed during the slice or differs from another row with the same
+%                      sliceID (slice moved to another setup): force values / fold changes over time are only
+%                      comparable after conversion to uN (2026-10-10)
 %      endComments     comments of the log file about the end (removed, discarded, fixed, frozen, imaging, ...)
 %    Without <name>_overview.csv ('overviewSeconds', 0) lastBeat, lastAmplitude, maxAmplitude and nBeats come from
 %    <name>_channels.csv (whole recording: for a slice replaced within a recording only the later slice gets them).
 %
 % Python: myodish_analysis.slice_register (same files and results).
 %
-% TS 2026-10-08
+% TS 2026-10-08 (calibration 2026-10-10)
 
 P = struct('newSliceHours', 2, 'write', true);
 for i = 1:2:numel(varargin)
@@ -96,7 +100,7 @@ c = {'experiment', 'series', 'channel', 'slice', 'setupID', 'sampleID', 'species
     'endTime', 'daysInSetup', 'startReason', 'insertedLater', 'endStatus', 'beatingAtEnd', 'lastBeat', ...
     'lastAmplitude', 'maxAmplitude', 'lastAmplitude_pctMax', 'nBeats', 'dayStart', 'dayEnd', 'daySource', ...
     'nRecordings', 'firstRecording', 'lastRecording', 'nChamberOut', 'outHours', 'longestOut_min', 'nPutBack', ...
-    'nTechnical', 'endComments'};
+    'nTechnical', 'calibration', 'calibrationChanged', 'endComments'};
 end
 
 
@@ -276,6 +280,13 @@ if isempty(rows)
     R = emptyRegister();
 else
     R = cell2table(rows, 'VariableNames', columns());
+    % calibration (2026-10-10): rows of the same sliceID (slice moved to another setup) with other calibration values
+    sid = R.sliceID;
+    for i = 1:height(R)
+        if isempty(sid{i}) || isempty(R.calibration{i}), continue; end
+        j = find(strcmp(sid, sid{i}) & ~cellfun(@isempty, R.calibration));
+        if numel(unique(R.calibration(j))) > 1, R.calibrationChanged(i) = 1; end
+    end
 end
 end
 
@@ -285,7 +296,7 @@ cur = struct('e', e, 'series', series, 'c', c, 'k', k, 'start', t, 'reason', rea
     'inserted', ~strcmp(reason, 'first signal') || t - seriesStart > hours * 3600, 'lab', row, 'last', t, ...
     'recs', {{}}, 'nOut', 0, 'outSec', 0, 'longest', 0, 'nTech', 0, 'nPutBack', 0, 'W', zeros(0, 5), ...
     'fb', zeros(0, 4), ...
-    'endCand', '', 'endComments', '', 'closed', '');
+    'endCand', '', 'endComments', '', 'closed', '', 'cal', {{}});
 end
 
 
@@ -299,7 +310,7 @@ outSince = [];
 outText = '';
 emptyBetween = false;
 seriesStart = S(1).start;
-fields = {'status', 'setupID', 'sampleID', 'species', 'sliceID', 'idDate', 'cultureStart', 'endComments'};
+fields = {'status', 'setupID', 'sampleID', 'species', 'sliceID', 'idDate', 'cultureStart', 'endComments', 'calibration'};
 for r = 1:numel(S)
     CH = S(r).CH;
     i = find(num(CH, 'channel') == c, 1);
@@ -378,6 +389,7 @@ for r = 1:numel(S)
         outSince = []; outText = ''; emptyBetween = false;
         cur.last = St + b;
         if ~any(strcmp(cur.recs, S(r).name)), cur.recs{end+1} = S(r).name; end
+        if ~isempty(row.calibration), cur.cal = [cur.cal, strsplit(row.calibration, ';')]; end
         O = S(r).O;
         if istable(O) && height(O) > 0
             tf = num(O, 't_from'); tt = num(O, 't_to');
@@ -462,10 +474,16 @@ pct = nan; if maxAmp > 0, pct = 100 * lastAmp / maxAmp; end
 dS = nan; dE = nan;
 if ~isnan(base), dS = (cur.start - base) / 86400; dE = (cur.last - base) / 86400; end
 if isempty(cur.recs), r1 = ''; r2 = ''; else, r1 = cur.recs{1}; r2 = cur.recs{end}; end
+cal = '';                                          %calibration values of the slice in the order of time (2026-10-10)
+if ~isempty(cur.cal)
+    v = cur.cal([true, ~strcmp(cur.cal(2:end), cur.cal(1:end-1))]);
+    cal = strjoin(v, ';');
+end
+calChanged = double(numel(unique(cur.cal)) > 1);
 row = {cur.e, cur.series, cur.c, cur.k, lab.setupID, lab.sampleID, lab.species, lab.sliceID, lab.idDate, ...
     clockText(cur.start), clockText(cur.last), (cur.last - cur.start) / 86400, cur.reason, double(cur.inserted), ...
     status, double(beating), clockText(lastBeat), lastAmp, maxAmp, pct, nBeats, dS, dE, src, numel(cur.recs), r1, ...
-    r2, cur.nOut, cur.outSec / 3600, cur.longest / 60, cur.nPutBack, cur.nTech, cur.endComments};
+    r2, cur.nOut, cur.outSec / 3600, cur.longest / 60, cur.nPutBack, cur.nTech, cal, calChanged, cur.endComments};
 end
 
 

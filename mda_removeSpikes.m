@@ -1,7 +1,11 @@
-function [X, spikes] = mda_removeSpikes(X, fs)
+function [X, spikes] = mda_removeSpikes(X, fs, opts)
 %MDA_REMOVESPIKES  Spike artifacts of the force channels: detection and removal.
 %
-%   [X, spikes] = mda_removeSpikes(X, fs)     X: channels x samples (raw samples of the force channels, AU)
+%   [X, spikes] = mda_removeSpikes(X, fs)        X: channels x samples (raw samples of the force channels, AU)
+%   [X, spikes] = mda_removeSpikes(X, fs, opts)  options (mda_options) spikeJumpMin, spikeJumpFactor, spikeGroupGap,
+%                                                spikeMaxDuration, spikeLevelWindow, spikeJumpFraction,
+%                                                spikeCoincidence, spikeCoincidenceFactor (advanced settings; the
+%                                                numbers below are their defaults)
 %
 % Spikes appear e.g. when a chamber is taken out or put in, often in several channels at once: the value jumps within
 % 1-2 samples and comes back within a few ms (or goes on to a new level). A spike is a group of jumps (|difference
@@ -19,9 +23,16 @@ function [X, spikes] = mda_removeSpikes(X, fs)
 %
 % Used by mda_readMdd (option 'spikeRemoval', default true) before the averaging of the raw samples.
 %
-% TS 2026-10-10
+% TS 2026-10-10 (advanced settings 2026-10-10)
 
-JUMP_MIN = 50; JUMP_FACTOR = 8; GROUP_GAP_MS = 40; MAX_MS = 100; LEVEL_MS = 20; COINCIDENCE_MS = 10;
+if nargin < 3, opts = struct(); end
+D = struct('spikeJumpMin', 50, 'spikeJumpFactor', 8, 'spikeGroupGap', 0.04, 'spikeMaxDuration', 0.1, ...
+    'spikeLevelWindow', 0.02, 'spikeJumpFraction', 0.5, 'spikeCoincidence', 0.01, 'spikeCoincidenceFactor', 0.5);
+for f = fieldnames(D)'
+    if isfield(opts, f{1}), D.(f{1}) = double(opts.(f{1})); end
+end
+JUMP_MIN = D.spikeJumpMin; JUMP_FACTOR = D.spikeJumpFactor; GROUP_GAP_MS = 1000 * D.spikeGroupGap;
+MAX_MS = 1000 * D.spikeMaxDuration; LEVEL_MS = 1000 * D.spikeLevelWindow; COINCIDENCE_MS = 1000 * D.spikeCoincidence;
 X = double(X);
 [nCh, n] = size(X);
 G = max(1, round(GROUP_GAP_MS * fs / 1000));
@@ -48,7 +59,7 @@ for pas = 1:2
             for f = find(found(:, 1) ~= c)'
                 near(max(1, found(f, 2) - Cw):min(n, found(f, 3) + Cw)) = true;
             end
-            J = max(JUMP_MIN, J1(c) / 2);
+            J = max(JUMP_MIN, D.spikeCoincidenceFactor * J1(c));
             big = find(ad >= J & near(1:end-1) & ~replaced(c, 1:end-1) & ~replaced(c, 2:end));
         end
         if isempty(big), continue; end
@@ -56,7 +67,7 @@ for pas = 1:2
         g1 = big([1, br + 1]); g2 = big([br, numel(big)]);
         for q = 1:numel(g1)
             k1 = g1(q); k2 = g2(q);                    %jump k: x(k) -> x(k+1)
-            if any(replaced(c, k1+1:k2)) || ~isSpike(x, k1, k2, J, W, Lmax), continue; end
+            if any(replaced(c, k1+1:k2)) || ~isSpike(x, k1, k2, J, W, Lmax, D.spikeJumpFraction), continue; end
             sz = max(abs(x(k1+1:k2) - x(k1)));
             idx = k1+1:k2;
             x(idx) = x(k1) + (x(k2+1) - x(k1)) * (idx - k1) / (k2 + 1 - k1);
@@ -70,7 +81,7 @@ spikes = sortrows(found, [2 1]);
 end
 
 
-function tf = isSpike(x, k1, k2, J, W, Lmax)
+function tf = isSpike(x, k1, k2, J, W, Lmax, frac)
 % jumps k1..k2: x(k1+1..k2) is a spike
 tf = false;
 if k2 <= k1 || k2 - k1 > Lmax || k1 - W + 1 < 1 || k2 + W > numel(x), return; end
@@ -80,5 +91,5 @@ after = median(x(k2+1:k2+W));
 beyond = max(max(seg) - max(before, after), min(before, after) - min(seg));
 if beyond < J, return; end                         %a step / monotonic transition
 largestJump = max(abs(diff(x(k1:k2+1))));
-tf = largestJump >= 0.5 * max(abs(seg - before));
+tf = largestJump >= frac * max(abs(seg - before));
 end

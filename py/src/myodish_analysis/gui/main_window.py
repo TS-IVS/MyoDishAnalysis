@@ -11,16 +11,20 @@
    up / down = zoom in / out; mouse over the overview: its time axis, otherwise the force plot (beyond the loaded
    window the loaded window follows and is read again; the zoomed overview moves along).
 2. Force plot: force - zero force; red = selected contractions, orange = uncertain (high sensitivity), grey = excluded
-   by the filters, x = excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range,
-   purple = comments.
+   by the filters, x = excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16), green
+   rings = elicited by an extra pulse, black diamonds = ambiguous stimulus assignment, grey background = rocker moving,
+   yellow = analysed range, purple = comments.
    Cursor mode 'drag = select time range' or 'click = exclude / include contraction'. Wheel = zoom the time axis,
    shift + wheel = move, double-click = whole loaded window. Right click: zero force, reference beat, save / export.
 3. Stimulus plot (current per pulse, interval to the previous pulse), table (mean, SD, n of the selected contractions,
    extra / missed / uncertain beats) and lower plot (one parameter per contraction). Detection threshold per channel
    (auto or manual); 'high sensitivity' (default) counts all contractions and marks the uncertain ones (orange), 'high
    specificity' does not count them (option detection). Rocker artifact ...: window with the signal before / after the
-   rocker filter and the removed artifact (save, export). Stimuli: MyoDish pulses or external trigger pulses (external
-   stimulator at the external controller unit; auto = trigger pulses if the window has no MyoDish pulses). Every data
+   rocker filter and the removed artifact (save, export). Advanced ... (2026-10-10): all parameters of the method that
+   are based on assumptions or experience, one tab per part (stimulus assignment / onset gate and stimulus source,
+   detection, noise / artifact and rocker rules, signal and spike removal, rocker filter, export); Guide = settings
+   guide (PDF), Defaults = options(), Apply / OK analyse the window again, Save settings ... / Load settings ...:
+   settings file (settings.py). Legend of the force plot: menu View (right click in the force plot). Every data
    export contains the table info (version, all settings); Open results ... restores recording, settings and analysis
    window of a results file and compares the contractions. Overlay contractions: mean beat (stimulus / peak) or
    time course of the range (t = 0 at the first stimulus), other channels of the same range by checkboxes, colour /
@@ -56,6 +60,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from .. import reference_beat as rb
 from .._matlab import Struct, mround, nanmean
 from ..add_labels import add_labels
+from ..advanced import ROWS as ADVANCED_ROWS
 from ..analyze_ap import AP_PARAMETERS, analyze_ap, remove_artefacts
 from ..analyze_channel import analyze_channel
 from ..analysis import datenum_to_timestamps, myodish_analysis
@@ -74,6 +79,38 @@ from .widgets import (BLUE, GREEN, GREY, MAGENTA, ORANGE, PURPLE, RED, ElidedLab
                       vlines)
 
 MU = "µ"
+# options of the advanced settings window (dialogs.AdvancedSettings, advanced.py), 2026-10-10
+ADVANCED_NAMES = tuple(r[0] for r in ADVANCED_ROWS)
+REREAD_NAMES = tuple(r[0] for r in ADVANCED_ROWS if r[8])  # applied when the data are read
+
+
+def _same(a, b):
+    """option values equal (numbers, text, None, arrays)"""
+    if isinstance(a, str) or isinstance(b, str) or a is None or b is None:
+        return a == b
+    try:
+        return bool(np.array_equal(np.asarray(a, float), np.asarray(b, float), equal_nan=True))
+    except (TypeError, ValueError):
+        return a == b
+
+
+def _fmt_opt(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return f"{v:g}"
+    if isinstance(v, (tuple, list, np.ndarray)):
+        return " ".join(f"{float(x):g}" for x in np.asarray(v, float).ravel())
+    return str(v)
+
+
+def _remove_legend(p):
+    """removes the legend of the markers (MainWindow._force_legend) from the plot p"""
+    leg = getattr(p, "_mda_legend", None)
+    if leg is not None:
+        if leg.scene() is not None:
+            leg.scene().removeItem(leg)
+        p._mda_legend = None
 
 
 def _plot_list():
@@ -379,18 +416,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cbRel = QtWidgets.QCheckBox("time 0 = window start")
         self.cbRel.setToolTip("time axis: 0 = start of the loaded window (display only; From/To, tables and exports keep "
                               "the time in the file, s)")
-        self.cXT = QtWidgets.QComboBox()
-        self.cXT.addItems(["stimuli: auto", "stimuli: MyoDish", "stimuli: ext. trigger"])
-        self.cXT.setToolTip("stimulus times: MyoDish pulses of the channel, or the external trigger pulses of the "
-                            "status channel (external stimulator at the external controller unit: one chamber, any "
-                            "data channel). auto = external trigger pulses if the window has no MyoDish pulses")
-        self.cXT.activated.connect(self.on_filter)
+        self.bAdv = btn("Advanced ...", self.on_advanced, "advanced settings: stimulus assignment (onset gate), stimulus "
+                        "source (MyoDish / external trigger), detection and filter parameters, pulse table (for users "
+                        "who know the method; see options.py)")
         self.cbRocker.toggled.connect(self.on_filter)
         pv.addWidget(self.cbRocker)
         self.cbStim.toggled.connect(self.on_filter)
         hs = QtWidgets.QHBoxLayout()
         hs.addWidget(self.cbStim)
-        hs.addWidget(self.cXT)
+        hs.addWidget(self.bAdv)
         pv.addLayout(hs)
         self.cbRF.toggled.connect(self.on_rocker_filter)
         self.cDet = QtWidgets.QComboBox()
@@ -460,6 +494,11 @@ class MainWindow(QtWidgets.QMainWindow):
         m.addAction("Export data of the parameter plot ...", lambda: self.export_plot_data("parameter"))
         m.addSeparator()
         m.addAction("Rocker artifact (removed signal) ...", self.on_rocker_window)
+        vm = self.menuBar().addMenu("View")  # 2026-10-10
+        self.aLegend = vm.addAction("Legend of the force plot")
+        self.aLegend.setCheckable(True)
+        self.aLegend.setChecked(True)
+        self.aLegend.toggled.connect(self.on_legend)
         hm = self.menuBar().addMenu("Help")
         hm.addAction("Help ...", self.on_help)
 
@@ -695,9 +734,83 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_filter(self, *_):
         self.opts.rocker = "stopped" if self.cbRocker.isChecked() else "any"
         self.opts.beats = "stimulated" if self.cbStim.isChecked() else "all"
-        self.opts.externalTrigger = ("auto", "off", "on")[self.cXT.currentIndex()]
         if self.S is not None:
             self.analyze(False)
+
+    def on_advanced(self, *_):
+        """advanced settings (2026-10-10): stimulus assignment (onset gate), stimulus source, detection, filters, pulse
+        table; Apply / OK analyse the window again (spike removal: the window is read again)"""
+        from .dialogs import AdvancedSettings
+        if getattr(self, "adv_win", None) is None:
+            self.adv_win = AdvancedSettings(self)
+        elif not self.adv_win.isVisible():
+            self.adv_win.show_options(self.opts)  # (hidden by Cancel / OK: current settings)
+        self.adv_win.show()
+        self.adv_win.raise_()
+        self.adv_win.activateWindow()
+        return self.adv_win
+
+    def apply_advanced(self, o):
+        """options o of the advanced settings window (checked; with settings of the main window loaded from a settings
+        file): the window is analysed again (options marked reread: read again); returns a message"""
+        from ..options import options as make_options
+        reread = any(not _same(o[k], self.opts[k]) for k in REREAD_NAMES)  # applied when the data are read
+        header = not _same(o.rockerSource, self.opts.rockerSource) or \
+            not _same(o.rockerLogDelay, self.opts.rockerLogDelay)
+        a = {k: v for k, v in self.opts.items() if k != "referenceBeat"}
+        b = {k: v for k, v in o.items() if k != "referenceBeat"}
+        changed = any(not _same(a.get(k), b.get(k)) for k in set(a) | set(b))
+        self.opts = o
+        for wdg, val in ((self.cbRF, bool(o.rockerFilter)), (self.cbRocker, o.rocker == "stopped"),
+                         (self.cbStim, o.beats == "stimulated")):  # settings of the main window (loaded settings)
+            wdg.blockSignals(True)
+            wdg.setChecked(val)
+            wdg.blockSignals(False)
+        self.cDet.blockSignals(True)
+        self.cDet.setCurrentIndex(1 if o.detection == "specific" else 0)
+        self.cDet.blockSignals(False)
+        d0 = make_options()
+        ch = [f"{k} = {_fmt_opt(o[k])}" for k in ADVANCED_NAMES if not _same(o[k], d0[k])]
+        msg = "Advanced settings: " + ("changed: " + ", ".join(ch) if ch else "defaults") + "."
+        if not changed or self.H is None:
+            self.status(msg)
+            return msg
+        if header:  # rocker state of the file
+            try:
+                self.H = read_mdd(self.H.file, opts=self.opts)
+            except Exception:  # noqa: BLE001
+                pass
+        if self.S is None:
+            self.status(msg)
+            return msg
+        if reread:
+            r0 = list(self.range)
+            self.on_load(window=self.win_req)
+            if self.S is not None and r0[0] >= self.S.fromSeconds - 1e-9 and r0[1] <= self.S.toSeconds + 1e-9:
+                self.range = r0
+                self.analyze(False)
+        else:
+            self.analyze(False)
+        self.status(msg + " " + self.lStatus.text())
+        return msg
+
+    def api_advanced(self, chg=None):
+        """tests / scripts: the advanced settings chg (dict) as typed in the window, then Apply; returns the options.
+        chg = 'save' / 'load' with next_file set before: Save settings ... / Load settings ... of the window"""
+        if not chg:
+            return self.opts
+        w = self.on_advanced()
+        if isinstance(chg, str):
+            if chg == "save":
+                w.save()
+            else:
+                w.load()
+            return self.opts
+        o = dict(self.opts)
+        o.update(chg)
+        w.show_options(o)
+        w.apply(False)
+        return self.opts
 
     def set_zero_at_click(self):
         if self.S is None or self.C is None or any(math.isnan(v) for v in self.alt_pt):
@@ -972,10 +1085,55 @@ class MainWindow(QtWidgets.QMainWindow):
         ax.t0 = self.S.fromSeconds if self.rel_time else 0.0
         ax.tmax = self.S.toSeconds - ax.t0 if self.rel_time else self.H.totalSeconds
 
+    def on_legend(self, on=None):
+        """legend of the markers in the force plot on / off (menu View; 2026-10-10)"""
+        if on is not None and bool(on) != self.aLegend.isChecked():
+            self.aLegend.setChecked(bool(on))  # (calls this again)
+            return
+        if self.C is not None:
+            self.plot_main(False)
+        else:
+            _remove_legend(self.pMain)
+
+    def _force_legend(self, p, has):
+        """legend of the markers of the force plot (items without data), the order of the settings guide"""
+        E = [("scatter", dict(symbol="t", size=8, pen=pg.mkPen(RED), brush=RED), "selected contraction", True),
+             ("scatter", dict(symbol="t", size=8, pen=pg.mkPen(ORANGE), brush=ORANGE), "uncertain (high sensitivity)",
+              True),
+             ("scatter", dict(symbol="t", size=8, pen=pg.mkPen((128, 128, 128)), brush=None), "excluded by filter", True),
+             ("scatter", dict(symbol="x", size=11, pen=pg.mkPen("k", width=1.5), brush="k"), "excluded by you", True),
+             ("scatter", dict(symbol="o", size=4, pen=None, brush=(153, 153, 153)), "outside the analysed range", True),
+             ("scatter", dict(symbol="o", size=12, pen=pg.mkPen(MAGENTA, width=1.5), brush=None),
+              "deviating from the reference beat", has["dev"]),
+             ("scatter", dict(symbol="o", size=13, pen=pg.mkPen(GREEN, width=1.5), brush=None),
+              "elicited by an extra pulse", has["ex"]),
+             ("scatter", dict(symbol="d", size=13, pen=pg.mkPen("k", width=1), brush=None),
+              "ambiguous stimulus assignment", has["amb"]),
+             ("scatter", dict(symbol="o", size=11, pen=pg.mkPen("k", width=1.3), brush=None), "only in the results file",
+              has["res"]),
+             ("line", pg.mkPen(BLUE, width=1), "stimulus pulse", True),
+             ("line", pg.mkPen(GREEN, width=1.2), "extra pulse (status bit 16)", has["x"]),
+             ("scatter", dict(symbol="s", size=10, pen=None, brush=(140, 140, 140, 64)), "rocker moving", True),
+             ("scatter", dict(symbol="s", size=10, pen=pg.mkPen((217, 179, 51)), brush=(255, 245, 191)),
+              "analysed range", True),
+             ("line", pg.mkPen(PURPLE, width=1, style=QtCore.Qt.PenStyle.DotLine), "comment of the log file",
+              has["com"]),
+             ("line", pg.mkPen((184, 184, 184), width=1), "before the rocker filter", has["raw"])]
+        leg = pg.LegendItem(offset=(-6, 6), labelTextSize="7pt", colCount=2, pen=pg.mkPen((180, 180, 180)),
+                            brush=pg.mkBrush(255, 255, 255, 215), verSpacing=-6, horSpacing=8)
+        leg.setParentItem(p.vb)
+        for kind, st, name, show in E:
+            if not show:
+                continue
+            it = pg.ScatterPlotItem(**st) if kind == "scatter" else pg.PlotDataItem(pen=st)
+            leg.addItem(it, name)
+        p._mda_legend = leg
+
     def plot_main(self, reset_x, target=None):
         p = self.pMain if target is None else target
         old = self.pMain.vb.viewRange()[0]
         p.clear()
+        _remove_legend(p)
         C, S, B = self.C, self.S, self.B
         if target is None:
             self.hv_f = None
@@ -1009,6 +1167,12 @@ class MainWindow(QtWidgets.QMainWindow):
         c.setClipToView(True)
         st = C.stimTimes[(C.stimTimes >= S.fromSeconds) & (C.stimTimes <= S.toSeconds)]
         vlines(p, st, yl[0], yl[0] + 0.04 * (yl[1] - yl[0]), BLUE)
+        xt = np.asarray(C.get("extraTimes", np.zeros(0)), float).ravel()  # extra pulses (bit 16; 2026-10-10): green
+        xt = xt[(xt >= S.fromSeconds) & (xt <= S.toSeconds)]
+        has_x = xt.size > 0
+        if has_x:
+            vlines(p, xt, yl[0], yl[0] + 0.06 * (yl[1] - yl[0]), GREEN, width=1.2)
+        has_amb = has_dv = has_ex = has_res = has_com = False
         if B is not None and len(B):
             pk = {v: i for i, v in enumerate(C.peakTimes)}
             tp = B["t_peak"].to_numpy()
@@ -1026,12 +1190,25 @@ class MainWindow(QtWidgets.QMainWindow):
             p.addItem(pg.ScatterPlotItem(tp[sel], y[sel], symbol="t", size=8, pen=pg.mkPen(RED), brush=RED))
             p.addItem(pg.ScatterPlotItem(tp[unc], y[unc], symbol="t", size=8, pen=pg.mkPen(ORANGE), brush=ORANGE))
             dv = self.deviating() & inR
-            if dv.any():
+            has_dv = bool(dv.any())
+            if has_dv:
                 p.addItem(pg.ScatterPlotItem(tp[dv], y[dv], symbol="o", size=14, pen=pg.mkPen(MAGENTA, width=1.5),
                                              brush=None))
+            if "elicitedByExtraPulse" in B.columns:  # 2026-10-10
+                ex = inR & B["elicitedByExtraPulse"].to_numpy(bool)  # elicited by an extra pulse: green rings
+                has_ex = bool(ex.any())
+                if has_ex:
+                    p.addItem(pg.ScatterPlotItem(tp[ex], y[ex], symbol="o", size=16, pen=pg.mkPen(GREEN, width=1.5),
+                                                 brush=None))
+                am = inR & B["stimAmbiguous"].to_numpy(bool)  # ambiguous stimulus assignment: black diamonds
+                has_amb = bool(am.any())
+                if has_amb:
+                    p.addItem(pg.ScatterPlotItem(tp[am], y[am], symbol="d", size=15, pen=pg.mkPen("k", width=1),
+                                                 brush=None))
         if self.res_only:  # opened results: contractions not detected again (black o)
             ro = np.asarray(self.res_only, float)
             ro = ro[(ro >= S.fromSeconds) & (ro <= S.toSeconds)]
+            has_res = ro.size > 0
             if ro.size:
                 p.addItem(pg.ScatterPlotItem(ro, np.interp(ro, C.t, fy), symbol="o", size=13,
                                              pen=pg.mkPen("k", width=1.3), brush=None))
@@ -1039,6 +1216,7 @@ class MainWindow(QtWidgets.QMainWindow):
             E = self.LE
             cm = E["isComment"].to_numpy() & (E["t_file"].to_numpy() >= S.fromSeconds) & \
                 (E["t_file"].to_numpy() <= S.toSeconds)
+            has_com = bool(cm.any())
             if cm.any():
                 tc = E["t_file"].to_numpy()[cm]
                 vlines(p, tc, yl[0], yl[1], PURPLE, style=QtCore.Qt.PenStyle.DotLine)
@@ -1057,10 +1235,17 @@ class MainWindow(QtWidgets.QMainWindow):
             p.vb.setXRange(old[0], old[1], padding=0)
         p.setLabel("left", f"force - zero force ({MU}N)" if has_zero else f"force ({MU}N, sensor signal; zero "
                    "unknown)")
-        ttl = (f"Channel {self.ch}   (red = selected, orange = uncertain, grey = excluded by filter, x = excluded by you, blue = stimuli, "
-               "grey background = rocker moving, purple = comments")
-        ttl += ", light grey = before rocker filter)" if show_raw else ")"
-        set_title(p, ttl)
+        if getattr(self, "aLegend", None) is None or self.aLegend.isChecked():  # legend of the markers (2026-10-10)
+            self._force_legend(p, dict(dev=has_dv, ex=has_ex, amb=has_amb, res=has_res, x=has_x, com=has_com,
+                                       raw=bool(show_raw)))
+            set_title(p, f"Channel {self.ch}")
+            return
+        ttl = (f"Channel {self.ch}   (red = selected, orange = uncertain, grey = excluded by filter, x = excluded by "
+               "you, blue = stimuli, grey background = rocker moving, purple = comments")
+        ttl += ", light grey = before rocker filter" if show_raw else ""
+        ttl += ", green = extra pulses / elicited by one" if has_x else ""
+        ttl += ", diamond = ambiguous stimulus" if has_amb else ""
+        set_title(p, ttl + ")")
 
     def plot_param(self, target=None):
         p = self.pPar if target is None else target
@@ -1123,6 +1308,14 @@ class MainWindow(QtWidgets.QMainWindow):
         rows.append(["extra beats", fmt_num(Sm.extraBeats_percent, 3), "", str(int(Sm.nDetected)), "%"])
         rows.append(["missed beats", f"{int(Sm.nMissedBeats)}", "", str(int(Sm.nStimuli)), "count"])
         rows.append(["missed beats", fmt_num(Sm.missedBeats_percent, 3), "", str(int(Sm.nStimuli)), "%"])
+        if "nMissedDuringContraction" in Sm.index:  # 2026-10-10
+            rows.append(["missed in a contraction", f"{int(Sm.nMissedDuringContraction)}", "", str(int(Sm.nStimuli)),
+                         "count"])
+            if Sm.nExtraPulses > 0:
+                rows.append(["extra pulses", f"{int(Sm.nExtraPulses)}", "", "", "count"])
+                rows.append(["elicited by extra pulse", f"{int(Sm.nElicitedByExtraPulse)}", "", str(int(Sm.nStimulated)),
+                             "count"])
+            rows.append(["ambiguous stimulus", f"{int(Sm.nAmbiguous)}", "", str(int(Sm.nStimulated)), "count"])
         rows.append(["uncertain (all)", f"{int(Sm.nUncertain)}", "", str(int(Sm.nDetected)), "count"])
         rows.append(["uncertain stimulated", f"{int(Sm.nStimulatedUncertain)}", "", str(int(Sm.nStimulated)), "count"])
         rows.append(["uncertain extra", f"{int(Sm.nExtraBeatsUncertain)}", "", str(int(Sm.nExtraBeats)), "count"])
@@ -1161,6 +1354,11 @@ class MainWindow(QtWidgets.QMainWindow):
                f"stimulated, {int(Sm.nExtraBeats)} extra)\n{int(Sm.nStimuli)} stimuli"
                f"{' (ext. trigger)' if self.C.stimChannel == 0 else ''} ({Sm.stimFrequency:.2f} Hz), "
                f"{int(Sm.nMissedBeats)} without contraction\n{self.label_line(Sm)}")
+        if "nExtraPulses" in Sm.index and (Sm.nExtraPulses > 0 or Sm.nAmbiguous > 0):
+            xp = (f"{int(Sm.nExtraPulses)} extra pulses ({int(Sm.nElicitedByExtraPulse)} elicited a contraction), "
+                  if Sm.nExtraPulses > 0 else "")
+            txt += (f"\n{xp}{int(Sm.nAmbiguous)} ambiguous stimulus assignments, missed in a contraction: "
+                    f"{int(Sm.nMissedDuringContraction)}")
         if self.C.rockerFilter is not None:
             txt += "\n" + self.rocker_line(self.C.rockerFilter)
         if has_ref:
@@ -1672,6 +1870,7 @@ class MainWindow(QtWidgets.QMainWindow):
             m.addAction("Remove reference beat of this channel", self.clear_reference)
             m.addSeparator()
             m.addAction("Show rocker artifact (removed signal) ...", self.on_rocker_window)
+            m.addAction("Show / hide legend", lambda: self.aLegend.setChecked(not self.aLegend.isChecked()))
             m.addSeparator()
         if name in ("ep_v", "ep_s"):  # EP plots: y limits, stimulus artefacts (2026-10-09)
             k = 1 if name == "ep_v" else 2
@@ -1970,7 +2169,8 @@ class MainWindow(QtWidgets.QMainWindow):
             wdg.setChecked(val)
             wdg.blockSignals(False)
         self.cDet.setCurrentIndex(1 if self.opts.detection == "specific" else 0)
-        self.cXT.setCurrentIndex(("auto", "off", "on").index(self.opts.externalTrigger))
+        if getattr(self, "adv_win", None) is not None:  # advanced settings of the results (shown when opened again)
+            self.adv_win.close()
         self.ch = ch
         self.cCh.setCurrentIndex(dc.index(ch))
         self.show_threshold()
@@ -2116,6 +2316,14 @@ class MainWindow(QtWidgets.QMainWindow):
                                             self.win_req[0], self.win_req[1]]],
                                           columns=["range", "channel", "from", "to", "threshold_uN", "maxStimToPeak_s",
                                                    "windowFrom", "windowTo"])
+        P = C.get("pulses")
+        if self.opts.pulseTable and isinstance(P, pd.DataFrame) and len(P):  # pulses of the range (2026-10-10)
+            P = P[(P["t"] >= self.range[0]) & (P["t"] <= self.range[1])].copy()
+            pos = pd.Series(T["contraction"].to_numpy(float), index=T["t_peak"].to_numpy(float))
+            pos = pos[~pos.index.duplicated()]
+            P["contraction"] = P["t_peak"].map(pos).to_numpy(float)
+            P.insert(0, "range", "range1")
+            info["pulses"] = P.reset_index(drop=True)
         RF = C.get("rockerFilter")
         if RF is not None:  # result of the rocker filter (as myodish_analysis)
             info["rockerFilter"] = pd.DataFrame([["range1", self.ch, self.S.fromSeconds, self.S.toSeconds, RF.status,

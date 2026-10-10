@@ -15,7 +15,7 @@ authors:
     affiliation: "Institute of Cellular and Molecular Physiology, Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU); InVitroSys GmbH"
     email: "thomas.seidel@fau.de"
     orcid: "https://orcid.org/0000-0002-3127-1693"
-version: "1.0.0-beta.3"
+version: "1.0.0-beta.4"
 date-released: "2026-10-10"
 license: "GPL-3.0-or-later"
 repository-code: "https://github.com/TS-IVS/MyoDishAnalysis"

@@ -23,10 +23,20 @@ other: none. FFR, RP, ST, PRP, PD also as separate words or parts of a CamelCase
 
 group_beats: see the help of mda_groupBeats.m (same quantities, groups, columns; return_stimuli=True: also Z, the
 stimuli of the channel with role, value and capture, input of protocol_results):
-  pacingFrequency, S2interval, stimCurrent, pauseLength, rockerSpeed, pulseDuration, 'log:<code>'.
+  pacingFrequency, S2interval, stimCurrent, pauseLength, rockerSpeed, pulseDuration, 'log:<code>'. Extra pulses (status
+  channel bit 16) are no stimuli of the protocol; an extra pulse belongs to the group of the nearest regular pulse, a
+  contraction elicited by it to the group of the last regular pulse at or before it, an extra beat to the group of
+  the last regular pulse at or before its onset. pacingFrequency: groups = frequencies rounded to
+  opts.frequencyResolution (0.1 Hz; below 1 Hz frequencyResolutionLow, 0.05 Hz); pauseLength: pauses within opts.pauseTolerance (10 %) of the
+  shortest pause of a set have the same pause length.
+
+steady_n (FFR protocols: opts.steadyStateBeats): steady state per frequency (the last steady_n contractions of the
+longest run, within it of the longest sequence of consecutive captured stimuli with captured neighbours; rocker at rest
+if any, see ffrRockerFallback); pauseLength: reference of each pause (prpReference); amplitude_CV, irregular;
+return_notes=True: also the notes (2026-10-10).
 
 TS 2026-10-07 (port of mda_protocols.m and mda_groupBeats.m; schedule files 2026-10-07; uncertain contractions
-2026-10-09)
+2026-10-09; extra pulses, frequency / pause tolerances, FFR steady state, PRP reference, irregular groups 2026-10-10)
 """
 from __future__ import annotations
 
@@ -239,6 +249,8 @@ def regular_pacing_start(H, t0, tLimit, minDur=300.0):
         e = min(b, a + 3600.0)
         S = read_data(H, a, e, 2, stim_only=True)
         k = (S.stim.time >= a) & (S.stim.time < e)  # chunk boundaries: no pulse twice
+        if "isExtraPulse" in S.stim:
+            k &= ~np.asarray(S.stim.isExtraPulse, bool)  # extra pulses: no pacing (2026-10-10)
         tt.append(S.stim.time[k]); ch.append(S.stim.channel[k]); cur.append(S.stim.current[k])
         a = e
     tt, ch, cur = np.concatenate(tt), np.concatenate(ch), np.concatenate(cur)
@@ -299,11 +311,20 @@ def _g(x):
 
 
 # =====================================================================================================
-def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
+def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0, return_notes=False):
     from .options import options as make_options
     from .read_mdd import read_mdd
     if opts is None:
         opts = make_options()
+    steadyN = int(steady_n or 0)
+    notes = []
+    ffrFallback = bool(opts.get("ffrRockerFallback", True))  # options of older versions: defaults
+    prpRef = opts.get("prpReference", "steady")
+    prpN = int(opts.get("prpReferenceBeats", 6))
+    irrCV = float(opts.get("irregularCV", 0.15))
+    minGB = int(opts.get("minGroupBeats", 5))
+    rockerSel = opts.get("rocker", "any")
+    beatsSel = opts.get("beats", "all")
     by = str(by)
     byl = by.lower()
     r0, r1 = float(range_[0]), float(range_[1])
@@ -311,7 +332,10 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
     # stimuli of the channel (with the 300 s before)
     S = read_mdd(H, max(0.0, r0 - 300), min(H.totalSeconds, r1 + 1), opts)
     stimCh = C.stimChannel
-    idx = np.flatnonzero(S.stim.channel == stimCh)
+    isX = np.zeros(np.size(S.stim.channel), bool)  # extra pulses (status channel bit 16) are no stimuli of the
+    if "isExtraPulse" in S.stim and stimCh > 0 and opts.get("stimAssignment", "onset") != "peak":  # protocol
+        isX = np.asarray(S.stim.isExtraPulse, bool)  # (option stimAssignment 'peak': as before)
+    idx = np.flatnonzero((S.stim.channel == stimCh) & ~isX)
     o = np.argsort(S.stim.time[idx], kind="stable")
     idx = idx[o]
     tt = S.stim.time[idx]
@@ -326,8 +350,19 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
     step = np.full(nS, np.nan)  # pauseLength: number of the pause
     role = np.array([""] * nS, dtype=object)
     refRole = ""
-    if byl == "pacingfrequency":
-        val = 1.0 / _group_median(prevInt, _cluster_values(prevInt, 0.0, 0.02))
+    runId = np.zeros(nS, int)
+    steadyCL = math.nan
+    if byl == "pacingfrequency":  # one group per rounded frequency (frequencyResolution, 2026-10-10)
+        val = _round_frequency(1.0 / _group_median(prevInt, _cluster_values(prevInt, 0.0, 0.02)),
+                               float(opts.get("frequencyResolution", 0.1)),
+                               float(opts.get("frequencyResolutionLow", 0.05)))
+        # runs of consecutive stimuli at the same frequency; step = number of the run of this frequency (steady state)
+        runId = np.cumsum(np.r_[True, ~(val[1:] == val[:-1])])[:nS]
+        if steadyN > 0:
+            for v in np.unique(val[~np.isnan(val)]):
+                r = list(dict.fromkeys(runId[val == v].tolist()))
+                for q, x in enumerate(r):
+                    step[runId == x] = q + 1
     elif byl == "s2interval":
         with np.errstate(invalid="ignore"):
             premature = (prevInt < 0.95 * np.r_[np.nan, prevInt[:-1]]) & (np.isnan(nextInt) | (nextInt > 1.05 * prevInt))
@@ -373,6 +408,10 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
         role[after] = "afterRest"
         role[rest] = "postRest"
         val[rest] = prevInt[rest]
+        pz = np.full(nS, np.nan)  # pauses within pauseTolerance: one pause length (2026-10-10)
+        pz[rest] = prevInt[rest] - (steadyCL if not math.isnan(steadyCL) else 0.0)
+        v2 = _group_median(prevInt, _cluster_anchored(pz, float(opts.get("pauseTolerance", 0.1))))
+        val[rest] = np.array([mround(x * 1000) for x in v2[rest]]) / 1000  # (ms: labels without rounding noise)
         sr = rest & inR
         step[sr] = np.arange(1, int(sr.sum()) + 1)
         refRole = "steady"
@@ -401,10 +440,14 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
     tPeak = B["t_peak"].to_numpy(float)
     # stimulus of every contraction: first stimulus with t == t_stim, without t_stim the last stimulus <= t_peak -
     # minStimToPeak (lookups instead of a search over all stimuli per contraction: long protocols, 2026-10-10)
+    # (2026-10-10: contraction elicited by an extra pulse: the last regular pulse at or before it; extra beat: the last
+    # regular pulse at or before the onset, if known)
     k = _first_index(tt, tStim)
-    noStim = np.isnan(tStim)
+    noStim = np.isnan(tStim) | (k < 0)
     if noStim.any():
-        x = tPeak[noStim] - opts.minStimToPeak
+        hasOn = "t_onset" in B.columns and opts.get("stimAssignment", "onset") != "peak"
+        tOn = B["t_onset"].to_numpy(float) if hasOn else np.full(nB, np.nan)
+        x = np.where(~np.isnan(tStim), tStim, np.where(~np.isnan(tOn), tOn, tPeak - opts.minStimToPeak))[noStim]
         if np.all(np.diff(tt) >= 0):
             k[noStim] = np.searchsorted(tt, x, side="right") - 1  # -1: none
         else:
@@ -426,6 +469,66 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
     B["groupRole"] = list(bRole)
     B["groupStep"] = bStep
 
+    # FFR: steady state per frequency (2026-10-10)
+    selStep = {}
+    if byl == "pacingfrequency" and steadyN > 0 and nB > 0 and nS > 0:
+        amp = B["amplitude"].to_numpy(float)
+        eligible = ~np.isnan(amp)
+        stim = B["beatType"].to_numpy() == "stimulated"
+        if beatsSel == "stimulated":
+            eligible &= stim
+        moving = B["rockerMoving"].to_numpy(bool)
+        inc = B["included"].to_numpy(bool).copy()
+        inRs = (tt >= r0) & (tt <= r1)
+        # captured stimuli: followed by their stimulated contraction (any rocker state). Within the longest run, only
+        # captured stimuli whose previous and next stimulus are captured, too, count (preceding and following interval
+        # of the contraction = stimulus intervals), and of these the longest sequence of consecutive stimuli: partial
+        # capture (e.g. 2:1) is no steady state at this frequency (2026-10-10)
+        capt = np.zeros(nS, bool)
+        okC = has & stim & ~np.isnan(amp)
+        capt[k[okC]] = True
+        okS = capt & np.r_[False, capt[:-1]] & np.r_[capt[1:], True]
+        fb = []
+        nc = []
+        for key in list(dict.fromkeys(bLbl[has].tolist())):
+            rowsG = bLbl == key
+            js = np.flatnonzero(inRs & (lbl == key))
+            if js.size == 0 or math.isnan(val[js[0]]):
+                continue
+            ru = runId[js]
+            u, cnt = np.unique(ru, return_counts=True)
+            rSel = u[np.flatnonzero(cnt == cnt.max())[-1]]  # longest run (equal length: the later one)
+            jRun = np.flatnonzero(runId == rSel)
+            jOk = jRun[okS[jRun]]
+            if jOk.size == 0:
+                nc.append(key)
+            else:
+                sub = np.cumsum(np.r_[1, np.diff(jOk) != 1])
+                cs = np.bincount(sub)
+                jOk = jOk[sub == np.flatnonzero(cs == cs.max())[-1]]
+            cand = rowsG & has & eligible & np.isin(k, jOk)
+            if rockerSel == "stopped":
+                use = cand & ~moving
+                if not use.any() and cand.any() and ffrFallback:
+                    use = cand
+                    fb.append(key)
+            elif rockerSel == "moving":
+                use = cand & moving
+            else:
+                use = cand
+            iu = np.flatnonzero(use)
+            iu = iu[np.argsort(tPeak[iu], kind="stable")]
+            iu = iu[max(0, iu.size - steadyN):]
+            inc[rowsG] = False
+            inc[iu] = True
+            selStep[key] = float(step[np.flatnonzero(runId == rSel)[0]])
+        B["included"] = inc
+        if fb:
+            notes.append("no contraction with the rocker at rest at %s: contractions with the rocker moving used"
+                         % ", ".join(fb))
+        if nc:
+            notes.append("no run of captured stimuli at %s (missed beats): no steady-state contractions" % ", ".join(nc))
+
     # summary per group
     inR = (tt >= r0) & (tt <= r1)
     Cst = np.asarray(C.stimTimes, dtype=float)
@@ -437,6 +540,24 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
     hasC = jC >= 0
     captured[hasC] = Ccap[jC[hasC]]
     capturedCertain[hasC] = Ccc[jC[hasC]]
+    duringC = np.zeros(nS, bool)  # within a contraction elicited by another pulse
+    Cdc = C.get("stimDuringContraction")
+    if Cdc is not None and np.size(Cdc) == Cst.size:
+        duringC[hasC] = np.asarray(Cdc, bool)[jC[hasC]]
+    # extra pulses of the range: group of the nearest regular pulse (pre-pulse: the next one, CCM pulse: the previous
+    # one)
+    xT = np.zeros(0)
+    xE = np.zeros(0, bool)
+    xLbl = np.array([], dtype=object)
+    if C.get("extraTimes") is not None and np.size(C.extraTimes) and nS > 0:
+        xT = np.asarray(C.extraTimes, float).ravel()
+        xE = np.zeros(xT.size, bool)
+        if C.get("extraElicited") is not None and np.size(C.extraElicited) == xT.size:
+            xE = np.asarray(C.extraElicited, bool).ravel()
+        keepX = (xT >= r0) & (xT <= r1)
+        xT = xT[keepX]
+        xE = xE[keepX]
+        xLbl = np.array([lbl[int(np.argmin(np.abs(tt - x)))] for x in xT], dtype=object)
     inRb = (tPeak >= r0) & (tPeak <= r1)
     keys = []
     for x in list(lbl[inR]) + list(bLbl[inRb]):
@@ -465,6 +586,9 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
         Cg.stimTimes = tt[js]
         Cg.stimCaptured = captured[js]
         Cg.stimCapturedCertain = capturedCertain[js]
+        Cg.stimDuringContraction = duringC[js]
+        Cg.extraTimes = xT[xLbl == keys[q]] if xT.size else np.zeros(0)
+        Cg.extraElicited = xE[xLbl == keys[q]] if xT.size else np.zeros(0, bool)
         Bg = B[B["group"].to_numpy() == keys[q]]
         T = summarize(Bg, Cg, [r0, r1])
         pj = prevInt[js]
@@ -483,8 +607,12 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
         parts.append(T)
     Z = pd.DataFrame(dict(t=tt, prevInt=prevInt, nextInt=nextInt, role=role, value=val, step=step, group=lbl,
                           captured=captured, inRange=inR))
+    def _out(B, G):
+        res = (B, G, Z) if return_stimuli else (B, G)
+        return res + (notes,) if return_notes else res
+
     if not parts:
-        return (B, pd.DataFrame(), Z) if return_stimuli else (B, pd.DataFrame())
+        return _out(B, pd.DataFrame())
     G = pd.concat(parts, ignore_index=True)
     ref = math.nan
     if refRole:
@@ -492,7 +620,61 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False):
         if r.size:
             ref = float(G["amplitude_mean"].iloc[r[0]])
     G.insert(list(G.columns).index("amplitude_SD") + 1, "amplitude_pctOfRef", 100 * G["amplitude_mean"] / ref)
-    return (B, G, Z) if return_stimuli else (B, G)
+    cv = G["amplitude_CV"].to_numpy(float)
+    with np.errstate(invalid="ignore"):
+        irregular = np.where(np.isnan(cv), np.nan, (cv > irrCV).astype(float))
+    G.insert(list(G.columns).index("amplitude_CV") + 1, "irregular", irregular)
+    if selStep:  # FFR: number of the run summarized
+        G["groupStep"] = [selStep.get(g, x) for g, x in zip(G["group"], G["groupStep"].to_numpy(float))]
+    if byl == "pacingfrequency" and steadyN > 0 and minGB > 0:
+        nc = G["nContractions"].to_numpy(float)
+        few = np.flatnonzero((nc > 0) & (nc < minGB) & ~np.isnan(G["groupValue"].to_numpy(float)))
+        if few.size:
+            notes.append("fewer than %d included contractions at %s" % (minGB, ", ".join(
+                "%s (%d)" % (G["group"].iloc[q], int(nc[q])) for q in few)))
+    # post-rest potentiation: reference of each pause (2026-10-10)
+    if byl == "pauselength" and prpRef != "steady" and nB > 0 and not math.isnan(steadyCL):
+        with np.errstate(invalid="ignore"):
+            regular = np.abs(prevInt - steadyCL) <= 0.05 * steadyCL  # stimuli at the steady interval
+        amp = B["amplitude"].to_numpy(float)
+        cOf = np.full(nS, -1)  # stimulated contraction of every stimulus
+        okB = has & (B["beatType"].to_numpy() == "stimulated") & ~np.isnan(amp)
+        for i in np.flatnonzero(okB):
+            cOf[k[i]] = i
+        post = np.flatnonzero((B["groupRole"].to_numpy() == "postRest") & has & B["included"].to_numpy(bool))
+        refOf = np.full(nB, np.nan)
+        if prpRef == "preceding":
+            for i in post:
+                lst = []
+                j = k[i] - 1
+                while j >= 0 and regular[j]:
+                    if cOf[j] >= 0:
+                        lst.append(cOf[j])
+                        if len(lst) == prpN:
+                            break
+                    j -= 1
+                if lst:
+                    refOf[i] = float(np.median(amp[lst]))
+        else:  # 'firstTrain'
+            kp = np.flatnonzero((role == "postRest") & (tt >= r0) & (tt <= r1))
+            lst = []
+            if kp.size:
+                j = kp[0] - 1
+                while j >= 0 and regular[j]:
+                    if cOf[j] >= 0:
+                        lst.append(cOf[j])
+                    j -= 1
+            if lst:
+                refOf[post] = float(np.mean(amp[lst]))
+        grp = B["group"].to_numpy()
+        pct = G["amplitude_pctOfRef"].to_numpy(float).copy()
+        for q in np.flatnonzero(G["groupRole"].to_numpy() == "postRest"):
+            rq = post[grp[post] == G["group"].iloc[q]]
+            x = amp[rq] / refOf[rq]
+            x = x[~np.isnan(x)]
+            pct[q] = 100 * float(np.mean(x)) if x.size else math.nan
+        G["amplitude_pctOfRef"] = pct
+    return _out(B, G)
 
 
 def add_empty_group_columns(B, T):
@@ -507,6 +689,7 @@ def add_empty_group_columns(B, T):
     T.insert(pos, "capture_percent", np.nan)
     T.insert(pos + 1, "currentReached_percent", np.nan)
     T.insert(list(T.columns).index("amplitude_SD") + 1, "amplitude_pctOfRef", np.nan)
+    T.insert(list(T.columns).index("amplitude_CV") + 1, "irregular", np.nan)
     T.insert(0, "groupBy", "none")
     T.insert(0, "groupStep", np.nan)
     T.insert(0, "groupRole", "")
@@ -527,6 +710,35 @@ def _cluster_values(v, absTol, relTol):
     ok = ~np.isnan(v)
     gid[ok] = np.searchsorted(starts, v[ok], side="right") - 1
     return gid
+
+
+def _cluster_anchored(v, relTol):
+    """groups of similar values: sorted distinct values, a new group where the value > (1 + relTol) x the first value
+    of the group (no chaining)"""
+    gid = np.full(v.shape, -1)
+    u = np.unique(v[~np.isnan(v)])
+    if u.size == 0:
+        return gid
+    starts = [u[0]]
+    for x in u[1:]:
+        if x > (1 + relTol) * starts[-1] + 1e-12:
+            starts.append(x)
+    ok = ~np.isnan(v)
+    gid[ok] = np.searchsorted(np.asarray(starts), v[ok], side="right") - 1
+    return gid
+
+
+def _round_frequency(f, res, res_low=0.05):
+    """frequency rounded to res (Hz) at >= 1 Hz, to res_low below 1 Hz (as MATLAB round; division by the integer
+    1 / res where possible: exact decimals)"""
+    f = np.asarray(f, float)
+    out = np.full(f.shape, np.nan)
+    for sel, r in (((f >= 1), res), ((f < 1), res_low)):  # (NaN: neither)
+        q = 1.0 / r
+        if abs(q - round(q)) < 1e-9:
+            q = float(round(q))
+        out[sel] = np.array([mround(x * q) for x in f[sel]]) / q
+    return out
 
 
 def _group_median(v, gid):
@@ -555,9 +767,8 @@ def _first_index(a, v):
 def _group_labels(byl, val, role, byName):
     out = []
     for v, r in zip(val, role):
-        if byl == "pacingfrequency":
-            stp = 0.05 if v >= 0.5 else 0.01
-            s = "%g Hz" % (mround(v / stp) * stp) if not math.isnan(v) else ""
+        if byl == "pacingfrequency":  # the rounded frequency (_round_frequency)
+            s = "%g Hz" % v if not math.isnan(v) else ""
         elif byl == "s2interval":
             if r == "S1":
                 s = "S1"
@@ -572,7 +783,7 @@ def _group_labels(byl, val, role, byName):
         elif byl == "stimcurrent":
             s = "%g mA" % v
         elif byl == "pauselength":
-            s = "rest %.3g s" % v if r == "postRest" else ("after rest" if r == "afterRest" else r)
+            s = "rest %s s" % _g3(v) if r == "postRest" else ("after rest" if r == "afterRest" else r)
         elif byl == "rockerspeed":
             s = "%g rpm" % v
         elif byl == "pulseduration":
@@ -583,6 +794,14 @@ def _group_labels(byl, val, role, byName):
             s = "unknown"
         out.append(s)
     return np.array(out, dtype=object)
+
+
+def _g3(v):
+    """v with 3 significant digits as MATLAB sprintf('%.3g') (halves away from zero)"""
+    if math.isnan(v) or v == 0:
+        return "%g" % v
+    d = 2 - int(math.floor(math.log10(abs(v))))
+    return "%g" % (mround(v * 10 ** d) / 10 ** d)
 
 
 def _unique_last(te, x):

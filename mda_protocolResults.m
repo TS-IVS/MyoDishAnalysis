@@ -15,7 +15,9 @@ function R = mda_protocolResults(by, G, Z, trace, opts)
 %   GetFFRdata / GetStimThreshold: at most 1 skipped stimulus per rocker stop).
 %   FFR (pacingFrequency)
 %     maxCapturedFrequency_Hz   highest captured pacing frequency
-%     amplitude_0p5Hz_uN        mean amplitude at 0.5 Hz (captured group within +-5 %)
+%     amplitude_0p5Hz_uN        mean amplitude at 0.5 Hz (captured group; groups: frequencies rounded to
+%                               opts.frequencyResolution, 0.1 Hz, below 1 Hz frequencyResolutionLow, 0.05 Hz, see
+%                               mda_groupBeats)
 %     FFR_1Hz_pct, FFR_2Hz_pct, FFR_3Hz_pct   mean amplitude at 1 / 2 / 3 Hz in % of 0.5 Hz (captured groups)
 %   ST (stimCurrent)
 %     captureThreshold_mA       lowest captured current
@@ -32,6 +34,12 @@ function R = mda_protocolResults(by, G, Z, trace, opts)
 %                               a separate peak < 50 %)
 %     refPeriodNoResponse_ms    S2 interval below which there is no response at all (median response < noise level)
 %     ...Step_ms                distance of the two intervals around the transition (uncertainty ~ +-Step/2)
+%     refPeriodAllCaptured_ms   (2026-10-10) from long to short S2 intervals, the interval before the first one at
+%                               which not every S2 had a separate peak (definition above); every S2 with a separate
+%                               peak: the shortest interval (note); already at the longest one: NaN (note). Definition
+%                               as the refractory period of the MyoDish export, but more sensitive to a single S2
+%                               without a separate peak: in 323 recordings of human slices refPeriodNoPeak_ms agreed
+%                               better with the export (within 10 %: 95 vs 85 %; bias -1 vs +13 ms)
 %     Transition: the first interval (from long to short) below the level whose next shorter interval is also
 %     below it; linear interpolation with the previous (longer) interval. Not reached / already at the longest
 %     interval: NaN and a note. Noise level >= 50 %: NaN (no reliable S1 contraction).
@@ -39,13 +47,21 @@ function R = mda_protocolResults(by, G, Z, trace, opts)
 %                               is below S2shortest_ms; 'already at the longest interval': above S2longest_ms)
 %     S2noiseLevel_pct, amplitudeS1_uN, nS2, nTemplateBeats
 %   PRP (pauseLength)
-%     PRP15_pct, PRP30_pct, PRP60_pct   amplitude in % of the steady reference after the pause nearest to 15 / 30 /
-%                               60 s (pause = stimulus interval - steady interval; within +-50 %)
-%     PRP15_pause_s, ...        the actual pause
+%     PRP15_pct, PRP30_pct, PRP60_pct   amplitude in % of the reference (option prpReference, default: median of the
+%                               last 6 contractions before the pause) after a pause of 15 / 30 / 60 s
+%                               (pause = stimulus interval - steady interval; within +-opts.pauseTolerance, default
+%                               10 %; several pauses: their mean, resultNote)
+%     PRP15_pause_s, ...        the pause (mean of these pauses)
 %   resultNote
 %
-% TS 2026-10-07
+% TS 2026-10-07 (tolerances frequencyResolution / pauseTolerance 2026-10-10: FFR groups at 0.1 Hz (below 1 Hz
+% 0.05 Hz), before +-5 %;
+% pauses +-10 %, before the nearest pause within +-50 %; refPeriodAllCaptured 2026-10-10)
 
+if nargin < 5 || isempty(opts), opts = struct(); end
+fRes = 0.1; if isfield(opts, 'frequencyResolution'), fRes = opts.frequencyResolution; end
+fResLow = 0.05; if isfield(opts, 'frequencyResolutionLow'), fResLow = opts.frequencyResolutionLow; end
+pTol = 0.1; if isfield(opts, 'pauseTolerance'), pTol = opts.pauseTolerance; end
 cols = resultColumns();
 R = cell2table([num2cell(nan(1, numel(cols) - 1)), {''}], 'VariableNames', cols);
 notes = {};
@@ -61,11 +77,11 @@ switch lower(char(by))
     case 'pacingfrequency'
         ok = cap & ~isnan(val);
         if any(ok), R.maxCapturedFrequency_Hz = max(val(ok)); end
-        a05 = ampAt(val, amp, cap, 0.5);
+        a05 = ampAt(val, amp, cap, 0.5, fResLow);
         R.amplitude_0p5Hz_uN = a05;
-        R.FFR_1Hz_pct = 100 * ampAt(val, amp, cap, 1) / a05;
-        R.FFR_2Hz_pct = 100 * ampAt(val, amp, cap, 2) / a05;
-        R.FFR_3Hz_pct = 100 * ampAt(val, amp, cap, 3) / a05;
+        R.FFR_1Hz_pct = 100 * ampAt(val, amp, cap, 1, fRes) / a05;
+        R.FFR_2Hz_pct = 100 * ampAt(val, amp, cap, 2, fRes) / a05;
+        R.FFR_3Hz_pct = 100 * ampAt(val, amp, cap, 3, fRes) / a05;
         if isnan(a05), notes{end+1} = 'no captured 0.5 Hz group'; end
     case 'stimcurrent'
         ok = cap & ~isnan(val);
@@ -89,10 +105,11 @@ switch lower(char(by))
         pct = G.amplitude_pctOfRef(pr);
         for x = [15 30 60]
             if ~isempty(pr) && ~isnan(cl)
-                [~, k] = min(abs(pause - x));
-                if abs(pause(k) - x) <= 0.5 * x
-                    R.(sprintf('PRP%d_pct', x)) = pct(k);
-                    R.(sprintf('PRP%d_pause_s', x)) = pause(k);
+                k = find(abs(pause - x) <= pTol * x + 1e-9);
+                if ~isempty(k)
+                    R.(sprintf('PRP%d_pct', x)) = mean(pct(k), 'omitnan');
+                    R.(sprintf('PRP%d_pause_s', x)) = mean(pause(k));
+                    if numel(k) > 1, notes{end+1} = sprintf('PRP%d: mean of %d pauses', x, numel(k)); end %#ok<AGROW>
                 end
             end
         end
@@ -115,6 +132,7 @@ c = {'maxCapturedFrequency_Hz', 'amplitude_0p5Hz_uN', 'FFR_1Hz_pct', 'FFR_2Hz_pc
     'captureThreshold_mA', 'stimThreshold10_mA', 'stimThreshold50_mA', 'stimThreshold95_mA', 'stimThreshold99_mA', ...
     'maxAmplitude_uN', ...
     'refPeriodNoPeak_ms', 'refPeriodNoPeakStep_ms', 'refPeriodNoResponse_ms', 'refPeriodNoResponseStep_ms', ...
+    'refPeriodAllCaptured_ms', ...
     'S2shortest_ms', 'S2longest_ms', 'S2noiseLevel_pct', 'amplitudeS1_uN', 'nS2', 'nTemplateBeats', ...
     'PRP15_pct', 'PRP15_pause_s', 'PRP30_pct', 'PRP30_pause_s', 'PRP60_pct', 'PRP60_pause_s', ...
     'resultNote'};
@@ -129,10 +147,10 @@ cap = (n - nf) <= max(1, floor(0.1 * n)) & nf >= 2;
 end
 
 
-function a = ampAt(val, amp, cap, f)
-% amplitude of the captured group at f (+-5 %, the nearest)
+function a = ampAt(val, amp, cap, f, res)
+% amplitude of the captured group at f (group values rounded to res, see mda_groupBeats: within +-res / 2)
 a = nan;
-k = find(cap & abs(val - f) <= 0.05 * f);
+k = find(cap & abs(val - f) <= res / 2 + 1e-9);
 if isempty(k), return; end
 [~, i] = min(abs(val(k) - f));
 a = amp(k(i));
@@ -265,9 +283,19 @@ ciU = round(1000 * ciU);
 if ~isempty(ciU), R.S2shortest_ms = ciU(end); R.S2longest_ms = ciU(1); end
 [R.refPeriodNoPeak_ms, R.refPeriodNoPeakStep_ms, notes] = transition(ciU, 100 * fracSep, 50, 'no peak', notes);
 [R.refPeriodNoResponse_ms, R.refPeriodNoResponseStep_ms, notes] = transition(ciU, medResp, noise, 'no response', notes);
+% as GetRefractoryPeriod (MyoDish exports, 2026-10-10): the interval before the first one (from long to short) at which
+% not every S2 had a separate peak
+kA = find(fracSep < 1, 1);
+if isempty(kA)
+    if ~isempty(ciU), R.refPeriodAllCaptured_ms = ciU(end); notes{end+1} = 'all captured: every S2 with a separate peak'; end
+elseif kA > 1
+    R.refPeriodAllCaptured_ms = ciU(kA-1);
+else
+    notes{end+1} = 'all captured: not every S2 with a separate peak already at the longest interval';
+end
 if ~isnan(noise) && noise >= 50
     R.refPeriodNoPeak_ms = nan; R.refPeriodNoPeakStep_ms = nan;
-    R.refPeriodNoResponse_ms = nan; R.refPeriodNoResponseStep_ms = nan;
+    R.refPeriodNoResponse_ms = nan; R.refPeriodNoResponseStep_ms = nan; R.refPeriodAllCaptured_ms = nan;
     notes = {sprintf('noise level %d %%: no reliable stimulus-locked S1 contraction - no estimates', round(noise))};
 end
 

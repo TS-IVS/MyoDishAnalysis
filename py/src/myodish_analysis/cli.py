@@ -70,6 +70,8 @@ def main(argv=None):
     ap.add_argument("--group-by", help="group the contractions: pacingFrequency, S2interval, stimCurrent, pauseLength, "
                     "rockerSpeed, pulseDuration, log:<code>, none (default with --protocol: by protocol type)")
     ap.add_argument("--list-protocols", action="store_true", help="list the protocols found in the log file and exit")
+    ap.add_argument("--settings", help="settings file (saved by the GUI or settings.save_settings) or results of an "
+                    "analysis: all options from it; the other arguments override them")
     ap.add_argument("--set", nargs="+", default=[], metavar="NAME=VALUE", help="further options (see options)")
     ap.add_argument("--show-figures", action="store_true")
     ap.add_argument("--quiet", action="store_true")
@@ -88,6 +90,8 @@ def main(argv=None):
         prot = a.protocol[0] if len(a.protocol) == 1 and not a.protocol[0].isdigit() else \
             [int(x) for x in a.protocol]
     kw = {}
+    if a.settings:
+        kw["settings"] = a.settings
     if a.rocker:
         kw["rocker"] = a.rocker
     if a.beats:
@@ -185,10 +189,14 @@ def watch_main(argv=None):
     ap.add_argument("--beats", choices=["all", "stimulated"])
     ap.add_argument("--threshold", type=float, nargs="+", help="detection threshold (uN), one value or one per channel")
     ap.add_argument("--rocker-filter", action="store_true", help="remove the periodic rocker artifact")
+    ap.add_argument("--settings", help="settings file (saved by the GUI or settings.save_settings) or results of an "
+                    "analysis: all analysis options from it; the other arguments override them")
     ap.add_argument("--set", nargs="+", default=[], metavar="NAME=VALUE", help="further analysis options")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args(argv)
     kw = {}
+    if a.settings:
+        kw["settings"] = a.settings
     if a.rocker:
         kw["rocker"] = a.rocker
     if a.beats:

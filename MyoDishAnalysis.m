@@ -24,7 +24,14 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %   (peak --> 50 / 90 % relaxation), CD50, CD90 (contraction duration at 50 / 90 %), AUC (area above the
 %   diastolic force from 10 % upstroke to 90 % relaxation), peakToPeakInterval, peakToPeakFrequency;
 %   in addition: t_peak, clockTime, beatType (stimulated / extra / unpaced), t_stim, stimToPeak,
-%   rockerMoving, prominence (detection criterion)
+%   rockerMoving, prominence (detection criterion); eliciting pulse (option stimAssignment, default 'onset': pulse in
+%   the gate of the contraction onset, see mda_analyzeChannel): t_onset, stimToOnset, stimPulse (pulse ID),
+%   stimCurrent, stimChargeDuration, stimPauseDuration, stimDechargeDuration, elicitedByExtraPulse (extra pulse,
+%   status channel bit 16), stimAmbiguous, prePulses / postPulses (pulses without own contraction before / during
+%   the contraction: 't<ms>|<mA>|<charge us>|<pause us>|<decharge us>', several joined by '&')
+%   info.pulses (option pulseTable, default true; sheet / file 'pulses'): one row per stimulus pulse of the analysed
+%   channels and ranges: pulse ID, time, extra pulse, current, durations, outcome (elicited / duringContraction /
+%   noResponse), role (eliciting / pre / post), contraction, coupling interval, time since the last onset, phase
 %
 % OPTIONS (name/value pairs)
 %   'output', file      write the results: .xlsx (sheets contractions, summary, parameters, info) or .csv
@@ -37,6 +44,8 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %   'showFigures', tf   plot the signal with the detected contractions (default false; ranges <= 30 min,
 %                       at most 16 figures)
 %   'quiet', tf         no messages (default false)
+%   'settings', file    all options from a settings file (mda_settings; GUI: Advanced ... -> Save settings ...) or
+%                       from the results of an earlier analysis; options given after it override them
 %   'rocker', 'stopped' only contractions while the rocker is at rest are included ('any' (default), 'moving')
 %   'beats', 'stimulated'  only stimulated contractions are included (default 'all')
 %   'threshold', x      minimum peak prominence in uN (default 'auto'), one value for all channels or one value per
@@ -57,7 +66,10 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %                       of the protocol type (FFR: pacingFrequency, RP: S2interval, ST: stimCurrent, PRP:
 %                       pauseLength, PD: pulseDuration). The summary then has one row per range, channel and group
 %                       (columns group, groupValue, groupRole, groupStep, groupBy, capture_percent,
-%                       amplitude_pctOfRef, ...).
+%                       amplitude_pctOfRef, amplitude_CV, irregular, ...). FFR protocols (2026-10-10): each frequency
+%                       from its steady state (the last steadyStateBeats contractions of its longest run; rocker at
+%                       rest if there are such contractions, see ffrRockerFallback); post-rest potentiation: reference
+%                       per pause (prpReference); see mda_groupBeats.
 %   further options: see mda_options (filters, stimulus assignment, file format)
 %
 % EXAMPLES
@@ -195,7 +207,7 @@ end
 pad = opts.maxBeatWindow + 2;
 if opts.rockerFilter, pad = max(pad, 60); end      %context for the estimate of the rocker artifact
 parts = {}; sumParts = {}; thrInfo = zeros(0, 8);
-rfRows = {}; resParts = {};
+rfRows = {}; resParts = {}; pulseParts = {};
 spikes = zeros(0, 4);                              %spike artifacts removed ('spikeRemoval'): channel, from, to, size
 nFig = 0;
 f0cache = [];                                       %rocker frequency per rocker speed, estimated once (all channels)
@@ -252,12 +264,30 @@ for r = 1:nR
         B.contraction = (1:height(B))';
         CsC = Cs(c,:);
         Cm = CsC{1};
-        Cm.stimTimes = cell2mat(cellfun(@(x) x.stimTimes(x.stimTimes >= x.range(1) & x.stimTimes <= x.range(2)), CsC(:), 'UniformOutput', false));
-        Cm.stimCaptured = cell2mat(cellfun(@(x) x.stimCaptured(x.stimTimes >= x.range(1) & x.stimTimes <= x.range(2)), CsC(:), 'UniformOutput', false));
-        Cm.stimCapturedCertain = cell2mat(cellfun(@(x) x.stimCapturedCertain(x.stimTimes >= x.range(1) & x.stimTimes <= x.range(2)), CsC(:), 'UniformOutput', false));
+        Cm.stimTimes = inRangeOf(CsC, 'stimTimes', 'stimTimes');
+        Cm.stimCaptured = inRangeOf(CsC, 'stimCaptured', 'stimTimes');
+        Cm.stimCapturedCertain = inRangeOf(CsC, 'stimCapturedCertain', 'stimTimes');
+        Cm.stimDuringContraction = inRangeOf(CsC, 'stimDuringContraction', 'stimTimes');
+        Cm.extraTimes = inRangeOf(CsC, 'extraTimes', 'extraTimes');
+        Cm.extraElicited = inRangeOf(CsC, 'extraElicited', 'extraTimes');
         Cm.threshold = median(cellfun(@(x) x.threshold, CsC));
+        if opts.pulseTable                         %pulses of the range: contraction numbers of the whole range
+            Pc = cellfun(@(x) x.pulses, CsC(:), 'UniformOutput', false);
+            Pc = vertcat(Pc{~cellfun(@isempty, Pc)});
+            if ~isempty(Pc) && height(Pc) > 0
+                [tf, loc] = ismember(Pc.t_peak, B.t_peak);
+                Pc.contraction(:) = nan;
+                Pc.contraction(tf) = B.contraction(loc(tf));
+                pulseParts{end+1} = [table(repmat(labels(r), height(Pc), 1), 'VariableNames', {'range'}), Pc]; %#ok<AGROW>
+            end
+        end
         if grouping && ~strcmpi(groupByR{r}, 'none')
-            [B, T, Z] = mda_groupBeats(H, B, Cm, ranges(r,:), groupByR{r}, opts);
+            steadyN = 0;                           %FFR protocols: steady state per frequency (2026-10-10)
+            if istable(protocols) && strcmpi(protocols.type{r}, 'FFR'), steadyN = opts.steadyStateBeats; end
+            [B, T, Z, gNotes] = mda_groupBeats(H, B, Cm, ranges(r,:), groupByR{r}, opts, steadyN);
+            for q = 1:numel(gNotes)
+                H.notes{end+1} = sprintf('%s, channel %d: %s', labels{r}, channels(c), gNotes{q});
+            end
             gb = lower(groupByR{r});
             if ismember(gb, {'pacingfrequency', 'stimcurrent', 's2interval', 'pauselength'})
                 trace = [];
@@ -283,6 +313,7 @@ for r = 1:nR
                 B.groupStep = nan(height(B), 1);
                 T = addvars(T, nan, nan, 'After', 'missedBeats_percent', 'NewVariableNames', {'capture_percent', 'currentReached_percent'});
                 T = addvars(T, nan(height(T), 1), 'After', 'amplitude_SD', 'NewVariableNames', 'amplitude_pctOfRef');
+                T = addvars(T, nan(height(T), 1), 'After', 'amplitude_CV', 'NewVariableNames', 'irregular');
                 T = [table({'all'}, nan, {''}, nan, {'none'}, 'VariableNames', {'group','groupValue','groupRole','groupStep','groupBy'}), T]; %#ok<AGROW>
             end
         end
@@ -354,6 +385,13 @@ if ~isempty(spikes)
         size(spikes, 1), strjoin(spParts', ', '), max(spikes(:,4)));
 end
 info.spikes = spikes;
+if opts.pulseTable                                 %all stimulus pulses of the analysed channels and ranges (2026-10-10)
+    if isempty(pulseParts)
+        info.pulses = table();
+    else
+        info.pulses = vertcat(pulseParts{:});
+    end
+end
 info.channels = channels;
 info.ranges = ranges;
 info.rangeLabels = labels;
@@ -384,6 +422,21 @@ end
 
 
 % =====================================================================================================
+function v = inRangeOf(CsC, field, timeField)
+% values of the field of all chunks (channel info of mda_analyzeChannel) whose times lie in the chunk's range
+parts = cell(numel(CsC), 1);
+for i = 1:numel(CsC)
+    x = CsC{i};
+    if ~isfield(x, field) || ~isfield(x, timeField), continue; end
+    tt = x.(timeField);
+    y = x.(field);
+    parts{i} = reshape(y(tt >= x.range(1) & tt <= x.range(2)), [], 1);
+end
+v = vertcat(parts{:});
+if isempty(v), v = zeros(0, 1); end
+end
+
+
 function s = shortName(file)
 [~, n, e] = fileparts(file);
 s = [n e];

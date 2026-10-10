@@ -136,6 +136,9 @@ end
 if isfield(info, 'protocolResults') && height(info.protocolResults) > 0
     X.protocolResults = table2struct(info.protocolResults, 'ToScalar', true);
 end
+if isfield(info, 'pulses') && istable(info.pulses) && height(info.pulses) > 0   %pulse table (2026-10-10)
+    X.pulses = table2struct(info.pulses, 'ToScalar', true);
+end
 R.(key) = X;
 end
 

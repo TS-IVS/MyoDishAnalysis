@@ -4,6 +4,7 @@ function R = mda_readResults(resultsFile)
 %   R = mda_readResults('results.xlsx')
 %   R = mda_readResults('results_info.csv')      (or _summary.csv, _contractions.csv(.gz), _thresholds.csv: the
 %                                                  other files of the set are found by their names)
+%   R = mda_readResults('settings.csv')          a single table key, value (settings file of mda_settings): options
 %
 % Results of MyoDishAnalysis ('output'), MyoDishAnalysisWatch, MyoDishAnalysisGUI (Export this channel ..., All
 % channels -> file ..., protocols) and of the Python version. Used by MyoDishAnalysisGUI to open results:
@@ -22,7 +23,7 @@ function R = mda_readResults(resultsFile)
 %   R.info            the info table (key, value)
 %   R.notes           cell of messages
 %
-% TS 2026-10-09
+% TS 2026-10-09 (settings files 2026-10-10)
 
 R = struct('resultsFile', char(resultsFile), 'mddFile', '', 'version', '', 'implementation', '', 'createdBy', '', ...
     'analysisDate', '', 'options', mda_options(), 'channels', [], 'windows', [], 'summary', [], 'contractions', [], ...
@@ -36,10 +37,13 @@ if strcmpi(e, '.xlsx') || strcmpi(e, '.xls')
     sheets = sheetnames(resultsFile);
     get = @(nm) readSheet(resultsFile, sheets, nm);
 else
-    base = regexprep(n, '_(info|summary|contractions|thresholds|parameters|labels|rockerFilter|protocols|protocolResults)$', '');
+    base = regexprep(n, '_(info|summary|contractions|thresholds|parameters|labels|rockerFilter|protocols|protocolResults|pulses)$', '');
     get = @(nm) readCsv(fullfile(p, [base '_' nm '.csv']));
 end
 I = get('info');
+if isempty(I) && strcmpi(e, '.csv') && exist(resultsFile, 'file')   %a single table key, value (settings file)
+    I = readCsv(char(resultsFile), true);
+end
 if isempty(I) || ~all(ismember({'key', 'value'}, I.Properties.VariableNames))
     error('mda_readResults: no info table (key, value) found for %s.', resultsFile);
 end
@@ -75,6 +79,10 @@ for k = find(startsWith(I.key, 'option_'))'
     end
     given.(name) = parseValue(v, defaults.(name), name);
 end
+if any(startsWith(I.key, 'option_')) && ~ismember('option_stimAssignment', I.key)
+    given.stimAssignment = 'peak';                 %results of versions <= 1.0.0-beta.3 (2026-10-10)
+    R.notes{end+1} = 'results without option stimAssignment (older version): stimulus assignment ''peak''';
+end
 R.options = mda_options(given);
 ch = val('channels');
 if ~isempty(ch), R.channels = parseNumbers(ch); end
@@ -82,7 +90,7 @@ if ~isempty(ch), R.channels = parseNumbers(ch); end
 R.summary = get('summary');
 R.labels = get('labels');
 R.rockerFilter = get('rockerFilter');
-cf = fullfile(p, [regexprep(n, '_(info|summary|contractions|thresholds|parameters|labels|rockerFilter)$', '') '_contractions.csv.gz']);
+cf = fullfile(p, [regexprep(n, '_(info|summary|contractions|thresholds|parameters|labels|rockerFilter|protocols|protocolResults|pulses)$', '') '_contractions.csv.gz']);
 if ~(strcmpi(e, '.xlsx') || strcmpi(e, '.xls')) && ~exist(regexprep(cf, '\.gz$', ''), 'file') && exist(cf, 'file')
     tmp = tempname; mkdir(tmp);                     %readtable does not read .gz
     gunzip(cf, tmp);
@@ -193,13 +201,13 @@ T = readtable(file, o);
 end
 
 
-function T = readCsv(file)
+function T = readCsv(file, isInfo)
 T = [];
 if ~exist(file, 'file'), return; end
 o = detectImportOptions(file, 'FileType', 'text', 'Delimiter', ',');
 o.VariableNamesLine = 1; o.DataLines = [2 Inf];     %header in line 1 (detection can skip the first data line)
 [~, n] = fileparts(file);
-if endsWith(n, '_info'), o = setvartype(o, intersect(o.VariableNames, {'key', 'value'}), 'char'); end
+if endsWith(n, '_info') || (nargin > 1 && isInfo), o = setvartype(o, intersect(o.VariableNames, {'key', 'value'}), 'char'); end
 o = textDates(o);
 T = readtable(file, o);
 end

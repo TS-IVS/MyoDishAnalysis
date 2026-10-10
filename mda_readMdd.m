@@ -42,6 +42,10 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               2.0.7769 corrected, see mda_clockTime), extendedSensorIntervals, notes,
 %               offsetLog / calibrationLog ([time channel value] of the 'Offset' / 'Calibration' entries of the log;
 %               time -Inf = logged before the recording start), calibrationApplied, extendedSensorFactor,
+%               pulseSettingsLog ([time logChannel code value]: chargeDuration (code 1), pauseDuration (2),
+%               dechargeDuration (3) entries, us; log channel 10k + c = extra pulse #k of channel c),
+%               extraPulseLog ([time channel k offset_ms line]: programmed time of the extra pulses relative to the
+%               regular pulse of the channel, from the 'Sequence' entries; see extraPulseOffsets),
 %               rockerSpeedLog ([time rpm]), rockerSource ('status channel' or 'log'), rockerLogIntervals
 %               ([from to] in s with rocker speed > 0 according to the log file), recordingStopped (1 = the log
 %               file ends with 'Recording stopped' for this file, 0 = recording still running or aborted, NaN = no
@@ -76,7 +80,7 @@ if ischar(fromSeconds) && strcmpi(fromSeconds,'overview')
     S = readOverview(S, binSeconds, progressFcn, tRange);
     return;
 end
-S = readData(S, fromSeconds, toSeconds, opts.downsampling, ~isfield(opts, 'spikeRemoval') || opts.spikeRemoval);
+S = readData(S, fromSeconds, toSeconds, opts.downsampling, ~isfield(opts, 'spikeRemoval') || opts.spikeRemoval, opts);
 end
 
 
@@ -100,6 +104,9 @@ H.recordingStopped = L.recordingStopped; %1 / 0 / NaN (2026-10-08)
 H.offsetLog = L.offsetEvents;          %[time channel value]: sensor signal without load ('Offset' entries)
 H.calibrationLog = L.calibrationEvents; %[time channel value]: 'Calibration' entries (AU per mN)
 H.rockerSpeedLog = L.rockerSpeedEvents; %[time rpm]: 'rockerSpeed' entries (0 = stop)
+H.pulseSettingsLog = L.pulseSettingsEvents; %[time logChannel code value]: pulse durations (us; code 1 charge, 2 pause,
+                                           %3 decharge; log channel 10k + c = extra pulse #k of channel c)
+H.extraPulseLog = L.extraPulseOffsets;     %[time channel k offset_ms line]: programmed extra pulse times (2026-10-10)
 
 % sampling rate: option > log file > 500 Hz for old 8-channel files (software 1.0.x) > 400 Hz
 if ~isempty(opts.samplingRate)
@@ -228,7 +235,7 @@ end
 
 
 % =====================================================================================================
-function S = readData(S, fromSeconds, toSeconds, nDS, spikeRemoval)
+function S = readData(S, fromSeconds, toSeconds, nDS, spikeRemoval, opts)
 if nargin < 5, spikeRemoval = false; end
 fs = S.samplingRate;
 nCh = S.nChannelsInFile;
@@ -261,7 +268,7 @@ S.force = zeros(nData, n);
 S.spikes = zeros(0, 4);                            %channel, from, to (s, time in the file), size (AU)
 Xr = [];
 if spikeRemoval && nRaw > 0
-    [Xr, sp] = mda_removeSpikes(raw(1:nData, :), fs);
+    [Xr, sp] = mda_removeSpikes(raw(1:nData, :), fs, opts);
     if ~isempty(sp)
         dc = S.dataChannels(:);
         S.spikes = [dc(sp(:,1)), (i0 + sp(:,2) - 1) / fs, (i0 + sp(:,3) - 1) / fs, sp(:,4)];
@@ -477,7 +484,7 @@ if nargin < 2, fileTime = []; end
 L = struct('samplingRate',nan,'recordingDuration',nan,'nChannelsController',nan,'singleChannelMode',[], ...
     'extendedSensorModeEvents',zeros(0,2),'startDatenum',nan,'programVersion','','clockNote','', ...
     'offsetEvents',zeros(0,3),'calibrationEvents',zeros(0,3),'rockerSpeedEvents',zeros(0,2), ...
-    'recordingStopped',nan);
+    'recordingStopped',nan,'pulseSettingsEvents',zeros(0,4),'extraPulseOffsets',zeros(0,5));
 if ~exist(logFile,'file'), return; end
 % MyoDish logs are UTF-16 little endian (with byte order mark); converted copies may be UTF-8
 fid = fopen(logFile, 'r');
@@ -497,6 +504,9 @@ tStart = nan; tStop = nan; tStartPar = nan; tStopPar = nan;
 kStart = nan; kStartPar = nan; tFirst = nan;
 sysAll = cell(numel(lines), 1); textAll = sysAll; tAll = nan(numel(lines), 1); versions = {};   %all valid entries (clock time)
 ext = zeros(0,3); offs = zeros(0,4); cal = zeros(0,4); rck = zeros(0,3);  %last column: line number
+pst = zeros(0,5); nPst = 0;                         %pulse durations: time, log channel, code (1-3), value (us), line
+seqEv = cell(0, 1);                                 %'Sequence' entries: {time, log channel, line, text}
+pstCodes = {'chargeDuration', 'pauseDuration', 'dechargeDuration'};
 lineStart = nan; lineStartPar = nan;
 tMax = -inf; tMaxPar = -inf;                        %latest dataLogTime since the chosen start line
 % 2026-10-08: state of the last 'Recording' entry (1 started, 0 stopped) for this file (name in the entry), for the
@@ -556,6 +566,15 @@ for i = 1:numel(lines)
         end
     elseif strcmpi(code,'rockerSpeed')
         v = str2double(value); if ~isnan(v), rck(end+1,:) = [tsec v i]; end %#ok<AGROW>
+    elseif any(strcmpi(code, pstCodes))              %pulse durations (us) of a channel; channel 10k+c = extra pulse #k
+        ch = str2double(f{3}); v = str2double(value);
+        if ~isnan(ch) && ~isnan(v)
+            nPst = nPst + 1;
+            if nPst > size(pst, 1), pst(end + max(64, nPst), :) = 0; end
+            pst(nPst,:) = [tsec ch find(strcmpi(code, pstCodes), 1) v i];
+        end
+    elseif strcmpi(code,'Sequence')                  %stimulus times of the sequence (regular and extra pulses #k)
+        seqEv{end+1, 1} = {tsec, str2double(f{3}), i, value}; %#ok<AGROW>
     elseif strcmpi(code,'nChannels')
         v = str2double(value); if ~isnan(v), L.nChannelsController = v; end
     elseif strcmpi(code,'programInfo') && contains(value,'Version','IgnoreCase',true)
@@ -596,6 +615,14 @@ if ~isnan(lineStart)
     cal(cal(:,4) < lineStart, 1) = -inf;
     rck(rck(:,3) < lineStart, 1) = -inf;
 end
+pst = pst(1:nPst, :);
+X = extraPulseOffsets(seqEv);
+if ~isnan(lineStart)
+    pst(pst(:,5) < lineStart, 1) = -inf;
+    X(X(:,5) < lineStart, 1) = -inf;
+end
+L.pulseSettingsEvents = pst(:,1:4);
+L.extraPulseOffsets = X;
 L.rockerSpeedEvents = rck(:,1:2);
 L.extendedSensorModeEvents = ext(:,1:2);
 L.offsetEvents = offs(:,1:3);
@@ -615,4 +642,68 @@ if ~isnat(clk(kStart))
     if isnan(tSys), tSys = 0; end
     L.startDatenum = datenum(clk(kStart)) - tSys/86400;
 end
+end
+
+
+function X = extraPulseOffsets(ev)
+% Programmed time of the extra pulses relative to the regular pulse of the same channel, from the 'Sequence'
+% entries of the log file: 'Sent stimPeriod P' starts a new sequence (all extra pulses cleared); 'Added stimTime(s)
+% a b#k ...' of channel c sets its regular times (numbers) and extra pulse times (#k = extra pulse k, software
+% 2022 and 2026); an entry of log channel 10k + c ('Added stimTime e') sets the times of extra pulse k of channel c.
+% X: rows [time, channel c, k, offset (ms; extra time - nearest regular time of the channel, within the period),
+% line]. Every entry that changes channel c gives the complete set of its extra pulses (rows with the same line);
+% k = 0 / offset NaN: no extra pulses. TS 2026-10-10
+X = zeros(0, 5);
+if isempty(ev), return; end
+R = cell(1, 8);                                     %regular times per channel (ms within the period)
+E = cell(8, 9);                                     %extra pulse times per channel and k
+P = nan;                                            %period (ms)
+rows = cell(numel(ev), 1);
+for i = 1:numel(ev)
+    t = ev{i}{1}; chn = ev{i}{2}; ln = ev{i}{3}; txt = strtrim(ev{i}{4});
+    if strncmpi(txt, 'Sent stimPeriod', 15)
+        p = str2double(regexp(txt, '-?\d+(\.\d+)?', 'match', 'once'));
+        if ~isnan(p) && p > 0, P = p; end
+        R = cell(1, 8); E = cell(8, 9);
+        rows{i} = [repmat(t, 8, 1), (1:8)', zeros(8, 1), nan(8, 1), repmat(ln, 8, 1)];
+        continue;
+    end
+    tok = regexp(txt, '^Added stimTime(?:\(s\))?\s*(.*)$', 'tokens', 'once', 'ignorecase');
+    if isempty(tok) || isnan(chn), continue; end
+    k0 = floor(chn / 10); c = chn - 10 * k0;
+    if c < 1 || c > 8 || k0 > 9, continue; end
+    reg = []; ext = cell(1, 9);
+    for p = regexp(strtrim(tok{1}), '\s+', 'split')
+        m = regexp(p{1}, '^(-?\d+(?:\.\d+)?)(#\d)?$', 'tokens', 'once');   %(MATLAB: no tokens inside (?:...)?)
+        if isempty(m), continue; end
+        v = str2double(m{1});
+        if numel(m) >= 2 && numel(m{2}) == 2 && str2double(m{2}(2)) >= 1
+            k = str2double(m{2}(2)); ext{k}(end+1) = v;
+        elseif k0 > 0
+            ext{k0}(end+1) = v;
+        else
+            reg(end+1) = v; %#ok<AGROW>
+        end
+    end
+    if k0 == 0                                      %an entry of channel c replaces its sequence
+        R{c} = reg;
+        for k = 1:9, E{c,k} = ext{k}; end
+    else
+        E{c,k0} = ext{k0};
+    end
+    r = zeros(0, 5);
+    for k = 1:9
+        for e = E{c,k}
+            if isempty(R{c}), continue; end
+            d = e - R{c};
+            if ~isnan(P), d = mod(d + P/2, P) - P/2; end
+            [~, j] = min(abs(d));
+            r(end+1, :) = [t, c, k, d(j), ln]; %#ok<AGROW>
+        end
+    end
+    if isempty(r), r = [t, c, 0, nan, ln]; end
+    rows{i} = r;
+end
+X = vertcat(rows{:});
+if isempty(X), X = zeros(0, 5); end
 end

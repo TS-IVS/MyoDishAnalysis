@@ -161,6 +161,19 @@ def cmp_cli(X, T, S, info, name, rtol, rocker=False):
         lU.append(f"{name}: uncertain differs in {int(du.sum())} of {len(M)} contractions (channels "
                   f"{sorted(int(c) for c in chU)}; channels with a shifted / missing peak {sorted(int(c) for c in chOdd)})")
         skip1 = skip1 + ("uncertain",)
+    if rocker and len(M) == len(P) and "t_onset" in M.columns and "t_onset" in P.columns:
+        # onset (2026-10-10): the tangent at the maximum dF/dt; after the artifact subtraction two samples of dF/dt can
+        # be equal to ~1e-11, so that the tangent of the neighbouring sample is taken (onset < 1 sample apart)
+        a_, b_ = M["t_onset"].to_numpy(float), P["t_onset"].to_numpy(float)
+        do = np.abs(a_ - b_)
+        mv = (do > 1e-6) | (np.isnan(a_) != np.isnan(b_))
+        okO = bool(mv.sum() <= max(2, 0.01 * len(M)) and np.all(do[mv & ~np.isnan(do)] < 0.0051))
+        lU.append(f"{name}: t_onset differs in {int(mv.sum())} of {len(M)} contractions by up to "
+                  f"{np.nanmax(np.r_[0, do[mv]]) * 1000:.2f} ms (equal maxima of dF/dt after the artifact subtraction)")
+        okU = okU and okO
+        keep = ~mv
+        M = M[keep].reset_index(drop=True)
+        P = P[keep].reset_index(drop=True)
     ok1, l1 = compare_tables(M, P, name + " contractions", rtol=rtol, atol=rtol, skip=skip1)
     ok1, l1 = ok1 and okU, lU + l1
     if "clockTime" in M.columns and len(M) == len(P) and len(M):
@@ -211,7 +224,22 @@ def cmp_cli(X, T, S, info, name, rtol, rocker=False):
         else:
             ok5, l5 = compare_tables(Mp, Pp.reset_index(drop=True), name + " protocolResults", rtol=max(rtol, 1e-9),
                                      atol=max(rtol, 1e-9), skip=("clockTime",))
-    report(okS and ok1 and ok2 and ok3 and ok4 and ok5, lines + l1 + l2 + l3 + l4 + l5, name)
+    ok6, l6 = True, []
+    if hasattr(X, "pulses"):  # pulse table (2026-10-10)
+        Mq = table_from_struct(X.pulses)
+        Pq = info.get("pulses")
+        if Pq is None or len(Pq) != len(Mq):
+            ok6, l6 = False, [f"{name} pulses: {len(Mq)} rows in MATLAB, {0 if Pq is None else len(Pq)} in Python"]
+        elif rocker:  # contractions can shift by one sample (see above): pulses and outcome counts
+            cc = ["pulse", "channel", "t", "extra", "current_mA"]
+            ok6, l6 = compare_tables(Mq[cc], Pq.reset_index(drop=True)[cc], name + " pulses", rtol=1e-9, atol=1e-9)
+            dO = int(np.sum(Mq["outcome"].to_numpy() != Pq["outcome"].to_numpy()))
+            ok6 = ok6 and dO <= max(2, 0.01 * len(Mq))
+            l6.append(f"{name} pulses: outcome differs in {dO} of {len(Mq)} pulses (limit 1 %, >= 2)")
+        else:
+            ok6, l6 = compare_tables(Mq, Pq.reset_index(drop=True), name + " pulses", rtol=max(rtol, 1e-9),
+                                     atol=max(rtol, 1e-9))
+    report(okS and ok1 and ok2 and ok3 and ok4 and ok5 and ok6, lines + l1 + l2 + l3 + l4 + l5 + l6, name)
 
 
 def cmp_reader(R, mdd, a, b, name):

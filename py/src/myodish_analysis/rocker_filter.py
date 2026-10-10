@@ -18,8 +18,10 @@ refined with the data of all channels; per rocker-on period blocks of 30 s: leas
 baseline per stretch between two contractions to the samples between the contractions; consistency checks;
 cross-faded blocks; only the periodic part is subtracted.
 
+The numbers are the defaults of the advanced settings rockerHzPerRpm and rf... (options.py).
+
 TS 2026-10-06 (port of mda_rockerFilter.m, TS 2026-10-05; contraction masks independent of the option
-detection 2026-10-09)
+detection 2026-10-09; advanced settings 2026-10-10)
 """
 from __future__ import annotations
 
@@ -30,27 +32,43 @@ import numpy as np
 from ._matlab import Struct, colon, linspace, mround, nanmedian, round_digits
 
 
-def _constants():
-    return Struct(
-        hzPerRpm=0.0202,     # rocker frequency per rpm setting (two setups: 0.02020 and 0.02025 Hz/rpm)
-        bandRel=0.03,        # search band around the expected frequency
-        bandNoLog=(0.4, 2.2),  # search band without rocker speed in the log file
-        K=6,                 # harmonics
-        block=30,            # block length (s), hop = block / 2
-        minRun=3,            # shorter rocker-on periods are not corrected (s)
-        knot=2,              # baseline knots (s)
-        lamB=0.1,            # smoothness penalty baseline
-        lamH=1e-3,           # ridge penalty harmonics
-        minCover=0.9,        # fraction of the 20 phase bins of the rocker cycle with >= 5 samples
-        minR2=0.2,
-        maxPPrel=1.6,        # block size <= 1.6 x reference size
-        minRefBlock=10,      # reference blocks >= 10 s
-        maxBorrow=60,        # artifact of a neighbouring block of the same rocker period (s)
-        f0Block=120,         # frequency estimate: blocks of <= 120 s, at most 6 per channel and speed
-        f0Blocks=6,
-        wideRel=0.10,        # frequency estimate: the peak must be clear within +-10 %
-        extendBlock=90,      # blocks without full coverage of the rocker cycle: retried with 90 s
-    )
+_CONSTANTS = (  # (field, option, default): advanced settings of the rocker filter (before 2026-10-10: constants)
+    ("hzPerRpm", "rockerHzPerRpm", 0.0202),   # rocker frequency per rpm setting (two setups: 0.02020 and 0.02025)
+    ("bandRel", "rfBandRel", 0.03),           # search band around the expected frequency
+    ("bandNoLog", "rfBandNoLog", (0.4, 2.2)),  # search band without rocker speed in the log file
+    ("K", "rfHarmonics", 6),                  # harmonics
+    ("block", "rfBlock", 30),                 # block length (s), hop = block / 2
+    ("minRun", "rfMinRun", 3),                # shorter rocker-on periods are not corrected (s)
+    ("knot", "rfKnot", 2),                    # baseline knots (s)
+    ("lamB", "rfSmoothBaseline", 0.1),        # smoothness penalty baseline
+    ("lamH", "rfRidge", 1e-3),                # ridge penalty harmonics
+    ("minCover", "rfMinCover", 0.9),          # fraction of the 20 phase bins of the rocker cycle with >= 5 samples
+    ("minR2", "rfMinR2", 0.2),
+    ("maxPPrel", "rfMaxSizeRel", 1.6),        # block size <= 1.6 x reference size
+    ("minRefBlock", "rfMinRefBlock", 10),     # reference blocks >= 10 s
+    ("maxBorrow", "rfMaxBorrow", 60),         # artifact of a neighbouring block of the same rocker period (s)
+    ("f0Block", "rfF0Block", 120),            # frequency estimate: blocks of <= 120 s, at most 6 per channel and speed
+    ("f0Blocks", "rfF0Blocks", 6),
+    ("wideRel", "rfF0Clear", 0.10),           # frequency estimate: the peak must be clear within +-10 %
+    ("extendBlock", "rfExtendBlock", 90),     # blocks without full coverage of the rocker cycle: retried with 90 s
+    ("maskRelax", "rfMaskRelax", 1.3),        # contraction masks: peak ... + 1.3 x TTR90 + margin
+    ("maskMargin", "rfMaskMargin", 0.08),     # contraction masks: margin before (TTP90) and after (s)
+    ("maskMax", "rfMaskMax", 1.2),            # paced: stimulus ... min(next stimulus - 50 ms, 1.2 s)
+)
+
+
+def _constants(opts=None):
+    P = Struct()
+    for f, name, default in _CONSTANTS:
+        v = opts.get(name, default) if opts is not None else default
+        if isinstance(default, tuple):
+            v = tuple(float(x) for x in np.asarray(v, dtype=float).ravel())
+        elif f in ("K", "f0Blocks"):
+            v = int(round(float(v)))
+        else:
+            v = float(v)
+        P[f] = v
+    return P
 
 
 def _empty_r(channel=math.nan):
@@ -92,7 +110,7 @@ def rocker_filter(S, channels, opts, Sctx=None):
         o = Struct(o0)
         o.threshold = float(thrV[channels.index(chX)])
         return o
-    P = _constants()
+    P = _constants(opts)
     R = [_empty_r(c) for c in channels]
 
     # ------------------------------------------------------------------ rocker periods and their speed
@@ -155,8 +173,8 @@ def rocker_filter(S, channels, opts, Sctx=None):
         try:
             B0, C0 = analyze_channel(Sctx, dcX[k], None, o_of(dcX[k]))
             if C0.stimTimes.size >= 3:
-                MA[k] = _first_mask(B0, C0)
-            MB[k] = _second_mask(B0, C0)
+                MA[k] = _first_mask(B0, C0, P)
+            MB[k] = _second_mask(B0, C0, P)
         except Exception:
             MB[k] = np.zeros((0, 2))
     if needEstimate.any():
@@ -207,7 +225,7 @@ def rocker_filter(S, channels, opts, Sctx=None):
             Sx.force = np.array(Sctx.force, dtype=float, copy=True)
             Sx.force[rowX] = x - _eval_artifact(I, tc, runT, f0run, P)
             B1, C1 = analyze_channel(Sx, ch, None, o_of(ch))
-            I2 = _fit_artifact(tc, x, runT, gi, f0run, _second_mask(B1, C1), P)
+            I2 = _fit_artifact(tc, x, runT, gi, f0run, _second_mask(B1, C1, P), P)
             if I2.score >= I.score:
                 I = I2
                 Rc["pass"] = 2
@@ -273,17 +291,17 @@ def _runs(on, dt, minLen):
 
 
 # ------------------------------------------------------------------ masks (time intervals with contractions)
-def _first_mask(B, C):
+def _first_mask(B, C, P):
     ST = np.asarray(C.stimTimes, dtype=float)
     if ST.size >= 3:
         CL = np.r_[np.diff(ST), np.median(np.diff(ST))]
-        return np.c_[ST - 0.02, ST + np.minimum(CL - 0.05, 1.2)]
+        return np.c_[ST - 0.02, ST + np.minimum(CL - 0.05, P.maskMax)]
     ttp, ttr = _durations(B)
     pk = np.asarray(C.peakTimes, dtype=float)
-    return np.c_[pk - ttp - 0.08, pk + 1.3 * ttr + 0.08]
+    return np.c_[pk - ttp - P.maskMargin, pk + P.maskRelax * ttr + P.maskMargin]
 
 
-def _second_mask(B, C):
+def _second_mask(B, C, P):
     ST = np.asarray(C.stimTimes, dtype=float)
     if ST.size >= 3:
         st = (B["beatType"] == "stimulated").to_numpy()
@@ -292,15 +310,15 @@ def _second_mask(B, C):
         if np.isnan(lat):
             lat = 0.3
         CL = np.r_[np.diff(ST), np.median(np.diff(ST))]
-        iv = np.c_[ST - 0.02, ST + np.minimum(CL - 0.05, max(0.3, lat + 1.3 * ttr + 0.08))]
+        iv = np.c_[ST - 0.02, ST + np.minimum(CL - 0.05, max(0.3, lat + P.maskRelax * ttr + P.maskMargin))]
         ampS = nanmedian(B["amplitude"].to_numpy()[st])
         with np.errstate(invalid="ignore"):
             ex = (B["beatType"] == "extra").to_numpy() & (B["prominence"].to_numpy() >= 0.5 * ampS)
         tp = B["t_peak"].to_numpy()[ex]
-        return np.r_[iv, np.c_[tp - ttp - 0.08, tp + 1.3 * ttr + 0.08]]
+        return np.r_[iv, np.c_[tp - ttp - P.maskMargin, tp + P.maskRelax * ttr + P.maskMargin]]
     ttp, ttr = _durations(B)
     pk = np.asarray(C.peakTimes, dtype=float)
-    return np.c_[pk - ttp - 0.08, pk + 1.3 * ttr + 0.08]
+    return np.c_[pk - ttp - P.maskMargin, pk + P.maskRelax * ttr + P.maskMargin]
 
 
 def _durations(B):

@@ -72,7 +72,7 @@ def test_first_and_second_pass(raw, tmp_path):
     O = pd.read_csv(os.path.join(res, "A", "example9_ratVentricle_overview.csv"))
     C = pd.read_csv(os.path.join(res, "A", "example9_ratVentricle_contractions.csv"))
     assert len(O) == 12 and O["nBeats"].sum() == len(C) == 333 and list(O["t_from"][:2]) == [0, 60]
-    assert O["window"][0] == "2000-01-01 15:48:46" and abs(O["amplitude"][0] - 755.866666666667) < 1e-6
+    assert O["window"][0] == "2000-01-01 15:48:46" and abs(O["amplitude"][0] - 748.916666666667) < 1e-6  # 755.87 with diastolicLevel minimum
     R = pd.read_csv(os.path.join(res, "mda_slices.csv"), keep_default_na=False)
     a = R[R["experiment"] == "A"].iloc[0]
     assert len(R) == 9 and a["endStatus"] == "beating at end of data" and a["nBeats"] == 333 and a["species"] == "rat"
@@ -204,7 +204,7 @@ def test_helpers():
         assert W.event_category("comment", t) == "protocol", t
     assert W.event_category("comment", "Approaching 2 GB limit. Changing datafile2.") == "recording"
     assert W.event_category("comment", "ZI: MX1.6-1.8 Dexa100nM") == "comment"
-    assert W.mda_version() == "1.0.0-beta.3" or "-" not in mda.__version__
+    assert W.mda_version() == "1.0.0-beta.4" or "-" not in mda.__version__
     assert len(W.code_fingerprint()) == 8
     for f in ("example1_rabbitVentricle", "example9_ratVentricle"):
         assert mda.read_header(os.path.join(EX, f + ".mdd")).recordingStopped is True

@@ -6,7 +6,7 @@ Each has a command-line function (time range "from – to") and a GUI to view th
 range or single contractions interactively. This file documents the MATLAB version (the reference);
 the Python version (`py/`) gives the same results.
 
-Version 1.0.0-beta.3 (2026-10-10) · Thomas Seidel, Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU) / InVitroSys GmbH.
+Version 1.0.0-beta.4 (2026-10-10) · Thomas Seidel, Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU) / InVitroSys GmbH.
 Public beta version (feedback welcome: GitHub issues or e-mail). Until 2026-10-06 named MyoDishContractionTool (functions MyoDishContractions,
 MyoDishContractionsGUI, mdct_*); now MyoDishAnalysis, MyoDishAnalysisGUI, mda_*.
 Python version with the same results: folder `py/` (see `py/README.md`).
@@ -14,7 +14,7 @@ Python version with the same results: folder `py/` (see `py/README.md`).
 ## Citation and acknowledgement
 MyoDishAnalysis was developed by Thomas Seidel, Institute of Cellular and Molecular
 Physiology, Friedrich-Alexander-Universität Erlangen-Nürnberg / InVitroSys. If you publish results obtained with this
-software, please cite the version you used (Seidel T. MyoDishAnalysis, version 1.0.0-beta.3, 2026; DOI: see
+software, please cite the version you used (Seidel T. MyoDishAnalysis, version 1.0.0-beta.4, 2026; DOI: see
 `CITATION.cff` or the Zenodo record of the release) and mention it in the Methods.
 Copyright (c) 2026 Thomas Seidel. License: GNU General Public License, version 3 or (at your option) any later version
 (GPL-3.0-or-later, file `LICENSE`). Free to use, also commercially (companies, InVitroSys customers). Copies, original
@@ -65,11 +65,23 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    when the window leaves its visible part. The mouse wheel zooms only the display.
 2. **Force plot**: force − zero force (if the zero force is known, see "Zero force"; otherwise the sensor signal).
    Red = selected contractions, orange = uncertain contractions (see *high sensitivity* below), grey = excluded by
-   the filters, x = excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.
+   the filters, x = excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16:
+   pre-pulses, CCM pulses, ...), green rings = contractions elicited by an extra pulse, black diamonds = ambiguous
+   stimulus assignment (see "Stimulus assignment"), grey background = rocker moving, yellow = analysed range.
+   **Legend** of these markers in the force plot (menu *View → Legend of the force plot* or right click in the force
+   plot; draggable; entries that do not occur in the window are left out).
    Panel *Cursor in the force plot*: *drag = select time range* or *click = exclude / include contraction*.
-   List *stimuli* (next to *only stimulated contractions*): *auto* / *MyoDish* / *ext. trigger* — stimulus times from
-   the MyoDish pulses of the channel or from the external trigger pulses (external stimulator, see "External
-   trigger").
+   **Advanced ...** (next to *only stimulated contractions*): all parameters of the method that are based on
+   assumptions or experience (see "Advanced settings"), one tab per part of the analysis: *Assignment* (onset gate,
+   rise phases, pre- / post-pulses, **stimuli**: *auto* / *MyoDish pulses* / *external trigger pulses*), *Detection*,
+   *Noise / artifacts*, *Rocker rules*, *Signal* (averaging, filters, spike removal), *Rocker filter*, *Protocols*
+   (tolerances of the grouping), *Export*. Hover over a name for its meaning; the default is shown next to every
+   field (* = the window is read again). **Guide** opens the settings guide (`docs/MyoDishAnalysis_settings_guide.pdf`:
+   figures for every parameter and the legend), **Defaults** shows the defaults, **Save settings ...** /
+   **Load settings ...** write / read a settings file (a results file can be loaded as well; all settings except the
+   threshold and zero force of the channels), **Apply** / **OK** analyse the window again (status line: the settings
+   that differ from the defaults). The settings apply to All channels, Protocols, Trend and the exports and are
+   written to the info table of every export.
    Mouse wheel: zoom the time axis (shift + wheel: move; double-click: whole loaded window). The figure toolbar
    zoom/pan also works (switch the tool off again to use the mouse modes). Time axis in h:mm:ss or m:ss (decimals
    when zoomed in below ~10 s); checkbox *time 0 = window start* shows the time relative to the
@@ -104,7 +116,10 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    (contractions without an adequate stimulus, count and % of the detected contractions) and **missed beats**
    (stimuli without a contraction above the detection threshold, count and % of the stimuli), both over the whole
    range, independent of the rocker / stimulated filters; **uncertain** contractions (all, stimulated, extra) and
-   uncertain missed beats (stimuli followed only by an uncertain contraction, i.e. missed with *high specificity*). **Lower plot**: one parameter per contraction over time, chosen
+   uncertain missed beats (stimuli followed only by an uncertain contraction, i.e. missed with *high specificity*);
+   **missed in a contraction** (regular pulses that fell into a contraction elicited by another pulse), **extra
+   pulses** and the contractions **elicited by an extra pulse** (if the range has extra pulses), **ambiguous
+   stimulus** assignments. **Lower plot**: one parameter per contraction over time, chosen
    with the list *Lower plot* above it (all parameters, plus stimToPeak and prominence; red = selected, dashed = mean
    of the selected contractions).
    **Trend ...** (next to the list): rolling mean or median (window in min) of a parameter over long periods and
@@ -288,7 +303,8 @@ Own additional fields are kept as extra columns.
 * Options: `'output','results.xlsx'` (or `.csv`), `'metadata',m` (labels per channel, see above),
   `'rocker','stopped'`, `'beats','stimulated'`, `'threshold',300` (µN), `'zeroForce',[z1 z2 ...]`,
   `'rockerFilter',true` (see "Rocker artifact"; result per channel in `info.rockerFilter` and the sheet
-  `rockerFilter`), `'externalTrigger','auto'|'on'|'off'` (see "External trigger"), `'showFigures',true`,
+  `rockerFilter`), `'externalTrigger','auto'|'on'|'off'` (see "External trigger"), `'stimAssignment','onset'|'peak'`
+  and the gate parameters (see "Stimulus assignment"), `'pulseTable',false` (no pulse table), `'showFigures',true`,
   `'quiet',true`; all others see `help mda_options`.
 * Results files (`'output'`; the watcher; GUI exports): sheet / file **info** (key, value) with the version
   (`version`, `implementation` MATLAB / Python, `software`), the recording (`file`, sampling rate, recording start),
@@ -300,9 +316,11 @@ Own additional fields are kept as extra columns.
   exactly the same contractions again (**Open results ...**). `mda_readResults` / `read_results` read them.
 * `contractions`: one row per detected contraction; `summary`: one row per channel and range
   (counts incl. nExtraBeats, nMissedBeats, extraBeats_percent, missedBeats_percent, nUncertain,
-  nStimulatedUncertain, nExtraBeatsUncertain, nMissedBeatsUncertain; mean, SD and n of all parameters of the included
-  contractions). Column `uncertain` of `contractions`: contraction found with high sensitivity only (option
-  `'detection'`, see "Signal processing and detection").
+  nStimulatedUncertain, nExtraBeatsUncertain, nMissedBeatsUncertain, nMissedDuringContraction, nExtraPulses,
+  nElicitedByExtraPulse, nAmbiguous; mean, SD and n of all parameters of the included contractions). Column
+  `uncertain` of `contractions`: contraction found with high sensitivity only (option `'detection'`, see "Signal
+  processing and detection"). `info.pulses` (sheet / file **pulses**, option `'pulseTable'`, default on): one row per
+  stimulus pulse (see "Stimulus assignment").
 
 ## Automatic analysis of new recordings (`MyoDishAnalysisWatch`; Python `mda-watch`)
 ```matlab
@@ -343,8 +361,9 @@ its results as well.
   * `<name>_gaps.csv` (`'gaps',true`, default): periods without force signal (`mda_signalGaps` / `signal_gaps`, see
     below) with clock times and the comments of the log file within 5 min of their start or end. The summary gets
     the columns `noSignal_s` (s without signal in the range) and `nChamberOut` (chambers taken out in the range).
-  * `<name>_channels.csv` (`'gaps',true`): one row per channel with recording, `recordingStart`, `fileLength_s` and
-    the status at the end of the recording (`beating`, `not beating` = no contraction in the last 30 min with signal
+  * `<name>_channels.csv` (`'gaps',true`): one row per channel with recording, `recordingStart`, `fileLength_s`,
+    `calibration` (`Calibration` entries of the log file for the channel, AU per mN, several values in the order of
+    time separated by `;`; 2026-10-10) and the status at the end of the recording (`beating`, `not beating` = no contraction in the last 30 min with signal
     outside the stimulation protocols, `protocols only` = no time outside the protocols, not analysed, `removed` =
     chamber taken out and not put back, `signal lost` = technical, `no slice`), `beatingAtEnd`, s with and without
     signal, chambers taken out,
@@ -435,7 +454,10 @@ another preparation, another species), `endStatus` (`removed`, `beating at end o
 window with contractions), `maxAmplitude` (95th percentile of the 1-min amplitudes), `lastAmplitude_pctMax`,
 `nBeats`, `dayStart` / `dayEnd` (days since the label `cultureStart` or since 00:00 of `idDate`; not for slices
 inserted later without `cultureStart`), `daySource`, `nRecordings`, `firstRecording`, `lastRecording`, `nChamberOut`,
-`outHours`, `longestOut_min`, `nPutBack`, `nTechnical`, `endComments`. With `endStatus`, `lastAmplitude_pctMax` and `dayEnd` the
+`outHours`, `longestOut_min`, `nPutBack`, `nTechnical`, `calibration` (calibration values of the channel in the
+recordings of the slice, `;` separated), `calibrationChanged` (1 if the calibration changed during the slice or differs
+from another row with the same `sliceID`, e.g. a slice moved to another setup: force values and fold changes over time
+are only comparable in µN; 2026-10-10), `endComments`. With `endStatus`, `lastAmplitude_pctMax` and `dayEnd` the
 slices that died or were taken out can be counted and classified (e.g. dead vs. weak) with a criterion chosen later.
 
 ## Stimulation protocols (`'protocol'`, `'groupBy'`; GUI: **Protocols ...**)
@@ -474,16 +496,20 @@ P = mda_protocols(file)                                              % protocols
 
   | `groupBy` | value | default for |
   |---|---|---|
-  | `pacingFrequency` | 1 / interval from the previous stimulus (Hz); intervals within 2 % are one group; label rounded to 0.05 Hz | FFR |
+  | `pacingFrequency` | 1 / interval from the previous stimulus (Hz); intervals within 2 % form a cluster, its frequency (1 / median interval) is rounded to `frequencyResolution` (0.1 Hz) at ≥ 1 Hz and to `frequencyResolutionLow` (0.05 Hz) below 1 Hz: clusters with the same rounded frequency are one group (0.99, 1.0, 1.001 Hz = `1 Hz`; 0.74, 0.75 Hz = `0.75 Hz`; before 2026-10-10: label rounded to 0.05 Hz at all rates, `groupValue` unrounded); `groupValue` = the rounded frequency, `stimFrequency` = 1 / median interval. **FFR protocols** (2026-10-10, option `steadyStateBeats`, default 10): each frequency is summarized from its steady state, the last 10 contractions of the longest run of consecutive stimuli at this frequency (other runs, e.g. the basic pacing before and after the protocol, are not used; `groupStep` = number of the run), of its longest sequence of captured stimuli whose previous and next stimuli are captured, too (partial capture, e.g. 2:1: no steady state, note); 0 = all contractions of the frequency (versions ≤ 1.0.0-beta.3) | FFR |
   | `S2interval` | S2 = premature stimulus (interval < 95 % of the previous one, next interval longer, previous stimulus not premature); groups `S2 <ms>` and `post-S2 <ms>` (the next stimulus; post-extrasystolic potentiation; S2 intervals within 7.5 ms are one group), `S1` (other stimuli at the basic interval, median ± 5 %, not followed by an S2), `pre-S2` (S1 followed by an S2: relaxation cut off) and `other` (other intervals, e.g. trains at a higher rate between the S1-S2 steps; analyse them with `pacingFrequency`) | RP |
   | `stimCurrent` | current of the pulse (mA, status channel); `currentReached_percent` per group | ST |
-  | `pauseLength` | first stimulus after a pause (interval ≥ 1.5 s, ≥ 1.5 × the median interval and ≥ 1.5 × the interval before; the median interval returns within the next 3 stimuli): `rest <s>`, one group per pause with `groupStep` = number of the pause (pooling over channels whose effective pauses differ); stimuli within 10 s after a pause `after rest` (decaying potentiation, not part of the reference); other stimuli at the median interval (± 5 %) `steady` (reference); all others `other` | PRP |
+  | `pauseLength` | first stimulus after a pause (interval ≥ 1.5 s, ≥ 1.5 × the median interval and ≥ 1.5 × the interval before; the median interval returns within the next 3 stimuli): `rest <s>`, one group per pause with `groupStep` = number of the pause (pooling over channels whose effective pauses differ); stimuli within 10 s after a pause `after rest` (decaying potentiation, not part of the reference); other stimuli at the median interval (± 5 %) `steady` (reference); all others `other`. Pauses (interval − steady interval) within `pauseTolerance` (10 %) of the shortest pause of a set have the same pause length (`groupValue` = their median interval, equal labels numbered `#n`) | PRP |
   | `pulseDuration` | `chargeDuration` entry of the log file for the stimulated channel (ms) | PD |
   | `rockerSpeed` | rocker speed at the peak (rpm, `rockerSpeed` entries of the log file); all contractions by default | rockerSpeed |
   | `log:<code>` | any numeric entry of the log file for the stimulated channel (or channel 0), e.g. `log:pauseDuration` | – |
 * **Summary**: one row per protocol, channel and group with `group`, `groupValue`, `groupRole`, `groupStep`, `groupBy`, `nStimuli`,
   `nContractions`, `capture_percent` (stimuli followed by a contraction, independent of the rocker filter),
-  `amplitude_pctOfRef` (mean amplitude in % of the group `S1` / `steady`) and mean, SD and n of all parameters. The
+  `amplitude_pctOfRef` (mean amplitude in % of the group `S1` / `steady`; post-rest groups: see PRP reference below),
+  `amplitude_CV` (coefficient of variation of the amplitudes, population SD / mean), `irregular` (1 if
+  `amplitude_CV` > `irregularCV`, 0.15: conduction block, alternans or extra beats) and mean, SD and n of all
+  parameters. FFR frequencies summarized from fewer than `minGroupBeats` (5) included contractions are listed in the
+  notes (`info.notes`). The
   contraction table gets the columns `group`, `groupValue`, `groupRole`, `groupStep`; the Excel output a sheet
   `protocols`.
 * **Protocol results** (`mda_protocolResults`; `info.protocolResults`, sheet `protocolResults`, GUI table "protocol
@@ -493,13 +519,14 @@ P = mda_protocols(file)                                              % protocols
   | protocol | columns | definition |
   |---|---|---|
   | FFR | `maxCapturedFrequency_Hz` | highest captured pacing frequency |
-  | | `FFR_1Hz_pct`, `FFR_2Hz_pct`, `FFR_3Hz_pct`, `amplitude_0p5Hz_uN` | mean amplitude at 1 / 2 / 3 Hz in % of 0.5 Hz (captured groups, ± 5 %) |
+  | | `FFR_1Hz_pct`, `FFR_2Hz_pct`, `FFR_3Hz_pct`, `amplitude_0p5Hz_uN` | mean amplitude at 1 / 2 / 3 Hz in % of 0.5 Hz (captured groups; group frequencies rounded to 0.1 Hz, before 2026-10-10 ± 5 %) |
   | ST | `stimThreshold10_mA`, `…50`, `…95`, `…99` | lowest captured current whose mean amplitude is ≥ 10 / 50 / 95 / 99 % of the largest one (thresh10 … thresh99 of GetStimThreshold); `captureThreshold_mA` = lowest captured current, `maxAmplitude_uN` |
   | RP | `refPeriodNoPeak_ms` | S2 interval below which there is no separate contraction peak (< 50 % of the S2 with a peak) |
   | | `refPeriodNoResponse_ms` | S2 interval below which there is no response at all (median S2 response < noise level) |
+  | | `refPeriodAllCaptured_ms` | shortest S2 interval above which every S2 interval gives a separate contraction peak at every S2 (from long to short: the S2 interval before the first one with a missing peak; all with a peak: the shortest analysed interval, note; 2026-10-10). Definition as the refractory period of the MyoDish export, but more sensitive to a single S2 without a separate peak: in 323 recordings of human slices `refPeriodNoPeak_ms` agreed better with the export (within 10 %: 95 vs 85 %, bias −1 vs +13 ms) |
   | | `…Step_ms`, `S2noiseLevel_pct`, `amplitudeS1_uN`, `nS2`, `nTemplateBeats` | distance of the two S2 intervals around the transition (uncertainty ≈ ± step/2), noise level, ... |
   | | `S2shortest_ms`, `S2longest_ms` | shortest / longest analysed S2 interval: a transition that is *not reached* (NaN, note) lies below `S2shortest_ms` (e.g. a slice that still gives a separate S2 contraction at the shortest S2 interval of the protocol), one *already at the longest interval* above `S2longest_ms` |
-  | PRP | `PRP15_pct`, `PRP30_pct`, `PRP60_pct` (+ `_pause_s`) | amplitude in % of the steady reference after the pause nearest to 15 / 30 / 60 s (pause = stimulus interval − steady interval) |
+  | PRP | `PRP15_pct`, `PRP30_pct`, `PRP60_pct` (+ `_pause_s`) | amplitude in % of the reference after a pause of 15 / 30 / 60 s ± `pauseTolerance` (10 %; several pauses: their mean, note; before 2026-10-10 the nearest pause within ± 50 %) (pause = stimulus interval − steady interval). Reference (option `prpReference`, 2026-10-10): `'preceding'` (default) = median of the last `prpReferenceBeats` (6) contractions of the pacing before each pause (this pacing loads the SR; slow changes of the amplitude during the protocol do not enter the ratio), `'firstTrain'` = mean of the contractions of the pacing before the first pause, `'steady'` = mean of the group `steady` (versions ≤ 1.0.0-beta.3) |
 
   S2 response (as in GetRefractoryPeriod): the mean S1 contraction (S1 interval before and after, rocker at rest) is
   scaled to the S1 contraction of each S1-S2 pair (S1 … S2 + 20 ms) and subtracted; response = maximum of the
@@ -510,7 +537,9 @@ P = mda_protocols(file)                                              % protocols
   464 ms (step 29 ms).
 * **Rocker, stimulated beats**: with `'protocol'` only stimulated contractions (`'beats','stimulated'`) with the
   rocker at rest are included unless `'rocker'` / `'beats'` is given (grouping by rocker speed: all). Sharp-electrode recordings (no rocker) and protocols without rocker stops need
-  `'rocker','any'` (GUI: "all contractions"). A contraction counts as "rocker moving" if the rocker moved anywhere
+  `'rocker','any'` (GUI: "all contractions"). FFR protocols (2026-10-10, option `ffrRockerFallback`, default on): a
+  frequency without contractions with the rocker at rest is summarized from its contractions with the rocker moving
+  (note). A contraction counts as "rocker moving" if the rocker moved anywhere
   between its diastolic minimum and 90 % relaxation. After a stimulation pause the diastolic minimum is searched only
   in the last 0.5 s before the stimulus (option `pauseDiastoleWindow`), so that rocker movement or drift during the
   rest does not count (PRP: the rocker typically stops ~1.2 s before the post-rest stimulus).
@@ -520,9 +549,14 @@ P = mda_protocols(file)                                              % protocols
 
 ## Parameters (per contraction)
 Within the cycle between the previous and the next peak (at most 3 s on each side):
-F_dia = minimum before the peak, F_min,post = minimum after the peak. After a stimulation pause (stimulus interval
-≥ 2.5 s and ≥ 1.5 × the interval before) F_dia is searched only from 0.5 s before the stimulus
-(`pauseDiastoleWindow`; `Inf` = as for all other contractions).
+F_dia = median of the unfiltered signal 60 … 5 ms before the eliciting pulse (option `diastolicLevel`,
+`'preStimulusMedian'`, default since 2026-10-10; window `diastoleWindowStart` … `diastoleWindowEnd`, ends before the
+stimulus artifact). Contractions without a pulse (extra, unpaced) and contractions whose median is at or above the peak
+use the minimum before the peak, the level of all contractions with `'diastolicLevel','minimum'` (versions ≤
+1.0.0-beta.3; a short dip before the pulse, e.g. noise or rocker movement, lowered it and enlarged the amplitude).
+F_min,post = minimum after the peak. After a stimulation pause (stimulus interval ≥ 2.5 s and ≥ 1.5 × the interval
+before) the minimum before the peak is searched only from 0.5 s before the stimulus (`pauseDiastoleWindow`; `Inf` =
+as for all other contractions).
 Upstroke levels = F_dia + x % of the amplitude (last crossing before the peak); relaxation levels =
 F_min,post + (100 − x) % of (F_peak − F_min,post) (first crossing after the peak). Crossing times are
 interpolated linearly between samples; dF/dt = central difference of the filtered signal.
@@ -543,11 +577,14 @@ interpolated linearly between samples; dF/dt = central difference of the filtere
 | peakToPeakInterval, peakToPeakFrequency | s, Hz | to the previous detected contraction |
 | stimInterval, stimFrequency | s, Hz | set stimulation: stimulus of this contraction − previous stimulus pulse of the channel (extra contractions: last two stimuli before the peak) |
 
-Further columns: `t_peak` (s in the file), `clockTime`, `beatType` (`stimulated` = peak 25 ms …
-min(stimulus interval, 1 s) after a stimulus of the channel; `extra` = not stimulus-locked; `unpaced` = no
-stimuli in this channel), `t_stim`, `stimToPeak`, `rockerMoving` (rocker moved at any time between F_dia and
-90 % relaxation), `included`, `prominence` (detection criterion); with `'rockerFilter',true` also `rockerCorrected`
-(rocker moved and the artifact was subtracted).
+Further columns: `t_peak` (s in the file), `clockTime`, `beatType` (`stimulated` = elicited by a pulse of the
+channel, see "Stimulus assignment"; `extra` = no eliciting pulse; `unpaced` = no stimuli in this channel), `t_stim`
+(eliciting pulse), `stimToPeak`, `rockerMoving` (rocker moved at any time between F_dia and 90 % relaxation),
+`included`, `uncertain`, `t_onset` (onset of the contraction), `stimToOnset`, `stimPulse` (pulse ID = raw sample
+number of the eliciting pulse in the file, from 0; the key of the pulse table), `stimCurrent` (mA),
+`stimChargeDuration`, `stimPauseDuration`, `stimDechargeDuration` (µs, from the log file), `elicitedByExtraPulse`,
+`stimAmbiguous`, `prePulses`, `postPulses`, `prominence` (detection criterion); with `'rockerFilter',true` also
+`rockerCorrected` (rocker moved and the artifact was subtracted).
 
 ## Signal processing and detection
 * Data: 400 Hz, 2 samples averaged (200 Hz), moving median 50 ms + moving mean 25 ms (same processing
@@ -591,15 +628,92 @@ stimuli in this channel), `t_stim`, `stimToPeak`, `rockerMoving` (rocker moved a
   taken from the analysed window: in long windows with very different phases (e.g. a whole force-frequency protocol)
   small but regular contractions of the weak phase can be flagged; look at the orange markers in the GUI.
 
-## External trigger (external stimulator; option `'externalTrigger'`, GUI list *stimuli*)
+## Advanced settings and settings files (2026-10-10)
+
+All constants of the method that are based on assumptions or experience are options (114 in total, 78 of them
+constants in the code before 2026-10-10; defaults = the values used before, so the results do not change, except for
+the new tolerances of the protocol grouping, see "Stimulation protocols"): stimulus
+assignment, detection and certainty, noise level and artifact gap rule, rocker rules, spike removal, rocker filter,
+tolerances of the protocol grouping, pulse text. List with defaults and meaning: `help mda_options` (section ADVANCED
+SETTINGS) or the help of `options.py`; with figures: [`docs/MyoDishAnalysis_settings_guide.pdf`](docs/MyoDishAnalysis_settings_guide.pdf)
+(GUI: **Advanced ...** → **Guide**). Purely numerical details (e.g. number of phase bins of the rocker cycle) and the
+criteria of the protocol results (captured group, ST threshold levels, S2 response) are fixed.
+
+Every analysis stores all options in its info table (rows `option_<name>`). A **settings file** is the same key /
+value table as `.csv` (`createdBy` = MyoDishAnalysisSettings):
+
+```matlab
+mda_settings('save', 'mySettings.csv', mda_options('gateMax', 0.2, 'rockerFilter', true));
+o = mda_settings('load', 'mySettings.csv');          % or a results file (.xlsx, _info.csv): its options
+MyoDishAnalysis(file, 1:8, 0, 600, 'settings', 'mySettings.csv', 'threshold', 300);   % later names override it
+MyoDishAnalysisWatch(raw, results, 'settings', 'mySettings.csv');   % index: the values (a changed file -> outdated)
+```
+
+Python: `settings.save_settings(file, opts)`, `settings.load_settings(file)`, `options(settings=file)`,
+`mda-analyze ... --settings file`, `mda-watch ... --settings file`. Options unknown in the version that reads the
+file are ignored (note); options missing in it have their default.
+
+## Stimulus assignment (onset gate) and extra pulses (option `'stimAssignment'`, default `'onset'`; 2026-10-10)
+Which pulse elicited a contraction? Every stimulus pulse of the channel is a candidate: the **regular pulses** and
+the **extra pulses** (status channel bit 16, e.g. pre-pulses before the regular pulse or CCM pulses after it; log
+channel 10k + c = extra pulse #k of channel c).
+* **Onset** of a contraction = the tangent at the maximum dF/dt between the diastolic minimum and the peak crosses the
+  diastolic level. The delay from the eliciting pulse to the onset is short (median per channel 6–75 ms in the
+  example recordings, up to ~80 ms near threshold), much shorter and more stable than the delay to the peak.
+* **Gate**: a pulse can only have elicited a contraction if it lies from onset − `gateMax` (0.15 s) to onset +
+  `gateTolerance` (0.015 s, tolerance of the onset estimate). Contractions are assigned in the order of their
+  prominence; every pulse elicits at most one contraction.
+* Several candidates: pulses before the onset before pulses after it; regular pulses before extra pulses (an extra
+  pulse after the regular pulse falls into its refractory period, e.g. CCM; a sub-threshold pre-pulse lies further
+  before the onset than the regular pulse); of one kind the earliest up to `gateCore` (0.06 s) before the onset,
+  otherwise the latest one. An eliciting pre-pulse is found because the regular pulse then lies after the onset.
+* No pulse in the gate: the upstroke can rise in phases (rocker movement, a spontaneous event fused with the
+  contraction just before the stimulus). The onsets of the other rise phases (local maxima of dF/dt ≥ 25 % of the
+  maximum) are tried, the earliest first; then a pulse up to 5 ms before the maximum dF/dt. Still none: `extra`.
+* **stimAmbiguous** = true: a pulse of the other kind (regular / extra) within `ambiguityWindow` (0.01 s) of the
+  chosen one, or one that would be chosen with the onset `gateTolerance` earlier or later, a later rise phase (the
+  upstroke started more than `gateTolerance` before it) or the pulse after the gate. Ambiguities are accepted and counted
+  (`nAmbiguous`), not hidden.
+* **Missed beats** = regular pulses that elicited no contraction; `nMissedDuringContraction` = those that fell into a
+  contraction elicited by another pulse (from its eliciting pulse to 90 % relaxation; refractory), the others were
+  diastolic. Extra pulses never count as stimuli of the pacing (counts, intervals, protocols, groups).
+* **prePulses / postPulses**: pulses without own contraction, written to the contraction they belong to: during the
+  contraction (eliciting pulse … 90 % relaxation) as post-pulses, before it (at most `prePulseWindow`, 1 s, before
+  the eliciting pulse) as pre-pulses. Format `t<ms>|<mA>|<charge µs>|<pause µs>|<decharge µs>`, several joined by
+  `&` (sorted by time; at most 10, then `&+<number of the others>`); t relative to the eliciting pulse (extra beat:
+  the onset), the programmed offset of the log file (`Sequence` entries) if the measured one is within 5 ms of it.
+  The leading `t` keeps spreadsheet programs from reading a cell such as `-150|15|...` as a formula; `&` instead of
+  `;` because `;` is the column separator of German CSV files. Example: `t-150|15|3000|1000|3000`.
+  Durations: the last `chargeDuration` / `pauseDuration` / `dechargeDuration` entry of the log file before the pulse
+  (extra pulse #k: log channel 10k + c if present, otherwise the values of the channel; software 2026).
+  Time resolution of the pulses: 2.5 ms (400 Hz).
+* **Pulse table** (`info.pulses`, sheet / file `pulses`; `'pulseTable',false` = none; xlsx with ≥ 1,048,576 rows:
+  `<name>_pulses.csv`; watcher: like the contractions, `_pulses.csv(.gz)`): one row per pulse of the analysed
+  channels and ranges: `pulse` (ID = raw sample number), `channel`, `t`, `extra`, `current_mA`, `currentReached`,
+  durations, `outcome` (`elicited` / `duringContraction` / `noResponse`), `role` (`eliciting` / `pre` / `post`),
+  `contraction` (number in the contraction table), `t_peak`, `tRel_ms`, `couplingInterval_s` (to the previous
+  eliciting pulse), `sinceOnset_s` (to the onset of the latest contraction) and `phase` (sinceOnset / onset … 90 %
+  relaxation). Threshold, refractory period and pre-pulse effects can be evaluated from it as special cases.
+* `'stimAssignment','peak'`: as in versions ≤ 1.0.0-beta.3 (peak `minStimToPeak` … min(stimulus interval, 1 s) after
+  a pulse, the most prominent peak after it; extra pulses count as regular pulses). Results files of these versions
+  are opened with `'peak'` (`mda_readResults`).
+* Validation (2026-10-10): 9 example recordings (50 channels, 33,633 contractions; rabbit, human ventricle and atrium,
+  pig, rat): `beatType` identical to `'peak'` in 41 channels. Differences: the peak gate counted spontaneous beats
+  0.2–0.45 s after a pulse as stimulated where the delay to the onset is 6–16 ms (rat, 2 Hz, faster spontaneous
+  rhythm; 193 contractions), assigned the pulse to the second peak of a double contraction (rabbit) or to a later
+  peak 1.5 s after the pulse (human, slow contractions; 23), counted artifact steps of a chamber with saturated signal
+  (rabbit, 74), and single contractions in 4 further channels. 8 recordings of 2022–2026 (prepulse threshold
+  protocols, CCM, rat, pig, human): see `CHANGELOG.md`.
+
+## External trigger (external stimulator; option `'externalTrigger'`, GUI *Advanced ...* → *Stimuli*)
 With the external controller unit (one chamber) the slice can be paced by an external stimulator whose TTL pulses
 are fed into the MyoDish: the status channel then has bit 14 (external trigger) set without channel and current bits
 (e.g. a sharp-electrode setup with its own stimulator: 1 Hz, 4 Hz and S1-S2 intervals). These pulses are read as
 `stim.channel = 0` (before 2026-10-08 they were read as channel 8, so the contractions of the slice in channel 1 were
 all `unpaced`); a pulse of 2 samples (at USB reconnects) is one pulse. `'externalTrigger'`: `'auto'` (default) = the
 external trigger pulses are the stimuli of the analysed channel if the window has no MyoDish stimulus pulses;
-`'on'` = always (any data channel; MyoDish pulses ignored); `'off'` = never. GUI: list next to *only stimulated
-contractions* (*stimuli: auto / MyoDish / ext. trigger*); the stimulus plot then shows the trigger pulses ("ext") and
+`'on'` = always (any data channel; MyoDish pulses ignored); `'off'` = never. GUI: **Advanced ...** → *Stimuli*
+(*auto* / *MyoDish pulses* / *external trigger pulses*); the stimulus plot then shows the trigger pulses ("ext") and
 their intervals, and the EP alignment also tries the trigger pulses (`mddChannel` 0). Since the external controller
 unit carries one chamber, any channel with a signal belongs to it: analyse the channel with the slice.
 Test recording (rabbit LV, 2.6 h, 8,691 trigger pulses): with the trigger pulses 30 / 30 contractions stimulated
@@ -725,7 +839,9 @@ lower plot, the trend and all exports.
 | `mda_groupBeats.m` | contractions grouped by a stimulation quantity (pacing frequency, S2 interval, current, rest, ...), summary per group |
 | `mda_protocolResults.m` | characteristic values per protocol and channel (max. captured frequency, FFR ratios, current thresholds, refractory periods, PRP at 15 / 30 / 60 s) |
 | `mda_parameters.m` | names, units and definitions of the parameters |
-| `mda_options.m` | options and defaults |
+| `mda_options.m` | options and defaults (incl. the advanced settings) |
+| `mda_settings.m` | settings files: save / load all options (also from results files) |
+| `docs/MyoDishAnalysis_settings_guide.pdf` | settings guide: legend of the force plot, pulse assignment, every advanced setting with figures |
 | `mda_summarize.m`, `mda_writeResults.m` | summary table, Excel/CSV export (info table: version and all settings) |
 | `mda_readResults.m` | read a results file again (settings, analysis windows, contractions; GUI: Open results) |
 | `mda_labels.m`, `mda_addLabels.m` | labels per channel (metadata) |

@@ -1,7 +1,8 @@
 """Dialogs of the GUI: comments of the log file, labels per channel, contraction table, help, file dialogs, saving plots
 (images) and exporting the plotted data. Port of the corresponding parts of MyoDishAnalysisGUI.m.
 
-TS 2026-10-06 (info table in every export, open results, rocker artifact window 2026-10-09)
+TS 2026-10-06 (info table in every export, open results, rocker artifact window 2026-10-09; advanced settings
+2026-10-10)
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import pandas as pd
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from ..advanced import ROWS as ADVANCED_ROWS, TABS as ADVANCED_TABS
 from ..analyze_ap import AP_PARAMETERS
 from ..analysis import datenum_to_timestamps
 from ..labels import labels as make_labels
@@ -653,6 +655,248 @@ class TableWindow(QtWidgets.QWidget):
             parent._tables = getattr(parent, "_tables", []) + [self]
 
 
+# ----------------------------------------------------------------------------------------------- advanced settings
+# rows (advanced.py, as advancedDefs in MyoDishAnalysisGUI.m): option name, label, kind ('popup', 'check', 'num',
+# 'int', 'numauto', 'vec'), popup items [(label, value)], description, scale (shown value = option value x scale),
+# unit, tab, reread (the window is read again)
+
+
+def _adv_default_text(row, d0):
+    name, _, kind, items, _, scale, unit, _, reread = row
+    v = d0[name]
+    unit = unit.replace("uN", "µN")
+    if kind == "popup":
+        t = "default: " + next(lb for lb, val in items if val == v)
+    elif kind == "check":
+        t = "default: on" if v else "default: off"
+    elif kind == "numauto":
+        t = "s (default: auto)" if isinstance(v, str) else f"s (default: {v:g})"
+    elif kind == "vec":
+        t = f"{unit} (default: {' '.join(f'{x * scale:g}' for x in v)})".strip()
+    else:
+        t = f"{unit} (default: {float(v) * scale:g})".strip()
+    return t + (" *" if reread else "")
+
+
+def settings_guide_file():
+    """settings guide (PDF): docs/ of the repository (next to the MATLAB code) or of the package"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    nm = "MyoDishAnalysis_settings_guide.pdf"
+    for d in (os.path.join(here, "..", "docs"), os.path.join(here, "..", "..", "..", "..", "docs")):
+        f = os.path.normpath(os.path.join(d, nm))
+        if os.path.isfile(f):
+            return f
+    return ""
+
+
+class AdvancedSettings(QtWidgets.QWidget):
+    """advanced settings (2026-10-10): all parameters of the method that are based on assumptions or experience
+    (options.py), one tab per part of the analysis; meaning: tooltips and the settings guide (button Guide).
+    Defaults = options(); Apply / OK analyse the window again (* = the window is read again). Save settings ... /
+    Load settings ...: settings file (settings.py; results of an analysis can be loaded as well)."""
+
+    def __init__(self, win):
+        from ..options import options as make_options
+        super().__init__(win)  # owned by the main window (closed with it)
+        self.win = win
+        self.pending = {}  # settings of the main window loaded from a file (applied at Apply / OK)
+        self.setWindowFlag(QtCore.Qt.WindowType.Window)
+        self.setWindowTitle("MyoDishAnalysis - advanced settings")
+        v = QtWidgets.QVBoxLayout(self)
+        self.tabs = QtWidgets.QTabWidget()
+        self.ctl = {}
+        d0 = make_options()
+        for tab in ADVANCED_TABS:
+            page = QtWidgets.QWidget()
+            g = QtWidgets.QGridLayout(page)
+            g.setVerticalSpacing(3)
+            r = 0
+            for row in ADVANCED_ROWS:
+                name, label, kind, items, tip, scale, unit, tb, reread = row
+                if tb != tab:
+                    continue
+                if reread:
+                    tip += " (the window is read again)"
+                lb = QtWidgets.QLabel(label)
+                lb.setToolTip(tip)
+                g.addWidget(lb, r, 0)
+                if kind == "popup":
+                    w = QtWidgets.QComboBox()
+                    w.addItems([it[0] for it in items])
+                elif kind == "check":
+                    w = QtWidgets.QCheckBox("")
+                else:
+                    w = QtWidgets.QLineEdit("")
+                    w.setMaximumWidth(120 if kind == "vec" else 90)
+                w.setToolTip(tip)
+                g.addWidget(w, r, 1)
+                d = QtWidgets.QLabel(_adv_default_text(row, d0))
+                d.setStyleSheet("color: #666666")
+                d.setToolTip(tip)
+                g.addWidget(d, r, 2)
+                self.ctl[name] = w
+                r += 1
+            g.setRowStretch(r, 1)
+            g.setColumnStretch(2, 1)
+            self.tabs.addTab(page, tab)
+        v.addWidget(self.tabs)
+        self.lMsg = QtWidgets.QLabel("Hover over a name for its meaning; Guide: settings guide with figures. Apply or OK "
+                                     "analyses the loaded window again (* = the window is read again). Settings are "
+                                     "saved with every export and can be loaded from a settings file or from results.")
+        self.lMsg.setWordWrap(True)
+        self.lMsg.setStyleSheet("color: #000099")
+        v.addWidget(self.lMsg)
+        h = QtWidgets.QHBoxLayout()
+        for text, cb, tip in (
+                ("Defaults", self.defaults, "show the default values (options()); Apply or OK uses them"),
+                ("Load settings ...", self.load, "settings file (Save settings ...) or results of an analysis (.xlsx, "
+                 "_info.csv): all settings except the threshold and zero force of the channels; Apply or OK uses them"),
+                ("Save settings ...", self.save, "all settings as shown (with the rocker filter, detection and filters "
+                 "of the main window) as a settings file (.csv): options(settings=file), mda-analyze --settings file"),
+                ("Guide", self.guide, "settings guide (PDF): the parameters and the markers of the force plot with "
+                 "figures")):
+            b = QtWidgets.QPushButton(text)
+            b.setToolTip(tip)
+            b.clicked.connect(cb)
+            h.addWidget(b)
+        h.addStretch(1)
+        for text, cb in (("Cancel", self.close), ("Apply", lambda: self.apply(False)), ("OK", lambda: self.apply(True))):
+            b = QtWidgets.QPushButton(text)
+            b.clicked.connect(cb)
+            h.addWidget(b)
+        v.addLayout(h)
+        self.resize(820, 680)
+        self.show_options(win.opts)
+
+    def defaults(self):
+        from ..options import options as make_options
+        self.show_options(make_options())
+
+    def show_options(self, o):
+        for name, _, kind, items, _, scale, _, _, _ in ADVANCED_ROWS:
+            w = self.ctl[name]
+            v = o[name]
+            if kind == "popup":
+                vals = [it[1] for it in items]
+                w.setCurrentIndex(vals.index(v) if v in vals else 0)
+            elif kind == "check":
+                w.setChecked(bool(v))
+            elif kind == "numauto":
+                w.setText("auto" if isinstance(v, str) or v is None else f"{v:g}")
+            elif kind == "vec":
+                w.setText(" ".join(f"{float(x) * scale:g}" for x in np.asarray(v, float).ravel()))
+            else:
+                w.setText(f"{float(v) * scale:g}")
+
+    def read(self):
+        """options from the controls (and the settings loaded for the main window), checked; (options, error)"""
+        from ..options import options as make_options
+        o = dict(self.win.opts)
+        o.update(self.pending)
+        for name, label, kind, items, _, scale, _, _, _ in ADVANCED_ROWS:
+            w = self.ctl[name]
+            if kind == "popup":
+                o[name] = items[w.currentIndex()][1]
+            elif kind == "check":
+                o[name] = w.isChecked()
+            elif kind == "numauto":
+                t = w.text().strip()
+                if not t or t.lower() == "auto":
+                    o[name] = "auto"
+                else:
+                    try:
+                        o[name] = float(t)
+                    except ValueError:
+                        return None, f"{label}: a number or auto."
+            elif kind == "vec":
+                try:
+                    o[name] = tuple(float(x) / scale for x in w.text().replace(",", " ").split())
+                except ValueError:
+                    return None, f"{label}: numbers separated by spaces."
+            else:
+                try:
+                    x = float(w.text().strip()) / scale
+                except ValueError:
+                    return None, f"{label}: enter a number."
+                o[name] = int(x) if name in ("medianFilterMs", "meanFilterMs") and x == int(x) else x
+        try:
+            return make_options(o), ""
+        except ValueError as e:
+            return None, str(e)
+
+    def apply(self, close_it):
+        """options from the controls: checked (options()), then the window is analysed again"""
+        o, err = self.read()
+        if o is None:
+            self.lMsg.setText(err)
+            return False
+        msg = self.win.apply_advanced(o)
+        self.pending = {}
+        if close_it:
+            self.close()  # hidden, reused by the next Advanced ...
+        else:
+            self.show_options(self.win.opts)
+            self.lMsg.setText(msg)
+        return True
+
+    def save(self):
+        """all settings as shown -> settings file (settings.py)"""
+        from ..settings import save_settings
+        o, err = self.read()
+        if o is None:
+            self.lMsg.setText(err)
+            return ""
+        if self.win.next_file:
+            fn, self.win.next_file = self.win.next_file, ""
+        else:
+            d = self.win.last_dir or (os.path.dirname(self.win.H.file) if self.win.H is not None else "")
+            fn, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save settings",
+                                                          os.path.join(d, "MyoDishAnalysis_settings.csv"),
+                                                          "settings (*.csv)")
+            if not fn:
+                return ""
+        try:
+            fn = save_settings(fn, o)
+            self.lMsg.setText(f"Settings saved: {fn} (all options as shown; Apply or OK uses them here).")
+        except OSError as e:
+            self.lMsg.setText(f"Settings not saved: {e}")
+            return ""
+        return fn
+
+    def load(self):
+        """settings file or results -> controls (and the settings of the main window at Apply / OK)"""
+        from ..settings import load_settings
+        if self.win.next_file:
+            fn, self.win.next_file = self.win.next_file, ""
+        else:
+            d = self.win.last_dir or (os.path.dirname(self.win.H.file) if self.win.H is not None else "")
+            fn, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load settings", d,
+                                                          "settings or results (*.csv *.xlsx)")
+            if not fn:
+                return False
+        try:
+            o, notes = load_settings(fn, notes=True)
+        except (OSError, ValueError, KeyError) as e:
+            self.lMsg.setText(f"Settings not loaded: {e}")
+            return False
+        names = {r[0] for r in ADVANCED_ROWS} | {"threshold", "zeroForce", "referenceBeat"}
+        self.pending = {k: v for k, v in o.items() if k not in names}
+        self.show_options(o)
+        msg = (f"Loaded {os.path.basename(fn)}: Apply or OK uses these settings (with rocker filter "
+               f"{bool(o.rockerFilter)}, {o.detection}, rocker {o.rocker}, beats {o.beats}).")
+        if notes:
+            msg += " " + " ".join(notes)
+        self.lMsg.setText(msg)
+        return True
+
+    def guide(self):
+        f = settings_guide_file()
+        if not f:
+            self.lMsg.setText("Settings guide not found (docs/MyoDishAnalysis_settings_guide.pdf of the repository).")
+            return
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(f))
+
+
 # ----------------------------------------------------------------------------------------------- help
 class RockerArtifactWindow(QtWidgets.QMainWindow):
     """rocker artifact (2026-10-09): signal of the loaded window before and after the rocker filter and the subtracted
@@ -777,7 +1021,16 @@ def help_text():
         "Force plot: red = selected contractions, orange = uncertain contractions (high sensitivity: neither locked to "
         "the stimuli nor large compared with the other contractions; not counted with high specificity), grey = "
         "excluded by the filters (rocker / stimulated only), x = "
-        "excluded by you, blue ticks = stimuli, grey background = rocker moving, yellow = analysed range.",
+        "excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16: pre-pulses, CCM "
+        "pulses, ...), green rings = contractions elicited by an extra pulse, black diamonds = ambiguous stimulus "
+        "assignment, grey background = rocker moving, yellow = analysed range.",
+        "Advanced ...: all parameters of the method that are based on assumptions or experience, one tab per part "
+        "(stimulus assignment / onset gate, detection, noise and artifact rules, rocker rules, signal and spike removal, "
+        "rocker filter, export). Hover over a name for its meaning; Guide = settings guide (PDF) with figures; Defaults "
+        "= options(); Apply / OK analyse the window again (* = the window is read again). Save settings ... / Load "
+        "settings ...: settings file (.csv; also results of an analysis); the settings are saved with every export "
+        "(info table).",
+        "Legend of the force plot: menu View or right click in the force plot (it can be dragged).",
         "Cursor in the force plot: \"drag = select time range\" or \"click = exclude / include contraction\". Mouse "
         "wheel: zoom the time axis (shift + wheel: move); double-click: whole loaded window. Right click: zero force, "
         "reference beat, save / export.",

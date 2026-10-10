@@ -20,7 +20,11 @@ function ok = mda_test()
 % Rocker peaks (option rockerArtifacts): rocker movement only, every 4th stimulus answered, every stimulus answered.
 % Uncertain contractions (option detection): small peaks between the contractions, not locked to the stimuli.
 %
-% TS 2026-10-05 (stimulation pause 2026-10-07, external trigger 2026-10-08, rocker peaks, uncertain 2026-10-09)
+% Diastolic level (option diastolicLevel): median before the pulse vs minimum before the peak. FFR steady state and PRP
+% reference per pause (protocolSelectionTest).
+%
+% TS 2026-10-05 (stimulation pause 2026-10-07, external trigger 2026-10-08, rocker peaks, uncertain 2026-10-09;
+% diastolic level, FFR steady state, PRP reference 2026-10-10)
 
 dt = 0.005;
 t = 0:dt:20;
@@ -48,6 +52,20 @@ for k = 1:size(expected, 1)
     ok = ok && pass;
     fprintf('%-20s expected %9.4f   calculated %9.4f   max. rel. error %.1e   %s\n', expected{k,1}, expected{k,2}, mean(v), err, passStr(pass));
 end
+
+% diastolic level (2026-10-10): a dip to 50 uN 0.3 ... 0.25 s before every pulse (outside the window 60 ... 5 ms
+% before it): median before the pulse (default) 100 uN, amplitude 1000 uN; 'minimum' 50 uN, amplitude 1050 uN
+F2 = F;
+for k = 1:numel(onset), F2(t >= onset(k) - 0.4 & t < onset(k) - 0.35) = 50; end
+S2 = S; S2.force = F2;
+Bm = mda_analyzeChannel(S2, 1, [2 17], mda_options('noFiltering', 'zeroForce', 40));
+Bn = mda_analyzeChannel(S2, 1, [2 17], mda_options('noFiltering', 'zeroForce', 40, 'diastolicLevel', 'minimum'));
+okD = all(abs(Bm.amplitude - 1000) < 1e-9) && all(abs(Bm.diastolicSignal - 100) < 1e-9) && ...
+    all(abs(Bm.TTP90 - 0.18) < 1e-9) && all(abs(Bn.amplitude - 1050) < 1e-9) && all(abs(Bn.diastolicSignal - 50) < 1e-9);
+fprintf(['diastolic level: median before the pulse %.1f uN (amplitude %.1f), minimum %.1f uN (amplitude %.1f); ' ...
+    'expected 100 / 1000, 50 / 1050   %s\n'], mean(Bm.diastolicSignal), mean(Bm.amplitude), mean(Bn.diastolicSignal), ...
+    mean(Bn.amplitude), passStr(okD));
+ok = ok && okD;
 
 % rocker filter: the same contractions every 2 s plus a periodic artifact (60 rpm = 1.2117 Hz, 3 harmonics, 300 uN
 % peak-to-peak = 30 % of the amplitude) while the rocker moves (0-90 s and 100-200 s, another phase after the stop)
@@ -135,6 +153,7 @@ ok = ok && okP;
 % stimulation pause (2026-10-07): 1 Hz, pause of 9 s, rocker moving (artifact +-120 uN) until 1.2 s before the next
 % stimulus. F_dia of the first contraction after the pause: only from pauseDiastoleWindow (0.5 s) before its stimulus
 % (amplitude 1000 uN, rocker stopped); with the whole window (Inf) the artifact gives F_dia and the rocker state.
+% Diastolic level 'minimum' (the median before the pulse is not affected by the pause: amplitude 1000 uN in both).
 t = 0:dt:30;
 F = 100 * ones(size(t));
 onset = [1:10, 19:28];
@@ -148,13 +167,14 @@ on = t >= 13.5 & t < 17.7;
 F(on) = F(on) + 120 * sin(2*pi*1.2*t(on));
 S = struct('dataChannels', 1, 'dt', dt, 't', t, 'force', F, 'rockerOn', on, 'fromSeconds', 0, 'toSeconds', 30);
 S.stim = struct('time', (onset - 0.1)', 'channel', ones(numel(onset), 1));
-o = mda_options('noFiltering', 'zeroForce', 40);
+o = mda_options('noFiltering', 'zeroForce', 40, 'diastolicLevel', 'minimum');
 B = mda_analyzeChannel(S, 1, [0.5 29.5], o);
 B0 = mda_analyzeChannel(S, 1, [0.5 29.5], mda_options(o, 'pauseDiastoleWindow', inf));
+Bmed = mda_analyzeChannel(S, 1, [0.5 29.5], mda_options(o, 'pauseDiastoleWindow', inf, 'diastolicLevel', 'preStimulusMedian'));
 p = abs(B.t_stim - 18.9) < 1e-9;
 okS = height(B) == 20 && height(B0) == 20 && sum(p) == 1 && abs(B.amplitude(p) - 1000) < 1e-6 && ...
     abs(B.diastolicSignal(p) - 100) < 1e-6 && ~B.rockerMoving(p) && B0.amplitude(p) > 1050 && B0.rockerMoving(p) && ...
-    max(abs(B.amplitude(~p) - B0.amplitude(~p))) < 1e-9 && ~any(B.rockerMoving);
+    max(abs(B.amplitude(~p) - B0.amplitude(~p))) < 1e-9 && ~any(B.rockerMoving) && abs(Bmed.amplitude(p) - 1000) < 1e-6;
 fprintf(['stimulation pause 9 s, rocker moving until 1.2 s before the stimulus: amplitude %.1f uN (expected 1000; ' ...
     'whole window %.1f), rocker moving %d (whole window %d), other contractions unchanged   %s\n'], B.amplitude(p), ...
     B0.amplitude(p), B.rockerMoving(p), B0.rockerMoving(p), passStr(okS));
@@ -225,7 +245,153 @@ ok = ok && okU;
 % keeps the MyoDish pulses
 okX = externalTriggerTest();
 ok = ok && okX;
+% tolerances of the grouping (2026-10-10): pacing frequency rounded to 0.1 Hz (0.99, 1.0 and 1.031 Hz = '1 Hz'),
+% pauses within 10 % = one pause length (PRP results: mean of these pauses)
+okG = groupingTest();
+ok = ok && okG;
+% FFR steady state and PRP reference per pause (2026-10-10)
+okP = protocolSelectionTest();
+ok = ok && okP;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
+end
+
+function okG = groupingTest()
+% temporary .mdd (9 channels, 400 Hz): pulses of channel 1 at intervals of 2.0, 2.04 (8 each: 0.5 / 0.49 Hz), 1.3325,
+% 1.35 (6 each: 0.75 / 0.74 Hz), 1.0, 1.01, 0.97, 0.5 and 0.51 s (12 each),
+% then 1 s pacing with pauses (intervals 16, 15.5, 31 and 32.5 s, 10 stimuli between them); a contraction 30 ms after
+% every pulse (rise 100 ms, relaxation 200 ms)
+fs = 400;
+iv = [2 * ones(1, 8), 2.04 * ones(1, 8), 1.3325 * ones(1, 6), 1.35 * ones(1, 6), ones(1, 12), 1.01 * ones(1, 12), ...
+    0.97 * ones(1, 12), 0.5 * ones(1, 12), 0.51 * ones(1, 12)];
+ffrEnd = 1 + sum(iv) + 0.5;
+pz = [16 15.5 31 32.5];
+for q = 1:numel(pz), iv = [iv, ones(1, 10), pz(q)]; end %#ok<AGROW>
+iv = [iv, ones(1, 10)];
+ts = 1 + [0 cumsum(iv)];
+ts = round(ts * fs) / fs;
+T = ceil(ts(end)) + 2; n = T * fs; tt = (0:n-1) / fs;
+F = 2000 * ones(1, n);
+for k = 1:numel(ts)
+    a = ts(k) + 0.03;
+    I = tt >= a & tt < a + 0.1; F(I) = 2000 + 1000 * (tt(I) - a) / 0.1;
+    I = tt >= a + 0.1 & tt < a + 0.3; F(I) = 3000 - 1000 * (tt(I) - a - 0.1) / 0.2;
+end
+X = zeros(9, n, 'int16');
+X(1,:) = int16(round(F));
+code = zeros(1, n, 'uint16');
+code(round(ts * fs) + 1) = uint16(512 + 50);       %channel 1, 50 mA
+X(9,:) = typecast(code, 'int16');
+base = [tempname '_grouping'];
+mdd = [base '.mdd']; lg = [base '_log.log'];
+fid = fopen(mdd, 'w'); fwrite(fid, X, 'int16'); fclose(fid);
+L = {'systemTime;dataLogTime;channel;code;value', '2026 01 01 06:00:00:000;0;0;nChannels;9', ...
+    '2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd', '2026 01 01 06:00:00:000;0;0;samplingRate Recording;400'};
+for c = 1:8
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Calibration;1000', c); %#ok<AGROW>
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Offset;0', c); %#ok<AGROW>
+end
+L{end+1} = sprintf('2026 01 01 06:%02d:%02d:000;%d;0;Recording;stopped: x.mdd', floor(T / 60), mod(T, 60), T * 1000);
+fid = fopen(lg, 'w'); fprintf(fid, '%s\n', L{:}); fclose(fid);
+okG = false;
+try
+    o = {'quiet', true, 'noFiltering', 'spikeRemoval', false};
+    [~, Sf, If] = MyoDishAnalysis(mdd, 1, 0.5, ffrEnd, 'groupBy', 'pacingFrequency', o{:});
+    [~, Sp, Ip] = MyoDishAnalysis(mdd, 1, ffrEnd, T, 'groupBy', 'pauseLength', o{:});
+    Sf = Sf(~strcmp(Sf.group, 'unknown'), :);
+    R = Ip.protocolResults;
+    rest = Sp(strcmp(Sp.groupRole, 'postRest'), :);
+    [~, Sf2] = MyoDishAnalysis(mdd, 1, 0.5, ffrEnd, 'groupBy', 'pacingFrequency', 'frequencyResolution', 0.01, o{:});
+    okG = isequal(sort(Sf.group)', {'0.5 Hz', '0.75 Hz', '1 Hz', '2 Hz'}) && ...
+        isequal(sort(Sf.groupValue)', [0.5 0.75 1 2]) && ...
+        Sf.nStimuli(strcmp(Sf.group, '1 Hz')) == 36 && If.protocolResults.maxCapturedFrequency_Hz == 2 && ...
+        abs(If.protocolResults.FFR_1Hz_pct - 100) < 2 && abs(If.protocolResults.FFR_2Hz_pct - 100) < 2 && ...
+        height(rest) == 4 && ...
+        isequal(rest.group', {'rest 15.8 s #1', 'rest 15.8 s #2', 'rest 31.8 s #3', 'rest 31.8 s #4'}) && ...
+        abs(R.PRP15_pause_s - 14.75) < 1e-6 && abs(R.PRP30_pause_s - 30.75) < 1e-6 && isnan(R.PRP60_pct) && ...
+        contains(R.resultNote{1}, 'PRP15: mean of 2 pauses') && any(strcmp(Sf2.group, '1.03 Hz'));
+    fprintf(['grouping tolerances: frequency groups %s (expected 0.5, 0.75, 1, 2 Hz), pauses %s, PRP15 / 30 pause %.2f / %.2f s ' ...
+        '(expected 14.75 / 30.75)   %s\n'], strjoin(Sf.group', ', '), strjoin(rest.group', ', '), R.PRP15_pause_s, ...
+        R.PRP30_pause_s, passStr(okG));
+catch ME
+    fprintf('grouping tolerances: %s   FAILED\n', ME.message);
+end
+delete(mdd); delete(lg);
+end
+
+function okP = protocolSelectionTest()
+% temporary .mdd (9 channels, 400 Hz): FFR protocol (log comments) with pulses at 0.5 Hz (16), 1 Hz (20), 2 Hz (20)
+% and again 0.5 Hz (3), amplitude 1000 + 10 x number of the pulse; PRP protocol: 1 Hz train of 12 pulses (amplitudes
+% 920 ... 1140), pause 10 s, post-rest contraction 2000 uN, 11 pulses (940 ... 1140), pause 20 s, post-rest 2500 uN,
+% 12 pulses. 2 Hz with 2:1 capture (no contraction after every second pulse). Expected: FFR 0.5 Hz from the longest
+% run (15 pulses with the interval of 0.5 Hz), its last 10 contractions (mean 1115 uN), groupStep 1; steadyStateBeats
+% 0: all 18 contractions; 2 Hz: no steady state (no included contraction, note). PRP: 'preceding' reference median of
+% the last 6 (1090 uN): 183.49 / 229.36 %; 'firstTrain' mean of the train at 1 Hz (1040 uN): 192.31 / 240.38 %
+fs = 400;
+ivF = [2 * ones(1, 15), ones(1, 20), 0.5 * ones(1, 20), 2 * ones(1, 3)];
+tsF = 2 + [0 cumsum(ivF)];
+ampF = 1000 + 10 * (1:numel(tsF));
+t0 = tsF(end) + 2;                                 %(2 s: no pause before the train)
+ivP = [ones(1, 11), 10, ones(1, 11), 20, ones(1, 12)];
+tsP = t0 + [0 cumsum(ivP)];
+ampP = [920:20:1140, 2000, 940:20:1140, 2500, 1000 * ones(1, 12)];
+ts = round([tsF tsP] * fs) / fs; amp = [ampF ampP];
+hasC = true(size(ts)); hasC(38:2:56) = false;     %2 Hz (pulses 37 ... 56): 2:1 capture
+T = ceil(ts(end)) + 3; n = T * fs; tt = (0:n-1) / fs;
+F = 2000 * ones(1, n);
+for k = find(hasC)
+    a = ts(k) + 0.03;
+    I = tt >= a & tt < a + 0.1; F(I) = 2000 + amp(k) * (tt(I) - a) / 0.1;
+    I = tt >= a + 0.1 & tt < a + 0.3; F(I) = 2000 + amp(k) - amp(k) * (tt(I) - a - 0.1) / 0.2;
+end
+X = zeros(9, n, 'int16');
+X(1,:) = int16(round(F));
+code = zeros(1, n, 'uint16');
+code(round(ts * fs) + 1) = uint16(512 + 50);       %channel 1, 50 mA
+X(9,:) = typecast(code, 'int16');
+base = [tempname '_protsel'];
+mdd = [base '.mdd']; lg = [base '_log.log'];
+fid = fopen(mdd, 'w'); fwrite(fid, X, 'int16'); fclose(fid);
+clk = @(x) sprintf('2026 01 01 06:%02d:%02d:%03d', floor(x / 60), floor(mod(x, 60)), round(1000 * mod(x, 1)));
+L = {'systemTime;dataLogTime;channel;code;value', '2026 01 01 06:00:00:000;0;0;nChannels;9', ...
+    '2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd', '2026 01 01 06:00:00:000;0;0;samplingRate Recording;400'};
+for c = 1:8
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Calibration;1000', c); %#ok<AGROW>
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Offset;0', c); %#ok<AGROW>
+end
+ev = {1.5, 'FFR protocol started'; tsF(end) + 1, 'FFR protocol ended'; t0 - 0.5, 'PRP protocol started'; ...
+    tsP(end) + 1, 'PRP protocol ended'};
+for q = 1:size(ev, 1)
+    L{end+1} = sprintf('%s;%d;0;comment;%s', clk(ev{q,1}), round(1000 * ev{q,1}), ev{q,2}); %#ok<AGROW>
+end
+L{end+1} = sprintf('%s;%d;0;Recording;stopped: x.mdd', clk(T), T * 1000);
+fid = fopen(lg, 'w'); fprintf(fid, '%s\n', L{:}); fclose(fid);
+okP = false;
+try
+    o = {'quiet', true, 'noFiltering', 'spikeRemoval', false, 'downsampling', 1};
+    [~, S1, I1] = MyoDishAnalysis(mdd, 1, [], [], 'protocol', 'all', o{:});
+    [~, S0] = MyoDishAnalysis(mdd, 1, [], [], 'protocol', 'FFR', 'steadyStateBeats', 0, o{:});
+    [~, S2] = MyoDishAnalysis(mdd, 1, [], [], 'protocol', 'PRP', 'prpReference', 'firstTrain', o{:});
+    g = @(S, r, nm) S(strcmp(S.range, r) & strcmp(S.group, nm), :);
+    a = g(S1, 'FFR 1', '0.5 Hz'); a0 = g(S0, 'FFR 1', '0.5 Hz');
+    p1 = g(S1, 'PRP 1', 'rest 10 s'); p2 = g(S1, 'PRP 1', 'rest 20 s');
+    q1 = g(S2, 'PRP 1', 'rest 10 s'); q2 = g(S2, 'PRP 1', 'rest 20 s');
+    a2 = g(S1, 'FFR 1', '2 Hz');
+    n2 = 0; if ~isempty(a2), n2 = a2.nContractions; end
+    note2 = any(contains(I1.notes, 'no run of captured stimuli at 2 Hz'));
+    okP = a.nContractions == 10 && abs(a.amplitude_mean - 1115) < 1e-6 && a.groupStep == 1 && ...
+        g(S1, 'FFR 1', '1 Hz').nContractions == 10 && n2 == 0 && note2 && ...
+        a0.nContractions == 18 && isnan(a0.groupStep) && ...
+        abs(p1.amplitude_pctOfRef - 100 * 2000 / 1090) < 1e-6 && abs(p2.amplitude_pctOfRef - 100 * 2500 / 1090) < 1e-6 && ...
+        abs(q1.amplitude_pctOfRef - 100 * 2000 / 1040) < 1e-6 && abs(q2.amplitude_pctOfRef - 100 * 2500 / 1040) < 1e-6 && ...
+        a.irregular == 0;
+    fprintf(['FFR steady state: 0.5 Hz %d contractions (expected 10), mean %.1f uN (1115), step %g (1), all: %d (18), ' ...
+        '2 Hz with 2:1 capture %d (0, note %d); PRP %.2f / %.2f %% (183.49 / 229.36), firstTrain %.2f / %.2f %% ' ...
+        '(192.31 / 240.38)   %s\n'], a.nContractions, a.amplitude_mean, a.groupStep, a0.nContractions, n2, note2, ...
+        p1.amplitude_pctOfRef, p2.amplitude_pctOfRef, q1.amplitude_pctOfRef, q2.amplitude_pctOfRef, passStr(okP));
+catch ME
+    fprintf('FFR steady state / PRP reference: %s   FAILED\n', ME.message);
+end
+delete(mdd); delete(lg);
 end
 
 function okX = externalTriggerTest()

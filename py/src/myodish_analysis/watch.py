@@ -10,7 +10,9 @@ of the analysis apply to the watcher results as well; with reanalyze="outdated" 
 analysed again.
 
 Per recording (results_folder/<subfolder of raw_folder>/):
-  <name>_summary.csv, _contractions.csv(.gz), _parameters.csv, _info.csv (version, all options, watcher settings),
+  <name>_summary.csv, _contractions.csv(.gz), _pulses.csv(.gz) (all stimulus pulses, option pulseTable; like the
+  contractions: not written with contractions='none', compressed with compress=True), _parameters.csv, _info.csv
+  (version, all options, watcher settings),
   _thresholds.csv (analysis windows), _labels.csv (_rockerFilter.csv); mda-gui <name>_info.csv opens them
       summary = one row per channel and time range: time bins of bin_minutes (default 60 min) without the periods of
       the stimulation protocols (include_protocols=False, default; a bin with a protocol gives several ranges).
@@ -33,7 +35,8 @@ Per recording (results_folder/<subfolder of raw_folder>/):
       board group or controller failures (>= 2 channels within 1 s), saturation, channels without a chamber ('no
       signal'); with clock times and the comments of the log file within 5 min of the start or end. The summary gets
       the columns noSignal_s (s without signal in the range) and nChamberOut (chambers taken out in the range).
-  <name>_channels.csv (gaps=True): one row per channel: recording, recordingStart, fileLength_s, status at the end of
+  <name>_channels.csv (gaps=True): one row per channel: recording, recordingStart, fileLength_s, calibration ('Calibration'
+      entries of the log file, AU per mN; several values separated by ';'), status at the end of
       the recording ('beating', 'not beating' = no contraction in the last 30 min with signal outside the stimulation
       protocols, 'protocols only' = no time outside the protocols (not analysed), 'removed' = chamber taken out and
       not put back, 'signal lost' = technical, 'no slice'), beatingAtEnd, s with and without signal, chambers taken out, technical failures,
@@ -76,13 +79,15 @@ overview_seconds (60), events (True), gaps (True: <name>_gaps.csv, <name>_channe
 nChamberOut), register (True: slice register), new_slice_hours (2), workers
 (1; > 1: recordings analysed in parallel processes), flag_capture (90), flag_extra_beats (10), flag_amplitude_change
 (30), quiet. All other keywords are analysis options of myodish_analysis (e.g.
-rockerFilter=True, rocker='stopped', threshold=300), applied to all recordings.
+rockerFilter=True, rocker='stopped', threshold=300), applied to all recordings; settings=file: analysis options from a
+settings file (settings.py) or earlier results (the index records their values: a changed file analyses the
+recordings again).
 
 Run it once a day by the scheduler of the operating system (cron / launchd / Windows task scheduler), e.g.
     0 7 * * *  /path/to/venv/bin/mda-watch /data/myodish/raw /data/myodish/results --quiet
 or keep it running with interval=24.
 
-TS 2026-10-08 (watcher settings in the info table 2026-10-09)
+TS 2026-10-08 (watcher settings in the info table 2026-10-09; pulse table 2026-10-10)
 """
 from __future__ import annotations
 
@@ -152,6 +157,7 @@ def watch(raw_folder, results_folder, **kw):
     bad = [k for k in kw if k.lower() in _SET_BY_WATCHER]
     if bad:
         raise ValueError(f"watch: {', '.join(bad)} is set by the watcher (labels per channel: <name>_labels.csv)")
+    kw = _expand_settings(kw)  # settings file: its values (2026-10-10)
     make_options(**{k: v for k, v in kw.items() if k.lower() not in _NOT_IN_OPTIONS})  # unknown options: error now
     while True:
         index, report = _one_pass(os.path.abspath(raw_folder), os.path.abspath(results_folder), o, kw)
@@ -161,6 +167,27 @@ def watch(raw_folder, results_folder, **kw):
             nxt = _dt.datetime.now() + _dt.timedelta(hours=float(o["interval"]))
             print(f"next pass {nxt:%Y-%m-%d %H:%M} (Ctrl+C stops)")
         time.sleep(float(o["interval"]) * 3600)
+
+
+def _expand_settings(kw):
+    """keyword settings (settings file, settings.py): the options of the file that differ from the defaults, the other
+    keywords override them. The index records the values, not the file name: a changed settings file analyses the
+    recordings again (reanalyze 'outdated')."""
+    keys = [k for k in kw if k.lower() == "settings"]
+    if not keys:
+        return kw
+    f = kw[keys[-1]]
+    rest = {k: v for k, v in kw.items() if k.lower() != "settings"}
+    if not f:
+        return rest
+    from .settings import load_settings
+    St = load_settings(f)
+    D = make_options()
+    given = {k.lower() for k in rest}
+    out = {k: v for k, v in St.items() if k != "referenceBeat" and k.lower() not in given
+           and _value_text(v) != _value_text(D[k])}
+    out.update(rest)
+    return out
 
 
 def code_fingerprint():
@@ -439,7 +466,8 @@ def _analyse(f, rel, H, res, row, o, aopts):
             msgs.append(f"protocols: {type(ex).__name__}: {ex}")
     W = _protocol_windows(P, float(o["protocol_margin_seconds"]))
     fr, to, labels, bins = _ranges(H, float(o["bin_minutes"]) * 60, None if o["include_protocols"] else W)
-    for suffix in ("_contractions.csv", "_contractions.csv.gz", "_overview.csv"):  # results of earlier options
+    for suffix in ("_contractions.csv", "_contractions.csv.gz", "_overview.csv", "_pulses.csv", "_pulses.csv.gz"):
+        # results of earlier options
         if os.path.isfile(os.path.join(outDir, n + suffix)):
             os.remove(os.path.join(outDir, n + suffix))
     E = None
@@ -478,13 +506,15 @@ def _analyse(f, rel, H, res, row, o, aopts):
             outputs.append(n + "_overview.csv")
         C = _sample(C, labels, W if o["include_protocols"] else None, o)
         write_results(os.path.join(outDir, n + ".csv"), C, S, info)
-        cf = os.path.join(outDir, n + "_contractions.csv")
-        if o["contractions"] == "none":
-            os.remove(cf)
-        elif o["compress"]:
-            with open(cf, "rb") as src, gzip.GzipFile(cf + ".gz", "wb", mtime=0) as dst:
-                shutil.copyfileobj(src, dst)
-            os.remove(cf)
+        for cf in (os.path.join(outDir, n + "_contractions.csv"), os.path.join(outDir, n + "_pulses.csv")):
+            if not os.path.isfile(cf):  # pulses: option pulseTable
+                continue
+            if o["contractions"] == "none":
+                os.remove(cf)
+            elif o["compress"]:
+                with open(cf, "rb") as src, gzip.GzipFile(cf + ".gz", "wb", mtime=0) as dst:
+                    shutil.copyfileobj(src, dst)
+                os.remove(cf)
         outputs.insert(0, n + ".csv")
         msgs = list(info.get("notes", [])) + msgs
     else:
@@ -568,14 +598,25 @@ def _channel_status(H, C, G, E, name, L=None, tEnd=math.inf):
         cch, ctx = cm["channel"].to_numpy(float), cm["text"].astype(str).tolist()
     else:
         cch, ctx = np.zeros(0), []
+    # 'Calibration' entries of the log file per channel (AU per mN; channel 0 = all channels), in the order of time,
+    # several values separated by ';' (2026-10-10: changes are flagged in the slice register)
+    CLg = getattr(H, "calibrationLog", None)
+    if CLg is None and isinstance(H, dict):
+        CLg = H.get("calibrationLog")
+    CLg = np.asarray(CLg if CLg is not None else np.zeros((0, 3)), float).reshape(-1, 3)
+    CLg = CLg[np.argsort(CLg[:, 0], kind="stable")]
     rows = []
     for c in [int(x) for x in np.ravel(H.dataChannels)]:
+        cv = CLg[(CLg[:, 1] == c) | (CLg[:, 1] == 0), 2]
+        if cv.size:
+            cv = cv[np.r_[True, np.diff(cv) != 0]]
+        cal = ";".join("%.15g" % x for x in cv)
         g = G[G["channel"].to_numpy(float) == c]
         typ = g["type"].to_numpy()
         fs_, ue = g["fromStart"].to_numpy(bool), g["untilEnd"].to_numpy(bool)
         noSig = float(np.sum(g["duration"].to_numpy(float)))
         r = dict(recording=name, recordingStart=start, fileLength_s=TT,
-                 channel=c, status="", beatingAtEnd=False, signal_s=max(0.0, TT - noSig), noSignal_s=noSig,
+                 channel=c, calibration=cal, status="", beatingAtEnd=False, signal_s=max(0.0, TT - noSig), noSignal_s=noSig,
                  nChamberOut=float(np.sum((typ == "chamber out") & ~fs_)),
                  nTechnical=float(np.sum(np.isin(typ, ["board group", "controller", "saturated"]))),
                  firstSignal_s=math.nan, lastSignal_s=math.nan, nContractions=0.0, lastContraction_s=math.nan,

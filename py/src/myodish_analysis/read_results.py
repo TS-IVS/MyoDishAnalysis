@@ -4,6 +4,7 @@ mda_readResults.m.
     R = read_results('results.xlsx')
     R = read_results('results_info.csv')       (or _summary.csv, _contractions.csv(.gz), _thresholds.csv: the other
                                                 files of the set are found by their names)
+    R = read_results('settings.csv')           a single table key, value (settings file of settings.py): options
 
 Results of myodish_analysis (output=...), the watcher, the GUI (Export this channel ..., All channels -> file ...,
 protocols) and of the MATLAB version. Used by the GUI to open results: mda-gui results.xlsx.
@@ -16,7 +17,7 @@ windows (DataFrame, one row per analysis window: channel, range, from, to (contr
 +- maxBeatWindow + 2 s), summary, contractions, labels, rockerFilter (DataFrames or None), extra (dict of the other
 rows of the info table, e.g. loadedWindow_s, epRecording, watcherOptions), info (the info table), notes (list).
 
-TS 2026-10-09
+TS 2026-10-09 (settings files 2026-10-10)
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ import pandas as pd
 from .options import NAMES as OPTION_NAMES, _DEFAULTS as OPTION_DEFAULTS, options as make_options
 
 _SUFFIX = re.compile(r"_(info|summary|contractions|thresholds|parameters|labels|rockerFilter|protocols|"
-                     r"protocolResults)$")
+                     r"protocolResults|pulses)$")
 
 
 def parse_numbers(s):
@@ -115,6 +116,8 @@ def read_results(results_file):
                 f = f + ".gz"
             return _read_csv(f, info=name == "info")
     I = get("info")
+    if I is None and e.lower() == ".csv" and not gz and os.path.isfile(results_file):  # a single table key, value
+        I = _read_csv(results_file, info=True)
     if I is None or not {"key", "value"} <= set(I.columns):
         raise ValueError(f"read_results: no info table (key, value) found for {results_file}.")
     I = I[["key", "value"]].copy()
@@ -149,6 +152,10 @@ def read_results(results_file):
                 R["notes"].append(f"{v}: not restored (create it again in the GUI)")
             continue
         given[name] = _parse_value(v, OPTION_DEFAULTS[name], name)
+    keys = list(I["key"])
+    if any(str(k).startswith("option_") for k in keys) and "option_stimAssignment" not in keys:
+        given["stimAssignment"] = "peak"  # results of versions <= 1.0.0-beta.3 (2026-10-10)
+        R["notes"].append("results without option stimAssignment (older version): stimulus assignment 'peak'")
     R["options"] = make_options(given)
     ch = val("channels")
     if ch:

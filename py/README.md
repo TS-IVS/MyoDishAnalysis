@@ -4,7 +4,7 @@ Python port of the MATLAB **MyoDishAnalysis** (folder above this one): contracti
 single contraction** in MyoDish recordings (`.mdd`), reference beat, rocker filter, alignment of a parallel EP
 recording (LabChart) and AP parameters. It includes a command line (`mda`) and an interactive GUI (`mda-gui`, PySide6 + pyqtgraph).
 
-Version 1.0.0b3 (2026-10-10; = MATLAB version 1.0.0-beta.3, public beta) · Thomas Seidel, Friedrich-Alexander-Universität
+Version 1.0.0b4 (2026-10-10; = MATLAB version 1.0.0-beta.4, public beta) · Thomas Seidel, Friedrich-Alexander-Universität
 Erlangen-Nürnberg (FAU) / InVitroSys GmbH. Until 2026-10-06 named MyoDishContractionTool (Python package
 `myodish_contractions`, commands `mdct`, `mdct-gui`, `mdct-test`); now `myodish_analysis`, `mda`, `mda-gui`, `mda-test`.
 
@@ -14,7 +14,7 @@ installation, usage and the differences.
 
 ## Citation and license
 If you publish results obtained with this software, please cite the version you used (Seidel T. MyoDishAnalysis,
-version 1.0.0-beta.3, 2026; DOI: see `CITATION.cff` or the Zenodo record of the release) and mention it in the Methods.
+version 1.0.0-beta.4, 2026; DOI: see `CITATION.cff` or the Zenodo record of the release) and mention it in the Methods.
 
 Copyright (c) 2026 Thomas Seidel. License: GNU General Public License, version 3 or (at your option) any later version
 (GPL-3.0-or-later, file `LICENSE`). You may use it free of charge, also commercially (companies, InVitroSys customers).
@@ -63,7 +63,12 @@ win.open_ep("file.mat"); win.api_set_range([10, 100]); T, Sm = win.api_results()
 ```
 
 `contractions` and `summary` are pandas DataFrames with the columns of the MATLAB tables (units in
-`contractions.attrs["units"]`). `info` is a dict, and `info["rockerFilter"]` and `info["thresholds"]` are DataFrames.
+`contractions.attrs["units"]`). `info` is a dict, and `info["rockerFilter"]`, `info["thresholds"]` and `info["pulses"]`
+(pulse table, see "Stimulus assignment" in the main README) are DataFrames. Stimulus assignment and gate parameters:
+`options(stimAssignment="onset", gateMax=0.15, ...)`, command line `--set gateMax=0.2`; GUI **Advanced ...**.
+All advanced settings (constants of the method, see "Advanced settings" in the main README and
+`docs/MyoDishAnalysis_settings_guide.pdf`): `myodish_analysis.advanced.ROWS`; settings files:
+`settings.save_settings(file, opts)`, `settings.load_settings(file)`, `options(settings=file)`, `--settings file`.
 Indices returned by the functions (e.g. `C.iPeaks`) are 0-based. Channel numbers are the physical channel numbers (1 … 8), as
 in MATLAB.
 
@@ -89,7 +94,7 @@ in MATLAB.
 | `mda_summarize`, `mda_writeResults` | `summarize()`, `write_results()` |
 | `mda_labels`, `mda_addLabels` | `labels()`, `add_labels()` |
 | `MyoDishAnalysisWatch` | `watch()`, `mda-watch` (same index `mda_index.csv` and results; see the main README) |
-| `mda_test`, `mda_testWatch`, `mda_testClockTime`, `mda_testSignalGaps`, `mda_testSliceRegister`, `mda_testSpikes`, `mda_testProtocolEnd` | `selftest()`, `mda-test`, `tests/test_mda.py`, `tests/test_watch.py`, `tests/test_clock_time.py`, `tests/test_signal_gaps.py`, `tests/test_slice_register.py`, `tests/test_spikes.py`, `tests/test_protocol_end.py` |
+| `mda_test`, `mda_testWatch`, `mda_testClockTime`, `mda_testSignalGaps`, `mda_testSliceRegister`, `mda_testSpikes`, `mda_testProtocolEnd`, `mda_testExtraPulses` | `selftest()`, `mda-test`, `tests/test_mda.py`, `tests/test_watch.py`, `tests/test_clock_time.py`, `tests/test_signal_gaps.py`, `tests/test_slice_register.py`, `tests/test_spikes.py`, `tests/test_protocol_end.py`, `selftest.extra_pulse_test()` |
 
 ## Agreement with MATLAB (R2026a), checked 2026-10-07
 `tests/compare_matlab.py` compares the Python results with MATLAB results of the same calls
@@ -133,6 +138,8 @@ and `mda_py_reference_helpers` (write the `.mat` files in `tests/reference/`).
   other windows. **Edit figure ...** of the overlay window opens a matplotlib window (toolbar: *Edit axis, curve and
   image parameters*; save as .png / .pdf / .svg) instead of a MATLAB figure with the plot tools.
 * GUI script access: `win.open_ep(file)`, `win.EP`, `win.api_set_range()`, `win.api_results()`, `win.api_zero_at()`,
+  `win.api_advanced({"gateMax": 0.2})` (advanced settings as typed in the window and Apply; `"save"` / `"load"` with
+  `win.next_file` set: Save settings ... / Load settings ...), `win.on_legend(False)` (legend of the force plot),
   `win.on_key('right', shift)`, `win.overlay_channels([1, 3])`, `win.win_overlay`, `win.ep_set_ylim(1, [-100, 40])`,
   `win.ep_set_clean(True)`, `win.hover(t, 'signal')` replace `fig.UserData`.
 * The `showFigures` figures of the command line are drawn with matplotlib.

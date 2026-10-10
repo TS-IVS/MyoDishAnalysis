@@ -17,6 +17,7 @@ function [S, R] = mda_rockerFilter(S, channels, opts, Sctx)
 % METHOD
 %   While the rocker moves, the dish tilts periodically and the medium moves. Each sensor shows an additive periodic
 %   signal with the rocker frequency f0 (the shape and size differ between channels, they are stable over time).
+%   (the numbers are the defaults of the advanced settings rockerHzPerRpm and rf..., mda_options)
 %   1. f0: rocker speed in the log file ('rockerSpeed', rpm) x 0.0202 Hz/rpm (measured: 60 rpm = 1.212-1.215 Hz),
 %      refined +-3 % with the data of all channels (harmonic-sum periodogram of the samples between contractions;
 %      a clear peak is required). Without a rocker speed in the log file: search 0.4-2.2 Hz.
@@ -37,7 +38,7 @@ function [S, R] = mda_rockerFilter(S, channels, opts, Sctx)
 %   detectable; too little time between contractions (fast pacing of slow tissue). Changes of the contraction itself
 %   by the rocker movement (e.g. a modulation of the amplitude) cannot be removed by a subtraction.
 %
-% TS 2026-10-05 (contraction masks independent of the option detection 2026-10-09)
+% TS 2026-10-05 (contraction masks independent of the option detection 2026-10-09; advanced settings 2026-10-10)
 
 if nargin < 4 || isempty(Sctx), Sctx = S; end
 channels = channels(:)';
@@ -55,7 +56,7 @@ if isnumeric(opts.threshold) && numel(opts.threshold) > 1
     thrV = opts.threshold(:)'; o0.threshold = 'auto';
 end
 oOf = @(chX) setThreshold(o0, thrV, channels, chX);  %options of the contraction masks of channel chX
-P = constants();
+P = constants(opts);
 R = repmat(emptyR(), 1, numel(channels));
 for c = 1:numel(channels), R(c).channel = channels(c); end
 
@@ -115,8 +116,8 @@ MA = cell(1, nX); MB = cell(1, nX);
 for k = find(need(:))'
     try
         [B0, C0] = mda_analyzeChannel(Sctx, Sctx.dataChannels(k), [], oOf(Sctx.dataChannels(k)));
-        if numel(C0.stimTimes) >= 3, MA{k} = firstMask(B0, C0); end
-        MB{k} = secondMask(B0, C0);
+        if numel(C0.stimTimes) >= 3, MA{k} = firstMask(B0, C0, P); end
+        MB{k} = secondMask(B0, C0, P);
     catch
         MB{k} = zeros(0, 2);
     end
@@ -171,7 +172,7 @@ for c = 1:numel(channels)
         Sx = Sctx;
         Sx.force(rowX, :) = (x - evalArtifact(I, t, runT, f0run, P))';
         [B1, C1] = mda_analyzeChannel(Sx, ch, [], oOf(ch));
-        I2 = fitArtifact(t, x, runT, gi, f0run, secondMask(B1, C1), P);
+        I2 = fitArtifact(t, x, runT, gi, f0run, secondMask(B1, C1, P), P);
         if I2.score >= I.score, I = I2; R(c).pass = 2; end
     end
     a = evalArtifact(I, S.t(:), runT, f0run, P);
@@ -208,25 +209,33 @@ end
 
 
 % =====================================================================================================
-function P = constants()
-P.hzPerRpm = 0.0202;       %rocker frequency per rpm setting (two setups: 0.02020 and 0.02025 Hz/rpm)
-P.bandRel = 0.03;          %search band around the expected frequency
-P.bandNoLog = [0.4 2.2];   %search band without rocker speed in the log file
-P.K = 6;                   %harmonics
-P.block = 30;              %block length (s), hop = block / 2
-P.minRun = 3;              %shorter rocker-on periods are not corrected (s)
-P.knot = 2;                %baseline knots (s)
-P.lamB = 0.1;              %smoothness penalty baseline
-P.lamH = 1e-3;             %ridge penalty harmonics
-P.minCover = 0.9;          %fraction of the 20 phase bins of the rocker cycle with >= 5 samples
-P.minR2 = 0.2;
-P.maxPPrel = 1.6;          %block size <= 1.6 x reference size
-P.minRefBlock = 10;        %reference blocks >= 10 s
-P.maxBorrow = 60;          %artifact of a neighbouring block of the same rocker period (s)
-P.f0Block = 120;           %frequency estimate: blocks of <= 120 s (resolution), at most 6 per channel and speed
-P.f0Blocks = 6;
-P.wideRel = 0.10;          %frequency estimate: the peak must be clear within +-10 %
-P.extendBlock = 90;        %blocks without full coverage of the rocker cycle: retried with 90 s
+function P = constants(opts)
+% advanced settings of the rocker filter (mda_options; before 2026-10-10: constants)
+M = {'hzPerRpm', 'rockerHzPerRpm', 0.0202;    %rocker frequency per rpm setting (two setups: 0.02020 and 0.02025 Hz/rpm)
+    'bandRel', 'rfBandRel', 0.03;              %search band around the expected frequency
+    'bandNoLog', 'rfBandNoLog', [0.4 2.2];     %search band without rocker speed in the log file
+    'K', 'rfHarmonics', 6;                     %harmonics
+    'block', 'rfBlock', 30;                    %block length (s), hop = block / 2
+    'minRun', 'rfMinRun', 3;                   %shorter rocker-on periods are not corrected (s)
+    'knot', 'rfKnot', 2;                       %baseline knots (s)
+    'lamB', 'rfSmoothBaseline', 0.1;           %smoothness penalty baseline
+    'lamH', 'rfRidge', 1e-3;                   %ridge penalty harmonics
+    'minCover', 'rfMinCover', 0.9;             %fraction of the 20 phase bins of the rocker cycle with >= 5 samples
+    'minR2', 'rfMinR2', 0.2;
+    'maxPPrel', 'rfMaxSizeRel', 1.6;           %block size <= 1.6 x reference size
+    'minRefBlock', 'rfMinRefBlock', 10;        %reference blocks >= 10 s
+    'maxBorrow', 'rfMaxBorrow', 60;            %artifact of a neighbouring block of the same rocker period (s)
+    'f0Block', 'rfF0Block', 120;               %frequency estimate: blocks of <= 120 s (resolution), at most 6 per channel and speed
+    'f0Blocks', 'rfF0Blocks', 6;
+    'wideRel', 'rfF0Clear', 0.10;              %frequency estimate: the peak must be clear within +-10 %
+    'extendBlock', 'rfExtendBlock', 90;        %blocks without full coverage of the rocker cycle: retried with 90 s
+    'maskRelax', 'rfMaskRelax', 1.3;           %contraction masks: peak ... + 1.3 x TTR90 + margin
+    'maskMargin', 'rfMaskMargin', 0.08;        %contraction masks: margin before (TTP90) and after (s)
+    'maskMax', 'rfMaskMax', 1.2};              %paced: stimulus ... min(next stimulus - 50 ms, 1.2 s)
+P = struct();
+for k = 1:size(M, 1)
+    if isfield(opts, M{k,2}), P.(M{k,1}) = double(opts.(M{k,2})); else, P.(M{k,1}) = M{k,3}; end
+end
 end
 
 function R = emptyR()
@@ -256,18 +265,18 @@ s0 = s0(keep); s1 = s1(keep);
 end
 
 % ------------------------------------------------------------------ masks (time intervals with contractions)
-function iv = firstMask(B, C)
+function iv = firstMask(B, C, P)
 ST = C.stimTimes(:);
 if numel(ST) >= 3
     CL = [diff(ST); median(diff(ST))];
-    iv = [ST - 0.02, ST + min(CL - 0.05, 1.2)];
+    iv = [ST - 0.02, ST + min(CL - 0.05, P.maskMax)];
 else
     [ttp, ttr] = durations(B);
-    iv = [C.peakTimes(:) - ttp - 0.08, C.peakTimes(:) + 1.3 * ttr + 0.08];
+    iv = [C.peakTimes(:) - ttp - P.maskMargin, C.peakTimes(:) + P.maskRelax * ttr + P.maskMargin];
 end
 end
 
-function iv = secondMask(B, C)
+function iv = secondMask(B, C, P)
 ST = C.stimTimes(:);
 if numel(ST) >= 3
     st = strcmp(B.beatType, 'stimulated');
@@ -275,13 +284,13 @@ if numel(ST) >= 3
     lat = median(B.stimToPeak(st), 'omitnan');
     if isnan(lat), lat = 0.3; end
     CL = [diff(ST); median(diff(ST))];
-    iv = [ST - 0.02, ST + min(CL - 0.05, max(0.3, lat + 1.3 * ttr + 0.08))];
+    iv = [ST - 0.02, ST + min(CL - 0.05, max(0.3, lat + P.maskRelax * ttr + P.maskMargin))];
     ampS = median(B.amplitude(st), 'omitnan');
     ex = strcmp(B.beatType, 'extra') & B.prominence >= 0.5 * ampS;
-    iv = [iv; B.t_peak(ex) - ttp - 0.08, B.t_peak(ex) + 1.3 * ttr + 0.08];
+    iv = [iv; B.t_peak(ex) - ttp - P.maskMargin, B.t_peak(ex) + P.maskRelax * ttr + P.maskMargin];
 else
     [ttp, ttr] = durations(B);
-    iv = [C.peakTimes(:) - ttp - 0.08, C.peakTimes(:) + 1.3 * ttr + 0.08];
+    iv = [C.peakTimes(:) - ttp - P.maskMargin, C.peakTimes(:) + P.maskRelax * ttr + P.maskMargin];
 end
 end
 

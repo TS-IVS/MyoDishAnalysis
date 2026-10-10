@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import os
+import tempfile
 import sys
 
 import numpy as np
@@ -273,7 +274,11 @@ def test_prp_groups_example7():
     assert set(S["group"]) == set(R["group"]) | {"steady", "after rest", "other"}
     st = S[S["group"] == "steady"].iloc[0]
     assert st["nContractions"] == 8 and st["amplitude_pctOfRef"] == 100
-    assert 115 < R["amplitude_pctOfRef"].max() < 125
+    # reference 'preceding' (default): last 6 contractions before each pause; 'steady' (<= 1.0.0-beta.3): 115-125 %
+    assert 120 < R["amplitude_pctOfRef"].max() < 130
+    _, S0, _ = mda.myodish_analysis(os.path.join(EX, "example7_pigVentricle.mdd"), 1, protocol="PRP", quiet=True,
+                                    prpReference="steady")
+    assert 115 < S0.loc[S0["groupRole"] == "postRest", "amplitude_pctOfRef"].max() < 125
 
 
 @pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
@@ -290,9 +295,124 @@ def test_protocol_results_examples():
         <= r["stimThreshold99_mA"]
     r = res("example7_pigVentricle.mdd", 1, protocol="PRP")
     assert (r["PRP15_pause_s"], r["PRP30_pause_s"], r["PRP60_pause_s"]) == (15, 30, 60)
-    assert 115 < r["PRP15_pct"] < 125 and np.isnan(r["FFR_1Hz_pct"])
+    assert 120 < r["PRP15_pct"] < 130 and np.isnan(r["FFR_1Hz_pct"])  # reference 'steady' (<= 1.0.0-beta.3): 115-125
     r = res("example8_rabbitVentricle_EP.mdd", 1, protocol="RP", rocker="any")
     assert r["S2shortest_ms"] < r["refPeriodNoPeak_ms"] < r["S2longest_ms"]
+
+
+def test_grouping_tolerances(tmp_path):
+    # 2026-10-10 (as groupingTest of mda_test.m): pacing frequency rounded to 0.1 Hz, below 1 Hz to 0.05 Hz (0.49 /
+    # 0.5, 0.74 / 0.75, 0.97 / 0.99 / 1.0, 1.96 / 2.0 Hz), pauses within 10 % = one pause length (PRP: their mean)
+    fs = 400
+    iv = [2.0] * 8 + [2.04] * 8 + [1.3325] * 6 + [1.35] * 6 + [1.0] * 12 + [1.01] * 12 + [0.97] * 12 + [0.5] * 12 + [0.51] * 12
+    ffr_end = 1 + sum(iv) + 0.5
+    for p_ in (16, 15.5, 31, 32.5):
+        iv += [1.0] * 10 + [p_]
+    iv += [1.0] * 10
+    ts = np.round((1 + np.r_[0, np.cumsum(iv)]) * fs) / fs
+    T = int(np.ceil(ts[-1])) + 2
+    n = T * fs
+    tt = np.arange(n) / fs
+    F = np.full(n, 2000.0)
+    for t0 in ts:
+        a = t0 + 0.03
+        m = (tt >= a) & (tt < a + 0.1)
+        F[m] = 2000 + 1000 * (tt[m] - a) / 0.1
+        m = (tt >= a + 0.1) & (tt < a + 0.3)
+        F[m] = 3000 - 1000 * (tt[m] - a - 0.1) / 0.2
+    X = np.zeros((9, n), np.int16)
+    X[0] = np.round(F).astype(np.int16)
+    code = np.zeros(n, np.uint16)
+    code[np.round(ts * fs).astype(int)] = 512 + 50  # channel 1, 50 mA
+    X[8] = code.view(np.int16)
+    mdd = str(tmp_path / "grouping.mdd")
+    X.T.astype("<i2").tofile(mdd)
+    L = ["systemTime;dataLogTime;channel;code;value", "2026 01 01 06:00:00:000;0;0;nChannels;9",
+         "2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd", "2026 01 01 06:00:00:000;0;0;samplingRate Recording;400"]
+    for c in range(1, 9):
+        L += [f"2026 01 01 06:00:00:000;0;{c};Calibration;1000", f"2026 01 01 06:00:00:000;0;{c};Offset;0"]
+    L.append(f"2026 01 01 06:{T // 60:02d}:{T % 60:02d}:000;{T * 1000};0;Recording;stopped: x.mdd")
+    (tmp_path / "grouping_log.log").write_text("\n".join(L) + "\n")
+    kw = dict(quiet=True, noFiltering=True, spikeRemoval=False)
+    _, Sf, If = mda.myodish_analysis(mdd, 1, 0.5, ffr_end, groupBy="pacingFrequency", **kw)
+    _, Sp, Ip = mda.myodish_analysis(mdd, 1, ffr_end, T, groupBy="pauseLength", **kw)
+    Sf = Sf[Sf["group"] != "unknown"]
+    assert sorted(Sf["group"]) == ["0.5 Hz", "0.75 Hz", "1 Hz", "2 Hz"]
+    assert sorted(Sf["groupValue"]) == [0.5, 0.75, 1, 2]
+    assert int(Sf.loc[Sf["group"] == "1 Hz", "nStimuli"].iloc[0]) == 36
+    rf = If["protocolResults"].iloc[0]
+    assert rf["maxCapturedFrequency_Hz"] == 2 and abs(rf["FFR_1Hz_pct"] - 100) < 2 and abs(rf["FFR_2Hz_pct"] - 100) < 2
+    rest = Sp[Sp["groupRole"] == "postRest"]
+    assert rest["group"].tolist() == ["rest 15.8 s #1", "rest 15.8 s #2", "rest 31.8 s #3", "rest 31.8 s #4"]
+    rp = Ip["protocolResults"].iloc[0]
+    assert abs(rp["PRP15_pause_s"] - 14.75) < 1e-6 and abs(rp["PRP30_pause_s"] - 30.75) < 1e-6
+    assert np.isnan(rp["PRP60_pct"]) and "PRP15: mean of 2 pauses" in rp["resultNote"]
+    _, Sf2, _ = mda.myodish_analysis(mdd, 1, 0.5, ffr_end, groupBy="pacingFrequency", frequencyResolution=0.01, **kw)
+    assert "1.03 Hz" in set(Sf2["group"])  # 0.97 s: a group of its own at 0.01 Hz
+
+
+def test_protocol_selection(tmp_path):
+    # 2026-10-10 (as protocolSelectionTest of mda_test.m): FFR steady state (last 10 contractions of the longest run;
+    # 2 Hz with 2:1 capture: none), PRP reference per pause ('preceding': median of the last 6; 'firstTrain': mean of
+    # the train)
+    fs = 400
+    ivF = [2.0] * 15 + [1.0] * 20 + [0.5] * 20 + [2.0] * 3
+    tsF = 2 + np.r_[0, np.cumsum(ivF)]
+    ampF = 1000 + 10 * np.arange(1, tsF.size + 1)
+    t0 = tsF[-1] + 2
+    ivP = [1.0] * 11 + [10.0] + [1.0] * 11 + [20.0] + [1.0] * 12
+    tsP = t0 + np.r_[0, np.cumsum(ivP)]
+    ampP = np.r_[np.arange(920, 1141, 20), 2000, np.arange(940, 1141, 20), 2500, np.full(12, 1000)]
+    ts = np.round(np.r_[tsF, tsP] * fs) / fs
+    amp = np.r_[ampF, ampP].astype(float)
+    hasC = np.ones(ts.size, bool)
+    hasC[37:56:2] = False  # 2 Hz (pulses 36 ... 55): 2:1 capture
+    T = int(np.ceil(ts[-1])) + 3
+    n = T * fs
+    tt = np.arange(n) / fs
+    F = np.full(n, 2000.0)
+    for t_, a_ in zip(ts[hasC], amp[hasC]):
+        a = t_ + 0.03
+        m = (tt >= a) & (tt < a + 0.1)
+        F[m] = 2000 + a_ * (tt[m] - a) / 0.1
+        m = (tt >= a + 0.1) & (tt < a + 0.3)
+        F[m] = 2000 + a_ - a_ * (tt[m] - a - 0.1) / 0.2
+    X = np.zeros((9, n), np.int16)
+    X[0] = np.round(F).astype(np.int16)
+    code = np.zeros(n, np.uint16)
+    code[np.round(ts * fs).astype(int)] = 512 + 50
+    X[8] = code.view(np.int16)
+    mdd = str(tmp_path / "protsel.mdd")
+    X.T.astype("<i2").tofile(mdd)
+
+    def clk(x):
+        return "2026 01 01 06:%02d:%02d:%03d" % (int(x // 60), int(x % 60), int(round(1000 * (x % 1))))
+    L = ["systemTime;dataLogTime;channel;code;value", "2026 01 01 06:00:00:000;0;0;nChannels;9",
+         "2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd", "2026 01 01 06:00:00:000;0;0;samplingRate Recording;400"]
+    for c in range(1, 9):
+        L += [f"2026 01 01 06:00:00:000;0;{c};Calibration;1000", f"2026 01 01 06:00:00:000;0;{c};Offset;0"]
+    for x, txt in ((1.5, "FFR protocol started"), (tsF[-1] + 1, "FFR protocol ended"), (t0 - 0.5, "PRP protocol started"),
+                   (tsP[-1] + 1, "PRP protocol ended")):
+        L.append("%s;%d;0;comment;%s" % (clk(x), int(round(1000 * x)), txt))
+    L.append("%s;%d;0;Recording;stopped: x.mdd" % (clk(T), T * 1000))
+    (tmp_path / "protsel_log.log").write_text("\n".join(L) + "\n")
+    kw = dict(quiet=True, noFiltering=True, spikeRemoval=False, downsampling=1)
+    _, S1, I1 = mda.myodish_analysis(mdd, 1, None, None, protocol="all", **kw)
+    _, S0, _ = mda.myodish_analysis(mdd, 1, None, None, protocol="FFR", steadyStateBeats=0, **kw)
+    _, S2, _ = mda.myodish_analysis(mdd, 1, None, None, protocol="PRP", prpReference="firstTrain", **kw)
+
+    def g(S, r, nm):
+        return S[(S["range"] == r) & (S["group"] == nm)].iloc[0]
+    a, a0 = g(S1, "FFR 1", "0.5 Hz"), g(S0, "FFR 1", "0.5 Hz")
+    assert a["nContractions"] == 10 and abs(a["amplitude_mean"] - 1115) < 1e-6 and a["groupStep"] == 1
+    a2 = S1[(S1["range"] == "FFR 1") & (S1["group"] == "2 Hz")]
+    assert g(S1, "FFR 1", "1 Hz")["nContractions"] == 10 and (a2.empty or a2["nContractions"].iloc[0] == 0)
+    assert any("no run of captured stimuli at 2 Hz" in x for x in I1["notes"])
+    assert a0["nContractions"] == 18 and np.isnan(a0["groupStep"]) and a["irregular"] == 0
+    assert abs(g(S1, "PRP 1", "rest 10 s")["amplitude_pctOfRef"] - 100 * 2000 / 1090) < 1e-6
+    assert abs(g(S1, "PRP 1", "rest 20 s")["amplitude_pctOfRef"] - 100 * 2500 / 1090) < 1e-6
+    assert abs(g(S2, "PRP 1", "rest 10 s")["amplitude_pctOfRef"] - 100 * 2000 / 1040) < 1e-6
+    assert abs(g(S2, "PRP 1", "rest 20 s")["amplitude_pctOfRef"] - 100 * 2500 / 1040) < 1e-6
 
 
 @pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
@@ -427,13 +547,40 @@ def test_gui_threshold_keys_overlay():
         w.on_channel()
         th = w.thr_of([1, 2])
         assert w.C.threshold == 400 and w.eThr.text() == "400" and th[0] == 400 and math.isnan(th[1])
-        # stimuli: external trigger pulses (none in this file) / MyoDish / auto
-        w.cXT.setCurrentIndex(2)
-        w.on_filter()
+        # advanced settings (2026-10-10): stimuli: external trigger pulses (none in this file) / auto; gate parameters
+        w.api_advanced({"externalTrigger": "on"})
         assert w.opts.externalTrigger == "on" and w.C.stimChannel == 0 and w.C.stimTimes.size == 0
-        w.cXT.setCurrentIndex(0)
-        w.on_filter()
+        w.api_advanced({"externalTrigger": "auto", "gateMax": 0.2})
         assert w.opts.externalTrigger == "auto" and w.C.stimChannel == 1 and w.C.stimTimes.size > 0
+        assert w.opts.gateMax == 0.2 and "gateMax = 0.2" in w.lStatus.text()
+        adv = w.adv_win
+        adv.ctl["gateCore"].setText("x")
+        assert not adv.apply(False) and "enter a number" in adv.lMsg.text()
+        adv.defaults()
+        assert adv.apply(True) and w.opts.gateMax == 0.15 and not w.adv_win.isVisible()
+        # all advanced settings in tabs, settings file save / load, legend of the force plot (2026-10-10)
+        from myodish_analysis.advanced import ROWS
+        assert adv.tabs.count() == 8 and set(adv.ctl) == {r[0] for r in ROWS}
+        f = os.path.join(tempfile.mkdtemp(), "set.csv")
+        w.next_file = f
+        w.api_advanced({"rfHarmonics": 4, "noisePercentile": 80})
+        w.api_advanced("save")
+        assert os.path.isfile(f) and w.opts.rfHarmonics == 4
+        w.api_advanced({"rfHarmonics": 6, "noisePercentile": 90})
+        w.cbRF.setChecked(True)
+        w.next_file = f
+        w.api_advanced("load")
+        assert w.adv_win.ctl["rfHarmonics"].text() == "4" and w.adv_win.pending["rockerFilter"] is False
+        assert w.adv_win.apply(False) and w.opts.rfHarmonics == 4 and w.opts.noisePercentile == 80
+        assert not w.cbRF.isChecked() and not w.opts.rockerFilter
+        w.adv_win.defaults()
+        w.adv_win.apply(True)
+        leg = w.pMain._mda_legend
+        assert leg is not None and "selected contraction" in [it[1].text for it in leg.items]
+        w.on_legend(False)
+        assert w.pMain._mda_legend is None and "red = selected" in w.pMain.titleLabel.text
+        w.on_legend(True)
+        assert w.pMain._mda_legend is not None
         # arrow keys: move (loaded window follows), extend, zoom
         w.on_key("right", False)
         assert (w.S.fromSeconds, w.S.toSeconds) == (30, 90)

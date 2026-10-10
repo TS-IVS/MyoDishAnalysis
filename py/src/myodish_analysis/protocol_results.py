@@ -12,7 +12,8 @@ opts   options (rocker: 'stopped' = template and S2 windows only while the rocke
 
 R      dict with all result columns (NaN where not applicable), see RESULT_COLUMNS and the help of mda_protocolResults.m
 
-TS 2026-10-07 (port of mda_protocolResults.m)
+TS 2026-10-07 (port of mda_protocolResults.m; tolerances frequencyResolution / pauseTolerance, refPeriodAllCaptured
+2026-10-10)
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ RESULT_COLUMNS = [
     "captureThreshold_mA", "stimThreshold10_mA", "stimThreshold50_mA", "stimThreshold95_mA", "stimThreshold99_mA",
     "maxAmplitude_uN",
     "refPeriodNoPeak_ms", "refPeriodNoPeakStep_ms", "refPeriodNoResponse_ms", "refPeriodNoResponseStep_ms",
+    "refPeriodAllCaptured_ms",
     "S2shortest_ms", "S2longest_ms", "S2noiseLevel_pct", "amplitudeS1_uN", "nS2", "nTemplateBeats",
     "PRP15_pct", "PRP15_pause_s", "PRP30_pct", "PRP30_pause_s", "PRP60_pct", "PRP60_pause_s",
     "resultNote"]
@@ -46,6 +48,9 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
     R["resultNote"] = ""
     notes = []
     byl = str(by).lower()
+    fRes = float(opts.get("frequencyResolution", 0.1)) if opts is not None else 0.1
+    fResLow = float(opts.get("frequencyResolutionLow", 0.05)) if opts is not None else 0.05
+    pTol = float(opts.get("pauseTolerance", 0.1)) if opts is not None else 0.1
     if G is None or len(G) == 0:
         R["resultNote"] = "no groups"
         return R
@@ -58,10 +63,10 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
         ok = cap & ~np.isnan(val)
         if ok.any():
             R["maxCapturedFrequency_Hz"] = float(np.max(val[ok]))
-        a05 = _at(val, amp, cap, 0.5)
+        a05 = _at(val, amp, cap, 0.5, fResLow)
         R["amplitude_0p5Hz_uN"] = a05
         for f, c in ((1, "FFR_1Hz_pct"), (2, "FFR_2Hz_pct"), (3, "FFR_3Hz_pct")):
-            R[c] = 100 * _at(val, amp, cap, f) / a05
+            R[c] = 100 * _at(val, amp, cap, f, fRes) / a05
         if math.isnan(a05):
             notes.append("no captured 0.5 Hz group")
 
@@ -85,12 +90,15 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
         pr = np.flatnonzero((role == "postRest") & ~np.isnan(val))
         pause = val[pr] - cl
         pct = G["amplitude_pctOfRef"].to_numpy(float)[pr]
-        for x in (15, 30, 60):
+        for x in (15, 30, 60):  # pauses within +-pauseTolerance (2026-10-10; before: the nearest within +-50 %)
             if pr.size and not math.isnan(cl):
-                k = int(np.argmin(np.abs(pause - x)))
-                if abs(pause[k] - x) <= 0.5 * x:
-                    R[f"PRP{x}_pct"] = float(pct[k])
-                    R[f"PRP{x}_pause_s"] = float(pause[k])
+                k = np.flatnonzero(np.abs(pause - x) <= pTol * x + 1e-9)
+                if k.size:
+                    p_ = pct[k]
+                    R[f"PRP{x}_pct"] = float(np.mean(p_[~np.isnan(p_)])) if np.any(~np.isnan(p_)) else math.nan
+                    R[f"PRP{x}_pause_s"] = float(np.mean(pause[k]))
+                    if k.size > 1:
+                        notes.append(f"PRP{x}: mean of {k.size} pauses")
         if math.isnan(cl):
             notes.append("no steady group")
 
@@ -103,10 +111,10 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
     return R
 
 
-def _at(val, amp, cap, f):
-    """amplitude of the captured group at f (+-5 %, the nearest)"""
+def _at(val, amp, cap, f, res=0.1):
+    """amplitude of the captured group at f (group values rounded to res, see group_beats: within +-res / 2)"""
     with np.errstate(invalid="ignore"):
-        k = np.flatnonzero(cap & (np.abs(val - f) <= 0.05 * f))
+        k = np.flatnonzero(cap & (np.abs(val - f) <= res / 2 + 1e-9))
     if not k.size:
         return math.nan
     return float(amp[k[np.argmin(np.abs(val[k] - f))]])
@@ -289,9 +297,20 @@ def _s2_results(R, Z, trace, opts):
     R["refPeriodNoPeak_ms"], R["refPeriodNoPeakStep_ms"] = _transition(ciU, 100 * fracSep, 50, "no peak", notes)
     R["refPeriodNoResponse_ms"], R["refPeriodNoResponseStep_ms"] = _transition(ciU, medResp, noise, "no response",
                                                                                notes)
+    # as GetRefractoryPeriod (MyoDish exports, 2026-10-10): the interval before the first one (from long to short) at
+    # which not every S2 had a separate peak
+    kA = np.flatnonzero(fracSep < 1)
+    if kA.size == 0:
+        if ciU.size:
+            R["refPeriodAllCaptured_ms"] = float(ciU[-1])
+            notes.append("all captured: every S2 with a separate peak")
+    elif kA[0] > 0:
+        R["refPeriodAllCaptured_ms"] = float(ciU[kA[0] - 1])
+    else:
+        notes.append("all captured: not every S2 with a separate peak already at the longest interval")
     if not math.isnan(noise) and noise >= 50:
         for c in ("refPeriodNoPeak_ms", "refPeriodNoPeakStep_ms", "refPeriodNoResponse_ms",
-                  "refPeriodNoResponseStep_ms"):
+                  "refPeriodNoResponseStep_ms", "refPeriodAllCaptured_ms"):
             R[c] = math.nan
         notes = [f"noise level {mround(noise)} %: no reliable stimulus-locked S1 contraction - no estimates"]
     return notes

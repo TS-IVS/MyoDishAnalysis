@@ -11,14 +11,17 @@ function T = mda_summarize(B, C, range)
 % Columns: channel, from, to, nContractions (included), nDetected, nStimulated, nExtraBeats, nStimuli, nMissedBeats,
 % extraBeats_percent, missedBeats_percent, nUncertain, nStimulatedUncertain, nExtraBeatsUncertain,
 % nMissedBeatsUncertain (uncertain contractions, see mda_analyzeChannel, option 'detection'; missed: stimuli followed
-% only by an uncertain contraction), stimFrequency (Hz, from the median stimulus interval in the range),
+% only by an uncertain contraction), nMissedDuringContraction (missed: the regular pulse fell into a contraction
+% elicited by another pulse), nExtraPulses (status channel bit 16), nElicitedByExtraPulse, nAmbiguous (stimAmbiguous),
+% stimFrequency (Hz, from the median stimulus interval in the range),
 % detectionThreshold (uN), zeroForce (uN, zero of diastolicForce), then <parameter>_mean, <parameter>_SD and
-% <parameter>_n (number of included contractions with a value of this parameter, 2026-10-05) for every parameter.
+% <parameter>_n (number of included contractions with a value of this parameter, 2026-10-05) for every parameter;
+% amplitude_CV after amplitude_n (population SD / mean of the included amplitudes, NaN with < 2; 2026-10-10).
 % With a reference beat (option referenceBeat): <parameter>_pctRef_mean / _SD (% of the reference) and
 % diastolicForce_dRef / diastolicSignal_dRef _mean / _SD (difference to the reference, uN), 2026-10-06.
 % With AP columns (EP recording, mda_analyzeAP): AP_dVdtMax, AP_RMP, AP_Vmax, APD25, APD50, APD90 _mean / _SD / _n.
 %
-% TS 2026-10-04 (uncertain contractions 2026-10-09)
+% TS 2026-10-04 (uncertain contractions 2026-10-09; extra pulses 2026-10-10)
 
 PI = mda_parameters();
 params = PI(:,1)';
@@ -52,12 +55,28 @@ if isfield(C, 'stimCapturedCertain'), nMU = sum(J & C.stimCaptured & ~C.stimCapt
 T = addvars(T, sum(u), sum(u & strcmp(B.beatType, 'stimulated')), sum(u & strcmp(B.beatType, 'extra')), nMU, ...
     'After', 'missedBeats_percent', 'NewVariableNames', {'nUncertain', 'nStimulatedUncertain', 'nExtraBeatsUncertain', ...
     'nMissedBeatsUncertain'});
+% 2026-10-10: extra pulses (status channel bit 16), contractions elicited by them, ambiguous assignments, missed beats
+% whose pulse fell into a contraction elicited by another pulse (refractory)
+nDur = 0; nXP = 0; nEl = 0; nAmb = 0;
+if isfield(C, 'stimDuringContraction') && numel(C.stimDuringContraction) == numel(ST)
+    nDur = sum(J & C.stimDuringContraction(:) & ~C.stimCaptured(:));
+end
+if isfield(C, 'extraTimes'), nXP = sum(C.extraTimes >= range(1) & C.extraTimes <= range(2)); end
+if ismember('elicitedByExtraPulse', B.Properties.VariableNames), nEl = sum(inRange & B.elicitedByExtraPulse); end
+if ismember('stimAmbiguous', B.Properties.VariableNames), nAmb = sum(inRange & B.stimAmbiguous); end
+T = addvars(T, nDur, nXP, nEl, nAmb, 'After', 'nMissedBeatsUncertain', 'NewVariableNames', ...
+    {'nMissedDuringContraction', 'nExtraPulses', 'nElicitedByExtraPulse', 'nAmbiguous'});
 for k = 1:numel(params)
     v = B.(params{k})(I);
     T.([params{k} '_mean']) = mean(v, 'omitnan');
     T.([params{k} '_SD']) = std(v, 'omitnan');
     T.([params{k} '_n']) = sum(~isnan(v));                %contractions with a value of this parameter
 end
+% 2026-10-10: coefficient of variation of the amplitude (population SD / mean; irregular groups, mda_groupBeats)
+v = B.amplitude(I); v = v(~isnan(v));
+cv = nan;
+if numel(v) >= 2, cv = std(v, 1) / mean(v); end
+T = addvars(T, cv, 'After', 'amplitude_n', 'NewVariableNames', 'amplitude_CV');
 % 2026-10-06: parameters relative to the reference beat (columns of B, option referenceBeat): mean and SD
 rel = B.Properties.VariableNames(endsWith(B.Properties.VariableNames, {'_pctRef', '_dRef'}));
 for k = 1:numel(rel)

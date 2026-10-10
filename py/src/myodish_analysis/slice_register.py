@@ -42,11 +42,15 @@ R  DataFrame (and files <experiment>/<name of the experiment folder>_slices.csv,
                      later without cultureStart (they may come from another preparation)
      nRecordings, firstRecording, lastRecording, nChamberOut, outHours, longestOut_min, nPutBack (long periods
      without signal bridged by a put-back comment), nTechnical (periods),
+     calibration     'Calibration' values (AU per mN) of the channel in the recordings of the slice (';' separated)
+     calibrationChanged  1 if the calibration changed during the slice or differs from another row with the same
+                     sliceID (slice moved to another setup): force values / fold changes over time are only comparable
+                     after conversion to uN (2026-10-10)
      endComments     comments of the log file about the end (removed, discarded, fixed, frozen, imaging, ...)
    Without <name>_overview.csv (overview_seconds=0) lastBeat, lastAmplitude, maxAmplitude and nBeats come from
    <name>_channels.csv (whole recording: for a slice replaced within a recording only the later slice gets them).
 
-TS 2026-10-08
+TS 2026-10-08 (calibration 2026-10-10)
 """
 from __future__ import annotations
 
@@ -67,7 +71,7 @@ COLUMNS = ["experiment", "series", "channel", "slice", "setupID", "sampleID", "s
            "startTime", "endTime", "daysInSetup", "startReason", "insertedLater", "endStatus", "beatingAtEnd",
            "lastBeat", "lastAmplitude", "maxAmplitude", "lastAmplitude_pctMax", "nBeats", "dayStart", "dayEnd",
            "daySource", "nRecordings", "firstRecording", "lastRecording", "nChamberOut", "outHours", "longestOut_min", "nPutBack",
-           "nTechnical", "endComments"]
+           "nTechnical", "calibration", "calibrationChanged", "endComments"]
 ALL_NAME = "mda_slices.csv"
 ROOT_NAME = "mda_slices_root.csv"
 _FMT = "%Y-%m-%d %H:%M:%S"
@@ -209,6 +213,18 @@ def _experiment(res, e, names, hours):
         for c in chans:
             rows += _channel(e, series, c, S, hours)
     R = pd.DataFrame(rows, columns=COLUMNS)
+    # calibration (2026-10-10): rows of the same sliceID (slice moved to another setup) with other calibration values
+    if len(R):
+        sid = R["sliceID"].astype(str).to_numpy()
+        cal = R["calibration"].astype(str).to_numpy()
+        chg = R["calibrationChanged"].to_numpy(float).copy()
+        for i in range(len(R)):
+            if not sid[i] or not cal[i]:
+                continue
+            j = (sid == sid[i]) & (cal != "")
+            if len(set(cal[j])) > 1:
+                chg[i] = 1
+        R["calibrationChanged"] = chg
     return R
 
 
@@ -217,7 +233,7 @@ def _new(e, series, c, k, t, reason, row, seriesStart, hours):
     inserted = reason != "first signal" or t - seriesStart > hours * 3600
     return dict(e=e, series=series, c=c, k=k, start=t, reason=reason, inserted=inserted, lab=lab, last=t,
                 recs=[], nOut=0, outSec=0.0, longest=0.0, nTech=0.0, nPutBack=0, W=[], fb=[], endCand="",
-                endComments="", closed="")
+                endComments="", closed="", cal=[])
 
 
 def _channel(e, series, c, S, hours):
@@ -235,7 +251,7 @@ def _channel(e, series, c, S, hours):
             continue
         i = int(i[0])
         row = {nm: _txt(CH, nm)[i] for nm in ("status", "setupID", "sampleID", "species", "sliceID", "idDate",
-                                                "cultureStart", "endComments")}
+                                                "cultureStart", "endComments", "calibration")}
         St, L = r["start"], r["L"]
         if row["status"] == "no slice":
             if cur is not None:
@@ -299,6 +315,8 @@ def _channel(e, series, c, S, hours):
             cur["last"] = St + b
             if r["name"] not in cur["recs"]:
                 cur["recs"].append(r["name"])
+            if row["calibration"]:
+                cur["cal"] += row["calibration"].split(";")
             O = r["O"]
             if O is not None and len(O):
                 oc, tf, tt = _num(O, "channel"), _num(O, "t_from"), _num(O, "t_to")
@@ -376,6 +394,9 @@ def _row(cur, hours):
     elif lab["idDate"]:
         src = "unknown (inserted later)"
     pct = 100 * lastAmp / maxAmp if maxAmp > 0 else math.nan
+    cv = cur["cal"]  # calibration values of the slice in the order of time (2026-10-10)
+    cal = ";".join(x for i, x in enumerate(cv) if i == 0 or x != cv[i - 1])
+    calChanged = int(len(set(cv)) > 1)
     return [cur["e"], cur["series"], cur["c"], cur["k"], lab["setupID"], lab["sampleID"], lab["species"],
             lab["sliceID"], lab["idDate"], _clock(cur["start"]), _clock(cur["last"]),
             (cur["last"] - cur["start"]) / 86400, cur["reason"], int(cur["inserted"]), status, int(beating),
@@ -383,4 +404,5 @@ def _row(cur, hours):
             (cur["start"] - base) / 86400 if src in ("cultureStart", "idDate") else math.nan,
             (cur["last"] - base) / 86400 if src in ("cultureStart", "idDate") else math.nan, src,
             len(cur["recs"]), cur["recs"][0] if cur["recs"] else "", cur["recs"][-1] if cur["recs"] else "",
-            cur["nOut"], cur["outSec"] / 3600, cur["longest"] / 60, cur["nPutBack"], cur["nTech"], cur["endComments"]]
+            cur["nOut"], cur["outSec"] / 3600, cur["longest"] / 60, cur["nPutBack"], cur["nTech"], cal, calChanged,
+            cur["endComments"]]

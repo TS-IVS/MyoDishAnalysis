@@ -6,7 +6,8 @@ function outFiles = mda_writeResults(outputFile, contractions, summary, info)
 %       thresholds (analysis windows: data window read, analysed range and detection threshold per channel and chunk;
 %       used to open the results in MyoDishAnalysisGUI), labels, rockerFilter (option 'rockerFilter': result per
 %       channel and time range), protocols (option 'protocol'), protocolResults (characteristic values per protocol
-%       and channel, mda_protocolResults)
+%       and channel, mda_protocolResults), pulses (all stimulus pulses of the analysed channels and ranges, option
+%       pulseTable; > 1048575 rows: <name>_pulses.csv)
 %   mda_writeResults('results.csv', ...)
 %       results_contractions.csv, results_summary.csv, results_parameters.csv, results_info.csv, ...
 %   T = mda_writeResults(info)
@@ -77,6 +78,10 @@ if strcmpi(e, '.csv')
         outFiles{end+1} = fullfile(p, [n '_protocolResults.csv']);
         writetable(info.protocolResults, outFiles{end});
     end
+    if isfield(info, 'pulses') && istable(info.pulses) && height(info.pulses) > 0
+        outFiles{end+1} = fullfile(p, [n '_pulses.csv']);
+        writetable(info.pulses, outFiles{end});
+    end
 else
     outFiles = {outputFile};
     writeSheet(contractions, outputFile, 'contractions');
@@ -95,6 +100,14 @@ else
     end
     if isfield(info, 'protocolResults') && istable(info.protocolResults) && height(info.protocolResults) > 0
         writeSheet(info.protocolResults, outputFile, 'protocolResults');
+    end
+    if isfield(info, 'pulses') && istable(info.pulses) && height(info.pulses) > 0
+        if height(info.pulses) < 1048576                %Excel row limit: otherwise <name>_pulses.csv
+            writeSheet(info.pulses, outputFile, 'pulses');
+        else
+            outFiles{end+1} = fullfile(p, [n '_pulses.csv']);
+            writetable(info.pulses, outFiles{end});
+        end
     end
 end
 end
