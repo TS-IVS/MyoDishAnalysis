@@ -297,6 +297,11 @@ function opts = mda_options(varargin)
 % TS 2026-10-05 (rockerSource, pauseDiastoleWindow 2026-10-07; rockerArtifacts, detection 2026-10-09; onset gate,
 % extra pulses, pulse table, advanced settings 2026-10-10; diastolic level, FFR steady state, PRP reference 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 opts = struct( ...
     'threshold', 'auto', ...
     'relThreshold', 0.3, ...

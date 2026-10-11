@@ -55,6 +55,11 @@ function R = mda_sliceRegister(resultsFolder, experiments, varargin)
 %
 % TS 2026-10-08 (calibration 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 P = struct('newSliceHours', 2, 'write', true);
 for i = 1:2:numel(varargin)
     name = validatestring(varargin{i}, fieldnames(P));

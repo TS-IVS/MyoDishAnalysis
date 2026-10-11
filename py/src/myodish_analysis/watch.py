@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Automatic analysis of new MyoDish recordings in a folder (watcher): MyoDishAnalysisWatch.m in Python.
 
     index, report = watch(raw_folder, results_folder, interval=0, reanalyze="outdated", ...)

@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Self test of the parameter calculation with synthetic contractions of known shape. Port of mda_test.m.
 
     ok = selftest()          prints expected and calculated values, returns True if all agree

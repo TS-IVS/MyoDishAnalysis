@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Overlay of contractions: one group per added selection (channel, range, filters, exclusions) or per channel of the
 analysed range (checkboxes), mean beat aligned at the stimulus (t = 0) or at the peak, or the time course of the range
 (t = 0 at the first stimulus of each group); colour, line width, line style and band (SD / SEM / range) per group;

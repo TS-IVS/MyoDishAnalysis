@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Slice register: one row per slice (channel of a setup from putting the slice in until it was taken out, the signal
 was lost or the data end), built from the results of the watcher. Port of mda_sliceRegister.m.
 

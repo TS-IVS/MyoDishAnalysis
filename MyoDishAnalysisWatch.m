@@ -106,6 +106,11 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %
 % TS 2026-10-08 (watcher settings in the info table 2026-10-09; pulse table 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 W = struct('interval', 0, 'reanalyze', 'outdated', 'retryErrors', false, 'fromDate', '', 'filter', '', ...
     'maxFiles', inf, 'dryRun', false, 'minFileAgeMinutes', 10, 'incompleteAfterHours', 30, 'binMinutes', 60, ...
     'includeProtocols', false, 'protocolMarginSeconds', 0, 'protocols', true, 'contractions', 'all', ...

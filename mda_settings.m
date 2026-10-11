@@ -18,6 +18,11 @@ function [out, notes] = mda_settings(action, file, opts)
 %
 % TS 2026-10-10
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 switch lower(action)
     case 'save'
         if nargin < 3 || isempty(opts), opts = mda_options(); end

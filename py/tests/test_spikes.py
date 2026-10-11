@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Spike removal (spikes.remove_spikes, option spikeRemoval of read_mdd) with synthetic signals. Pendant of
 mda_testSpikes.m (same signals and checks; sample indices here 0-based).
 

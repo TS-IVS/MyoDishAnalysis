@@ -21,6 +21,11 @@ function ok = mda_testExtraPulses()
 %
 % TS 2026-10-10
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 fs = 400; T = 16; n = T * fs; tt = (0:n-1) / fs;
 X = zeros(9, n, 'int16');
 F = 2000 * ones(1, n);

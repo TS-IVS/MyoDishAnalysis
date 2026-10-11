@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Reference beat window: mean +- 1 SD and +- x SD of the reference (absolute and normalized), the deviating contractions
 of the loaded range, threshold / measure / alignment, save / load (.mat, compatible with MATLAB). Port of the
 reference part of MyoDishAnalysisGUI.m.

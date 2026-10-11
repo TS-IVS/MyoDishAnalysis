@@ -40,6 +40,11 @@ function [S, R] = mda_rockerFilter(S, channels, opts, Sctx)
 %
 % TS 2026-10-05 (contraction masks independent of the option detection 2026-10-09; advanced settings 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin < 4 || isempty(Sctx), Sctx = S; end
 channels = channels(:)';
 nRow = numel(S.dataChannels);

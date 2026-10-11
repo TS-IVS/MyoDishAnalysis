@@ -25,6 +25,11 @@ function R = mda_readResults(resultsFile)
 %
 % TS 2026-10-09 (settings files 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 R = struct('resultsFile', char(resultsFile), 'mddFile', '', 'version', '', 'implementation', '', 'createdBy', '', ...
     'analysisDate', '', 'options', mda_options(), 'channels', [], 'windows', [], 'summary', [], 'contractions', [], ...
     'labels', [], 'rockerFilter', [], 'extra', struct(), 'info', [], 'notes', {{}});

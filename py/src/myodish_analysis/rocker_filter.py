@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Remove the periodic rocker artifact from the force signal while the rocker moves. Port of mda_rockerFilter.m.
 
     S, R = rocker_filter(S, channels, opts)          estimate the artifact in S and subtract it

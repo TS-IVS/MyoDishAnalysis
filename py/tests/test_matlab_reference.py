@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """pytest: Python port vs. MATLAB results (written by tests/matlab/mda_py_reference_*.m) on real recordings and
 synthetic signals. The recordings are the anonymized examples in examples/ of the repository.
 

@@ -25,6 +25,11 @@ function [X, spikes] = mda_removeSpikes(X, fs, opts)
 %
 % TS 2026-10-10 (advanced settings 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin < 3, opts = struct(); end
 D = struct('spikeJumpMin', 50, 'spikeJumpFactor', 8, 'spikeGroupGap', 0.04, 'spikeMaxDuration', 0.1, ...
     'spikeLevelWindow', 0.02, 'spikeJumpFraction', 0.5, 'spikeCoincidence', 0.01, 'spikeCoincidenceFactor', 0.5);

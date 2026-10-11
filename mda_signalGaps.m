@@ -39,6 +39,11 @@ function G = mda_signalGaps(src, opts, varargin)
 %
 % TS 2026-10-08
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin < 2 || isempty(opts), opts = mda_options(); end
 P = struct('minSeconds', 2, 'simultaneous', 1, 'simultaneousPair', 0.1, 'mergeSeconds', 0.5);
 for i = 1:2:numel(varargin)

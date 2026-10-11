@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """End of protocols without end comment (find_protocols, regular_pacing_start) with a synthetic recording (9 channels,
 400 Hz, 2400 s; stimuli of channels 1 and 2 in the status channel). Pendant of mda_testProtocolEnd.m.
 

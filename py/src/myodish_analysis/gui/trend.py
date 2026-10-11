@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Trend window: rolling mean / median of a parameter over long periods and over several .mdd files in a row (e.g. the
 daily files _0, _1, _2 ... of a culture). Sampling: all contractions, short windows (W s every T min) or rocker stops
 only. Port of the trend part of MyoDishAnalysisGUI.m.

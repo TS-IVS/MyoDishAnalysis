@@ -83,6 +83,11 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 % channels, detection mode, open results, rocker artifact window, EP y limits / artefact removal, mouse pointer values
 % 2026-10-09; advanced settings, settings files, legend of the force plot 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin < 1, mddFile = ''; end
 if nargin < 2, metadata = []; end
 

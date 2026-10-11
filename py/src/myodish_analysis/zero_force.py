@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Zero force of a channel (sensor signal without load, uN) at the times t. Port of mda_zeroForce.m.
 
     z, src, zeroT, zeroV = zero_force(S, channel, zero_user, t)

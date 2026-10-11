@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Write contraction table, summary and analysis info to Excel (.xlsx) or text (.csv). Port of mda_writeResults.m.
 
     write_results('results.xlsx', contractions, summary, info)

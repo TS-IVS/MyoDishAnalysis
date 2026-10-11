@@ -9,6 +9,11 @@ function ok = mda_testClockTime()
 %
 % TS 2026-10-08
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 ok = true;
 d0 = datetime(2021, 3, 1);
 at = @(hrs) d0 + seconds(round(hrs * 3600));       %clock times in whole seconds

@@ -29,6 +29,11 @@ function L = mda_labels(meta, channels)
 %
 % TS 2026-10-04
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 channels = channels(:);
 nCh = numel(channels);
 L = table(channels, 'VariableNames', {'channel'});

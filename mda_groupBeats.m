@@ -72,6 +72,11 @@ function [B, G, Z, notes] = mda_groupBeats(H, B, C, range, by, opts, steadyN)
 % uncertain contractions 2026-10-09; extra pulses, tolerances frequencyResolution / pauseTolerance, FFR steady state,
 % PRP reference per pause, irregular groups 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin < 6 || isempty(opts), opts = mda_options(); end
 if nargin < 7 || isempty(steadyN), steadyN = 0; end
 notes = {};

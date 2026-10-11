@@ -63,6 +63,11 @@ function EP = mda_readEPRecording(epFile, H, opts, varargin)
 %
 % TS 2026-10-06 (after importSharpElectrodeData and alignStimTimes_new)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin < 3 || isempty(opts), opts = mda_options(); end
 P = struct('signalChannel', [], 'stimChannel', [], 'block', [], 'mddChannel', [], 'stimThreshold', 'auto', ...
     'timeOffset', [], 'tolerance', 0.01, 'fitDrift', true);

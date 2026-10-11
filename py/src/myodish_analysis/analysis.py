@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Contraction parameters of every single contraction in a MyoDish recording (.mdd). Port of MyoDishAnalysis.m.
 
     contractions, summary, info = myodish_analysis(mdd_file, channels, from_s, to_s, **options)

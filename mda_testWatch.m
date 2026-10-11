@@ -11,6 +11,11 @@ function ok = mda_testWatch()
 %
 % TS 2026-10-08 (info table, mda_readResults 2026-10-09)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 ex = fullfile(fileparts(which('MyoDishAnalysis')), 'examples');
 root = tempname;
 raw = fullfile(root, 'raw');

@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """All entries of a MyoDish log file (comments, events, settings) as a table, in log order. Port of mda_logEntries.m.
 
     E = log_entries(log_file)          log_file = <name>_log.log next to the .mdd file

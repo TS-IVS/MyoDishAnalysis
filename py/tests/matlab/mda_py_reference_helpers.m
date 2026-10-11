@@ -8,6 +8,11 @@ function mda_py_reference_helpers(outFile)
 %
 % TS 2026-10-06
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 rs = rng; rng(11);
 X = {};
 X{end+1} = cumsum(round(randn(1, 3000)));                         %integer random walk: many plateaus and equal peaks

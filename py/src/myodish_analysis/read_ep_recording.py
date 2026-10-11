@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Read an EP recording (LabChart .mat export) and align it to a MyoDish .mdd file. Port of mda_readEPRecording.m.
 
     EP = read_ep_recording(ep_file, H)              H = read_mdd(mdd_file) (file facts) or the .mdd file name

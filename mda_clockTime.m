@@ -43,6 +43,11 @@ function [clk, info] = mda_clockTime(N, t, programVersion, fileTime, text)
 %
 % TS 2026-10-08
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin < 3, programVersion = ''; end
 if nargin < 4, fileTime = []; end
 if nargin < 5, text = {}; end

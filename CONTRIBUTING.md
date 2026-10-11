@@ -14,6 +14,6 @@ Thank you for testing and improving MyoDishAnalysis.
 ## Code contributions (pull requests)
 - MATLAB is the reference: a change of the analysis must be made in both versions and give the same results
   (`mda_test`, `pytest`, `py/tests/compare_matlab.py`).
-- By submitting a pull request you agree that your contribution is licensed under GPL-3.0-or-later and that Thomas
-  Seidel may also distribute it under other license terms (e.g. for use in other software). If you do not agree,
-  please say so in the pull request.
+- By submitting a pull request you agree that your contribution is licensed under GPL-3.0-or-later with the
+  additional terms in `NOTICE` and that Thomas Seidel may also distribute it under other license terms (e.g. for use
+  in other software). If you do not agree, please say so in the pull request.

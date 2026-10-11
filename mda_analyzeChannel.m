@@ -104,6 +104,11 @@ function [B, C] = mda_analyzeChannel(S, channel, range, opts)
 % TS 2026-10-05 (rocker artifacts, certainty of contractions 2026-10-09; onset gate, extra pulses, pulse table,
 % diastolic level before the pulse 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin < 3, range = []; end
 if nargin < 4 || isempty(opts), opts = mda_options(); end
 if ~isfield(opts, 'rockerFilter') || ~isfield(opts, 'referenceBeat') || ~isfield(opts, 'pauseDiastoleWindow') || ...

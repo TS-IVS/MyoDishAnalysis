@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Anonymize a MyoDish recording (.mdd + _log.log, optionally the LabChart .mat of a parallel EP recording) for sharing.
 
     python anonymize_recording.py <recording.mdd> <new_name> [--outdir DIR] [--date 2000-01-01] [--mat FILE.mat]

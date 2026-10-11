@@ -60,6 +60,11 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 % readSamplingRateFromMyoDishLogFile; identical data and stimulus times)
 % 2026-10-08: recordingStart from mda_clockTime (12-hour time stamps)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin < 3, toSeconds = []; end
 if nargin < 4 || isempty(opts), opts = mda_options(); end
 if nargin < 5, progressFcn = []; end

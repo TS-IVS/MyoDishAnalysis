@@ -58,6 +58,11 @@ function R = mda_protocolResults(by, G, Z, trace, opts)
 % 0.05 Hz), before +-5 %;
 % pauses +-10 %, before the nearest pause within +-50 %; refPeriodAllCaptured 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin < 5 || isempty(opts), opts = struct(); end
 fRes = 0.1; if isfield(opts, 'frequencyResolution'), fRes = opts.frequencyResolution; end
 fResLow = 0.05; if isfield(opts, 'frequencyResolutionLow'), fResLow = opts.frequencyResolutionLow; end

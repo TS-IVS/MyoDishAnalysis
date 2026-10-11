@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """GUI of the MyoDishAnalysis (PySide6 + pyqtgraph). Port of MyoDishAnalysisGUI.m.
 
     mda-gui [file.mdd] [--labels labels.csv]

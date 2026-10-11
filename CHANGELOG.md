@@ -3,6 +3,20 @@
 All notable changes. Versions: `MAJOR.MINOR.PATCH` (pre-releases `-beta.N`; Python package: `1.0.0bN`).
 MATLAB and Python versions have the same version number and give the same results.
 
+## [Unreleased]
+### Added
+- `NOTICE` (also `py/NOTICE`, part of the Python package): copyright and the additional terms under GPL-3.0
+  section 7 (author attribution; a modified version needs a name and version number of its own and must say
+  that it is modified; no promotion with the names of the author, FAU and InVitroSys; no trademark rights to
+  MyoDish and InVitroSys). Every source file starts with a short notice (copyright, SPDX license identifier,
+  reference to `NOTICE`), after the help text in the MATLAB files.
+- Zenodo DOI: 10.5281/zenodo.23287809 (all versions) in `CITATION.cff` and the README (badge, citation example with the
+  DOI of 1.0.0-beta.4, 10.5281/zenodo.23287810).
+
+The analysis is unchanged. The notices change the fingerprint of the core functions in the watcher index: with
+`'reanalyze','outdated'` (default) the watcher analyses recordings analysed with 1.0.0-beta.4 again;
+`'reanalyze','new'` avoids this.
+
 ## [1.0.0-beta.4] – 2026-10-10
 Fourth pre-release for testers (Git tag `v1.0.0-beta.4`). **Analysis results change**: diastolic level, FFR steady
 state, PRP reference, stimulus assignment and protocol grouping (below); the former behaviour is available as an option

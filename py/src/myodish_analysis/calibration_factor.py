@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Factor AU --> uN of a data channel at the times t (step function of time). Port of mda_calibrationFactor.m.
 
     k = calibration_factor(H, channel, t)     H = file facts from read_mdd, t = times in the file (s)

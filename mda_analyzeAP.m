@@ -60,6 +60,11 @@ function [A, M] = mda_analyzeAP(EP, B, varargin)
 %
 % TS 2026-10-06 (removeArtefacts 2026-10-09)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if ischar(EP) && strcmpi(EP, 'parameters')
     A = {
         'AP_dVdtMax', 'V/s', 'AP: maximum upstroke velocity; NaN if the upstroke lies within the stimulus artefact'

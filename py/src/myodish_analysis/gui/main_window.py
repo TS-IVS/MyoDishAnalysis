@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Interactive contraction analysis of a MyoDish recording (.mdd). Port of MyoDishAnalysisGUI.m (PySide6 + pyqtgraph).
 
     mda-gui [file.mdd]            (or: python -m myodish_analysis.gui [file.mdd])

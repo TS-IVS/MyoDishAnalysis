@@ -83,6 +83,11 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 % Requires MATLAB R2019b or newer, no toolboxes.
 % Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin < 1 || isempty(mddFile)
     [fn, pn] = uigetfile('*.mdd', 'MyoDish data file');
     if isequal(fn, 0), contractions = []; summary = []; info = []; return; end

@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Spike artifacts of the force channels: detection and removal. Port of mda_removeSpikes.m.
 
     X, spikes = remove_spikes(X, fs)        X: channels x samples (raw samples of the force channels, AU)

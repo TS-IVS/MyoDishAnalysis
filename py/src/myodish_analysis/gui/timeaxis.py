@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Time axis labels (h:mm:ss / m:ss) and number formats of the GUI (fmtClock, timeTicks, fmtNum, fmtDuration of
 MyoDishAnalysisGUI.m) and a pyqtgraph axis that uses them.
 

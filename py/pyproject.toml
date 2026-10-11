@@ -9,7 +9,7 @@ version = "1.0.0b4"
 description = "Analysis of MyoDish recordings (.mdd): parameters of every single contraction, reference beat, rocker filter, alignment of EP recordings and AP analysis. Python version of the MATLAB MyoDishAnalysis."
 readme = "README.md"
 license = "GPL-3.0-or-later"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Thomas Seidel", email = "thomas.seidel@fau.de" }]
 requires-python = ">=3.10"
 dependencies = [

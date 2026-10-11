@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Periods without signal (signal_gaps) and the watcher outputs _gaps.csv / _channels.csv with a synthetic recording
 (9 channels, 400 Hz, 600 s). Pendant of mda_testSignalGaps.m (same recording and checks).
 

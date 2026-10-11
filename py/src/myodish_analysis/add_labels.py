@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Add the per-channel labels as columns (after 'channel') to a contraction or summary table. Port of mda_addLabels.m.
 
     T = add_labels(T, L)          L = label table from labels(); rows are matched by T.channel

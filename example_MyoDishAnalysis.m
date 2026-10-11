@@ -5,6 +5,11 @@
 % (sampling rate, number of channels, extended sensor mode, recording start).
 % The recordings used here are the anonymized examples in the folder 'examples' (see examples/README.md).
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 ex = fullfile(fileparts(mfilename('fullpath')), 'examples');
 mdd = fullfile(ex, 'example3_humanVentricle.mdd');    % human ventricle, force-frequency protocol 0.2-4 Hz, 8 channels
 mddIso = fullfile(ex, 'example4_humanAtrium.mdd');    % human atrium, isoprenaline (channels 3, 4, 6, 8)

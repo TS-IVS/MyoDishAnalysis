@@ -8,6 +8,11 @@ function T = mda_addLabels(T, L, when)
 %
 % TS 2026-10-04
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 h = height(T);
 if nargin < 3, when = []; end
 [found, loc] = ismember(T.channel, L.channel);

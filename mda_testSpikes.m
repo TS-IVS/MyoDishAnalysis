@@ -15,6 +15,11 @@ function ok = mda_testSpikes()
 %
 % TS 2026-10-10
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 ok = true;
 fs = 400; N = 20 * 400;
 [X0, X] = signals(fs, N);

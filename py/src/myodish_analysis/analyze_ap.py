@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Action potential parameters of an EP recording (membrane potential) for every contraction. Port of mda_analyzeAP.m.
 
     A, M = analyze_ap(EP, B, **options)     EP from read_ep_recording, B from analyze_channel (same .mdd)

@@ -11,6 +11,11 @@ function [P, labelNames] = mda_parameters()
 %
 % TS 2026-10-05
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 P = {
     'amplitude',           'uN',     'F_peak - F_dia (force amplitude)'
     'diastolicForce',      'uN',     'diastolic force: F_dia - zero force of the channel (zero = sensor signal without load: Offset entry of the log file, or option zeroForce); NaN if unknown'

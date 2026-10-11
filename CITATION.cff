@@ -1,5 +1,6 @@
 # How to cite MyoDishAnalysis. GitHub shows this as "Cite this repository" (APA, BibTeX).
-# After the first release: add the Zenodo concept DOI (identifiers).
+# DOI: Zenodo concept DOI (all versions; resolves to the latest one). The DOI of each version is on its
+# Zenodo record.
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
@@ -19,10 +20,11 @@ version: "1.0.0-beta.4"
 date-released: "2026-10-10"
 license: "GPL-3.0-or-later"
 repository-code: "https://github.com/TS-IVS/MyoDishAnalysis"
-# identifiers:
-#   - type: doi
-#     value: "10.5281/zenodo.XXXXXXX"
-#     description: "Concept DOI (all versions)"
+doi: "10.5281/zenodo.23287809"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.23287809"
+    description: "Concept DOI (all versions)"
 keywords:
   - myocardial slices
   - living myocardial slices

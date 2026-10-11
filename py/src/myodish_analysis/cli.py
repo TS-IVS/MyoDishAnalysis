@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Command line: contraction parameters of every single contraction in a MyoDish recording (.mdd).
 
     mda FILE.mdd [-c 1 6 8] [--from 600 3000] [--to 660 3060] [--labels baseline drug] [-o results.xlsx]

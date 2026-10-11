@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Slice register (slice_register) with synthetic watcher results: experiment expA, series rigA_sampleX (4 recordings,
 channels 1-8) and rigB_sampleY (1 recording). Pendant of mda_testSliceRegister.m (same results and checks).
 

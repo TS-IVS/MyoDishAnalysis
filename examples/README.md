@@ -45,4 +45,4 @@ bug report: `python py/tools/anonymize_recording.py <file.mdd> <new_name> --init
 ## License
 The example recordings may be used, shared and adapted under the terms of the
 [Creative Commons Attribution 4.0 International license (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/);
-please cite MyoDishAnalysis (see `CITATION.cff`).
+please cite MyoDishAnalysis (DOI 10.5281/zenodo.23287809, see `CITATION.cff`).

@@ -17,6 +17,11 @@ function E = mda_logEntries(logFile)
 %
 % TS 2026-10-05 (12-hour time stamps 2026-10-08)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 E = table(NaT(0,1), zeros(0,1), zeros(0,1), cell(0,1), cell(0,1), false(0,1), ...
     'VariableNames', {'clockTime','t_file','channel','code','text','isComment'});
 if isempty(logFile) || ~exist(logFile, 'file'), return; end

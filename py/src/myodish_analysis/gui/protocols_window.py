@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Protocol window: stimulation protocols of the log file (force-frequency, refractory period, stimulation threshold,
 post-rest potentiation, pulse duration, rocker speed ...), contractions grouped by the protocol quantity, summary per
 group and plot of a parameter against the quantity. Port of the protocol part of MyoDishAnalysisGUI.m.

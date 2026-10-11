@@ -23,6 +23,11 @@ function T = mda_summarize(B, C, range)
 %
 % TS 2026-10-04 (uncertain contractions 2026-10-09; extra pulses 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 PI = mda_parameters();
 params = PI(:,1)';
 

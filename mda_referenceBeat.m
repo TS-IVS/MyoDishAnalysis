@@ -51,6 +51,11 @@ function out = mda_referenceBeat(action, varargin)
 %
 % TS 2026-10-05 (relative parameters 2026-10-06)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 switch lower(action)
     case 'create'
         align = 'stimulus';

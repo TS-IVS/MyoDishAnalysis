@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Clock time of log entries (clock_time): 12-hour time stamps of MyoDish software 2.0.7717-2.0.7769 corrected,
 24-hour logs unchanged. Pendant of mda_testClockTime.m (same cases).
 

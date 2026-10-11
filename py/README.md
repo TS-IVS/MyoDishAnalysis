@@ -13,16 +13,20 @@ GUI follow it. Their documentation (`../README.md`) applies to the Python versio
 installation, usage and the differences.
 
 ## Citation and license
-If you publish results obtained with this software, please cite the version you used (Seidel T. MyoDishAnalysis,
-version 1.0.0-beta.4, 2026; DOI: see `CITATION.cff` or the Zenodo record of the release) and mention it in the Methods.
+If you publish results obtained with this software, please cite the version you used with its DOI and mention it in
+the Methods, e.g. *Seidel T. MyoDishAnalysis, version 1.0.0-beta.4. Zenodo; 2026. doi:10.5281/zenodo.23287810*. The DOI
+of every version is on its Zenodo record; 10.5281/zenodo.23287809 stands for all versions and resolves to the latest one
+(GitHub: *Cite this repository*). Additional terms of the license: file `NOTICE`.
 
 Copyright (c) 2026 Thomas Seidel. License: GNU General Public License, version 3 or (at your option) any later version
 (GPL-3.0-or-later, file `LICENSE`). You may use it free of charge, also commercially (companies, InVitroSys customers).
 Copies, original or modified, may only be passed on under the same license and together with their source code. The
 software comes without any warranty. Questions and bug reports: thomas.seidel@fau.de
-Additional terms (GPL-3.0 section 7 b, c, e): modified versions must be marked as modified and must not be presented
-as the original MyoDishAnalysis (use a different name or a clear suffix); the copyright and author notice (Thomas Seidel)
-must be kept; no rights to the names MyoDish and InVitroSys are granted.
+Additional terms (GPL-3.0 section 7 b–e, file `NOTICE`): keep the copyright and author notices; a modified version
+must have a name of its own (e.g. `MyoDishAnalysis-<suffix>`) and its own version number and must say that it
+is a modified version, not an official release; the names of the author, FAU and InVitroSys may not be used
+to promote it; no trademark rights to the names MyoDish and InVitroSys are granted. These terms do not
+restrict the use of the software or of the results obtained with it.
 
 ## Installation
 Python ≥ 3.10 (tested with 3.12 on macOS arm64 and with 3.10 and 3.13 on Linux). Use a separate environment, outside of synchronized folders

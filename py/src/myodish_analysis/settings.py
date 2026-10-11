@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Save and load the settings of an analysis (all options, including the advanced settings). Port of mda_settings.m.
 
     save_settings('mySettings.csv', opts)   write a settings file: table key, value (as the info table of the

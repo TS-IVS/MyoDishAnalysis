@@ -1,3 +1,7 @@
+# MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+# Copyright (c) 2026 Thomas Seidel
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Rows of the advanced settings window of the GUI and of the parameter tables of the settings guide (generated
 from one parameter list, as advancedDefs in MyoDishAnalysisGUI.m).
 

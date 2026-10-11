@@ -26,6 +26,11 @@ function ok = mda_test()
 % TS 2026-10-05 (stimulation pause 2026-10-07, external trigger 2026-10-08, rocker peaks, uncertain 2026-10-09;
 % diastolic level, FFR steady state, PRP reference 2026-10-10)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 dt = 0.005;
 t = 0:dt:20;
 F = 100 * ones(size(t));

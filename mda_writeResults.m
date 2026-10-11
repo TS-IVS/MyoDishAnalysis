@@ -19,6 +19,11 @@ function outFiles = mda_writeResults(outputFile, contractions, summary, info)
 %
 % TS 2026-10-05 (version, implementation, extra rows, thresholds sheet, info table only 2026-10-09)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if nargin == 1 && isstruct(outputFile)              %info table only (GUI exports of plotted data)
     outFiles = infoTableOf(outputFile);
     return;

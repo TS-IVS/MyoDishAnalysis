@@ -13,6 +13,11 @@ function mda_py_reference_files(dataDir, outDir, which)
 %
 % TS 2026-10-07 (cases: anonymized example recordings; before: lab recordings, 2026-10-06; ex3 'spec', ex8 epClean 2026-10-09)
 
+% MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
+% Copyright (c) 2026 Thomas Seidel
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Additional terms (GPL-3.0 section 7): see the file NOTICE
+
 if ischar(which), which = {which}; end
 for w = which(:)'
     c = w{1};
