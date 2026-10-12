@@ -19,7 +19,9 @@ function [P, labelNames] = mda_parameters()
 P = {
     'amplitude',           'uN',     'F_peak - F_dia (force amplitude)'
     'diastolicForce',      'uN',     'diastolic force: F_dia - zero force of the channel (zero = sensor signal without load: Offset entry of the log file, or option zeroForce); NaN if unknown'
-    'diastolicSignal',     'uN',     'F_dia: sensor signal at the minimum before the contraction (zero point = sensor offset; changes over time are meaningful)'
+    'diastolicSignal',     'uN',     ['F_dia: diastolic sensor signal (option diastolicLevel: median 60-5 ms before the eliciting pulse, before the ' ...
+        'onset if it follows the pulse by more than gateMax; without pulse: minimum before the contraction; zero point = ' ...
+        'sensor offset; changes over time are meaningful)']
     'dFdtMax',             'uN/s',   'maximum rate of force rise (+dF/dt max), between F_dia and the peak'
     'dFdtMin',             'uN/s',   'maximum rate of relaxation (-dF/dt min, negative), between the peak and F_min,post'
     'riseTime10_90',       's',      'rise time from 10 % to 90 % of the amplitude'

@@ -62,6 +62,8 @@ def test_first_and_second_pass(raw, tmp_path):
     assert (X["status"] == "ok").all() and (X["implementation"] == "Python").all()
     assert (X["version"] == W.mda_version()).all() and (X["code"] == W.code_fingerprint()).all()
     assert "A/example9_ratVentricle.mdd" in report and os.listdir(os.path.join(res, "reports"))
+    pdfs = [x for x in os.listdir(os.path.join(res, "reports")) if x.endswith(".pdf")]  # PDF report (2026-10-11)
+    assert len(pdfs) == 1 and os.path.getsize(os.path.join(res, "reports", pdfs[0])) > 1000 and "PDF report: " in report
     S = pd.read_csv(os.path.join(res, "A", "example9_ratVentricle_summary.csv"))
     assert len(S) == 3 and list(S["range"]) == ["2000-01-01 15:48:46", "2000-01-01 15:53:46", "2000-01-01 15:58:46"]
     assert S["nContractions"].sum() == X.loc[0, "nContractions"]
@@ -106,10 +108,11 @@ def test_reanalysis_when_options_or_files_change(raw, tmp_path):
     res = str(tmp_path / "results")
     W.watch(raw, res, quiet=True, protocols=False)
     base = W.options_text({}, dict(protocols=False))
-    X, _ = W.watch(raw, res, quiet=True, protocols=False, reanalyze="new", rocker="stopped")
-    assert (X["options"] == base).all()  # 'new': other options are ignored
     X, report = W.watch(raw, res, quiet=True, protocols=False, rocker="stopped")
-    assert (X["options"] == base + "; rocker=stopped").all() and report
+    assert (X["options"] == base).all()  # default 'new': results of other options kept, notice (2026-10-12)
+    assert "2 recording(s) were analysed with other options" in report and "--reanalyze outdated" in report
+    X, report = W.watch(raw, res, quiet=True, protocols=False, rocker="stopped", reanalyze="outdated")
+    assert (X["options"] == base + "; rocker=stopped").all() and report and "NOTE" not in report
     log = os.path.join(raw, "A", "example9_ratVentricle_log.log")
     with open(log, "ab") as fh:
         fh.write(b"\x00")
@@ -128,14 +131,54 @@ def test_outdated_code_or_version(raw, tmp_path):
     X.loc[0, "code"] = "00000000"  # core code changed (same implementation)
     X.loc[1, "version"] = "0.9"
     X.to_csv(os.path.join(res, W.INDEX_NAME), index=False)
-    _, report = W.watch(raw, res, quiet=True, protocols=False)
-    assert "A/example9" in report and "B/example7" in report
+    X1, report = W.watch(raw, res, quiet=True, protocols=False)  # default 'new': kept, notice
+    assert report.startswith("MyoDishAnalysis has been updated") and "(0.9: 1, " in report
+    assert "with other core code: 1)" in report and list(X1["version"]) == list(X["version"])
+    _, report = W.watch(raw, res, quiet=True, protocols=False, reanalyze="outdated")
+    assert "A/example9" in report and "B/example7" in report and "NOTE" not in report
     X = W.read_index(res)
     X.loc[0, "code"] = "00000000"
     X["implementation"] = "MATLAB"  # code of another implementation: only version and options count
     X.to_csv(os.path.join(res, W.INDEX_NAME), index=False)
     _, report = W.watch(raw, res, quiet=True, protocols=False)
     assert report == ""
+
+
+def test_schedule(raw, tmp_path, monkeypatch, capsys):
+    """schedule: parsing, next pass, passes until Ctrl+C (2026-10-12)"""
+    import datetime as dt
+    P = W.parse_schedule
+    assert P("daily 10:00") == dict(kind="days", every=1, hour=10, minute=0) == P("every day at 10:00")
+    assert P("weekly Sun 05:00") == dict(kind="weekly", days=[6], hour=5, minute=0) == P("Sunday 5:00")
+    assert P("Mon,Thu 06:30")["days"] == [0, 3] and P("weekdays 07:00")["days"] == [0, 1, 2, 3, 4]
+    assert P("every 120 min") == dict(kind="interval", seconds=7200.0) and P("every 6 h")["seconds"] == 21600
+    assert P("every 2 days 10:00") == dict(kind="days", every=2, hour=10, minute=0)
+    for bad in ("daily 25:00", "sometimes", "every 0 min", "every 30 s", "T 10:00"):
+        with pytest.raises(ValueError):
+            P(bad)
+    now = dt.datetime(2026, 10, 12, 8, 30)  # Monday
+    N = W.next_pass
+    assert N(P("daily 10:00"), None, now) == dt.datetime(2026, 10, 12, 10, 0)
+    assert N(P("daily 07:00"), None, now) == dt.datetime(2026, 10, 13, 7, 0)
+    assert N(P("weekly Sun 05:00"), None, now) == dt.datetime(2026, 10, 18, 5, 0)
+    a = N(P("Mon,Thu 06:30"), None, now)
+    assert a == dt.datetime(2026, 10, 15, 6, 30) and N(P("Mon,Thu 06:30"), a, a) == dt.datetime(2026, 10, 19, 6, 30)
+    e = P("every 120 min")
+    assert N(e, None, now) == now and N(e, now, now) == dt.datetime(2026, 10, 12, 10, 30)
+    assert N(e, now, now + dt.timedelta(hours=5)) == dt.datetime(2026, 10, 12, 14, 30)  # missed passes skipped
+    d2 = P("every 2 days 07:00")
+    assert N(d2, dt.datetime(2026, 10, 13, 7), dt.datetime(2026, 10, 13, 7, 5)) == dt.datetime(2026, 10, 15, 7)
+    with pytest.raises(ValueError):
+        W.watch(raw, str(tmp_path / "r0"), schedule="every 1 h", interval=2)
+    # first pass now, then sleeping until the next one: Ctrl+C stops the watcher
+    def stop(_):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(W.time, "sleep", stop)
+    res = str(tmp_path / "results")
+    X, report = W.watch(raw, res, schedule="every 60 min", protocols=False, filter="example9")
+    out = capsys.readouterr().out
+    assert list(X["file"]) == ["A/example9_ratVentricle.mdd"] and "A/example9" in report
+    assert "next pass" in out and "watcher stopped" in out
 
 
 def test_skipped_recordings(tmp_path):
@@ -207,8 +250,8 @@ def test_helpers():
     for t in ("jump to 60 bpm", "S2 beat 300 ms", "50 mA", "0.5 Hz", "Pause 180seconds", "restored stimulation"):
         assert W.event_category("comment", t) == "protocol", t
     assert W.event_category("comment", "Approaching 2 GB limit. Changing datafile2.") == "recording"
-    assert W.event_category("comment", "ZI: MX1.6-1.8 Dexa100nM") == "comment"
-    assert W.mda_version() == "1.0.0-beta.4" or "-" not in mda.__version__
+    assert W.event_category("comment", "note: MX1.6-1.8 Dexa100nM") == "comment"
+    assert W.mda_version() == "1.0.0-beta.5" or "-" not in mda.__version__
     assert len(W.code_fingerprint()) == 8
     for f in ("example1_rabbitVentricle", "example9_ratVentricle"):
         assert mda.read_header(os.path.join(EX, f + ".mdd")).recordingStopped is True
@@ -275,12 +318,28 @@ def test_compress_none_and_stale_files(raw, tmp_path):
     W.watch(raw, res, quiet=True, protocols=False)
     f = os.path.join(res, "A", "example9_ratVentricle_contractions.csv")
     assert os.path.isfile(f)
-    W.watch(raw, res, quiet=True, protocols=False, compress=True)
+    W.watch(raw, res, quiet=True, protocols=False, compress=True, reanalyze="outdated")
     assert os.path.isfile(f + ".gz") and not os.path.isfile(f)
     assert len(pd.read_csv(f + ".gz")) == W.read_index(res).loc[0, "nContractions"]
-    W.watch(raw, res, quiet=True, protocols=False, contractions="none")
+    W.watch(raw, res, quiet=True, protocols=False, contractions="none", reanalyze="outdated")
     assert not os.path.isfile(f + ".gz") and not os.path.isfile(f)
     assert os.path.isfile(os.path.join(res, "A", "example9_ratVentricle_summary.csv"))
+
+
+def test_compress_protocol_outputs(raw, tmp_path):
+    """compress=True: protocol contractions and pulses as .csv.gz (gzip level 6) as well (2026-10-11)"""
+    res = str(tmp_path / "results")
+    W.watch(raw, res, quiet=True, filter="example7")
+    base = os.path.join(res, "B", "example7_pigVentricle_protocols_")
+    assert os.path.isfile(base + "contractions.csv") and os.path.isfile(base + "pulses.csv")
+    n = len(pd.read_csv(base + "contractions.csv"))
+    W.watch(raw, res, quiet=True, filter="example7", compress=True, reanalyze="outdated")
+    for k in ("contractions", "pulses"):
+        f = base + k + ".csv"
+        assert os.path.isfile(f + ".gz") and not os.path.isfile(f)
+        with open(f + ".gz", "rb") as fh:
+            assert fh.read(9)[8] == 0  # gzip header XFL: 2 = level 9, 4 = level 1, 0 = other levels (6)
+    assert n > 0 and len(pd.read_csv(base + "contractions.csv.gz")) == n
 
 
 def test_events_and_comments(tmp_path):

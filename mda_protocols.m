@@ -30,11 +30,16 @@ function P = mda_protocols(src, regularMinutes)
 % CamelCase / underscore name such as 'PD_Test') and default grouping:
 %   FFR          FFR, force-frequency, frequency          pacingFrequency
 %   RP           refractory, RP, S1S2, S2                 S2interval
-%   ST           threshold, stimCurrent, ST               stimCurrent
+%   ST           threshold, thresh, stimCurrent, ST       stimCurrent
 %   PRP          post rest, PRP, rest potentiation        pauseLength
 %   PD           pulse duration, PD                       pulseDuration
 %   rockerSpeed  rocker speed                             rockerSpeed
-%   other        all other names                          none
+%   unknown      no type keyword, but protocol, Protokoll, programme, program or Test (comments only)    none
+% A comment without any of these keywords is no protocol (e.g. 'Software new started', 'start Iso Wash In'). A
+% protocol of type 'unknown' without end comment needs regular pacing within 2 h after its start (end estimate),
+% otherwise it is dropped. A protocol without end comment ends at the latest when the software was restarted ('LogFile
+% opened', programInfo 'Version', 'Recording started:') or the connection was lost (without 'Connection
+% re-established' within 60 s) (2026-10-11).
 %
 % TS 2026-10-07 (schedule files 2026-10-07)
 
@@ -57,6 +62,7 @@ else
 end
 E = mda_logEntries(logFile);
 tAll = sort(E.t_file(isfinite(E.t_file)));       %all log entries (gaps within a protocol)
+tStop = interruptions(E);                         %software restarted / connection lost: a protocol without end comment ends there
 E = E((E.isComment | strcmpi(E.code, 'schedule')) & isfinite(E.t_file), :);
 E = sortrows(E, 't_file');                        %stable
 
@@ -84,14 +90,19 @@ for k = 1:height(E)
     if contains(lower(name), 'schedule'), continue; end           %the schedule file itself
     key = normName(name);
     typ = protocolType(name);
-    if ~E.isComment(k) && strcmp(typ, 'other'), continue; end   %schedule files without protocol keyword
+    if strcmp(typ, 'other')
+        % schedule files without protocol keyword: no protocol. Comments (2026-10-11): only with a general protocol
+        % keyword (type 'unknown'); others such as 'Software new started' or 'start Iso Wash In' are no protocol
+        if ~E.isComment(k) || ~genericProtocol(name), continue; end
+        typ = 'unknown';
+    end
     if strcmp(kind, 'start')
         st(end+1) = struct('type', typ, 'name', name, 'key', key, 'from', E.t_file(k), 'to', nan, ...
             'startComment', txt, 'endComment', '', 'note', ''); %#ok<AGROW>
         open(end+1) = numel(st); %#ok<AGROW>
     else
         j = find(strcmp({st(open).key}, key), 1, 'last');
-        if isempty(j), j = find(strcmp({st(open).type}, typ) & ~strcmp(typ, 'other'), 1, 'last'); end
+        if isempty(j), j = find(strcmp({st(open).type}, typ) & ~any(strcmp(typ, {'other', 'unknown'})), 1, 'last'); end
         if isempty(j), continue; end               %end without start: ignored
         st(open(j)).to = E.t_file(k);
         st(open(j)).endComment = txt;
@@ -121,6 +132,8 @@ st = st(~drop);
 % other starts without end: end estimated (2026-10-10) = start of regular pacing, otherwise the start of the next
 % protocol (any type) or the end of the file
 logE = [];
+unknownMaxSeconds = 7200;                          %unknown type without end comment (2026-10-11)
+dropU = false(1, numel(st));
 for i = 1:numel(st)
     if isnan(st(i).to)
         later = find([st.from] > st(i).from);
@@ -130,16 +143,27 @@ for i = 1:numel(st)
         else
             tLimit = T; why = 'end of the file';
         end
+        k = find(tStop(:,1) > st(i).from & tStop(:,1) < tLimit, 1);
+        if ~isempty(k)                            %2026-10-11
+            tLimit = tStop(k,1);
+            if tStop(k,2) == 1, why = 'software restarted'; else, why = 'connection lost'; end
+        end
         tEnd = tLimit;
+        r = nan;
         if ~isempty(H) && regularMinutes > 0
             if isempty(logE), logE = mda_logEntries(logFile); end
             [r, w] = regularPacingStart(H, logE, st(i).from, tLimit, 60 * regularMinutes);
             if ~isnan(r), tEnd = r; why = w; end
         end
+        if strcmp(st(i).type, 'unknown') && (isnan(r) || tEnd - st(i).from > unknownMaxSeconds)
+            dropU(i) = true;    %unknown type without end comment: a protocol only if regular pacing starts again
+            continue;           %within 2 h (otherwise e.g. 'not sure if stim protocol started' without a change)
+        end
         st(i).to = tEnd;
         st(i).note = sprintf('no end comment: end estimated at %g s (%s)', tEnd, why);
     end
 end
+st = st(~dropU);
 % protocols within a protocol of the same type are not listed separately
 keep = true(1, numel(st));
 for i = 1:numel(st)
@@ -289,7 +313,7 @@ if ~isempty(regexp(key, 'postrest|prp|restpotentiation', 'once'))
     typ = 'PRP';
 elseif ~isempty(regexp(key, 'refractory|^rp|s1s2|^s2', 'once')) || ismember('rp', tok)
     typ = 'RP';
-elseif ~isempty(regexp(key, 'threshold|stimcurrent|^st$|^st[^a-z]', 'once')) || ismember('st', tok)
+elseif ~isempty(regexp(key, 'thresh|tresh|stimcurrent|^st$|^st[^a-z]', 'once')) || ismember('st', tok)   %'StimThresh' (2026-10-11)
     typ = 'ST';
 elseif ~isempty(regexp(key, 'pulseduration|^pd$|^pd[^a-z]', 'once')) || ismember('pd', tok)
     typ = 'PD';
@@ -302,6 +326,35 @@ else
 end
 end
 
+
+function X = interruptions(E)
+%[file time, kind] of every interruption in the log entries (kind 1: software restarted = 'LogFile opened', programInfo
+%'Version ...' or 'Recording started: ...'; 2: 'Connection lost' without 'Connection re-established' within 60 s),
+%sorted (2026-10-11)
+X = zeros(0, 2);
+if ~istable(E) || height(E) == 0, return; end
+txt = strtrim(cellstr(string(E.text)));
+code = lower(cellstr(string(E.code)));
+t = E.t_file;
+restart = ~cellfun(@isempty, regexpi(txt, '^logfile opened', 'once')) | ...
+    (strcmp(code, 'programinfo') & ~cellfun(@isempty, regexpi(txt, '^version', 'once'))) | ...
+    (strcmp(code, 'recording') & ~cellfun(@isempty, regexpi(txt, '^started\s*:', 'once')));
+lost = ~cellfun(@isempty, regexpi(txt, '^connection lost', 'once'));
+back = t(~cellfun(@isempty, regexpi(txt, '^connection re-?established', 'once')));
+for k = find(lost)'
+    if any(back >= t(k) & back <= t(k) + 60), lost(k) = false; end
+end
+X = [t(restart), ones(nnz(restart), 1); t(lost), 2 * ones(nnz(lost), 1)];
+X = X(isfinite(X(:,1)), :);
+[~, o] = sort(X(:,1)); X = X(o, :);
+end
+
+function tf = genericProtocol(name)
+%name without type keyword but with a general protocol keyword (protocol, Protokoll, programme, program, Test as a word
+%or part of a CamelCase / underscore name): type 'unknown' (2026-10-11)
+tok = lower(regexp(char(name), '[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+', 'match'));
+tf = ~isempty(regexpi(char(name), 'protocol|protokoll|program', 'once')) || ismember('test', tok);
+end
 
 function g = defaultGroupBy(typ)
 switch typ

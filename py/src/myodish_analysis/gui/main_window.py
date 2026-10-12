@@ -144,7 +144,7 @@ def _shift_held():
     return bool(QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier)
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, mdd_file=None, metadata=None):
+    def __init__(self, mdd_file=None, metadata=None, channel=None, window=None):
         super().__init__()
         self.setWindowTitle("MyoDishAnalysis")
         self.resize(1450, 880)
@@ -200,7 +200,7 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QApplication.instance().installEventFilter(self)  # arrow keys: navigation on the time axis
         self.empty_plots()
         if mdd_file and not str(mdd_file).lower().endswith(".mdd"):  # results file (2026-10-09)
-            self.open_results(str(mdd_file))
+            self.open_results(str(mdd_file), channel=channel, window=window)
         elif mdd_file:
             self.open_file(str(mdd_file))
             if metadata is not None and self.H is not None:
@@ -208,6 +208,24 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.Lbl = make_labels(metadata, self.H.dataChannels)
                 except Exception as e:  # noqa: BLE001
                     self.status(f"Labels: {e}")
+            self.go_to(channel, window)
+
+    def go_to(self, channel=None, window=None):
+        """show this channel and load this window [from, to] s (commands of the analysis report, 2026-10-11)"""
+        if self.H is None:
+            return
+        if channel is not None:
+            dc = [int(c) for c in self.H.dataChannels]
+            if int(channel) not in dc:
+                self.status(f"Channel {int(channel)} is not in {self.H.file}.")
+            else:
+                self.cCh.blockSignals(True)
+                self.cCh.setCurrentIndex(dc.index(int(channel)))
+                self.cCh.blockSignals(False)
+                self.ch = int(channel)
+                self.show_threshold()
+        if window is not None:
+            self.on_load(window=[float(window[0]), float(window[1])])
 
     # =================================================================================================== UI
     def _build_ui(self):
@@ -498,6 +516,11 @@ class MainWindow(QtWidgets.QMainWindow):
         m.addAction("Export data of the parameter plot ...", lambda: self.export_plot_data("parameter"))
         m.addSeparator()
         m.addAction("Rocker artifact (removed signal) ...", self.on_rocker_window)
+        m.addSeparator()
+        self.aReport = m.addAction("Analysis report (PDF) with 'All channels -> file'")  # 2026-10-11
+        self.aReport.setCheckable(True)
+        self.aReport.setToolTip("also write <file>_report.pdf: channels to check (flags) with traces and the commands "
+                                "to open them")
         vm = self.menuBar().addMenu("View")  # 2026-10-10
         self.aLegend = vm.addAction("Legend of the force plot")
         self.aLegend.setCheckable(True)
@@ -2108,9 +2131,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if fn:
             self.open_results(fn)
 
-    def open_results(self, file, pick=None):
+    def open_results(self, file, pick=None, channel=None, window=None):
         """results file of MyoDishAnalysis / watcher / GUI export (2026-10-09): recording, settings and analysis window
-        of the results; the contractions are detected again and compared with the file (black o = only in the file)."""
+        of the results; the contractions are detected again and compared with the file (black o = only in the file).
+        channel, window (2026-10-11, analysis report): the analysis window of this channel that contains the start of
+        window (otherwise its first one); window [from, to] s is loaded instead of the data window of the analysis."""
         from ..read_results import read_results, value_of_channel
         try:
             R = read_results(file)
@@ -2133,6 +2158,16 @@ class MainWindow(QtWidgets.QMainWindow):
                                                                "MyoDish (*.mdd)")
                 if not mdd:
                     return False
+        if pick is None and channel is not None:  # analysis report: window of this channel
+            r = [i for i in range(len(W)) if int(W["channel"].iloc[i]) == int(channel)]
+            if window is not None:
+                r2 = [i for i in r if float(W["from"].iloc[i]) <= float(window[0]) + 1e-9
+                      and float(W["to"].iloc[i]) >= float(window[0]) - 1e-9]
+                r = r2 or r
+            if r:
+                pick = r[0]
+            else:
+                self.status(f"Results: no analysis window of channel {int(channel)}.")
         if pick is None:  # analysis window: channel, range, chunk
             pick = 0
             if len(W) > 1:
@@ -2185,19 +2220,21 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.status("Results: labels not read.")
         # data window of the analysis, analysed range, contractions excluded by the user (GUI exports)
         self.res_info = ""
-        self.on_load(window=[float(w["windowFrom"]), float(w["windowTo"])])
+        win = [float(w["windowFrom"]), float(w["windowTo"])] if window is None else [float(window[0]), float(window[1])]
+        self.on_load(window=win)
         if self.S is None:
             return False
         if self.opts.rockerFilter and R["createdBy"] != "MyoDishAnalysisGUI":
             self.rf_ctx = self.S  # as myodish_analysis: estimated from the data window itself
             self.rf_cache = {}
-        self.range = [max(float(w["from"]), self.S.fromSeconds), min(float(w["to"]), self.S.toSeconds)]
+        rg = [float(w["from"]), float(w["to"])] if window is None else [float(window[0]), float(window[1])]
+        self.range = [max(rg[0], self.S.fromSeconds), min(rg[1], self.S.toSeconds)]
         Tc = None
         T = R["contractions"]
         if isinstance(T, pd.DataFrame) and {"channel", "t_peak"} <= set(T.columns):
             tp = T["t_peak"].to_numpy(float)
-            Tc = T[(T["channel"].to_numpy() == ch) & (tp >= float(w["from"]) - 1e-9)
-                   & (tp <= float(w["to"]) + 1e-9)].reset_index(drop=True)
+            Tc = T[(T["channel"].to_numpy() == ch) & (tp >= self.range[0] - 1e-9)
+                   & (tp <= self.range[1] + 1e-9)].reset_index(drop=True)
             if "manuallyExcluded" in Tc.columns:
                 self.manual_off = [float(t) for t, m in zip(Tc["t_peak"], Tc["manuallyExcluded"]) if bool(m)]
         self.analyze(False)
@@ -2356,9 +2393,11 @@ class MainWindow(QtWidgets.QMainWindow):
             o = dict(self.opts)
             o["zeroForce"] = [self.zero_of(int(c)) for c in self.H.dataChannels]  # NaN = Offset of the log file
             o["threshold"] = self.thr_of([int(c) for c in self.H.dataChannels])  # NaN = auto
+            rep = self.aReport.isChecked()
             myodish_analysis(self.H.file, None, self.range[0], self.range[1], output=fn, quiet=True,
-                                 metadata=self.Lbl, **o)
-            self.status(f"All channels written to {os.path.basename(fn)} (same settings, manual exclusions not applied).")
+                             report=None if rep else False, metadata=self.Lbl, **o)
+            self.status(f"All channels written to {os.path.basename(fn)}" + (" and the report (_report.pdf)" if rep
+                        else "") + " (same settings, manual exclusions not applied).")
         except Exception as e:  # noqa: BLE001
             self._err("Error: ", e)
 

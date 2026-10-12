@@ -21,9 +21,15 @@ protocol keyword (e.g. PD_Test_12Steps.txt) and not 'schedule'; name = file name
 P: DataFrame, one row per protocol: type, name, number (k-th protocol of this type), from, to (s), groupBy (default
 quantity), startComment, endComment, note.
 Types (keywords in the name) and default grouping: FFR (FFR, force-frequency, frequency): pacingFrequency;
-RP (refractory, RP, S1S2, S2): S2interval; ST (threshold, stimCurrent, ST): stimCurrent; PRP (post rest, PRP, rest
-potentiation): pauseLength; PD (pulse duration, PD): pulseDuration; rockerSpeed (rocker speed): rockerSpeed;
-other: none. FFR, RP, ST, PRP, PD also as separate words or parts of a CamelCase / underscore name ('PD_Test').
+RP (refractory, RP, S1S2, S2): S2interval; ST (threshold, thresh, stimCurrent, ST): stimCurrent; PRP (post rest, PRP,
+rest potentiation): pauseLength; PD (pulse duration, PD): pulseDuration; rockerSpeed (rocker speed): rockerSpeed;
+unknown: none. FFR, RP, ST, PRP, PD also as separate words or parts of a CamelCase / underscore name ('PD_Test').
+A comment without a type keyword is a protocol of type 'unknown' only if it contains a general protocol keyword
+(protocol, Protokoll, programme, program, Test); otherwise it is no protocol ('Software new started', 'start Iso
+Wash In'). A protocol of type 'unknown' without end comment needs regular pacing within UNKNOWN_MAX_S (2 h) after its
+start (end estimate, below), otherwise it is dropped. A protocol without end comment ends at the latest when the
+software was restarted ('LogFile opened', programInfo 'Version', 'Recording started:') or the connection was lost
+(without 'Connection re-established' within 60 s) (2026-10-11).
 
 group_beats: see the help of mda_groupBeats.m (same quantities, groups, columns; return_stimuli=True: also Z, the
 stimuli of the channel with role, value and capture, input of protocol_results):
@@ -59,6 +65,7 @@ _START2 = re.compile(r"^(.+?)\s+(?:started|starts|begins)\s*$", re.I)
 _END1 = re.compile(r"^(?:end(?:ed)?|stop(?:ped)?|finish(?:ed)?)\s+(?:of\s+)?(?:the\s+)?(.+?)\s*$", re.I)
 _END2 = re.compile(r"^(.+?)\s+(?:ended|ends|end|stopped|finished|done)\s*$", re.I)
 COLUMNS = ["type", "name", "number", "from", "to", "groupBy", "startComment", "endComment", "note"]
+UNKNOWN_MAX_S = 7200.0  # protocol of unknown type without end comment: dropped if regular pacing starts later
 GROUP_BY = ["pacingFrequency", "S2interval", "stimCurrent", "pauseLength", "rockerSpeed", "pulseDuration"]
 
 
@@ -104,7 +111,7 @@ def protocol_type(name):
         return "PRP"
     if re.search(r"refractory|^rp|s1s2|^s2", key) or "rp" in tok:
         return "RP"
-    if re.search(r"threshold|stimcurrent|^st$|^st[^a-z]", key) or "st" in tok:
+    if re.search(r"thresh|tresh|stimcurrent|^st$|^st[^a-z]", key) or "st" in tok:  # 'StimThresh' (2026-10-11)
         return "ST"
     if re.search(r"pulseduration|^pd$|^pd[^a-z]", key) or "pd" in tok:
         return "PD"
@@ -113,6 +120,32 @@ def protocol_type(name):
     if re.search(r"ffr|forcefrequency|frequency", key) or "ffr" in tok:
         return "FFR"
     return "other"
+
+
+def interruptions(E):
+    """[file time, kind] of every interruption in the log entries E (kind 1: software restarted = 'LogFile opened',
+    programInfo 'Version ...' or 'Recording started: ...'; 2: 'Connection lost' without 'Connection re-established'
+    within 60 s), sorted (2026-10-11)"""
+    if E is None or len(E) == 0:
+        return np.zeros((0, 2))
+    txt = E["text"].astype(str).str.strip()
+    code = E["code"].astype(str).str.lower()
+    t = E["t_file"].to_numpy(float)
+    restart = (txt.str.match(r"(?i)^logfile opened") | (code.eq("programinfo") & txt.str.match(r"(?i)^version"))
+               | (code.eq("recording") & txt.str.match(r"(?i)^started\s*:"))).to_numpy(bool)
+    lost = txt.str.match(r"(?i)^connection lost").to_numpy(bool)
+    back = t[txt.str.match(r"(?i)^connection re-?established").to_numpy(bool)]
+    lost = lost & np.array([not np.any((back >= x) & (back <= x + 60)) for x in t], bool)
+    X = np.r_[np.c_[t[restart], np.ones(int(restart.sum()))], np.c_[t[lost], 2 * np.ones(int(lost.sum()))]]
+    X = X[np.isfinite(X[:, 0])]
+    return X[np.argsort(X[:, 0], kind="stable")] if X.size else np.zeros((0, 2))
+
+
+def generic_protocol(name):
+    """name without type keyword but with a general protocol keyword (protocol, Protokoll, programme, program, Test as
+    a word or part of a CamelCase / underscore name): type 'unknown'"""
+    tok = [w.lower() for w in _WORDS.findall(str(name))]
+    return bool(re.search(r"protocol|protokoll|program", str(name), re.I)) or "test" in tok
 
 
 def default_group_by(typ):
@@ -134,6 +167,7 @@ def find_protocols(src, regular_minutes=5.0):
     E = log_entries(logFile)
     tAll = np.sort(E["t_file"].to_numpy(float)) if len(E) else np.zeros(0)
     tAll = tAll[np.isfinite(tAll)]  # all log entries (gaps within a protocol)
+    tStop = interruptions(E)  # software restarted / connection lost: a protocol without end comment ends there
     isSched = np.array([str(c).lower() == "schedule" for c in E["code"]], dtype=bool)
     E = E[(E["isComment"].to_numpy(bool) | isSched) & np.isfinite(E["t_file"].to_numpy(float))]
     E = E.sort_values("t_file", kind="stable")
@@ -164,15 +198,20 @@ def find_protocols(src, regular_minutes=5.0):
             continue
         key = _norm_name(name)
         typ = protocol_type(name)
-        if not isC and typ == "other":  # schedule files without protocol keyword
-            continue
+        if typ == "other":
+            # schedule files without protocol keyword: no protocol. Comments (2026-10-11): only with a general
+            # protocol keyword (type 'unknown'); others such as 'Software new started' or 'start Iso Wash In'
+            # are no protocol
+            if not isC or not generic_protocol(name):
+                continue
+            typ = "unknown"
         if kind == "start":
             st.append(dict(type=typ, name=name, key=key, start=float(tf), to=math.nan, startComment=txt,
                            endComment="", note=""))
             open_.append(len(st) - 1)
         else:
             js = [j for j, i in enumerate(open_) if st[i]["key"] == key]
-            if not js and typ != "other":
+            if not js and typ not in ("other", "unknown"):
                 js = [j for j, i in enumerate(open_) if st[i]["type"] == typ]
             if not js:
                 continue  # end without start: ignored
@@ -200,13 +239,22 @@ def find_protocols(src, regular_minutes=5.0):
             nxt = min(later, key=lambda x: x["start"]) if later else None
             tLimit = nxt["start"] if nxt else T
             why = f"start of the next protocol '{nxt['name']}'" if nxt else "end of the file"
+            k = np.flatnonzero((tStop[:, 0] > s["start"]) & (tStop[:, 0] < tLimit))
+            if k.size:  # 2026-10-11
+                tLimit = float(tStop[k[0], 0])
+                why = "software restarted" if tStop[k[0], 1] == 1 else "connection lost"
             tEnd = tLimit
+            r = None
             if H is not None and regular_minutes and regular_minutes > 0:
                 r = regular_pacing_start(H, s["start"], tLimit, 60.0 * float(regular_minutes))
                 if r is not None:
                     tEnd, why = r
+            if s["type"] == "unknown" and (r is None or tEnd - s["start"] > UNKNOWN_MAX_S):
+                s["drop"] = True  # unknown type without end comment: a protocol only if regular pacing starts again
+                continue  # within 2 h (otherwise e.g. 'not sure if stim protocol started' without a change)
             s["to"] = tEnd
             s["note"] = f"no end comment: end estimated at {_g(tEnd)} s ({why})"
+    st = [s for s in st if not s.get("drop")]
     # protocols within a protocol of the same type are not listed separately
     keep = [True] * len(st)
     for i in range(len(st)):

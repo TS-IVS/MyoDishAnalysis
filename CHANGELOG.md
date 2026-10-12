@@ -3,19 +3,117 @@
 All notable changes. Versions: `MAJOR.MINOR.PATCH` (pre-releases `-beta.N`; Python package: `1.0.0bN`).
 MATLAB and Python versions have the same version number and give the same results.
 
-## [Unreleased]
-### Added
-- `NOTICE` (also `py/NOTICE`, part of the Python package): copyright and the additional terms under GPL-3.0
-  section 7 (author attribution; a modified version needs a name and version number of its own and must say
-  that it is modified; no promotion with the names of the author, FAU and InVitroSys; no trademark rights to
-  MyoDish and InVitroSys). Every source file starts with a short notice (copyright, SPDX license identifier,
-  reference to `NOTICE`), after the help text in the MATLAB files.
-- Zenodo DOI: 10.5281/zenodo.23287809 (all versions) in `CITATION.cff` and the README (badge, citation example with the
-  DOI of 1.0.0-beta.4, 10.5281/zenodo.23287810).
+## [1.0.0-beta.5] – 2026-10-12
+Fifth pre-release for testers (Git tag `v1.0.0-beta.5`). **Analysis results change** for contractions with a long
+delay after the pulse (longer gate, diastolic window), inverted signals and protocols found in comments (below);
+`gateMaxCertain = 0.15` and `invertedCheck = false` give the former stimulus assignment and force values.
+**The watcher no longer analyses all recordings again after an update** (`'reanalyze','new'` is the default; a notice
+names the recordings of another version and the command `'reanalyze','outdated'`).
 
-The analysis is unchanged. The notices change the fingerprint of the core functions in the watcher index: with
-`'reanalyze','outdated'` (default) the watcher analyses recordings analysed with 1.0.0-beta.4 again;
-`'reanalyze','new'` avoids this.
+### Added
+- **License notices** (2026-10-11): `NOTICE` (also `py/NOTICE`, part of the Python package): copyright and the
+  additional terms under GPL-3.0 section 7 (author attribution; a modified version needs a name and version number of
+  its own and must say that it is modified; no promotion with the names of the author, FAU and InVitroSys; no
+  trademark rights to MyoDish and InVitroSys). Every source file starts with a short notice (copyright, SPDX license
+  identifier, reference to `NOTICE`), after the help text in the MATLAB files.
+- **Zenodo DOI** (2026-10-11): 10.5281/zenodo.23287809 (all versions) in `CITATION.cff` and the README (badge,
+  citation example with the DOI of 1.0.0-beta.4, 10.5281/zenodo.23287810).
+- **Analysis report (PDF)** (2026-10-11/12; `mda_report.m`, `report.py`): which analyses should be checked, with
+  traces and the commands to open them in the GUI. Flags per channel with at least 50 detected contractions:
+  - check the analysis (red: the analysis may not work, or technical faults put wrong values into the data; a page
+    with traces of up to 4 channels): **I** inverted signal (sensor not working properly; only beating, capture and
+    rate analysed); **N** noise suspected = uncertain contractions ≥ 25 % and extra + missed beats ≥ 15 % (noise index
+    = uncertain % × (extra % + missed %) / 100, listed and used for the order; unpaced channel: uncertain ≥ 25 %);
+    **S** large extra beats (certain extra beats ≥ 5 % with > 3 × the paced amplitude); **D** delay pulse → onset >
+    150 ms. Uncertain contractions with regular capture (few extra and missed beats) are not flagged: in visual checks
+    they were real contractions near the detection threshold, while uncertain contractions with many missed or extra
+    beats were mostly rocker waves.
+  - slice quality (yellow: possibly poor biological quality, also e.g. an effect of a treatment; the user decides):
+    capture < 90 %, extra beats > 10 % (spontaneous activity), amplitude < 75 µN, amplitude change > 30 % (first →
+    last range, listed with its time span, e.g. "amplitude change +660 % over 24 h"), amplitude CV > 30 %.
+  - Page 1: recordings × channels with capture and flag codes, legend below; page 2: list of the channels to check and
+    of those with slice-quality flags, with the channel label in parentheses if given (treatment with concentration,
+    otherwise sliceGroup / sampleGroup, e.g. `ch 7 (PMA 100 nM): extra beats 30 %`); then one page per recording with
+    red flags (at most 8).
+  - Written by the watcher after every pass (`reports/mda_report_<date>_<time>.pdf`; option `report`, flags
+    `flagUncertain` (25), `flagIrregular` (15), `flagAmplitude`, `flagAmplitudeCV`, `flagDelay`, `flagMinBeats` /
+    `flag_*`), by `MyoDishAnalysis` / `myodish_analysis` / `mda` with an output file (`<output>_report.pdf`; option
+    `report`, `--report FILE`, `--no-report`) and by the GUI on request (menu Save / Export: report with 'All
+    channels → file'). MATLAB prints the channels to check as links in the command window.
+  - In the overnight runs with the first rules (extra > 10 % or uncertain > 10 % red), 14 % (2026) and 19 % (2024) of
+    the channels with a slice were red, half of them for uncertain contractions only; with the final rules 11 % of
+    the channels of a sample of 400 recordings of 2026 (former rules: 17 %).
+- **Quick-start guides** (2026-10-11): `docs/MyoDishAnalysis_quickstart_GUI.pdf` (2 pages: first analysis in the
+  GUI, export, reading the results) and `docs/MyoDishAnalysis_quickstart_watcher.pdf` (1 page). Settings guide 0.5
+  (longer gate, stimToRise50, inverted signal; figure 11).
+- **Watcher schedule** (2026-10-12; option `'schedule'`, `--schedule`): `'daily 10:00'`, `'weekly Sun 05:00'`
+  (`'Mon,Thu 06:30'`, `'weekdays 07:00'`), `'every 2 days 10:00'`, `'every 120 min'` / `'every 6 h'` (first pass now).
+  MATLAB: a timer in the background of the session (MATLAB stays free between the passes),
+  `MyoDishAnalysisWatch('status')` / `MyoDishAnalysisWatch('stop')`. Python: runs until Ctrl+C. Missed passes are
+  not repeated. `'interval'` (hours, blocking loop) remains.
+- **GUI at a channel and time window** (2026-10-11): `MyoDishAnalysisGUI(file, 'channel', c, 'window', [from to])`,
+  `mda-gui file --channel c --window from to` (recording or results file; with a results file its settings and the
+  analysis window of this channel).
+- **Onset gate of certain contractions** (2026-10-11; options `'gateMaxCertain'` 0.5 s, `'gateMaxCertainRel'` 0.5): a
+  certain contraction (auto threshold, paced channel) without a pulse within `gateMax` (0.15 s) before its onset is
+  assigned to a regular pulse up to min(0.5 s, 0.5 × the interval of the regular pulses before the onset) before the
+  onset, at least `gateMax`. Two passes: all contractions with `gateMax` first, then the remaining certain ones with
+  the longer gate, so that no contraction within 0.15 s of a pulse loses it. Uncertain contractions (e.g. rocker
+  artifacts) keep 0.15 s. Before, a contraction with a long electromechanical delay was an extra beat and its pulse a
+  missed beat (channels with a constant delay of about 0.3 s: 55–100 % extra beats, now 0–0.3 %); in 121 recordings
+  of 2025/2026, about 0.08 % of the certain contractions changed from extra to stimulated. `gateMaxCertain = 0.15`
+  gives the former assignment. Limitation: a stimulus-locked technical artifact 0.15–0.5 s after the pulses counts as
+  stimulated if it is detected as a certain contraction.
+- **Columns `t_rise50`, `stimToRise50`** (2026-10-11): time at which the upstroke crosses 50 % of the amplitude and
+  its delay to the eliciting pulse. Less dependent on the shape of the foot of the upstroke than `stimToOnset`
+  (interquartile range 25 / 39 ms vs 72 / 117 ms in two channels with slow or irregular upstrokes).
+- **Inverted signal** (2026-10-11; options `'invertedCheck'` on, `'invertedRatio'` 2, `'invertedMinAmplitude'` 50 µN,
+  `'invertedMinWidth'` 0.05 s, `'invertedSkip'` 0.02 s): in a paced channel whose stimulus-triggered median (filtered
+  signal 0.02 s … min(1 s, median interval) after the pulses, baseline 60–5 ms before each pulse, at most 300 pulses)
+  falls at least twice as much as it rises (fall ≥ 50 µN, ≥ 0.05 s below half the fall) and whose signal deflects
+  downwards (50th − 10th percentile ≥ 2 × (90th − 50th percentile)), the force measurement is not valid (e.g. magnet of
+  the MyoDish out of position). The contractions are detected in the negated signal, so that rate and capture
+  (`beatType`, missed beats, `peakToPeakFrequency`, `stimFrequency`) are still analysed; all force and time parameters
+  are NaN; column `invertedSignal` in the contractions and in the summary. Before, the force values of such a channel
+  were meaningless (e.g. contractions detected at the relaxation).
+
+### Changed
+- **Watcher: default `'reanalyze','new'`** (2026-10-12; before `'outdated'`): recordings analysed with another version
+  of MyoDishAnalysis, other options or other core code keep their results; every pass shows a notice (command window /
+  terminal, top of the txt and PDF reports) with their number and versions: "MyoDishAnalysis has been updated (now
+  …): n recording(s) were analysed with another version (…). This may change the results or lead to
+  inconsistencies with new data (see the release notes, CHANGELOG.md)." and the command that analyses them again
+  (`'reanalyze','outdated'`, `--reanalyze outdated`). Before, the first pass after an update analysed every recording
+  again (hours). Recordings with an analysis error are still retried after an update.
+- Definition of `diastolicSignal` in the parameters table: the diastolic level of `diastolicLevel` (median before the
+  pulse since 1.0.0-beta.4) instead of "the minimum before the contraction".
+- **Diastolic window of delayed contractions** (2026-10-11): if the onset follows the eliciting pulse by more than
+  `gateMax` (longer gate above), the median window ends 5 ms before the onset instead of before the pulse (the force
+  at the pulse may still fall, e.g. incomplete relaxation, which lowered the amplitude).
+- **Protocols from comments** (2026-10-11): a comment such as '... started' / 'start ...' marks a protocol only if it
+  contains a protocol keyword. Known types as before (`ST` now also 'thresh', e.g. 'Start StimThresh'); without a type
+  keyword but with a general one (protocol, Protokoll, programme, program, Test) the type is `unknown` (before:
+  `other`); without any keyword it is no protocol. Before, e.g. a note that the software was started again, an
+  experiment name or a drug application ('start Iso wash-in') were protocols, often up to the end of the file, and
+  their time was missing in the watcher summaries (112 h in 11 recordings of 2025/2026). A protocol of type
+  `unknown` without end comment needs regular pacing within 2 h after its start, otherwise it is dropped. A protocol
+  without end comment ends at the latest when the software was restarted ('LogFile opened', programInfo 'Version',
+  'Recording started:') or the connection was lost (without 'Connection re-established' within 60 s); before, e.g. a
+  refractory period protocol aborted by a lost connection lasted until the next protocol or the end of the file.
+- **Watcher, `compress`** (2026-10-11): gzip level 6 in Python (as MATLAB `gzip`; level 9 took 4 times longer for
+  2–4 % smaller files), and the protocol contractions and pulses (`_protocols_contractions.csv`,
+  `_protocols_pulses.csv`) are compressed as well (before: always .csv, 56 GB of the 195 GB of the 2025/2026 run).
+- **Slice register** (2026-10-11): a comment with 'replaced' / 'exchanged' / 'getauscht' ... starts a new slice only if
+  it names the slice (slice, Schnitt, tissue, S<n>C<n>) or nothing else that can be exchanged: 'medium exchange', 'setup /
+  sensor board / electrode exchanged' and 'chamber replaced' (the same slice in a new chamber) do not (before: 47 of 86
+  comment starts in 2025/2026 were such comments). `startReason` contains the comment once.
+
+### Fixed
+- **Protocol analysis** (2026-10-11): a protocol outside the recorded data (e.g. started after the connection was
+  lost) or with an error stopped the analysis of all protocols of the file ('Empty time range'). Now every protocol is
+  analysed on its own: such a protocol is not analysed (note in the info table, in the protocols table and in the
+  watcher index), the others are.
+- RuntimeWarning (0/0) in the S2 response of flat template beats (Python).
 
 ## [1.0.0-beta.4] – 2026-10-10
 Fourth pre-release for testers (Git tag `v1.0.0-beta.4`). **Analysis results change**: diastolic level, FFR steady

@@ -4,14 +4,22 @@
 # Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Automatic analysis of new MyoDish recordings in a folder (watcher): MyoDishAnalysisWatch.m in Python.
 
-    index, report = watch(raw_folder, results_folder, interval=0, reanalyze="outdated", ...)
-    mda-watch RAW_FOLDER RESULTS_FOLDER [--interval 24] [--rocker-filter] ...      (command line)
+    index, report = watch(raw_folder, results_folder, reanalyze="new", ...)              one pass
+    watch(raw_folder, results_folder, schedule="daily 10:00", ...)                         passes on a schedule
+    mda-watch RAW_FOLDER RESULTS_FOLDER [--schedule "daily 10:00"] [--rocker-filter] ...   (command line)
 
-Every pass searches raw_folder (with subfolders) for .mdd files and analyses those that are new, have changed, or were
-analysed with another version, other options or (same implementation) other core code. The watcher only calls the
-functions of MyoDishAnalysis (myodish_analysis, read_header, find_protocols, log_entries, write_results): improvements
-of the analysis apply to the watcher results as well; with reanalyze="outdated" (default) the affected recordings are
-analysed again.
+Every pass searches raw_folder (with subfolders) for .mdd files and analyses those that are new or have changed. The
+watcher only calls the functions of MyoDishAnalysis (myodish_analysis, read_header, find_protocols, log_entries,
+write_results). Recordings analysed earlier with another version of MyoDishAnalysis, other options or (same
+implementation) other core code are not analysed again by default (reanalyze="new", 2026-10-12); every pass then shows
+a notice (command line, top of the txt and PDF reports) with their number and the command that analyses them again
+(reanalyze="outdated"). Earlier results are kept until then.
+
+reanalyze:  'new' (default)  new and changed recordings; recordings with an analysis error are retried when the
+                             version, the options or the core code change
+            'outdated'       in addition the recordings analysed with another version, other options or other core
+                             code (e.g. after an update: all of them, can take hours)
+            'all'            every recording again
 
 Per recording (results_folder/<subfolder of raw_folder>/):
   <name>_summary.csv, _contractions.csv(.gz), _pulses.csv(.gz) (all stimulus pulses, option pulseTable; like the
@@ -25,14 +33,15 @@ Per recording (results_folder/<subfolder of raw_folder>/):
       contraction), 'thinned' (every thin_factor-th contraction per channel, thin_mode='nth', or the median of blocks
       of thin_factor contractions, thin_mode='median'; extra beats and, with include_protocols=True, the contractions in
       the protocols are always kept) or 'none'; columns bin, sampledEvery (number of contractions per row) and
-      sampleMode ('singleBeat' / 'median'). compress=True: <name>_contractions.csv.gz.
+      sampleMode ('singleBeat' / 'median'). compress=True: <name>_contractions.csv.gz (gzip level 6).
   <name>_overview.csv (overview_seconds=60, default; 0 = none): medians of all contractions per window of 1 min (file
       time, split at the ranges), channel, beat type, rocker state and inclusion: window (clock time of its start),
       t_from, t_to, nBeats, beatsPerMinute and the median of every parameter. About 1/30 (0.5 Hz) to 1/60 (1 Hz) of the
       rows of all contractions; opens in Excel.
   <name>_protocols_*.csv (if the log file contains stimulation protocols, protocols=True)
       myodish_analysis(file, protocol='all', ...): every contraction in the protocols, summary per protocol, channel
-      and group, protocolResults (FFR, ST thresholds, refractory periods, PRP).
+      and group, protocolResults (FFR, ST thresholds, refractory periods, PRP). compress=True: _protocols_contractions
+      and _protocols_pulses as .csv.gz.
   <name>_events.csv (events=True): all entries of the log file (comments, stimulation and rocker settings, recording,
       calibration, schedule, warnings) with category, clock time and time in the file.
   <name>_gaps.csv (gaps=True): periods without force signal (signal_gaps): chamber taken out ('chamber out'), sensor
@@ -67,6 +76,15 @@ results_folder/reports/mda_report_<date>_<time>.txt
   contraction), extra beats (% of the detected contractions), mean amplitude in the first and last range (>= 10
   included contractions) and flags (no contractions, capture < flag_capture %, extra beats > flag_extra_beats %,
   amplitude change > flag_amplitude_change %).
+results_folder/reports/mda_report_<date>_<time>.pdf (report=True, 2026-10-11)
+  analysis report of the same pass (report.py): overview of the recordings x channels with flags, the channels whose
+  analysis should be checked (red: inverted signal; noise suspected = uncertain >= flag_uncertain % and extra +
+  missed beats >= flag_irregular %; large extra beats; delay pulse -> onset > flag_delay s) and those with
+  slice-quality flags (yellow: capture < flag_capture %, extra beats > flag_extra_beats %, amplitude < flag_amplitude
+  uN, amplitude change > flag_amplitude_change %, amplitude CV > flag_amplitude_cv %); channels with fewer than
+  flag_min_beats detected contractions are not flagged. Pages with traces of the red channels
+  and the commands that open them in the GUI (MyoDishAnalysisGUI(<name>_info.csv, 'channel', c, 'window', [a b]) /
+  mda-gui <name>_info.csv --channel c --window a b).
 
 Recordings are skipped while they are written: files modified less than min_file_age_minutes ago (default 10),
 names starting with '.' (rsync temporary files), and recordings whose log file has no 'Recording stopped' entry
@@ -74,24 +92,34 @@ yet (status 'running') unless unchanged for incomplete_after_hours (default 30 h
 Recordings without log file get the status 'noLog'; they are checked again in every pass. Errors are retried when the
 file, the version, the options or the code change, or with retry_errors=True.
 
-Options (keywords): interval (hours between passes, 0 = one pass, default), reanalyze ('outdated' | 'new' | 'all'),
-retry_errors, from_date (only files modified on/after this date: 'yyyy-mm-dd', 'dd.mm.yyyy' or 'yymmdd'), filter
-(regular expression on the relative path), max_files (per pass), dry_run (list only), min_file_age_minutes,
-incomplete_after_hours, bin_minutes (60), include_protocols (False), protocol_margin_seconds (0: excluded after the end
-of a protocol as well), protocols (True), contractions ('all'), thin_factor (10), thin_mode ('nth'), compress (False),
-overview_seconds (60), events (True), gaps (True: <name>_gaps.csv, <name>_channels.csv, summary columns noSignal_s,
-nChamberOut), register (True: slice register), new_slice_hours (2), workers
-(1; > 1: recordings analysed in parallel processes), flag_capture (90), flag_extra_beats (10), flag_amplitude_change
-(30), quiet. All other keywords are analysis options of myodish_analysis (e.g.
-rockerFilter=True, rocker='stopped', threshold=300), applied to all recordings; settings=file: analysis options from a
-settings file (settings.py) or earlier results (the index records their values: a changed file analyses the
-recordings again).
+Schedule (schedule='...', 2026-10-12; runs until Ctrl+C, in a terminal or as a background process):
+    'daily 10:00'           every day at 10:00 (first pass at the next 10:00)
+    'weekly Sun 05:00'      every Sunday at 05:00; several days: 'Mon,Thu 06:30'; 'weekdays 07:00' (Mon-Fri)
+    'every 2 days 10:00'    every 2nd day at 10:00 (first pass at the next 10:00)
+    'every 120 min'         first pass now, then every 120 min (also 'every 6 h')
+Passes that are missed (computer asleep, a pass longer than the interval) are not repeated: the next one follows at
+the next scheduled time.
 
-Run it once a day by the scheduler of the operating system (cron / launchd / Windows task scheduler), e.g.
+Options (keywords): schedule (see above), interval (hours between passes, 0 = one pass, default; older form of
+schedule='every <h> h'), reanalyze ('new' | 'outdated' | 'all'), retry_errors, from_date (only files modified on/after
+this date: 'yyyy-mm-dd', 'dd.mm.yyyy' or 'yymmdd'), filter (regular expression on the relative path), max_files (per
+pass), dry_run (list only), min_file_age_minutes, incomplete_after_hours, bin_minutes (60), include_protocols (False),
+protocol_margin_seconds (0: excluded after the end of a protocol as well), protocols (True), contractions ('all'),
+thin_factor (10), thin_mode ('nth'), compress (False), overview_seconds (60), events (True), gaps (True:
+<name>_gaps.csv, <name>_channels.csv, summary columns noSignal_s, nChamberOut), register (True: slice register),
+new_slice_hours (2), workers (1; > 1: recordings analysed in parallel processes), flag_capture (90), flag_extra_beats
+(10), flag_amplitude_change (30), report (True: PDF report), flag_uncertain (25), flag_irregular (15), flag_amplitude
+(75 uN), flag_amplitude_cv (30), flag_delay (0.15 s), flag_min_beats (50), quiet. All other keywords are analysis options of
+myodish_analysis (e.g. rockerFilter=True, rocker='stopped', threshold=300), applied to all recordings; settings=file:
+analysis options from a settings file (settings.py) or earlier results (the index records their values: after a change
+of the file the earlier recordings count as analysed with other options).
+
+Keep it running with schedule='daily 07:00' (mda-watch ... --schedule "daily 07:00"), or start one pass a day by the
+scheduler of the operating system (cron / launchd / Windows task scheduler), e.g.
     0 7 * * *  /path/to/venv/bin/mda-watch /data/myodish/raw /data/myodish/results --quiet
-or keep it running with interval=24.
 
-TS 2026-10-08 (watcher settings in the info table 2026-10-09; pulse table 2026-10-10)
+TS 2026-10-08 (watcher settings in the info table 2026-10-09; pulse table 2026-10-10; schedule and reanalyze 'new'
+2026-10-12)
 """
 from __future__ import annotations
 
@@ -125,12 +153,14 @@ INDEX_COLUMNS = ["file", "bytes", "modified", "logBytes", "status", "version", "
                  "analyzed", "seconds", "nContractions", "outputs", "message"]
 LOCK_NAME = "mda_watch.lock"
 LOCK_HOURS = 12.0  # an older lock file is ignored (watcher crashed)
-WATCH_DEFAULTS = dict(interval=0.0, reanalyze="outdated", retry_errors=False, from_date=None, filter=None,
+WATCH_DEFAULTS = dict(interval=0.0, schedule=None, reanalyze="new", retry_errors=False, from_date=None, filter=None,
                       max_files=None, dry_run=False, min_file_age_minutes=10.0, incomplete_after_hours=30.0,
                       bin_minutes=60.0, include_protocols=False, protocol_margin_seconds=0.0, protocols=True,
                       contractions="all", thin_factor=10, thin_mode="nth", compress=False, overview_seconds=60.0,
                       events=True, gaps=True, register=True, new_slice_hours=2.0, workers=1,
-                      flag_capture=90.0, flag_extra_beats=10.0, flag_amplitude_change=30.0, quiet=False)
+                      flag_capture=90.0, flag_extra_beats=10.0, flag_amplitude_change=30.0, report=True,
+                      flag_uncertain=25.0, flag_irregular=15.0, flag_amplitude=75.0, flag_amplitude_cv=30.0,
+                      flag_delay=0.15, flag_min_beats=50, quiet=False)
 _TIME_FMT = "%Y-%m-%d %H:%M:%S"
 _SET_BY_WATCHER = ("output", "labels", "metadata", "protocol", "groupby")  # not allowed as analysis options
 _NOT_IN_OPTIONS = ("showfigures", "quiet", "chunkseconds")  # keywords of myodish_analysis, not of options()
@@ -141,11 +171,15 @@ _STIM_CODES = ("stimfrequency", "stimcurrent", "chargeduration", "dechargedurati
 
 # ------------------------------------------------------------------------------------------------ public
 def watch(raw_folder, results_folder, **kw):
-    """One pass (interval=0) or repeated passes (interval in hours) over raw_folder; returns (index, report)."""
+    """One pass, repeated passes on a schedule (schedule='daily 10:00', 'weekly Sun 05:00', 'every 120 min', ...; until
+    Ctrl+C) or every interval hours; returns (index, report) of the (last) pass."""
     wopts = {k: kw.pop(k) for k in list(kw) if k in WATCH_DEFAULTS}
     o = dict(WATCH_DEFAULTS, **wopts)
     if str(o["reanalyze"]).lower() not in ("outdated", "new", "all"):
-        raise ValueError("reanalyze: 'outdated', 'new' or 'all' expected")
+        raise ValueError("reanalyze: 'new', 'outdated' or 'all' expected")
+    spec = parse_schedule(o["schedule"]) if o["schedule"] else None
+    if spec is not None and o["interval"] and o["interval"] > 0:
+        raise ValueError("watch: schedule and interval cannot be combined (interval=h is schedule='every <h> h')")
     o["contractions"] = str(o["contractions"]).lower()
     o["thin_mode"] = str(o["thin_mode"]).lower()
     if o["contractions"] not in ("all", "thinned", "none"):
@@ -163,6 +197,8 @@ def watch(raw_folder, results_folder, **kw):
         raise ValueError(f"watch: {', '.join(bad)} is set by the watcher (labels per channel: <name>_labels.csv)")
     kw = _expand_settings(kw)  # settings file: its values (2026-10-10)
     make_options(**{k: v for k, v in kw.items() if k.lower() not in _NOT_IN_OPTIONS})  # unknown options: error now
+    if spec is not None:
+        return _scheduled(os.path.abspath(raw_folder), os.path.abspath(results_folder), o, kw, spec)
     while True:
         index, report = _one_pass(os.path.abspath(raw_folder), os.path.abspath(results_folder), o, kw)
         if not o["interval"] or o["interval"] <= 0:
@@ -173,10 +209,125 @@ def watch(raw_folder, results_folder, **kw):
         time.sleep(float(o["interval"]) * 3600)
 
 
+def _scheduled(raw, res, o, kw, spec):
+    """passes on the schedule until Ctrl+C; returns (index, report) of the last pass."""
+    index, report = read_index(res), ""
+    nxt = next_pass(spec, None, _dt.datetime.now())
+    try:
+        while True:
+            if nxt > _dt.datetime.now() and not o["quiet"]:
+                print(f"next pass {nxt:%Y-%m-%d %H:%M} (schedule '{o['schedule']}'; Ctrl+C stops)")
+            while True:  # short sleeps: the computer may sleep in between
+                rest = (nxt - _dt.datetime.now()).total_seconds()
+                if rest <= 0:
+                    break
+                time.sleep(min(rest, 60.0))
+            index, report = _one_pass(raw, res, o, kw)
+            nxt = next_pass(spec, nxt, _dt.datetime.now())
+    except KeyboardInterrupt:
+        if not o["quiet"]:
+            print("watcher stopped")
+    return index, report
+
+
+_DAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+SCHEDULE_HELP = ("'daily 10:00', 'weekly Sun 05:00', 'Mon,Thu 06:30', 'weekdays 07:00', 'every 2 days 10:00', "
+                 "'every 120 min' or 'every 6 h'")
+
+
+def parse_schedule(text):
+    """schedule text -> dict: kind 'interval' (seconds; first pass now), 'days' (every n days at hour:minute) or
+    'weekly' (days 0 = Monday ... 6 = Sunday at hour:minute). Same rules as MyoDishAnalysisWatch.m."""
+    s = " ".join(str(text).strip().lower().replace(",", ", ").split()).replace(" ,", ",")
+    bad = ValueError(f"schedule: {SCHEDULE_HELP} expected, not '{text}'")
+    m = re.fullmatch(r"every (\d+(?:\.\d+)?) ?(min|mins|minute|minutes|m|h|hr|hrs|hour|hours)", s)
+    if m:
+        sec = float(m.group(1)) * (60.0 if m.group(2).startswith("m") else 3600.0)
+        if sec < 60:
+            raise ValueError("schedule: interval of at least 1 min expected")
+        return dict(kind="interval", seconds=sec)
+    m = re.fullmatch(r"(?:daily|every day|every (\d+) days?)(?: at)? (\d{1,2}):(\d{2})", s)
+    if m:
+        n, h, mi = int(m.group(1) or 1), int(m.group(2)), int(m.group(3))
+        if n < 1 or h > 23 or mi > 59:
+            raise bad
+        return dict(kind="days", every=n, hour=h, minute=mi)
+    m = re.fullmatch(r"(?:weekly |every )?([a-z][a-z, ]*?)(?: at)? (\d{1,2}):(\d{2})", s)
+    if m:
+        days = set()
+        for tok in re.split(r"[ ,]+", m.group(1).strip()):
+            if tok in ("weekdays", "workdays"):
+                days |= {0, 1, 2, 3, 4}
+            elif tok in ("weekend", "weekends"):
+                days |= {5, 6}
+            else:
+                k = [i for i, d in enumerate(_DAY_NAMES) if len(tok) >= 2 and d.startswith(tok)]
+                if len(k) != 1:
+                    raise bad
+                days.add(k[0])
+        h, mi = int(m.group(2)), int(m.group(3))
+        if not days or h > 23 or mi > 59:
+            raise bad
+        return dict(kind="weekly", days=sorted(days), hour=h, minute=mi)
+    raise bad
+
+
+def next_pass(spec, prev=None, now=None):
+    """time of the next pass (datetime, local time) after the pass planned for prev (None: first pass)."""
+    now = now or _dt.datetime.now()
+    if spec["kind"] == "interval":
+        if prev is None:
+            return now
+        step = _dt.timedelta(seconds=spec["seconds"])
+        t = prev + step
+        while t <= now:  # missed passes are not repeated
+            t += step
+        return t
+    at = now.replace(hour=spec["hour"], minute=spec["minute"], second=0, microsecond=0)
+    if spec["kind"] == "days":
+        step = _dt.timedelta(days=spec["every"])
+        if prev is None:
+            return at if at > now else at + _dt.timedelta(days=1)
+        t = prev + step
+        while t <= now:
+            t += step
+        return t
+    for k in range(8):
+        t = at + _dt.timedelta(days=k)
+        if t > now and t.weekday() in spec["days"]:
+            return t
+    raise ValueError("schedule: no day")  # not reached
+
+
+def update_notice(stale, version, raw, res):
+    """lines of the notice about recordings that were analysed with another version, other options or other core code
+    and kept (reanalyze 'new'); stale = list of (reason, version of the index)."""
+    if not stale:
+        return []
+    nv, nOpt = {}, 0
+    for why, v in stale:
+        if why == "other options":
+            nOpt += 1
+        else:
+            k = str(v) + (" with other core code" if why == "core code changed" else "")
+            nv[k] = nv.get(k, 0) + 1
+    out = []
+    if nv:
+        out.append(f"MyoDishAnalysis has been updated (now {version}): {sum(nv.values())} recording(s) were analysed "
+                   f"with another version ({', '.join(f'{k}: {n}' for k, n in sorted(nv.items()))}). This may change "
+                   "the results or lead to inconsistencies with new data (see the release notes, CHANGELOG.md).")
+    if nOpt:
+        out.append(f"The analysis options have changed: {nOpt} recording(s) were analysed with other options (index "
+                   "column 'options'); their results may not be comparable with those of new recordings.")
+    out.append(f'The earlier results were kept. To analyse these recordings again: mda-watch "{raw}" "{res}" '
+               "--reanalyze outdated (with your other options)")
+    return out
+
+
 def _expand_settings(kw):
     """keyword settings (settings file, settings.py): the options of the file that differ from the defaults, the other
-    keywords override them. The index records the values, not the file name: a changed settings file analyses the
-    recordings again (reanalyze 'outdated')."""
+    keywords override them. The index records the values, not the file name: after a change of the settings file the
+    earlier recordings count as analysed with other options (reanalyze 'outdated' analyses them again)."""
     keys = [k for k in kw if k.lower() == "settings"]
     if not keys:
         return kw
@@ -315,7 +466,7 @@ def _scan_and_analyse(raw, res, o, aopts):
     from_date = parse_date(o["from_date"])
     rx = re.compile(o["filter"], re.I) if o["filter"] else None
     now = time.time()
-    todo = []
+    todo, stale = [], []
     for rel, f in _find_recordings(raw):
         if rx and not rx.search(rel):
             continue
@@ -328,25 +479,33 @@ def _scan_and_analyse(raw, res, o, aopts):
         if now - lastChange < 60 * float(o["min_file_age_minutes"]):
             continue  # still written / copied
         modified = _dt.datetime.fromtimestamp(st.st_mtime, _dt.timezone.utc).strftime(_TIME_FMT) + " UTC"
-        why = _why(X.iloc[pos[rel]] if rel in pos else None, st.st_size, modified, logBytes, version, code, otext, o)
+        r = X.iloc[pos[rel]] if rel in pos else None
+        why = _why(r, st.st_size, modified, logBytes, version, code, otext, o)
         if why:
             todo.append(dict(rel=rel, f=f, bytes=st.st_size, modified=modified, logBytes=logBytes,
                              lastChange=lastChange, why=why))
+        elif r is not None and r["status"] == "ok" and _outdated(r, version, code, otext):
+            stale.append((_outdated(r, version, code, otext), r["version"]))  # kept (reanalyze 'new')
     if o["max_files"] is not None:
         todo = todo[:int(o["max_files"])]
+    notice = update_notice(stale, version, raw, res)
     if not o["quiet"]:
         print(f"{_dt.datetime.now():{_TIME_FMT}}  {raw}: {len(todo)} recording(s) to analyse")
+        for ln in notice:
+            print("NOTE: " + ln)
     if o["dry_run"]:
         for t in todo:
             print(f"  {t['rel']}  ({t['why']})")
-        return X, ""
+        return X, "\n".join(notice)
     jobs = [(t, res, o, aopts, version, code, otext, now) for t in todo]
     blocks = []
+    done = []  # rows of the analysed recordings (PDF report)
 
     def store(row, block):
         nonlocal X
         if row["status"] in ("ok", "error"):
             blocks.append(block or f"{row['file']}\n  {row['status']}: {row['message']}\n")
+            done.append(dict(row))
         if not o["quiet"]:
             msg = f": {row['message']}" if row["status"] != "ok" else ""
             print(f"  {row['file']}: {row['status']} ({row['seconds']:g} s){msg}")
@@ -385,17 +544,76 @@ def _scan_and_analyse(raw, res, o, aopts):
     report = ""
     if blocks:
         blocks.sort()  # order of the files (parallel processing finishes in any order)
-        head = (f"MyoDishAnalysis {version} (Python) watcher report {_dt.datetime.now():{_TIME_FMT}}\n"
-                f"raw folder: {raw}\nresults:    {res}\noptions:    {otext}\n\n")
-        report = head + "\n".join(blocks) + ("\n" + reg if reg else "")
+        now_ = _dt.datetime.now()
+        head = (f"MyoDishAnalysis {version} (Python) watcher report {now_:{_TIME_FMT}}\n"
+                f"raw folder: {raw}\nresults:    {res}\noptions:    {otext}\n\n"
+                + "".join(f"NOTE: {ln}\n" for ln in notice) + ("\n" if notice else ""))
         d = os.path.join(res, "reports")
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, f"mda_report_{_dt.datetime.now():%Y-%m-%d_%H%M%S}.txt"), "w",
-                  encoding="utf-8") as fh:
+        pdf = ""
+        if o["report"]:  # analysis report (PDF, 2026-10-11)
+            pdf = os.path.join(d, f"mda_report_{now_:%Y-%m-%d_%H%M%S}.pdf")
+            try:
+                n = _pdf_report(pdf, raw, res, sorted(done, key=lambda r: r["file"]), o, version, otext, now_, notice)
+                pdf = f"PDF report: {pdf}" + (f" ({n} channel(s) to check)" if n else "") + "\n"
+            except Exception as ex:  # noqa: BLE001 - the report must not stop the watcher
+                pdf = _clean(f"PDF report: {type(ex).__name__}: {ex}") + "\n"
+        report = head + "\n".join(blocks) + ("\n" + reg if reg else "") + ("\n" + pdf if pdf else "")
+        with open(os.path.join(d, f"mda_report_{now_:%Y-%m-%d_%H%M%S}.txt"), "w", encoding="utf-8") as fh:
             fh.write(report)
         if not o["quiet"]:
             print("\n" + report)
+    elif notice:
+        report = "\n".join(notice)
     return X, report
+
+
+def _pdf_report(out, raw, res, rows, o, version, otext, now_, notice=()):
+    """analysis report (report.py) of the recordings of this pass, from their result files; returns the number of
+    channels to check."""
+    from .report import report_flags, write_report
+    ccols = {"channel", "t_peak", "beatType", "uncertain", "included", "amplitude", "stimToOnset"}
+    fl = dict(uncertain=float(o["flag_uncertain"]), irregular=float(o["flag_irregular"]),
+              extra=float(o["flag_extra_beats"]), capture=float(o["flag_capture"]),
+              amplitude_change=float(o["flag_amplitude_change"]), amplitude=float(o["flag_amplitude"]),
+              amplitude_cv=float(o["flag_amplitude_cv"]), delay=float(o["flag_delay"]),
+              min_beats=float(o["flag_min_beats"]))
+    recs = []
+    for row in rows:
+        rel = row["file"]
+        n = os.path.splitext(os.path.basename(rel))[0]
+        d = os.path.join(res, os.path.dirname(rel))
+        rec = dict(name=rel, file=os.path.join(raw, rel), open=os.path.join(d, n + "_info.csv"), S=None, C=None,
+                   P=None, status=None, notes=[])
+        if row["status"] != "ok":
+            rec["notes"] = [_clean(f"error: {row['message']}")]
+            recs.append(rec)
+            continue
+        rec["S"] = _read_result(os.path.join(d, n + "_summary.csv"))
+        C = _read_result(os.path.join(d, n + "_contractions.csv"), usecols=lambda c: c in ccols)
+        CH = _read_result(os.path.join(d, n + "_channels.csv"), usecols=lambda c: c in ("channel", "status"))
+        if CH is not None:
+            rec["status"] = {int(c): str(st) for c, st in zip(CH["channel"], CH["status"])}
+        rec["notes"] = [m for m in str(row["message"]).split(" | ") if m.startswith("protocols:")]
+        # flags now; contractions kept and pulses read (detail pages) only for recordings with channels to check:
+        # memory of passes with thousands of recordings
+        rec["R"] = report_flags(rec["S"], C, rec["status"], **fl)
+        rec["C"] = C if (rec["R"]["level"] == "check").any() else None
+        rec["P_file"] = os.path.join(d, n + "_pulses.csv")
+        recs.append(rec)
+    sub = [f"raw folder: {raw}", f"results: {res}",
+           f"MyoDishAnalysis {version} (Python) watcher, {now_:{_TIME_FMT}}: {len(rows)} recording(s) analysed in "
+           f"this pass; options: {otext}"]
+    R = write_report(recs, out, title="MyoDishAnalysis watcher report", subtitle=sub, notice=notice, **fl)
+    return int((R["level"] == "check").sum()) if len(R) else 0
+
+
+def _read_result(f, **kw):
+    """result table <f> or <f>.gz (None if neither exists)"""
+    for g in (f, f + ".gz"):
+        if os.path.isfile(g):
+            return pd.read_csv(g, low_memory=False, **kw)
+    return None
 
 
 def _process(job):
@@ -423,6 +641,17 @@ def _process(job):
     return row, block
 
 
+def _outdated(r, version, code, otext):
+    """'other version' / 'other options' / 'core code changed' (same implementation) / ''"""
+    if r["version"] != version:
+        return "other version"
+    if r["options"] != otext:
+        return "other options"
+    if r["implementation"] == "Python" and r["code"] != code:
+        return "core code changed"
+    return ""
+
+
 def _why(r, nbytes, modified, logBytes, version, code, otext, o):
     """reason to analyse the recording ('' = nothing to do)."""
     if r is None:
@@ -434,18 +663,12 @@ def _why(r, nbytes, modified, logBytes, version, code, otext, o):
     status = r["status"]
     if status in ("running", "noLog"):
         return "check " + status
-    outdated = ""
-    if r["version"] != version:
-        outdated = "other version"
-    elif r["options"] != otext:
-        outdated = "other options"
-    elif r["implementation"] == "Python" and r["code"] != code:
-        outdated = "core code changed"
+    outdated = _outdated(r, version, code, otext)
     mode = str(o["reanalyze"]).lower()
-    if status == "error":
+    if status == "error":  # no results to keep: retried when the version, the options or the core code change
         if o["retry_errors"]:
             return "retry error"
-        return ("retry error, " + outdated) if outdated and mode != "new" else ""
+        return ("retry error, " + outdated) if outdated else ""
     if mode == "all":
         return "reanalyze all"
     if mode == "outdated" and outdated:
@@ -470,7 +693,9 @@ def _analyse(f, rel, H, res, row, o, aopts):
             msgs.append(f"protocols: {type(ex).__name__}: {ex}")
     W = _protocol_windows(P, float(o["protocol_margin_seconds"]))
     fr, to, labels, bins = _ranges(H, float(o["bin_minutes"]) * 60, None if o["include_protocols"] else W)
-    for suffix in ("_contractions.csv", "_contractions.csv.gz", "_overview.csv", "_pulses.csv", "_pulses.csv.gz"):
+    for suffix in ("_contractions.csv", "_contractions.csv.gz", "_overview.csv", "_pulses.csv", "_pulses.csv.gz",
+                   "_protocols_contractions.csv", "_protocols_contractions.csv.gz", "_protocols_pulses.csv",
+                   "_protocols_pulses.csv.gz"):
         # results of earlier options
         if os.path.isfile(os.path.join(outDir, n + suffix)):
             os.remove(os.path.join(outDir, n + suffix))
@@ -516,9 +741,7 @@ def _analyse(f, rel, H, res, row, o, aopts):
             if o["contractions"] == "none":
                 os.remove(cf)
             elif o["compress"]:
-                with open(cf, "rb") as src, gzip.GzipFile(cf + ".gz", "wb", mtime=0) as dst:
-                    shutil.copyfileobj(src, dst)
-                os.remove(cf)
+                _gzip(cf)
         outputs.insert(0, n + ".csv")
         msgs = list(info.get("notes", [])) + msgs
     else:
@@ -531,14 +754,28 @@ def _analyse(f, rel, H, res, row, o, aopts):
         outputs.append(n + "_channels.csv")
     if o["protocols"] and P is not None and len(P):
         try:
-            myodish_analysis(f, None, protocol="all", metadata=meta, quiet=True,
-                             output=os.path.join(outDir, n + "_protocols.csv"), **aopts)
+            _, _, pinfo = myodish_analysis(f, None, protocol="all", metadata=meta, quiet=True,
+                                           output=os.path.join(outDir, n + "_protocols.csv"), report=False, **aopts)
             outputs.append(n + "_protocols.csv")
+            msgs += ["protocols: " + x for x in pinfo.get("notes", []) if "not analysed" in x]  # single protocols
+            if o["compress"]:  # protocol contractions and pulses as well (2026-10-11)
+                for cf in (os.path.join(outDir, n + "_protocols_contractions.csv"),
+                           os.path.join(outDir, n + "_protocols_pulses.csv")):
+                    if os.path.isfile(cf):
+                        _gzip(cf)
         except Exception as ex:  # noqa: BLE001
             msgs.append(f"protocols: {type(ex).__name__}: {ex}")
     row.update(status="ok", nContractions=nC, outputs="; ".join(outputs), message=_clean(" | ".join(msgs)))
     return row, _report_block(rel, H, S, o, CH, G)
 
+
+
+def _gzip(cf):
+    """<cf>.gz (compression level 6 as MATLAB gzip: 1/4 of the time of level 9, files ~2-4 % larger; mtime 0:
+    identical bytes for identical content), <cf> deleted"""
+    with open(cf, "rb") as src, gzip.GzipFile(cf + ".gz", "wb", compresslevel=6, mtime=0) as dst:
+        shutil.copyfileobj(src, dst)
+    os.remove(cf)
 
 def _gaps_out(G, H, E):
     """periods without signal with clock times and the comments of the log file within 5 min of their start or end

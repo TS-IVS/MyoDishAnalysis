@@ -6,12 +6,14 @@
 
     mda-gui [file.mdd] [--labels labels.csv]
     mda-gui results.xlsx             (or <name>_info.csv: results of mda / mda-watch / a GUI export, see read_results)
+    mda-gui file --channel 3 --window 120 140   open at channel 3 and the window 120-140 s (commands of the analysis
+                                     report; results file: its settings and the analysis window of this channel)
     python -m myodish_analysis.gui [file.mdd]
 
     from myodish_analysis.gui import run
     win = run('file.mdd')            # inside a running Qt application: returns the window
 
-TS 2026-10-06 (results files 2026-10-09; light colors also with Qt < 6.8, 2026-10-10)
+TS 2026-10-06 (results files 2026-10-09; light colors also with Qt < 6.8, 2026-10-10; channel / window 2026-10-11)
 """
 from __future__ import annotations
 
@@ -39,7 +41,7 @@ def light(app):
     app.setPalette(pal)
 
 
-def run(mdd_file=None, metadata=None, block=True):
+def run(mdd_file=None, metadata=None, block=True, channel=None, window=None):
     try:
         from PySide6 import QtWidgets
         import pyqtgraph  # noqa: F401
@@ -52,7 +54,7 @@ def run(mdd_file=None, metadata=None, block=True):
         app = QtWidgets.QApplication(sys.argv[:1])
         app.setApplicationName("MyoDishAnalysis")
         light(app)
-    win = MainWindow(mdd_file, metadata)
+    win = MainWindow(mdd_file, metadata, channel=channel, window=window)
     win.show()
     if own and block:
         app.exec()
@@ -63,8 +65,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="mda-gui", description="MyoDishAnalysis (interactive)")
     ap.add_argument("mdd", nargs="?", help=".mdd file, or a results file (.xlsx, <name>_info.csv) to open again")
     ap.add_argument("--labels", help="labels per channel (.csv / .xlsx, see labels)")
+    ap.add_argument("--channel", type=int, help="channel to show")
+    ap.add_argument("--window", type=float, nargs=2, metavar=("FROM", "TO"), help="time window to load (s)")
     a = ap.parse_args(argv)
-    run(a.mdd, a.labels)
+    run(a.mdd, a.labels, channel=a.channel, window=a.window)
 
 
 __all__ = ["run", "main", "light"]

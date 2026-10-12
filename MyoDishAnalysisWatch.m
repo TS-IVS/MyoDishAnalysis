@@ -1,13 +1,34 @@
 function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, varargin)
 %MYODISHANALYSISWATCH  Automatic analysis of new MyoDish recordings in a folder (watcher).
 %
-%   [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, ...)
+%   [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, ...)                  one pass
+%   MyoDishAnalysisWatch(rawFolder, resultsFolder, 'schedule', 'daily 10:00', ...)         passes on a schedule
+%   MyoDishAnalysisWatch('status')       scheduled watchers: schedule, next and last pass (table as first output)
+%   MyoDishAnalysisWatch('stop')         stops all scheduled watchers ('stop', resultsFolder: only this one)
 %
-%   Every pass searches rawFolder (with subfolders) for .mdd files and analyses those that are new, have changed, or
-%   were analysed with another version, other options or (same implementation) other core code. The watcher only
-%   calls the functions of MyoDishAnalysis (MyoDishAnalysis, mda_readMdd, mda_protocols): improvements of the analysis
-%   apply to the watcher results as well; with 'reanalyze','outdated' (default) the affected recordings are analysed
-%   again. Python: mda-watch (myodish_analysis.watch), same index and results.
+%   Every pass searches rawFolder (with subfolders) for .mdd files and analyses those that are new or have changed.
+%   The watcher only calls the functions of MyoDishAnalysis (MyoDishAnalysis, mda_readMdd, mda_protocols). Recordings
+%   analysed earlier with another version of MyoDishAnalysis, other options or (same implementation) other core code
+%   are not analysed again by default ('reanalyze','new', 2026-10-12); every pass then shows a notice (command window,
+%   top of the txt and PDF reports) with their number and the command that analyses them again ('reanalyze',
+%   'outdated'). Earlier results are kept until then. Python: mda-watch (myodish_analysis.watch), same index and
+%   results.
+%
+%   'reanalyze': 'new' (default)   new and changed recordings; recordings with an analysis error are retried when the
+%                                  version, the options or the core code change
+%                'outdated'        in addition the recordings analysed with another version, other options or other
+%                                  core code (e.g. after an update: all of them, can take hours)
+%                'all'             every recording again
+%
+% SCHEDULE ('schedule', 2026-10-12): the watcher runs in the background of this MATLAB session (timer) and checks for
+%   new recordings at the given times; MATLAB stays free in between (during a pass it is busy). It stops when MATLAB is
+%   closed or with MyoDishAnalysisWatch('stop'). A second schedule for the same results folder replaces the first.
+%     'daily 10:00'           every day at 10:00 (first pass at the next 10:00)
+%     'weekly Sun 05:00'      every Sunday at 05:00; several days: 'Mon,Thu 06:30'; 'weekdays 07:00' (Mon-Fri)
+%     'every 2 days 10:00'    every 2nd day at 10:00 (first pass at the next 10:00)
+%     'every 120 min'         first pass now, then every 120 min (also 'every 6 h')
+%   Passes that are missed (computer asleep, MATLAB busy, a pass longer than the interval) are not repeated: the next
+%   one follows at the next scheduled time.
 %
 % RESULTS per recording (resultsFolder/<subfolder of rawFolder>/)
 %   <name>_summary.csv, _contractions.csv(.gz), _pulses.csv(.gz) (all stimulus pulses, option pulseTable; like the
@@ -21,14 +42,15 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %       (every contraction), 'thinned' (every 'thinFactor'-th contraction per channel, 'thinMode','nth', or the median
 %       of blocks of 'thinFactor' contractions, 'thinMode','median'; extra beats and, with 'includeProtocols', the
 %       contractions in the protocols are always kept) or 'none'; columns bin, sampledEvery (number of contractions per
-%       row) and sampleMode ('singleBeat' / 'median'). 'compress', true: <name>_contractions.csv.gz.
+%       row) and sampleMode ('singleBeat' / 'median'). 'compress', true: <name>_contractions.csv.gz (gzip level 6).
 %   <name>_overview.csv ('overviewSeconds', 60, default; 0 = none): medians of all contractions per window of 1 min
 %       (file time, split at the ranges), channel, beat type, rocker state and inclusion: window (clock time of its
 %       start), t_from, t_to, nBeats, beatsPerMinute and the median of every parameter. About 1/30 (0.5 Hz) to 1/60
 %       (1 Hz) of the rows of all contractions; opens in Excel.
 %   <name>_protocols_*.csv (if the log file contains stimulation protocols, 'protocols', true)
 %       MyoDishAnalysis(file, [], [], [], 'protocol', 'all', ...): every contraction in the protocols, summary per
-%       protocol, channel and group, protocolResults (FFR, ST thresholds, refractory periods, PRP)
+%       protocol, channel and group, protocolResults (FFR, ST thresholds, refractory periods, PRP). 'compress', true:
+%       _protocols_contractions and _protocols_pulses as .csv.gz.
 %   <name>_events.csv ('events', true): all entries of the log file (comments, stimulation and rocker settings,
 %       recording, calibration, schedule, warnings) with category, clock time and time in the file
 %   <name>_gaps.csv ('gaps', true): periods without force signal (mda_signalGaps): chamber taken out ('chamber out'),
@@ -61,6 +83,15 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   contraction), extra beats (% of the detected contractions), mean amplitude in the first and last range (>= 10
 %   included contractions) and flags (no contractions, capture < flagCapture %, extra beats > flagExtraBeats %,
 %   amplitude change > flagAmplitudeChange %).
+% resultsFolder/reports/mda_report_<date>_<time>.pdf ('report', true; 2026-10-11)
+%   analysis report of the same pass (mda_report): overview of the recordings x channels with flags, the channels whose
+%   analysis should be checked (red: inverted signal; noise suspected = uncertain >= flagUncertain % and extra +
+%   missed beats >= flagIrregular %; large extra beats; delay pulse -> onset > flagDelay s) and those with
+%   slice-quality flags (yellow: capture < flagCapture %, extra beats > flagExtraBeats %, amplitude < flagAmplitude
+%   uN, amplitude change > flagAmplitudeChange %, amplitude CV > flagAmplitudeCV %); channels with fewer than
+%   flagMinBeats detected contractions are not flagged. Pages with traces of the red
+%   channels and the commands that open them in the GUI (MyoDishAnalysisGUI(<name>_info.csv, 'channel', c, 'window',
+%   [a b]); without 'quiet' also as links in the command window).
 %
 % SKIPPED while written: files modified less than 'minFileAgeMinutes' ago (default 10), names starting with '.'
 %   (rsync temporary files, hidden folders), and recordings whose log file has no 'Recording stopped' entry yet (status
@@ -69,8 +100,9 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   version, the options or the code change, or with 'retryErrors'.
 %
 % OPTIONS (name/value pairs)
-%   'interval', h            hours between passes (default 0 = one pass; > 0: runs until Ctrl+C)
-%   'reanalyze', m           'outdated' (default) | 'new' (only new and changed files) | 'all'
+%   'schedule', s            passes on a schedule in the background (see SCHEDULE; default '' = one pass)
+%   'interval', h            hours between passes (default 0 = one pass; > 0: runs until Ctrl+C, MATLAB stays busy)
+%   'reanalyze', m           'new' (default) | 'outdated' | 'all' (see above)
 %   'retryErrors', tf        analyse recordings with errors again (default false)
 %   'fromDate', d            only files modified on/after this date ('yyyy-mm-dd', 'dd.mm.yyyy', 'yymmdd')
 %   'filter', rx             regular expression on the path relative to rawFolder (case-insensitive)
@@ -90,33 +122,63 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   'register', tf           slice register (default true)
 %   'newSliceHours', h       slice register: new slice after >= h without signal (default 2)
 %   'flagCapture', 'flagExtraBeats', 'flagAmplitudeChange'   report flags (default 90, 10, 30 %)
+%   'report', tf             PDF report (default true)
+%   'flagUncertain', 'flagIrregular', 'flagAmplitude', 'flagAmplitudeCV', 'flagDelay', 'flagMinBeats'   flags of the
+%                            PDF report (default 25 %, 15 %, 75 uN, 30 %, 0.15 s, 50 contractions; see mda_report)
 %   'quiet', tf              no messages
 %   all other name/value pairs: analysis options of MyoDishAnalysis for all recordings, e.g. 'rockerFilter', true,
 %   'rocker', 'stopped', 'threshold', 300 (not 'output', 'labels', 'metadata', 'protocol', 'groupBy')
 %   'settings', file         analysis options from a settings file (mda_settings) or earlier results; the index
-%                            records its values (a changed file: the recordings are analysed again)
+%                            records its values (after a change of the file the earlier recordings count as
+%                            analysed with other options)
 %
 % EXAMPLES
 %   MyoDishAnalysisWatch('/data/myodish/raw', '/data/myodish/results', 'rockerFilter', true)
 %   MyoDishAnalysisWatch(raw, results, 'fromDate', '2026-10-01', 'dryRun', true)
-%   MyoDishAnalysisWatch(raw, results, 'interval', 24)        %one pass every 24 h (MATLAB stays busy)
+%   MyoDishAnalysisWatch(raw, results, 'schedule', 'daily 10:00')        %every day at 10:00, MATLAB stays free
+%   MyoDishAnalysisWatch(raw, results, 'schedule', 'weekly Sun 05:00')   %every Sunday at 05:00
+%   MyoDishAnalysisWatch(raw, results, 'schedule', 'every 120 min')      %now and then every 120 min
+%   MyoDishAnalysisWatch('status'), MyoDishAnalysisWatch('stop')
+%   MyoDishAnalysisWatch(raw, results, 'reanalyze', 'outdated')   %after an update: recordings of another version
 %   MyoDishAnalysisWatch(raw, results, 'contractions', 'thinned', 'thinMode', 'median', 'compress', true)
 %   Daily without an open MATLAB: the scheduler of the operating system with
 %   matlab -batch "MyoDishAnalysisWatch('raw', 'results', 'quiet', true)"   or the Python version (mda-watch).
 %
-% TS 2026-10-08 (watcher settings in the info table 2026-10-09; pulse table 2026-10-10)
+% TS 2026-10-08 (watcher settings in the info table 2026-10-09; pulse table 2026-10-10; PDF report 2026-10-11;
+% schedule and 'reanalyze','new' 2026-10-12)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
 % SPDX-License-Identifier: GPL-3.0-or-later
 % Additional terms (GPL-3.0 section 7): see the file NOTICE
 
-W = struct('interval', 0, 'reanalyze', 'outdated', 'retryErrors', false, 'fromDate', '', 'filter', '', ...
+if nargin >= 1 && (ischar(rawFolder) || isstring(rawFolder)) && ...
+        any(strcmpi(rawFolder, {'stop', 'status', 'nextPass'})) && ~isfolder(rawFolder)
+    switch lower(char(rawFolder))                  %no output: nothing shown as ans
+        case 'stop'
+            if nargin < 2, resultsFolder = ''; end
+            n = stopWatch(resultsFolder, true);
+            if nargout > 0, index = n; report = ''; end
+        case 'status'
+            [T, txt] = watchStatus(nargout == 0);
+            if nargout > 0, index = T; report = txt; end
+        case 'nextpass'                                %MyoDishAnalysisWatch('nextPass', schedule, prev, now) (tests)
+            a = [varargin, cell(1, 2)];
+            if isempty(a{2}), a{2} = now; end
+            index = nextPass(parseSchedule(resultsFolder), a{1}, a{2});
+            report = '';
+    end
+    return;
+end
+
+W = struct('interval', 0, 'schedule', '', 'reanalyze', 'new', 'retryErrors', false, 'fromDate', '', 'filter', '', ...
     'maxFiles', inf, 'dryRun', false, 'minFileAgeMinutes', 10, 'incompleteAfterHours', 30, 'binMinutes', 60, ...
     'includeProtocols', false, 'protocolMarginSeconds', 0, 'protocols', true, 'contractions', 'all', ...
     'thinFactor', 10, 'thinMode', 'nth', 'compress', false, 'overviewSeconds', 60, 'events', true, 'gaps', true, ...
     'register', true, 'newSliceHours', 2, ...
-    'flagCapture', 90, 'flagExtraBeats', 10, 'flagAmplitudeChange', 30, 'quiet', false);
+    'flagCapture', 90, 'flagExtraBeats', 10, 'flagAmplitudeChange', 30, 'report', true, 'flagUncertain', 25, ...
+    'flagIrregular', 15, 'flagAmplitude', 75, 'flagAmplitudeCV', 30, 'flagDelay', 0.15, 'flagMinBeats', 50, ...
+    'quiet', false);
 wNames = fieldnames(W);
 args = {};
 for i = 1:2:numel(varargin)
@@ -131,7 +193,7 @@ for i = 1:2:numel(varargin)
     end
 end
 if ~ismember(lower(W.reanalyze), {'outdated', 'new', 'all'})
-    error('MyoDishAnalysisWatch: ''reanalyze'': ''outdated'', ''new'' or ''all'' expected.');
+    error('MyoDishAnalysisWatch: ''reanalyze'': ''new'', ''outdated'' or ''all'' expected.');
 end
 W.contractions = lower(char(W.contractions)); W.thinMode = lower(char(W.thinMode));
 if ~ismember(W.contractions, {'all', 'thinned', 'none'})
@@ -150,6 +212,25 @@ res = absPath(resultsFolder);
 if ~isfolder(raw), error('MyoDishAnalysisWatch: folder not found: %s', raw); end
 oa = optionArgs(args);
 mda_options(oa{:});                                    %unknown analysis options: error now
+if ~isempty(W.schedule)                                %passes on a schedule in the background (timer, 2026-10-12)
+    if W.interval > 0
+        error(['MyoDishAnalysisWatch: ''schedule'' and ''interval'' cannot be combined (''interval'', h is ' ...
+            '''schedule'', ''every <h> h'').']);
+    end
+    spec = parseSchedule(W.schedule);
+    stopWatch(res, false);                             %a scheduled watcher of the same results folder is replaced
+    st = struct('raw', raw, 'res', res, 'W', W, 'args', {args}, 'spec', spec, 'next', nextPass(spec, [], now), ...
+        'last', NaN, 'lastText', '');
+    tm = timer('Name', 'MyoDishAnalysisWatch', 'Tag', 'MyoDishAnalysisWatch', 'ExecutionMode', 'fixedSpacing', ...
+        'Period', 30, 'BusyMode', 'drop', 'StartDelay', 1, 'TimerFcn', @scheduledPass, 'UserData', st);
+    start(tm);
+    if nargout > 0, index = readIndex(res); end
+    report = sprintf(['watcher scheduled (''%s''): next pass %s. MyoDishAnalysisWatch(''status'') shows the ' ...
+        'scheduled watchers, MyoDishAnalysisWatch(''stop'') stops them (they run while this MATLAB session is open).'], ...
+        W.schedule, datestr(st.next, 'yyyy-mm-dd HH:MM'));
+    if ~W.quiet, fprintf('%s\n', report); end
+    return;
+end
 while true
     [index, report] = onePass(raw, res, W, args);
     if W.interval <= 0, return; end
@@ -162,10 +243,10 @@ end
 
 
 % =====================================================================================================
-function [X, report] = onePass(raw, res, W, args)
+function [X, report, nDone] = onePass(raw, res, W, args)
 if ~isfolder(res), mkdir(res); end
 lock = fullfile(res, 'mda_watch.lock');
-report = '';
+nDone = 0;
 d = dir(lock);
 if ~isempty(d) && (now - d.datenum) * 24 < 12
     report = sprintf('another watcher is running (lock file %s, younger than 12 h): pass skipped', lock);
@@ -177,12 +258,12 @@ if ~W.dryRun
     fid = fopen(lock, 'w'); fprintf(fid, '%d %s\n', feature('getpid'), datestr(now, 'yyyy-mm-dd HH:MM:SS')); fclose(fid);
     cleanup = onCleanup(@() deleteIfExists(lock)); %#ok<NASGU>
 end
-[X, report] = scanAndAnalyse(raw, res, W, args);
+[X, report, nDone] = scanAndAnalyse(raw, res, W, args);
 end
 
 
-function [X, report] = scanAndAnalyse(raw, res, W, args)
-report = '';
+function [X, report, nDone] = scanAndAnalyse(raw, res, W, args)
+report = ''; nDone = 0;
 X = readIndex(res);
 version = mda_version();
 code = codeFingerprint();
@@ -193,6 +274,7 @@ hopts = mda_options(oa{:});
 t = now;
 F = findRecordings(raw);
 todo = {};
+stale = cell(0, 2);                                    %kept results of another version / other options ('new')
 for k = 1:numel(F)
     rel = F(k).rel; f = F(k).file;
     if ~isempty(W.filter) && isempty(regexpi(rel, W.filter, 'once', 'emptymatch')), continue; end   %as Python re.search
@@ -208,17 +290,24 @@ for k = 1:numel(F)
     why = reason(r, F(k).bytes, modified, logBytes, version, code, otext, W);
     if ~isempty(why)
         todo(end+1,:) = {rel, f, logf, F(k).bytes, modified, logBytes, lastChange, why}; %#ok<AGROW>
+    elseif ~isempty(r) && strcmp(r.status{1}, 'ok')
+        od = outdatedOf(r, version, code, otext);
+        if ~isempty(od), stale(end+1, :) = {od, r.version{1}}; end %#ok<AGROW>
     end
 end
 todo = todo(1:min(size(todo,1), W.maxFiles), :);
+notice = updateNotice(stale, version, raw, res);
 if ~W.quiet
     fprintf('%s  %s: %d recording(s) to analyse\n', datestr(now, 'yyyy-mm-dd HH:MM:SS'), raw, size(todo,1));
+    for k = 1:numel(notice), fprintf('NOTE: %s\n', notice{k}); end
 end
 if W.dryRun
     for k = 1:size(todo,1), fprintf('  %s  (%s)\n', todo{k,1}, todo{k,8}); end
+    report = strjoin(notice, newline);
     return;
 end
 blocks = {};
+done = {};                                             %rows of the analysed recordings (PDF report)
 for k = 1:size(todo,1)
     [rel, f, ~, nBytes, modified, logBytes, lastChange, why] = todo{k,:};
     row = struct('file', rel, 'bytes', nBytes, 'modified', modified, 'logBytes', logBytes, 'status', '', ...
@@ -246,6 +335,7 @@ for k = 1:size(todo,1)
     if any(strcmp(row.status, {'ok', 'error'}))
         if isempty(block), block = sprintf('%s\n  %s: %s\n', rel, row.status, row.message); end
         blocks{end+1} = block; %#ok<AGROW>
+        done{end+1} = row; %#ok<AGROW>
     end
     if ~W.quiet && ~strcmp(row.status, 'ok'), fprintf('  %s: %s: %s\n', rel, row.status, row.message); end
     X = setRow(X, row);
@@ -272,16 +362,280 @@ if size(todo, 1) > 0 && W.register && W.gaps          %slice register of the exp
 end
 if ~isempty(blocks)
     blocks = sort(blocks);
-    report = sprintf('MyoDishAnalysis %s (MATLAB) watcher report %s\nraw folder: %s\nresults:    %s\noptions:    %s\n\n%s', ...
-        version, datestr(now, 'yyyy-mm-dd HH:MM:SS'), raw, res, otext, strjoin(blocks, newline));
+    now_ = now;
+    nt = '';
+    if ~isempty(notice), nt = [sprintf('NOTE: %s\n', notice{:}) newline]; end
+    report = sprintf('MyoDishAnalysis %s (MATLAB) watcher report %s\nraw folder: %s\nresults:    %s\noptions:    %s\n\n%s%s', ...
+        version, datestr(now_, 'yyyy-mm-dd HH:MM:SS'), raw, res, otext, nt, strjoin(blocks, newline));
     if ~isempty(reg), report = [report newline reg]; end
     dr = fullfile(res, 'reports');
     if ~isfolder(dr), mkdir(dr); end
-    fid = fopen(fullfile(dr, ['mda_report_' datestr(now, 'yyyy-mm-dd_HHMMSS') '.txt']), 'w', 'n', 'UTF-8');
+    R = [];
+    if W.report                                        %analysis report (PDF, 2026-10-11)
+        pdf = fullfile(dr, ['mda_report_' datestr(now_, 'yyyy-mm-dd_HHMMSS') '.pdf']);
+        [~, o] = sort(cellfun(@(r) r.file, done, 'UniformOutput', false));
+        try
+            R = pdfReport(pdf, raw, res, done(o), W, version, otext, now_, notice);
+            n = sum(strcmp(R.level, 'check'));
+            ln = sprintf('PDF report: %s%s', pdf, repmat(sprintf(' (%d channel(s) to check)', n), 1, n > 0));
+        catch ME
+            ln = clean(sprintf('PDF report: %s: %s', ME.identifier, ME.message));
+        end
+        report = [report newline ln newline];
+    end
+    fid = fopen(fullfile(dr, ['mda_report_' datestr(now_, 'yyyy-mm-dd_HHMMSS') '.txt']), 'w', 'n', 'UTF-8');
     fwrite(fid, unicode2native(report, 'UTF-8'));
     fclose(fid);
-    if ~W.quiet, fprintf('\n%s\n', report); end
+    if ~W.quiet
+        fprintf('\n%s\n', report);
+        if ~isempty(R)                                 %channels to check: links that open them in the GUI
+            for j = find(strcmp(R.level, 'check'))'
+                if feature('hotlinks')
+                    fprintf('  <a href="matlab:%s">%s ch %d</a>: %s\n', R.matlab{j}, R.recording{j}, R.channel(j), R.red{j});
+                else
+                    fprintf('  %s\n', R.matlab{j});
+                end
+            end
+        end
+    end
+elseif ~isempty(notice)
+    report = strjoin(notice, newline);
 end
+nDone = numel(done);
+end
+
+
+function R = pdfReport(out, raw, res, rows, W, version, otext, now_, notice)
+% analysis report (mda_report) of the recordings of this pass, from their result files
+ccols = {'channel', 't_peak', 'beatType', 'uncertain', 'included', 'amplitude', 'stimToOnset'};
+fl = struct('uncertain', W.flagUncertain, 'irregular', W.flagIrregular, 'extra', W.flagExtraBeats, 'capture', ...
+    W.flagCapture, 'amplitudeChange', W.flagAmplitudeChange, 'amplitude', W.flagAmplitude, 'amplitudeCV', ...
+    W.flagAmplitudeCV, 'delay', W.flagDelay, 'minBeats', W.flagMinBeats);
+recs = struct('name', {}, 'file', {}, 'open', {}, 'S', {}, 'C', {}, 'P', {}, 'P_file', {}, 'R', {}, 'status', {}, ...
+    'notes', {});
+for i = 1:numel(rows)
+    row = rows{i};
+    rel = row.file;
+    [d, n] = fileparts(strrep(rel, '\', '/'));
+    d = fullfile(res, d);
+    rec = struct('name', rel, 'file', fullfile(raw, rel), 'open', fullfile(d, [n '_info.csv']), 'S', [], 'C', [], ...
+        'P', [], 'P_file', '', 'R', [], 'status', [], 'notes', {{}});
+    if ~strcmp(row.status, 'ok')
+        rec.notes = {clean(['error: ' row.message])};
+        recs(end+1) = rec; %#ok<AGROW>
+        continue;
+    end
+    rec.S = readResult(fullfile(d, [n '_summary.csv']), {});
+    C = readResult(fullfile(d, [n '_contractions.csv']), ccols);
+    rec.status = readResult(fullfile(d, [n '_channels.csv']), {'channel', 'status'});
+    m = strtrim(strsplit(row.message, ' | '));
+    rec.notes = m(startsWith(m, 'protocols:'));
+    % flags now; contractions kept and pulses read (detail pages) only for recordings with channels to check: memory
+    % of passes with thousands of recordings
+    rec.R = mda_report('flags', rec.S, C, rec.status, fl);
+    if any(strcmp(rec.R.level, 'check')), rec.C = C; end
+    rec.P_file = fullfile(d, [n '_pulses.csv']);
+    recs(end+1) = rec; %#ok<AGROW>
+end
+sub = {['raw folder: ' raw], ['results: ' res], sprintf(['MyoDishAnalysis %s (MATLAB) watcher, %s: %d recording(s) ' ...
+    'analysed in this pass; options: %s'], version, datestr(now_, 'yyyy-mm-dd HH:MM:SS'), numel(rows), otext)};
+R = mda_report(recs, out, 'title', 'MyoDishAnalysis watcher report', 'subtitle', sub, 'flags', fl, 'notice', notice);
+end
+
+
+function T = readResult(f, cols)
+% result table f or f.gz ([] if neither exists); cols: only these columns ({} = all); text columns as char
+T = [];
+src = f; tmp = '';
+if ~isfile(f)
+    if ~isfile([f '.gz']), return; end
+    tmp = tempname; mkdir(tmp);                        %readtable does not read .gz
+    gunzip([f '.gz'], tmp);
+    [~, n, e] = fileparts(f);
+    src = fullfile(tmp, [n e]);
+end
+try
+    o = detectImportOptions(src, 'FileType', 'text', 'Delimiter', ',', 'VariableNamingRule', 'preserve');
+    o.VariableNamesLine = 1; o.DataLines = [2 Inf];
+    if ~isempty(cols), o.SelectedVariableNames = intersect(cols, o.VariableNames, 'stable'); end
+    for k = 1:numel(o.SelectedVariableNames)
+        j = strcmp(o.VariableNames, o.SelectedVariableNames{k});
+        if any(strcmp(o.VariableTypes{j}, {'string', 'datetime', 'categorical'}))
+            o = setvartype(o, o.SelectedVariableNames{k}, 'char');
+        end
+    end
+    T = readtable(src, o);
+catch
+    T = [];
+end
+if ~isempty(tmp), rmdir(tmp, 's'); end
+end
+
+
+function od = outdatedOf(r, version, code, otext)
+% 'other version' / 'other options' / 'core code changed' (same implementation) / ''
+od = '';
+if ~strcmp(r.version{1}, version)
+    od = 'other version';
+elseif ~strcmp(r.options{1}, otext)
+    od = 'other options';
+elseif strcmp(r.implementation{1}, 'MATLAB') && ~strcmp(r.code{1}, code)
+    od = 'core code changed';
+end
+end
+
+
+function lines = updateNotice(stale, version, raw, res)
+% lines of the notice about recordings that were analysed with another version, other options or other core code
+% and kept ('reanalyze','new'); stale = {reason, version of the index} per recording
+lines = {};
+if isempty(stale), return; end
+isOpt = strcmp(stale(:, 1), 'other options');
+v = stale(~isOpt, 2);
+code = strcmp(stale(~isOpt, 1), 'core code changed');
+v(code) = strcat(v(code), {' with other core code'});
+if ~isempty(v)
+    [u, ~, j] = unique(v);
+    parts = arrayfun(@(k) sprintf('%s: %d', u{k}, sum(j == k)), 1:numel(u), 'UniformOutput', false);
+    lines{end+1} = sprintf(['MyoDishAnalysis has been updated (now %s): %d recording(s) were analysed with another ' ...
+        'version (%s). This may change the results or lead to inconsistencies with new data (see the release notes, ' ...
+        'CHANGELOG.md).'], version, numel(v), strjoin(parts, ', '));
+end
+if any(isOpt)
+    lines{end+1} = sprintf(['The analysis options have changed: %d recording(s) were analysed with other options ' ...
+        '(index column ''options''); their results may not be comparable with those of new recordings.'], sum(isOpt));
+end
+q = @(x) strrep(x, '''', '''''');
+lines{end+1} = sprintf(['The earlier results were kept. To analyse these recordings again: MyoDishAnalysisWatch(''%s'', ' ...
+    '''%s'', ''reanalyze'', ''outdated'') (with your other options)'], q(raw), q(res));
+end
+
+
+% ===================================================================================================== schedule
+function spec = parseSchedule(text)
+% schedule text -> struct: kind 'interval' (seconds; first pass now), 'days' (every n days at hour:minute) or 'weekly'
+% (days 0 = Monday ... 6 = Sunday at hour:minute). Same rules as watch.py (parse_schedule).
+s = lower(strtrim(char(text)));
+s = regexprep(regexprep(s, '\s*,\s*', ', '), '\s+', ' ');
+msg = sprintf(['MyoDishAnalysisWatch: ''schedule'': ''daily 10:00'', ''weekly Sun 05:00'', ''Mon,Thu 06:30'', ' ...
+    '''weekdays 07:00'', ''every 2 days 10:00'', ''every 120 min'' or ''every 6 h'' expected, not ''%s''.'], char(text));
+spec = struct('kind', '', 'seconds', NaN, 'every', 1, 'hour', 0, 'minute', 0, 'days', []);
+t = regexp(s, '^every (\d+(?:\.\d+)?) ?(min|mins|minute|minutes|m|h|hr|hrs|hour|hours)$', 'tokens', 'once');
+if ~isempty(t)
+    spec.kind = 'interval';
+    spec.seconds = str2double(t{1}) * 3600;
+    if t{2}(1) == 'm', spec.seconds = str2double(t{1}) * 60; end
+    if spec.seconds < 60, error('MyoDishAnalysisWatch: ''schedule'': interval of at least 1 min expected.'); end
+    return;
+end
+t = regexp(s, '^(daily|every day|every \d+ days?)(?: at)? (\d{1,2}):(\d{2})$', 'tokens', 'once');
+if ~isempty(t)
+    n = str2double(regexp(t{1}, '\d+', 'match', 'once'));
+    if isnan(n), n = 1; end
+    h = str2double(t{2}); mi = str2double(t{3});
+    if n < 1 || h > 23 || mi > 59, error(msg); end
+    spec.kind = 'days'; spec.every = n; spec.hour = h; spec.minute = mi;
+    return;
+end
+t = regexp(s, '^(?:weekly |every )?([a-z][a-z, ]*?)(?: at)? (\d{1,2}):(\d{2})$', 'tokens', 'once');
+if isempty(t), error(msg); end
+names = {'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'};
+days = [];
+for tok = strsplit(strtrim(t{1}), {' ', ','}, 'CollapseDelimiters', true)
+    switch tok{1}
+        case {'weekdays', 'workdays'}, days = [days 0:4]; %#ok<AGROW>
+        case {'weekend', 'weekends'}, days = [days 5 6]; %#ok<AGROW>
+        otherwise
+            k = find(startsWith(names, tok{1}));
+            if numel(tok{1}) < 2 || numel(k) ~= 1, error(msg); end
+            days(end+1) = k - 1; %#ok<AGROW>
+    end
+end
+h = str2double(t{2}); mi = str2double(t{3});
+if isempty(days) || h > 23 || mi > 59, error(msg); end
+spec.kind = 'weekly'; spec.days = unique(days); spec.hour = h; spec.minute = mi;
+end
+
+
+function t = nextPass(spec, prev, nowT)
+% time of the next pass (datenum, local time) after the pass planned for prev ([] = first pass)
+switch spec.kind
+    case 'interval'
+        if isempty(prev), t = nowT; return; end
+        step = spec.seconds / 86400;
+        t = prev + step;
+        while t <= nowT, t = t + step; end              %missed passes are not repeated
+    case 'days'
+        at = floor(nowT) + (spec.hour * 60 + spec.minute) / 1440;
+        if isempty(prev)
+            t = at; if t <= nowT, t = t + 1; end
+            return;
+        end
+        t = prev + spec.every;
+        while t <= nowT, t = t + spec.every; end
+    otherwise
+        at = floor(nowT) + (spec.hour * 60 + spec.minute) / 1440;
+        for k = 0:7
+            t = at + k;
+            if t > nowT && ismember(mod(weekday(t) + 5, 7), spec.days), return; end   %0 = Monday
+        end
+end
+end
+
+
+function scheduledPass(tm, ~)
+% timer callback (every 30 s): a pass when its time has come
+st = tm.UserData;
+if now < st.next, return; end
+try
+    [~, rep, n] = onePass(st.raw, st.res, st.W, st.args);
+    if startsWith(rep, 'another watcher'), st.lastText = rep; else, st.lastText = sprintf('%d recording(s) analysed', n); end
+catch ME
+    st.lastText = clean(['error: ' ME.message]);
+    if ~st.W.quiet, fprintf(2, 'MyoDishAnalysisWatch: %s\n', st.lastText); end
+end
+st.last = now;
+st.next = nextPass(st.spec, st.next, now);
+if isvalid(tm), tm.UserData = st; end
+if ~st.W.quiet
+    fprintf('next pass %s (schedule ''%s''; MyoDishAnalysisWatch(''stop'') stops the watcher)\n', ...
+        datestr(st.next, 'yyyy-mm-dd HH:MM'), st.W.schedule);
+end
+end
+
+
+function [T, txt] = watchStatus(show)
+% scheduled watchers (table) and their description
+tms = timerfindall('Tag', 'MyoDishAnalysisWatch');
+n = numel(tms);
+[res, raw, sch, nxt, lst, lastResult, lines] = deal(cell(n, 1));
+for i = 1:n
+    st = tms(i).UserData;
+    res{i} = st.res; raw{i} = st.raw; sch{i} = st.W.schedule; nxt{i} = datestr(st.next, 'yyyy-mm-dd HH:MM');
+    if isnan(st.last), lst{i} = ''; else, lst{i} = datestr(st.last, 'yyyy-mm-dd HH:MM'); end
+    lastResult{i} = st.lastText;
+    lines{i} = sprintf('%s (raw %s): ''%s'', next pass %s', res{i}, raw{i}, sch{i}, nxt{i});
+    if ~isempty(lst{i}), lines{i} = sprintf('%s, last pass %s (%s)', lines{i}, lst{i}, lastResult{i}); end
+end
+T = table(res, raw, sch, nxt, lst, lastResult, 'VariableNames', ...
+    {'resultsFolder', 'rawFolder', 'schedule', 'nextPass', 'lastPass', 'lastResult'});
+if n == 0, txt = 'no scheduled watcher'; else, txt = strjoin(lines, newline); end
+if show, fprintf('%s\n', txt); end
+end
+
+
+function n = stopWatch(res, show)
+% stops the scheduled watchers (of the results folder res; '' = all)
+tms = timerfindall('Tag', 'MyoDishAnalysisWatch');
+n = 0;
+if ~isempty(res), res = absPath(res); end
+for i = 1:numel(tms)
+    st = tms(i).UserData;
+    if isempty(res) || (isstruct(st) && strcmp(st.res, res))
+        stop(tms(i)); delete(tms(i)); n = n + 1;
+    end
+end
+if show, fprintf('%d scheduled watcher(s) stopped\n', n); end
 end
 
 
@@ -295,18 +649,11 @@ if r.bytes ~= nBytes || r.logBytes ~= logBytes || isnan(old) || abs(old - parseT
 end
 status = r.status{1};
 if any(strcmp(status, {'running', 'noLog'})), why = ['check ' status]; return; end
-outdated = '';
-if ~strcmp(r.version{1}, version)
-    outdated = 'other version';
-elseif ~strcmp(r.options{1}, otext)
-    outdated = 'other options';
-elseif strcmp(r.implementation{1}, 'MATLAB') && ~strcmp(r.code{1}, code)
-    outdated = 'core code changed';
-end
+outdated = outdatedOf(r, version, code, otext);
 mode = lower(W.reanalyze);
-if strcmp(status, 'error')
+if strcmp(status, 'error')        %no results to keep: retried when the version, the options or the core code change
     if W.retryErrors, why = 'retry error';
-    elseif ~isempty(outdated) && ~strcmp(mode, 'new'), why = ['retry error, ' outdated];
+    elseif ~isempty(outdated), why = ['retry error, ' outdated];
     end
     return;
 end
@@ -342,6 +689,10 @@ deleteFile(fullfile(outDir, [n '_contractions.csv.gz']));
 deleteFile(fullfile(outDir, [n '_pulses.csv']));
 deleteFile(fullfile(outDir, [n '_pulses.csv.gz']));
 deleteFile(fullfile(outDir, [n '_overview.csv']));
+for sfx = {'_protocols_contractions.csv', '_protocols_pulses.csv'}
+    deleteFile(fullfile(outDir, [n sfx{1}]));
+    deleteFile(fullfile(outDir, [n sfx{1} '.gz']));
+end
 E = [];
 if W.events
     E = mda_logEntries(H.logFile);
@@ -409,9 +760,16 @@ if W.gaps && istable(G)
 end
 if W.protocols && istable(P) && height(P) > 0
     try
-        MyoDishAnalysis(f, [], [], [], 'protocol', 'all', 'metadata', meta, 'quiet', true, ...
-            'output', fullfile(outDir, [n '_protocols.csv']), args{:});
+        [~, ~, pinfo] = MyoDishAnalysis(f, [], [], [], 'protocol', 'all', 'metadata', meta, 'quiet', true, ...
+            'output', fullfile(outDir, [n '_protocols.csv']), 'report', false, args{:});
         outputs{end+1} = [n '_protocols.csv'];
+        nt = pinfo.notes(contains(pinfo.notes, 'not analysed'));      %single protocols (2026-10-11)
+        if ~isempty(nt), msgs = [msgs, strcat('protocols: ', nt(:)')]; end
+        if W.compress                               %protocol contractions and pulses as well (2026-10-11)
+            for cf = {fullfile(outDir, [n '_protocols_contractions.csv']), fullfile(outDir, [n '_protocols_pulses.csv'])}
+                if isfile(cf{1}), gzip(cf{1}); delete(cf{1}); end
+            end
+        end
     catch ME
         msgs{end+1} = sprintf('protocols: %s: %s', ME.identifier, ME.message);
     end

@@ -11,6 +11,7 @@ function [B, C] = mda_analyzeChannel(S, channel, range, opts)
 %   opts     options from mda_options
 %
 %   B  table, one row per contraction (see below); stimulus columns: t_stim, stimToPeak, t_onset, stimToOnset,
+%      t_rise50, stimToRise50 (50 % of the amplitude on the upstroke, 2026-10-11),
 %      stimPulse (ID = raw sample number of the eliciting pulse), stimCurrent (mA), stimChargeDuration,
 %      stimPauseDuration, stimDechargeDuration (us, log file), elicitedByExtraPulse, stimAmbiguous, prePulses,
 %      postPulses (see 3.)
@@ -181,6 +182,20 @@ else
     maxLat = min(CL, 1.0);
 end
 
+% ------------------------------------------------------------------ inverted signal (2026-10-11)
+% paced: the force falls after the stimuli instead of rising (magnet of the chamber out of position): contractions
+% detected in the inverted signal (rate, capture), force and time parameters NaN (see invertedSignal)
+sgn = 1;
+invRise = nan; invFall = nan;
+if (~isfield(opts, 'invertedCheck') || opts.invertedCheck) && numel(ST) >= opts.pacedMinStimuli
+    [inv, invRise, invFall] = invertedSignal(t, f, ST, opts);
+    if inv
+        sgn = -1;
+        f = -f;
+        g = -g;
+    end
+end
+
 % ------------------------------------------------------------------ detection
 [isMax, P] = islocalmax(f);
 cand = find(isMax);
@@ -239,6 +254,7 @@ promPk = prom(accepted);
 % certain = >= 0.5 x typical (auto threshold). 'sensitive': uncertain contractions are counted and flagged (column
 % uncertain); 'specific': they are removed. Manual threshold: not assessed.
 certain = true(size(iPk));
+assessed = strcmp(thrMode, 'auto') && numel(ST) >= opts.pacedMinStimuli;   %certainty from the stimuli (longer gate)
 if strcmp(thrMode, 'auto') && ~isempty(iPk)
     if numel(ST) >= opts.pacedMinStimuli
         [~, o] = sort(promPk, 'descend');
@@ -293,7 +309,8 @@ if ~isempty(PT)
         end
         jAll = j;
     else
-        [pOfBeat, amb, tOn] = gateAssign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg);
+        gLen = gateLengths(tOn, certain & assessed, ST, opts);   %certain contractions: longer gate (2026-10-11)
+        [pOfBeat, amb, tOn] = gateAssign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg, gLen);
         jAll = pOfBeat;
     end
     beatType(pOfBeat > 0) = {'stimulated'};
@@ -338,12 +355,13 @@ end
 sel = find(tPk >= range(1) & tPk <= range(2));
 n = numel(sel);
 useMedian = ~strcmp(opts.diastolicLevel, 'minimum');   %diastolic level: median before the pulse (2026-10-10)
-xRaw = S.force(row,:); tRaw = S.t(:)';                %unfiltered signal (after spike removal / rocker filter)
+xRaw = sgn * S.force(row,:); tRaw = S.t(:)';          %unfiltered signal (after spike removal / rocker filter)
 PI = mda_parameters();
 names = PI(:,1)';            %columns of V
 ix = struct();
 for k = 1:numel(names), ix.(names{k}) = k; end
 V = nan(n, numel(names));
+rise50 = nan(n, 1);                                 %time of 50 % of the amplitude on the upstroke (2026-10-11)
 rockerMoving = false(n, 1);
 maxW = round(opts.maxBeatWindow / dt);
 for q = 1:n
@@ -361,14 +379,18 @@ for q = 1:n
     % diastolic level (2026-10-10): median of the unfiltered signal diastoleWindowStart ... diastoleWindowEnd before the
     % eliciting pulse (default); without pulse, or a median at or above the peak: the minimum before the peak
     if useMedian && ~isnan(tStimOfBeat(k))
-        w0 = lowerBound(tRaw, tStimOfBeat(k) - opts.diastoleWindowStart - 1e-9);
-        w1 = lowerBound(tRaw, tStimOfBeat(k) - opts.diastoleWindowEnd + 1e-9) - 1;
+        tRef = tStimOfBeat(k);                      %window before the pulse; delay > gateMax (longer gate of certain
+        if tOn(k) - tRef > opts.gateMax + 1e-9      %contractions): before the onset (the force at the pulse may still
+            tRef = tOn(k);                          %fall, e.g. incomplete relaxation; 2026-10-11)
+        end
+        w0 = lowerBound(tRaw, tRef - opts.diastoleWindowStart - 1e-9);
+        w1 = lowerBound(tRaw, tRef - opts.diastoleWindowEnd + 1e-9) - 1;
         if w0 >= 1 && w1 >= w0 && w1 <= numel(xRaw)
             Fm = median(xRaw(w0:w1), 'omitnan');
             if Fm < Fpk
                 Fdia = Fm;
                 %upstroke crossings: from the window before the pulse on (a median below the filtered minimum)
-                iu = min(ia, max(a, lowerBound(t, tStimOfBeat(k) - opts.diastoleWindowStart)));
+                iu = min(ia, max(a, lowerBound(t, tRef - opts.diastoleWindowStart)));
             end
         end
     end
@@ -382,6 +404,7 @@ for q = 1:n
     end
     up10 = crossUp(f, t, dt, iu, i, Fdia + 0.1*A);
     up50 = crossUp(f, t, dt, iu, i, Fdia + 0.5*A);
+    rise50(q) = up50;
     up90 = crossUp(f, t, dt, iu, i, Fdia + 0.9*A);
     V(q,ix.amplitude) = A;
     V(q,ix.diastolicSignal) = Fdia;
@@ -443,13 +466,22 @@ hasP = pSel > 0;
 sv = nan(n, 5);                                     %pulse ID, current, charge, pause, decharge
 sv(hasP, :) = [round(PT(pSel(hasP)) * fs), PC(pSel(hasP)), pDur(pSel(hasP), :)];
 [preTxt, postTxt] = pulseText(sel, owner, PT, PX, PC, pDur, pNom, pOfBeat, tOn, n, snapMs, opts.pulseTextMax);
-B = [B, table(col(tOn(sel)), col(tOn(sel)) - tStim, sv(:,1), sv(:,2), sv(:,3), sv(:,4), sv(:,5), ...
-    col(elicitedX(sel)), col(amb(sel)), preTxt, postTxt, 'VariableNames', {'t_onset', 'stimToOnset', 'stimPulse', ...
-    'stimCurrent', 'stimChargeDuration', 'stimPauseDuration', 'stimDechargeDuration', 'elicitedByExtraPulse', ...
-    'stimAmbiguous', 'prePulses', 'postPulses'})];
+B = [B, table(col(tOn(sel)), col(tOn(sel)) - tStim, rise50, rise50 - tStim, sv(:,1), sv(:,2), sv(:,3), sv(:,4), ...
+    sv(:,5), col(elicitedX(sel)), col(amb(sel)), preTxt, postTxt, 'VariableNames', {'t_onset', 'stimToOnset', ...
+    't_rise50', 'stimToRise50', 'stimPulse', 'stimCurrent', 'stimChargeDuration', 'stimPauseDuration', ...
+    'stimDechargeDuration', 'elicitedByExtraPulse', 'stimAmbiguous', 'prePulses', 'postPulses'})];
 B = [B, array2table(V, 'VariableNames', names), table(promSel, 'VariableNames', {'prominence'})];
-B.Properties.VariableUnits = [{'','','s','','s','s','','',''}, {'s','s','','mA','us','us','us','','','',''}, ...
+B.Properties.VariableUnits = [{'','','s','','s','s','','',''}, {'s','s','s','s','','mA','us','us','us','','','',''}, ...
     PI(:,2)', {'uN'}];
+B.invertedSignal = repmat(sgn < 0, n, 1);
+if sgn < 0                  %inverted signal: only rate, capture and stimulus timing (2026-10-11)
+    keepCols = {'peakToPeakInterval', 'peakToPeakFrequency', 'stimInterval', 'stimFrequency'};
+    for nm = names(:)'
+        if ~ismember(nm{1}, keepCols), B.(nm{1}) = nan(n, 1); end
+    end
+    B.t_rise50 = nan(n, 1);
+    B.stimToRise50 = nan(n, 1);
+end
 if opts.rockerFilter        %contraction during a rocker movement whose artifact was subtracted
     art = S.rockerArtifact(row, :);
     B.rockerCorrected = rockerMoving & col(art(iPk(sel)) ~= 0);
@@ -468,6 +500,9 @@ C.thresholdArtifacts = nArt;
 C.noContractions = noBeats;
 C.noiseLevel = noiseLvl;
 C.noiseMedian = noiseMed;
+C.invertedSignal = sgn < 0;                         %see invertedSignal; rise / fall of the stimulus-triggered median (uN)
+C.invertedRise = invRise;
+C.invertedFall = invFall;
 C.stimCapturedCertain = stimCapturedCertain;
 C.stimTimes = ST(:);
 C.stimCaptured = stimCaptured;
@@ -582,7 +617,7 @@ end
 end
 
 
-function [p, amb, tOn] = gateAssign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg)
+function [p, amb, tOn] = gateAssign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg, gLen)
 % Onset gate: a pulse (regular or extra) can only have elicited a contraction if it lies from onset - gateMax to
 % onset + gateTolerance. Contractions in the order of their prominence (the most prominent one first), each pulse
 % elicits at most one contraction. Several candidates: see choosePulse (before the onset before after it, regular
@@ -595,59 +630,95 @@ function [p, amb, tOn] = gateAssign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat,
 % steepRiseMargin (5 ms) before the maximum dF/dt (onset estimated too early, e.g. rocker artifacts) is taken (regular first, the
 % earliest), marked ambiguous. Contractions without onset (no upstroke in the data): the last unused pulse
 % minStimToPeak ... maxLat before the peak.
+% Second pass (2026-10-11): contractions without pulse whose gate gLen (see gateLengths) is longer than gateMax
+% (certain contractions) get an unused pulse of the longer gate (onset and rise phases; same choice and ambiguity);
+% the first pass with gateMax for all contractions keeps a pulse for the contraction right after it (a later one of a
+% longer gate cannot take it).
 if nargin < 9, tSeg = cell(numel(tOn), 1); end
 nPk = numel(tOn);
 p = zeros(nPk, 1); amb = false(nPk, 1);
 used = false(numel(PT), 1);
+gMax = opts.gateMax;
 [~, order] = sort(promPk, 'descend');
 for k = reshape(order, 1, [])
-    if isnan(tOn(k))
-        j = find(PT <= tPk(k) - opts.minStimToPeak & ~used, 1, 'last');
-        if ~isempty(j) && tPk(k) - PT(j) <= maxLat, p(k) = j; used(j) = true; end
-        continue;
-    end
-    [cand, b] = gate(tOn(k));
-    forced = false;
-    if isempty(cand) && ~isempty(tSeg{k})
-        first = min(tOn(k), min(tSeg{k}));               %start of the upstroke
-        for ts = reshape(tSeg{k}, 1, [])
-            c2 = gate(ts);
-            if ~isempty(c2)
-                cand = c2; tOn(k) = ts;
-                forced = ts > first + opts.gateTolerance + 1e-9;   %the upstroke started before (fused event): ambiguous
-                break;
-            end
+    assignOne(k, false);
+end
+if nargin >= 10 && ~isempty(gLen)
+    for k = reshape(order, 1, [])
+        if p(k) == 0 && gLen(k) > opts.gateMax + 1e-12
+            gMax = gLen(k);
+            assignOne(k, true);
         end
     end
-    if isempty(cand)
-        c2 = lowerBound(PT, tMs(k) - opts.steepRiseMargin + 1e-9) - 1;
-        cand = (b + 1:c2)';
-        cand = cand(~used(cand));
-        if isempty(cand), continue; end
-        r = cand(~PX(cand));
-        if ~isempty(r), j = r(1); else, j = cand(1); end
-        p(k) = j; used(j) = true; amb(k) = true;
-        continue;
-    end
-    j = choosePulse(cand, PT, PX, tOn(k), opts.gateCore);
-    o = cand(cand ~= j);
-    oth = o(PX(o) ~= PX(j));                             %candidates of the other kind (regular / extra)
-    % ambiguous: a pulse of the other kind (regular / extra) within ambiguityWindow, or chosen if the onset were
-    % gateTolerance earlier or later (tolerance of the onset estimate: gate and choice)
-    amb(k) = forced || any(abs(PT(oth) - PT(j)) <= opts.ambiguityWindow + 1e-9);
-    for t1 = tOn(k) + [-1 1] * opts.gateTolerance
-        c1 = gate(t1);
-        if ~amb(k) && ~isempty(c1) && PX(choosePulse(c1, PT, PX, t1, opts.gateCore)) ~= PX(j), amb(k) = true; end
-    end
-    p(k) = j;
-    used(j) = true;
 end
+    function assignOne(k, second)
+        if isnan(tOn(k))
+            if second, return; end
+            jj = find(PT <= tPk(k) - opts.minStimToPeak & ~used, 1, 'last');
+            if ~isempty(jj) && tPk(k) - PT(jj) <= maxLat, p(k) = jj; used(jj) = true; end
+            return;
+        end
+        [cand, b] = gate(tOn(k));
+        forced = false;
+        if isempty(cand) && ~isempty(tSeg{k})
+            first = min(tOn(k), min(tSeg{k}));           %start of the upstroke
+            for ts = reshape(tSeg{k}, 1, [])
+                c2 = gate(ts);
+                if ~isempty(c2)
+                    cand = c2; tOn(k) = ts;
+                    forced = ts > first + opts.gateTolerance + 1e-9;   %the upstroke started before (fused event): ambiguous
+                    break;
+                end
+            end
+        end
+        if isempty(cand)
+            if second, return; end
+            c2 = lowerBound(PT, tMs(k) - opts.steepRiseMargin + 1e-9) - 1;
+            cand = (b + 1:c2)';
+            cand = cand(~used(cand));
+            if isempty(cand), return; end
+            r = cand(~PX(cand));
+            if ~isempty(r), jj = r(1); else, jj = cand(1); end
+            p(k) = jj; used(jj) = true; amb(k) = true;
+            return;
+        end
+        jj = choosePulse(cand, PT, PX, tOn(k), opts.gateCore);
+        o = cand(cand ~= jj);
+        oth = o(PX(o) ~= PX(jj));                        %candidates of the other kind (regular / extra)
+        % ambiguous: a pulse of the other kind (regular / extra) within ambiguityWindow, or chosen if the onset were
+        % gateTolerance earlier or later (tolerance of the onset estimate: gate and choice)
+        amb(k) = forced || any(abs(PT(oth) - PT(jj)) <= opts.ambiguityWindow + 1e-9);
+        for t1 = tOn(k) + [-1 1] * opts.gateTolerance
+            c1 = gate(t1);
+            if ~amb(k) && ~isempty(c1) && PX(choosePulse(c1, PT, PX, t1, opts.gateCore)) ~= PX(jj), amb(k) = true; end
+        end
+        p(k) = jj;
+        used(jj) = true;
+    end
     function [c, b] = gate(t0)
-        a = lowerBound(PT, t0 - opts.gateMax - 1e-9);
+        a = lowerBound(PT, t0 - gMax - 1e-9);
         b = lowerBound(PT, t0 + opts.gateTolerance + 1e-9) - 1;
         c = (a:b)';
         c = c(~used(c));
     end
+end
+
+
+function gL = gateLengths(tOn, longGate, ST, opts)
+% gate length of every contraction (2026-10-11): gateMax; contractions with longGate (certain contractions of an auto
+% threshold, paced: locked to the stimuli or large) min(gateMaxCertain, gateMaxCertainRel x the interval of the regular
+% pulses before the onset), at least gateMax (slices with a long but constant delay, e.g. 0.3 s; the delay cannot
+% exceed half the stimulus interval)
+gL = repmat(opts.gateMax, numel(tOn), 1);
+k = find(longGate(:) & ~isnan(tOn(:)));
+U = unique(ST(:));
+if ~isempty(k) && numel(U) >= 2
+    j = discretize(tOn(k) + opts.gateTolerance, [U; inf]);   %last regular pulse at or before the onset
+    j(isnan(j)) = 1;
+    j = min(max(j(:), 2), numel(U));
+    iv = U(j) - U(j - 1);
+    gL(k) = max(opts.gateMax, min(opts.gateMaxCertain, opts.gateMaxCertainRel * iv(:)));
+end
 end
 
 
@@ -944,6 +1015,48 @@ end
 thr = sqrt(p(g) * p(g+1));
 keepLow(lo(locked)) = true;
 nLow = nnz(~locked);
+end
+
+
+function [inv, rise, fall] = invertedSignal(t, f, ST, opts)
+% paced channels: stimulus-triggered median of the filtered signal from invertedSkip after the pulses to min(1 s,
+% median stimulus interval), each window minus the median of its diastole window before the pulse (diastoleWindowStart
+% ... diastoleWindowEnd); at most 300 pulses, evenly spread. Inverted (force falls after the stimuli, magnet out of
+% position): largest fall >= invertedRatio x largest rise, >= invertedMinAmplitude and below half of it for >=
+% invertedMinWidth (no stimulus artifact), and the signal itself deflects downwards: 50th - 10th percentile >=
+% invertedRatio x (90th - 50th percentile) of the filtered signal of the windows. The median (not the mean) and the
+% percentiles are not changed by a few windows with steps (chamber taken out) or by beats that are not locked to the
+% pulses; the percentiles exclude upright contractions that precede the pulses (2026-10-11, sample of 121 recordings).
+% TS 2026-10-11
+inv = false; rise = nan; fall = nan;
+t = t(:); f = f(:); ST = ST(:);
+if numel(ST) < 2 || numel(t) < 10, return; end
+dt = median(diff(t));
+L = min(1, median(diff(ST)));
+grid = (opts.invertedSkip:dt:L - dt * 1e-9)';
+if numel(grid) < 5, return; end
+P = ST(ST - opts.diastoleWindowStart >= t(1) & ST + L <= t(end));
+if numel(P) > 300, P = P(round(linspace(0, numel(P) - 1, 300)) + 1); end
+if numel(P) < 5, return; end
+Y = nan(numel(P), numel(grid));
+for q = 1:numel(P)
+    i0 = lowerBound(t, P(q) - opts.diastoleWindowStart);
+    i1 = lowerBound(t, P(q) - opts.diastoleWindowEnd + 1e-12) - 1;
+    if i1 - i0 + 1 < 2, continue; end
+    Y(q, :) = interp1(t, f, P(q) + grid, 'linear')' - median(f(i0:i1));
+end
+m = median(Y, 1, 'omitnan');
+if all(isnan(m)), return; end
+rise = max(0, max(m));
+fall = max(0, -min(m));
+width = nnz(m < -fall / 2) * dt;
+inv = fall >= opts.invertedRatio * rise && fall >= opts.invertedMinAmplitude && width >= opts.invertedMinWidth;
+if inv                                             %shape of the signal: deflections downwards
+    x = sort(f(t >= P(1) - opts.diastoleWindowStart & t <= P(end) + L));
+    x = x(~isnan(x));
+    q = @(p) x(round(p * (numel(x) - 1)) + 1);     %nearest rank (as Python)
+    inv = ~isempty(x) && q(0.5) - q(0.1) >= opts.invertedRatio * (q(0.9) - q(0.5));
+end
 end
 
 

@@ -28,6 +28,13 @@ DETECTION OF CONTRACTIONS
                    the signal before the stimuli) nor large (>= 0.7 x typical amplitude and >= 3 x that rise;
                    unpaced: >= 0.5 x typical amplitude). 'sensitive': uncertain contractions are counted and flagged
                    (column uncertain); 'specific': they are not counted
+  invertedCheck    True (default) | False: paced channels: inverted signal (the force falls after the stimuli, e.g.
+                   magnet of the chamber out of position; see analyze_channel.inverted_signal): contractions detected
+                   in the inverted signal (rate, capture), force and time parameters NaN, column invertedSignal
+                   (2026-10-11). invertedRatio (2): the fall of the stimulus-triggered median >= this x its rise,
+                   and 50th - 10th percentile of the signal >= this x (90th - 50th percentile); invertedMinAmplitude
+                   (50 uN); invertedMinWidth (0.05 s below half the fall); invertedSkip (0.02 s after the pulse:
+                   stimulus artifact)
 
 SELECTION OF CONTRACTIONS (the excluded ones stay in the table with included = False)
   beats            'all' (default) | 'stimulated' (only contractions that follow a stimulus of the channel)
@@ -59,7 +66,12 @@ STIMULUS ASSIGNMENT (which pulse elicited a contraction; see analyze_channel)
                    pre-pulses or CCM pulses) are both candidates. 'peak': as in versions <= 1.0.0-beta.3 (last pulse
                    minStimToPeak ... maxStimToPeak before the peak; extra pulses count as regular pulses)
   gateMax          longest delay from the eliciting pulse to the onset [s] (default 0.15; near threshold the onset
-                   can be delayed by ~80 ms)
+                   can be delayed by ~80 ms); for uncertain contractions and without certainty (manual threshold,
+                   unpaced)
+  gateMaxCertain   longest delay for certain contractions (auto threshold, paced: locked to the stimuli or large) [s]
+                   (default 0.5; slices with a long but constant delay, e.g. 0.3 s), at most gateMaxCertainRel x the
+                   interval of the regular pulses before the onset, at least gateMax (2026-10-11)
+  gateMaxCertainRel  see gateMaxCertain [x stimulus interval] (default 0.5)
   gateCore         typical delay range [s] (default 0.06): several candidates: pulses before the onset before
                    pulses after it, regular before extra pulses; of one kind the earliest up to gateCore before the
                    onset, otherwise the latest one
@@ -88,8 +100,9 @@ DIASTOLIC FORCE
                    the channel in the log file; NaN = from the log file). myodish_analysis(): one value per
                    channel or one for all channels
   diastolicLevel   'preStimulusMedian' (default, 2026-10-10): F_dia = median of the unfiltered signal
-                   diastoleWindowStart ... diastoleWindowEnd (60 ... 5 ms) before the eliciting pulse; contractions
-                   without pulse (extra, unpaced) or with a median at or above the peak: 'minimum'. 'minimum'
+                   diastoleWindowStart ... diastoleWindowEnd (60 ... 5 ms) before the eliciting pulse (delay pulse ->
+                   onset > gateMax: before the onset, 2026-10-11); contractions without pulse (extra, unpaced) or with
+                   a median at or above the peak: 'minimum'. 'minimum'
                    (versions <= 1.0.0-beta.3): last minimum of the filtered signal before the peak. Amplitude, upstroke
                    levels, AUC and diastolicForce refer to F_dia; relaxation levels to the minimum after the peak (both)
   pauseDiastoleWindow  after a stimulation pause (stimulus interval >= 2.5 s and >= 1.5 x the interval before),
@@ -306,6 +319,11 @@ _DEFAULTS = dict(
     minThreshold=30,
     minBeatInterval=0.15,
     rockerArtifacts=True,
+    invertedCheck=True,
+    invertedRatio=2.0,
+    invertedMinAmplitude=50.0,
+    invertedMinWidth=0.05,
+    invertedSkip=0.02,
     detection="sensitive",
     beats="all",
     rocker="any",
@@ -319,6 +337,8 @@ _DEFAULTS = dict(
     referenceBeat=None,
     stimAssignment="onset",
     gateMax=0.15,
+    gateMaxCertain=0.5,
+    gateMaxCertainRel=0.5,
     gateCore=0.06,
     gateTolerance=0.015,
     ambiguityWindow=0.01,
@@ -513,6 +533,9 @@ def options(base=None, **changes):
     sr = opts.spikeRemoval
     opts.spikeRemoval = (sr is True) or (not isinstance(sr, str) and sr is not None and not _is_empty(sr)
                                           and bool(sr == 1)) or (isinstance(sr, str) and sr.lower() in ("on", "true"))
+    ic = opts.invertedCheck
+    opts.invertedCheck = (ic is True) or (not isinstance(ic, str) and ic is not None and not _is_empty(ic)
+                                          and bool(ic == 1)) or (isinstance(ic, str) and ic.lower() in ("on", "true"))
     if _is_empty(opts.referenceBeat):
         opts.referenceBeat = None
     elif isinstance(opts.referenceBeat, dict):
@@ -531,7 +554,8 @@ def options(base=None, **changes):
     opts.stimAssignment = str(opts.stimAssignment).lower()
     if opts.stimAssignment not in ("onset", "peak"):
         raise ValueError("options: 'stimAssignment' must be 'onset' or 'peak'.")
-    for k in ("gateMax", "gateCore", "gateTolerance", "ambiguityWindow", "prePulseWindow"):
+    for k in ("gateMax", "gateMaxCertain", "gateMaxCertainRel", "gateCore", "gateTolerance", "ambiguityWindow",
+              "prePulseWindow"):
         v = opts[k]
         if isinstance(v, (bool, str)) or not isinstance(v, numbers.Real) or not v >= 0:
             raise ValueError(f"options: '{k}' must be a number of seconds >= 0.")
@@ -552,7 +576,8 @@ def options(base=None, **changes):
               "noiseMinInterval", "artifactMaxRel", "noiseAbsMax", "noiseRelMax", "rhythmMinPerCycle", "keepNoiseRel",
               "keepNoiseAbs", "dropRel", "smallNoiseRel", "smallTypicalRel", "smallRhythmMinPerCycle",
               "smallRhythmTypicalRel", "spikeJumpFactor", "spikeGroupGap", "spikeCoincidence", "rfMinRun",
-              "rfSmoothBaseline", "rfRidge", "rfMinRefBlock", "rfMaxBorrow", "rfMaskMargin", "irregularCV"):
+              "rfSmoothBaseline", "rfRidge", "rfMinRefBlock", "rfMaxBorrow", "rfMaskMargin", "irregularCV",
+              "invertedRatio", "invertedMinAmplitude", "invertedMinWidth", "invertedSkip"):
         v = _number(opts[k])
         if not (v >= 0):
             raise ValueError(f"options: '{k}' must be a number >= 0.")

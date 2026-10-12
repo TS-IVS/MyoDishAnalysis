@@ -25,7 +25,8 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %   diastolic force from 10 % upstroke to 90 % relaxation), peakToPeakInterval, peakToPeakFrequency;
 %   in addition: t_peak, clockTime, beatType (stimulated / extra / unpaced), t_stim, stimToPeak,
 %   rockerMoving, prominence (detection criterion); eliciting pulse (option stimAssignment, default 'onset': pulse in
-%   the gate of the contraction onset, see mda_analyzeChannel): t_onset, stimToOnset, stimPulse (pulse ID),
+%   the gate of the contraction onset, see mda_analyzeChannel): t_onset, stimToOnset, t_rise50, stimToRise50 (50 % of
+%   the amplitude on the upstroke), stimPulse (pulse ID),
 %   stimCurrent, stimChargeDuration, stimPauseDuration, stimDechargeDuration, elicitedByExtraPulse (extra pulse,
 %   status channel bit 16), stimAmbiguous, prePulses / postPulses (pulses without own contraction before / during
 %   the contraction: 't<ms>|<mA>|<charge us>|<pause us>|<decharge us>', several joined by '&')
@@ -35,6 +36,9 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %
 % OPTIONS (name/value pairs)
 %   'output', file      write the results: .xlsx (sheets contractions, summary, parameters, info) or .csv
+%   'report', r         analysis report (PDF, mda_report: channels to check with traces and the commands to open them
+%                       in the GUI): default with 'output': <output without extension>_report.pdf; false: none; a
+%                       file name: this file (also without 'output') (2026-10-11)
 %   'labels', {..}      names of the time ranges (e.g. {'baseline','drug'})
 %   'metadata', m       labels per channel (columns of both tables): struct, table or file (.csv/.xlsx) with
 %                       setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, treatment,
@@ -98,7 +102,7 @@ if nargin < 3 || isempty(fromSeconds), fromSeconds = 0; end
 if nargin < 4 || isempty(toSeconds), toSeconds = inf; end
 
 % ------------------------------------------------------------------ options
-outputFile = ''; labels = {}; showFigures = false; quiet = false; chunkSeconds = 1800; metadata = [];
+outputFile = ''; labels = {}; showFigures = false; quiet = false; chunkSeconds = 1800; metadata = []; reportOpt = [];
 protocolSel = []; groupBy = '';
 rest = {};
 i = 1;
@@ -107,6 +111,7 @@ while i <= numel(varargin)
     if (ischar(key) || isstring(key)) && i < numel(varargin)
         switch lower(char(key))
             case 'output',       outputFile = char(varargin{i+1}); i = i + 2; continue;
+            case 'report',       reportOpt = varargin{i+1}; i = i + 2; continue;
             case 'labels',       labels = cellstr(varargin{i+1}); i = i + 2; continue;
             case 'showfigures',  showFigures = logical(varargin{i+1}); i = i + 2; continue;
             case 'quiet',        quiet = logical(varargin{i+1}); i = i + 2; continue;
@@ -176,6 +181,29 @@ end
 ranges = [fromSeconds(:) toSeconds(:)];
 ranges(ranges < 0) = H.totalSeconds + ranges(ranges < 0);
 ranges = min(max(ranges, 0), H.totalSeconds);
+protocolsAll = [];
+protRow = (1:size(ranges, 1))';                     %row of every analysed range in protocolsAll
+if ~isempty(protocols)          %every protocol on its own: one outside the data (or with an error, below) is not
+    protocolsAll = protocols;   %analysed (note), the others are (2026-10-11)
+    if ~ismember('note', protocolsAll.Properties.VariableNames)
+        protocolsAll.note = repmat({''}, height(protocolsAll), 1);
+    end
+    empty = ranges(:,2) <= ranges(:,1);
+    for r = find(empty)'
+        why = sprintf('not analysed: outside the recorded data (%g ... %g s, file length %.1f s)', ...
+            fromSeconds(r), toSeconds(r), H.totalSeconds);
+        H.notes{end+1} = sprintf('protocol %s: %s', labels{r}, why);
+        protocolsAll = addNote(protocolsAll, r, why);
+    end
+    if all(empty)
+        error('No protocol within the recorded data (file length %.1f s).', H.totalSeconds);
+    end
+    protRow = find(~empty);
+    ranges = ranges(~empty, :);
+    protocols = protocols(~empty, :);
+    labels = labels(~empty);
+    groupByR = groupByR(~empty);
+end
 if any(ranges(:,2) <= ranges(:,1))
     error('Empty time range (file length %.1f s).', H.totalSeconds);
 end
@@ -217,132 +245,149 @@ spikes = zeros(0, 4);                              %spike artifacts removed ('sp
 nFig = 0;
 f0cache = [];                                       %rocker frequency per rocker speed, estimated once (all channels)
 for r = 1:nR
-    edges = unique([ranges(r,1):chunkSeconds:ranges(r,2), ranges(r,2)]);
-    nQ = numel(edges) - 1;
-    Bc = cell(numel(channels), nQ); Cs = cell(numel(channels), nQ);
-    lastB = cell(1, numel(channels)); lastC = cell(1, numel(channels));
-    Sres = [];                                      %S2interval results: data of the whole range (traces)
-    for q = 1:nQ
-        % each chunk is read once for all channels; the file header (log file) is not read again
-        S = mda_readMdd(H, max(0, edges(q) - pad), edges(q+1) + pad, opts);
-        if isfield(S, 'spikes') && ~isempty(S.spikes)  %within the chunk (the padding belongs to the neighbours)
-            sp = S.spikes;
-            ok = sp(:,2) >= edges(q) & (sp(:,2) < edges(q+1) | (q == nQ & sp(:,2) <= edges(q+1))) & ...
-                ismember(sp(:,1), channels);
-            spikes = [spikes; sp(ok, :)]; %#ok<AGROW>
-        end
-        sub = [edges(q), edges(q+1)];
-        if q < nQ, sub(2) = sub(2) - 1e-9; end      %half-open chunks: no contraction twice
-        if opts.rockerFilter                        %rocker artifact of all channels of this chunk at once
-            oR = opts;
-            if isempty(oR.rockerFrequency) && ~isempty(f0cache), oR.rockerFrequency = f0cache; end
-            [S, RFq] = mda_rockerFilter(S, channels, oR);
-            if ~isempty(RFq) && ~isempty(RFq(1).f0table)  %frequencies found are kept (speeds not yet known: next chunk)
-                ft = RFq(1).f0table(~isnan(RFq(1).f0table(:,2)), :);
-                for jf = 1:size(ft, 1)
-                    if isempty(f0cache) || ~any(f0cache(:,1) == ft(jf,1) | (isnan(f0cache(:,1)) & isnan(ft(jf,1))))
-                        f0cache(end+1, :) = ft(jf, :); %#ok<AGROW>
+    n0 = [numel(parts), numel(sumParts), size(thrInfo, 1), size(rfRows, 1), numel(resParts), numel(pulseParts), ...
+        size(spikes, 1)];
+    try
+        edges = unique([ranges(r,1):chunkSeconds:ranges(r,2), ranges(r,2)]);
+        nQ = numel(edges) - 1;
+        Bc = cell(numel(channels), nQ); Cs = cell(numel(channels), nQ);
+        lastB = cell(1, numel(channels)); lastC = cell(1, numel(channels));
+        Sres = [];                                      %S2interval results: data of the whole range (traces)
+        for q = 1:nQ
+            % each chunk is read once for all channels; the file header (log file) is not read again
+            S = mda_readMdd(H, max(0, edges(q) - pad), edges(q+1) + pad, opts);
+            if isfield(S, 'spikes') && ~isempty(S.spikes)  %within the chunk (the padding belongs to the neighbours)
+                sp = S.spikes;
+                ok = sp(:,2) >= edges(q) & (sp(:,2) < edges(q+1) | (q == nQ & sp(:,2) <= edges(q+1))) & ...
+                    ismember(sp(:,1), channels);
+                spikes = [spikes; sp(ok, :)]; %#ok<AGROW>
+            end
+            sub = [edges(q), edges(q+1)];
+            if q < nQ, sub(2) = sub(2) - 1e-9; end      %half-open chunks: no contraction twice
+            if opts.rockerFilter                        %rocker artifact of all channels of this chunk at once
+                oR = opts;
+                if isempty(oR.rockerFrequency) && ~isempty(f0cache), oR.rockerFrequency = f0cache; end
+                [S, RFq] = mda_rockerFilter(S, channels, oR);
+                if ~isempty(RFq) && ~isempty(RFq(1).f0table)  %frequencies found are kept (speeds not yet known: next chunk)
+                    ft = RFq(1).f0table(~isnan(RFq(1).f0table(:,2)), :);
+                    for jf = 1:size(ft, 1)
+                        if isempty(f0cache) || ~any(f0cache(:,1) == ft(jf,1) | (isnan(f0cache(:,1)) & isnan(ft(jf,1))))
+                            f0cache(end+1, :) = ft(jf, :); %#ok<AGROW>
+                        end
                     end
+                end
+            end
+            for c = 1:numel(channels)
+                optsC = opts;
+                optsC.zeroForce = zeroOfChannel(c);
+                optsC.threshold = thrOfChannel(c);
+                [Bq, Cq] = mda_analyzeChannel(S, channels(c), sub, optsC);
+                Bc{c,q} = Bq;
+                lastB{c} = Bq; lastC{c} = Cq;           %control figure (single chunk)
+                Cq.t = []; Cq.f = []; Cq.rockerArtifact = [];   %keep only the small fields of the earlier chunks
+                Cs{c,q} = Cq;
+                thrInfo(end+1,:) = [r, channels(c), edges(q), edges(q+1), Cq.threshold, Cq.maxStimToPeak, ...
+                    max(0, edges(q) - pad), edges(q+1) + pad]; %#ok<AGROW>  data window read (GUI: open the results)
+                if opts.rockerFilter && ~isempty(Cq.rockerFilter)
+                    RF = Cq.rockerFilter;
+                    rfRows(end+1,:) = {labels{r}, channels(c), edges(q), edges(q+1), RF.status, RF.f0, RF.artifactPP, ...
+                        RF.r2, 100 * RF.correctedFraction, RF.message}; %#ok<AGROW>
                 end
             end
         end
         for c = 1:numel(channels)
-            optsC = opts;
-            optsC.zeroForce = zeroOfChannel(c);
-            optsC.threshold = thrOfChannel(c);
-            [Bq, Cq] = mda_analyzeChannel(S, channels(c), sub, optsC);
-            Bc{c,q} = Bq;
-            lastB{c} = Bq; lastC{c} = Cq;           %control figure (single chunk)
-            Cq.t = []; Cq.f = []; Cq.rockerArtifact = [];   %keep only the small fields of the earlier chunks
-            Cs{c,q} = Cq;
-            thrInfo(end+1,:) = [r, channels(c), edges(q), edges(q+1), Cq.threshold, Cq.maxStimToPeak, ...
-                max(0, edges(q) - pad), edges(q+1) + pad]; %#ok<AGROW>  data window read (GUI: open the results)
-            if opts.rockerFilter && ~isempty(Cq.rockerFilter)
-                RF = Cq.rockerFilter;
-                rfRows(end+1,:) = {labels{r}, channels(c), edges(q), edges(q+1), RF.status, RF.f0, RF.artifactPP, ...
-                    RF.r2, 100 * RF.correctedFraction, RF.message}; %#ok<AGROW>
-            end
-        end
-    end
-    for c = 1:numel(channels)
-        B = vertcat(Bc{c,:});
-        B.contraction = (1:height(B))';
-        CsC = Cs(c,:);
-        Cm = CsC{1};
-        Cm.stimTimes = inRangeOf(CsC, 'stimTimes', 'stimTimes');
-        Cm.stimCaptured = inRangeOf(CsC, 'stimCaptured', 'stimTimes');
-        Cm.stimCapturedCertain = inRangeOf(CsC, 'stimCapturedCertain', 'stimTimes');
-        Cm.stimDuringContraction = inRangeOf(CsC, 'stimDuringContraction', 'stimTimes');
-        Cm.extraTimes = inRangeOf(CsC, 'extraTimes', 'extraTimes');
-        Cm.extraElicited = inRangeOf(CsC, 'extraElicited', 'extraTimes');
-        Cm.threshold = median(cellfun(@(x) x.threshold, CsC));
-        if opts.pulseTable                         %pulses of the range: contraction numbers of the whole range
-            Pc = cellfun(@(x) x.pulses, CsC(:), 'UniformOutput', false);
-            Pc = vertcat(Pc{~cellfun(@isempty, Pc)});
-            if ~isempty(Pc) && height(Pc) > 0
-                [tf, loc] = ismember(Pc.t_peak, B.t_peak);
-                Pc.contraction(:) = nan;
-                Pc.contraction(tf) = B.contraction(loc(tf));
-                pulseParts{end+1} = [table(repmat(labels(r), height(Pc), 1), 'VariableNames', {'range'}), Pc]; %#ok<AGROW>
-            end
-        end
-        if grouping && ~strcmpi(groupByR{r}, 'none')
-            steadyN = 0;                           %FFR protocols: steady state per frequency (2026-10-10)
-            if istable(protocols) && strcmpi(protocols.type{r}, 'FFR'), steadyN = opts.steadyStateBeats; end
-            [B, T, Z, gNotes] = mda_groupBeats(H, B, Cm, ranges(r,:), groupByR{r}, opts, steadyN);
-            for q = 1:numel(gNotes)
-                H.notes{end+1} = sprintf('%s, channel %d: %s', labels{r}, channels(c), gNotes{q});
-            end
-            gb = lower(groupByR{r});
-            if ismember(gb, {'pacingfrequency', 'stimcurrent', 's2interval', 'pauselength'})
-                trace = [];
-                if strcmp(gb, 's2interval')            %S2 response: traces of the whole range
-                    if isempty(Sres), Sres = mda_readMdd(H, max(0, ranges(r,1) - 2), ranges(r,2) + 2, opts); end
-                    optsC = opts; optsC.zeroForce = zeroOfChannel(c); optsC.threshold = thrOfChannel(c);
-                    [~, Cx] = mda_analyzeChannel(Sres, channels(c), ranges(r,:), optsC);
-                    trace = struct('t', Cx.t, 'f', Cx.f, 'tR', Sres.t, 'rockerOn', Sres.rockerOn);
+            B = vertcat(Bc{c,:});
+            B.contraction = (1:height(B))';
+            CsC = Cs(c,:);
+            Cm = CsC{1};
+            Cm.stimTimes = inRangeOf(CsC, 'stimTimes', 'stimTimes');
+            Cm.stimCaptured = inRangeOf(CsC, 'stimCaptured', 'stimTimes');
+            Cm.stimCapturedCertain = inRangeOf(CsC, 'stimCapturedCertain', 'stimTimes');
+            Cm.stimDuringContraction = inRangeOf(CsC, 'stimDuringContraction', 'stimTimes');
+            Cm.extraTimes = inRangeOf(CsC, 'extraTimes', 'extraTimes');
+            Cm.extraElicited = inRangeOf(CsC, 'extraElicited', 'extraTimes');
+            Cm.threshold = median(cellfun(@(x) x.threshold, CsC));
+            Cm.invertedSignal = any(cellfun(@(x) isfield(x, 'invertedSignal') && x.invertedSignal, CsC));   %2026-10-11
+            if opts.pulseTable                         %pulses of the range: contraction numbers of the whole range
+                Pc = cellfun(@(x) x.pulses, CsC(:), 'UniformOutput', false);
+                Pc = vertcat(Pc{~cellfun(@isempty, Pc)});
+                if ~isempty(Pc) && height(Pc) > 0
+                    [tf, loc] = ismember(Pc.t_peak, B.t_peak);
+                    Pc.contraction(:) = nan;
+                    Pc.contraction(tf) = B.contraction(loc(tf));
+                    pulseParts{end+1} = [table(repmat(labels(r), height(Pc), 1), 'VariableNames', {'range'}), Pc]; %#ok<AGROW>
                 end
-                Rr = mda_protocolResults(groupByR{r}, T, Z, trace, opts);
-                pNote = {''};                      %note of the protocol (e.g. 'no end comment: end estimated ...')
-                if istable(protocols) && ismember('note', protocols.Properties.VariableNames)
-                    pNote = protocols.note(r);
+            end
+            if grouping && ~strcmpi(groupByR{r}, 'none')
+                steadyN = 0;                           %FFR protocols: steady state per frequency (2026-10-10)
+                if istable(protocols) && strcmpi(protocols.type{r}, 'FFR'), steadyN = opts.steadyStateBeats; end
+                [B, T, Z, gNotes] = mda_groupBeats(H, B, Cm, ranges(r,:), groupByR{r}, opts, steadyN);
+                for q = 1:numel(gNotes)
+                    H.notes{end+1} = sprintf('%s, channel %d: %s', labels{r}, channels(c), gNotes{q});
                 end
-                resParts{end+1} = [table(labels(r), channels(c), ranges(r,1), ranges(r,2), groupByR(r), ...
-                    'VariableNames', {'range','channel','from','to','groupBy'}), Rr, ...
-                    table(pNote, 'VariableNames', {'protocolNote'})]; %#ok<AGROW>
+                gb = lower(groupByR{r});
+                if ismember(gb, {'pacingfrequency', 'stimcurrent', 's2interval', 'pauselength'})
+                    trace = [];
+                    if strcmp(gb, 's2interval')            %S2 response: traces of the whole range
+                        if isempty(Sres), Sres = mda_readMdd(H, max(0, ranges(r,1) - 2), ranges(r,2) + 2, opts); end
+                        optsC = opts; optsC.zeroForce = zeroOfChannel(c); optsC.threshold = thrOfChannel(c);
+                        [~, Cx] = mda_analyzeChannel(Sres, channels(c), ranges(r,:), optsC);
+                        trace = struct('t', Cx.t, 'f', Cx.f, 'tR', Sres.t, 'rockerOn', Sres.rockerOn);
+                    end
+                    Rr = mda_protocolResults(groupByR{r}, T, Z, trace, opts);
+                    pNote = {''};                      %note of the protocol (e.g. 'no end comment: end estimated ...')
+                    if istable(protocols) && ismember('note', protocols.Properties.VariableNames)
+                        pNote = protocols.note(r);
+                    end
+                    resParts{end+1} = [table(labels(r), channels(c), ranges(r,1), ranges(r,2), groupByR(r), ...
+                        'VariableNames', {'range','channel','from','to','groupBy'}), Rr, ...
+                        table(pNote, 'VariableNames', {'protocolNote'})]; %#ok<AGROW>
+                end
+            else
+                T = mda_summarize(B, Cm, ranges(r,:));
+                if grouping                            %same columns as the grouped ranges
+                    B.group = repmat({'all'}, height(B), 1); B.groupValue = nan(height(B), 1); B.groupRole = repmat({''}, height(B), 1);
+                    B.groupStep = nan(height(B), 1);
+                    T = addvars(T, nan, nan, 'After', 'missedBeats_percent', 'NewVariableNames', {'capture_percent', 'currentReached_percent'});
+                    T = addvars(T, nan(height(T), 1), 'After', 'amplitude_SD', 'NewVariableNames', 'amplitude_pctOfRef');
+                    T = addvars(T, nan(height(T), 1), 'After', 'amplitude_CV', 'NewVariableNames', 'irregular');
+                    T = [table({'all'}, nan, {''}, nan, {'none'}, 'VariableNames', {'group','groupValue','groupRole','groupStep','groupBy'}), T]; %#ok<AGROW>
+                end
             end
-        else
-            T = mda_summarize(B, Cm, ranges(r,:));
-            if grouping                            %same columns as the grouped ranges
-                B.group = repmat({'all'}, height(B), 1); B.groupValue = nan(height(B), 1); B.groupRole = repmat({''}, height(B), 1);
-                B.groupStep = nan(height(B), 1);
-                T = addvars(T, nan, nan, 'After', 'missedBeats_percent', 'NewVariableNames', {'capture_percent', 'currentReached_percent'});
-                T = addvars(T, nan(height(T), 1), 'After', 'amplitude_SD', 'NewVariableNames', 'amplitude_pctOfRef');
-                T = addvars(T, nan(height(T), 1), 'After', 'amplitude_CV', 'NewVariableNames', 'irregular');
-                T = [table({'all'}, nan, {''}, nan, {'none'}, 'VariableNames', {'group','groupValue','groupRole','groupStep','groupBy'}), T]; %#ok<AGROW>
+            T.invertedSignal = repmat(Cm.invertedSignal, height(T), 1);   %signal inverted in (a chunk of) the range
+            T = [table(repmat(labels(r), height(T), 1), 'VariableNames', {'range'}), T]; %#ok<AGROW>
+            sumParts{end+1} = T; %#ok<AGROW>
+            B = [table(repmat(labels(r), height(B), 1), 'VariableNames', {'range'}), B]; %#ok<AGROW>
+            parts{end+1} = B; %#ok<AGROW>
+            if ~quiet
+                fprintf('  %s, channel %d: %d contractions detected (%d uncertain), %d included (threshold %.0f uN, %s)\n', ...
+                    labels{r}, channels(c), height(B), sum(B.uncertain), sum(B.included), Cm.threshold, Cm.thresholdMode);
+                if strcmp(opts.rocker, 'stopped') && height(B) > 0 && ~any(B.included) && all(B.rockerMoving)
+                    fprintf('    the rocker moved during every contraction: ''rocker'',''any'' includes them\n');
+                end
+                if opts.rockerFilter && ~isempty(rfRows)
+                    k = strcmp(rfRows(:,1), labels{r}) & cell2mat(rfRows(:,2)) == channels(c);
+                    msgs = unique(regexprep(rfRows(k,10), '^Rocker filter, channel \d+: ', ''), 'stable');
+                    fprintf('    rocker filter: %s\n', strjoin(msgs(1:min(3, end)), ' | '));
+                end
+            end
+            if showFigures && nFig < 16 && nQ == 1
+                nFig = nFig + 1;
+                plotChannel(lastC{c}, lastB{c}, S, ranges(r,:), sprintf('%s - channel %d - %s', shortName(H.file), channels(c), labels{r}));
             end
         end
-        T = [table(repmat(labels(r), height(T), 1), 'VariableNames', {'range'}), T]; %#ok<AGROW>
-        sumParts{end+1} = T; %#ok<AGROW>
-        B = [table(repmat(labels(r), height(B), 1), 'VariableNames', {'range'}), B]; %#ok<AGROW>
-        parts{end+1} = B; %#ok<AGROW>
-        if ~quiet
-            fprintf('  %s, channel %d: %d contractions detected (%d uncertain), %d included (threshold %.0f uN, %s)\n', ...
-                labels{r}, channels(c), height(B), sum(B.uncertain), sum(B.included), Cm.threshold, Cm.thresholdMode);
-            if strcmp(opts.rocker, 'stopped') && height(B) > 0 && ~any(B.included) && all(B.rockerMoving)
-                fprintf('    the rocker moved during every contraction: ''rocker'',''any'' includes them\n');
-            end
-            if opts.rockerFilter && ~isempty(rfRows)
-                k = strcmp(rfRows(:,1), labels{r}) & cell2mat(rfRows(:,2)) == channels(c);
-                msgs = unique(regexprep(rfRows(k,10), '^Rocker filter, channel \d+: ', ''), 'stable');
-                fprintf('    rocker filter: %s\n', strjoin(msgs(1:min(3, end)), ' | '));
-            end
-        end
-        if showFigures && nFig < 16 && nQ == 1
-            nFig = nFig + 1;
-            plotChannel(lastC{c}, lastB{c}, S, ranges(r,:), sprintf('%s - channel %d - %s', shortName(H.file), channels(c), labels{r}));
-        end
+    catch ME                                        %protocols: the others are analysed (2026-10-11)
+        if isempty(protocols), rethrow(ME); end
+        parts = parts(1:n0(1)); sumParts = sumParts(1:n0(2)); thrInfo = thrInfo(1:n0(3), :);
+        rfRows = rfRows(1:n0(4), :); resParts = resParts(1:n0(5)); pulseParts = pulseParts(1:n0(6));
+        spikes = spikes(1:n0(7), :);
+        why = sprintf('not analysed: %s', ME.message);
+        H.notes{end+1} = sprintf('protocol %s: %s', labels{r}, why);
+        protocolsAll = addNote(protocolsAll, protRow(r), why);
     end
+end
+if isempty(parts)
+    error('No range analysed: %s', strjoin(H.notes(max(1, end-nR+1):end), ' | '));
 end
 thrInfo = sortrows(thrInfo, [1 2 3]);                %order: range, channel, time
 contractions = vertcat(parts{:});
@@ -400,7 +445,7 @@ end
 info.channels = channels;
 info.ranges = ranges;
 info.rangeLabels = labels;
-info.protocols = protocols;
+if ~isempty(protocolsAll), info.protocols = protocolsAll; else, info.protocols = protocols; end   %all, with notes
 info.groupBy = groupByR;
 if ~isempty(resParts), info.protocolResults = PR; end
 info.labels = Lbl;
@@ -422,6 +467,21 @@ info.analysisDate = datestr(now, 'yyyy-mm-dd HH:MM:SS');
 if ~isempty(outputFile)
     mda_writeResults(outputFile, contractions, summary, info);
     if ~quiet, fprintf('  results written to %s\n', outputFile); end
+end
+rep = mda_report('path', outputFile, reportOpt);
+if ~isempty(rep)                                   %analysis report (2026-10-11)
+    R = mda_report('analysis', rep, H.file, contractions, summary, info, outputFile);
+    if ~quiet
+        k = find(strcmp(R.level, 'check'));
+        fprintf('  report written to %s%s\n', rep, repmat(sprintf(' (%d channel(s) to check)', numel(k)), 1, ~isempty(k)));
+        for j = k(:)'                              %clickable in the command window
+            if feature('hotlinks')
+                fprintf('    <a href="matlab:%s">open channel %d (%s)</a>\n', R.matlab{j}, R.channel(j), R.red{j});
+            else
+                fprintf('    %s\n', R.matlab{j});
+            end
+        end
+    end
 end
 end
 
@@ -470,4 +530,11 @@ plot(ax, B.t_peak(~inc), C.f(C.iPeaks(loc(~inc))), 'v', 'Color', [0.5 0.5 0.5]);
 xline(ax, range(1), 'g--'); xline(ax, range(2), 'g--');
 ylim(ax, yl); xlabel(ax, 'time in file (s)'); ylabel(ax, 'force (\muN)');
 title(ax, {ttl, sprintf('%d contractions included (red), grey = excluded, blue = stimuli, shaded = rocker moving', sum(inc))}, 'Interpreter', 'none');
+end
+
+
+function P = addNote(P, r, why)
+%note of protocol row r (protocols table)
+old = P.note{r};
+if isempty(old) || (isnumeric(old) && all(isnan(old))), P.note{r} = why; else, P.note{r} = [char(old) '; ' why]; end
 end

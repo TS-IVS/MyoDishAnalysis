@@ -4,12 +4,13 @@ function ok = mda_testWatch()
 %   ok = mda_testWatch()   prints the single checks, returns true if all pass
 %
 % Pendant of py/tests/test_watch.py: first and second pass, time bins with clock-time labels, protocols, one bin =
-% direct analysis with MyoDishAnalysis, reanalysis after a change of the options / of the log file, 'reanalyze','new',
+% direct analysis with MyoDishAnalysis, reanalysis after a change of the options / of the log file, 'reanalyze','new'
+% (default: notice) and 'outdated', schedule (parsing, next pass, timer, status, stop),
 % recordings still running (log file without 'Recording stopped'), without log file, in hidden folders, dry run,
 % filter, lock file; protocol periods excluded / included, thinned contractions (every n-th, block medians),
 % compression, events and comments, overview (1-min medians), slice register.
 %
-% TS 2026-10-08 (info table, mda_readResults 2026-10-09)
+% TS 2026-10-08 (info table, mda_readResults 2026-10-09; schedule, reanalyze 'new' 2026-10-12)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -38,6 +39,9 @@ pass = isequal(X.file', {'A/example9_ratVentricle.mdd', 'B/example7_pigVentricle
     ~isfile(fullfile(res, 'B', 'example7_pigVentricle_summary.csv')) && isfile(fullfile(res, 'A', 'example9_ratVentricle_events.csv')) && ...
     ~isfile(fullfile(res, 'A', 'example9_ratVentricle_protocols_summary.csv')) && ~isfile(fullfile(res, 'mda_watch.lock'));
 ok = check(ok, pass, 'first pass: index, 3 bins with clock time, protocol results, no lock file left');
+pdfs = dir(fullfile(res, 'reports', 'mda_report_*.pdf'));
+ok = check(ok, numel(pdfs) == 1 && pdfs(1).bytes > 1000 && contains(report, 'PDF report: '), ...
+    'PDF report of the pass (mda_report)');
 O = readCsv(fullfile(res, 'A', 'example9_ratVentricle_overview.csv'));   % amplitude(1) 755.87 with diastolicLevel minimum (<= 1.0.0-beta.3)
 C1 = readCsv(fullfile(res, 'A', 'example9_ratVentricle_contractions.csv'));
 R = readCsv(fullfile(res, 'mda_slices.csv'));
@@ -71,11 +75,13 @@ ok = check(ok, pass, 'info table: version, watcher settings, analysis windows (m
 base = ['binminutes=60; compress=0; contractions=all; events=1; gaps=1; includeprotocols=0; overviewseconds=60; ' ...
     'protocolmarginseconds=0; ' ...
     'protocols=0'];
-X = MyoDishAnalysisWatch(raw, res, q{:}, 'protocols', false, 'reanalyze', 'new', 'rocker', 'stopped');
-ok = check(ok, all(strcmp(X.options, base)), '''reanalyze'',''new'': other options ignored');
 [X, report] = MyoDishAnalysisWatch(raw, res, q{:}, 'protocols', false, 'rocker', 'stopped');
-ok = check(ok, all(strcmp(X.options, [base '; rocker=stopped'])) && contains(report, 'B/example7'), ...
-    'other options: both recordings analysed again (options text as in Python)');
+ok = check(ok, all(strcmp(X.options, base)) && contains(report, '2 recording(s) were analysed with other options') ...
+    && contains(report, '''reanalyze'', ''outdated'''), ...
+    'other options, ''reanalyze'',''new'' (default): results kept, notice (2026-10-12)');
+[X, report] = MyoDishAnalysisWatch(raw, res, q{:}, 'protocols', false, 'rocker', 'stopped', 'reanalyze', 'outdated');
+ok = check(ok, all(strcmp(X.options, [base '; rocker=stopped'])) && contains(report, 'B/example7') && ...
+    ~contains(report, 'NOTE'), '''reanalyze'',''outdated'': both recordings analysed again (options text as in Python)');
 fid = fopen(fullfile(raw, 'A', 'example9_ratVentricle_log.log'), 'a'); fwrite(fid, uint8(0)); fclose(fid);
 [X3, report] = MyoDishAnalysisWatch(raw, res, q{:}, 'protocols', false, 'rocker', 'stopped');
 ok = check(ok, contains(report, 'A/example9') && ~contains(report, 'B/example7') && X3.logBytes(1) == X.logBytes(1) + 1, ...
@@ -84,10 +90,18 @@ ok = check(ok, contains(report, 'A/example9') && ~contains(report, 'B/example7')
 ok = check(ok, contains(report, 'A/example9') && ~contains(report, 'B/example7'), ...
     '''reanalyze'',''all'' with ''maxFiles'', 1: first recording analysed again');
 X = readIndex(res);
-X.code{1} = '00000000';
+X.code{1} = '00000000'; X.version{2} = '0.9';
 writetable(X, fullfile(res, 'mda_index.csv'), 'FileType', 'text');
-[~, report] = MyoDishAnalysisWatch(raw, res, q{:}, 'protocols', false, 'rocker', 'stopped');
-ok = check(ok, contains(report, 'A/example9') && ~contains(report, 'B/example7'), 'changed core code: analysed again');
+[X1, report] = MyoDishAnalysisWatch(raw, res, q{:}, 'protocols', false, 'rocker', 'stopped');
+pass = startsWith(report, 'MyoDishAnalysis has been updated') && contains(report, '(0.9: 1, ') && ...
+    contains(report, 'with other core code: 1)') && isequal(X1.version, X.version);
+ok = check(ok, pass, 'other version / core code, default: results kept, notice with the versions');
+X = readIndex(res);
+X.code{1} = '00000000'; X.version{2} = '0.9';
+writetable(X, fullfile(res, 'mda_index.csv'), 'FileType', 'text');
+[~, report] = MyoDishAnalysisWatch(raw, res, q{:}, 'protocols', false, 'rocker', 'stopped', 'reanalyze', 'outdated');
+ok = check(ok, contains(report, 'A/example9') && contains(report, 'B/example7'), ...
+    '''reanalyze'',''outdated'': other version and changed core code analysed again');
 X = readIndex(res);
 X.code(:) = {'00000000'}; X.implementation(:) = {'Python'};
 writetable(X, fullfile(res, 'mda_index.csv'), 'FileType', 'text');
@@ -157,7 +171,7 @@ raw5 = fullfile(root, 'raw5');
 f5 = copyRec(ex, 'example9_ratVentricle', raw5, true);
 L5 = readUtf16(strrep(f5, '.mdd', '_log.log'));
 add = {'jump to 60 bpm', 'S2 beat 300 ms', '50 mA', 'Pause 180seconds', 'Approaching 2 GB limit. Changing datafile2.', ...
-    'ZI: MX1.6-1.8 Dexa100nM'};
+    'note: MX1.6-1.8 Dexa100nM'};
 fid = fopen(strrep(f5, '.mdd', '_log.log'), 'w');
 fprintf(fid, '%s', L5);
 for k = 1:numel(add), fprintf(fid, '2000 01 01 15:50:%02d:000;%d;0;comment;%s\n', k, 100000 + k, add{k}); end
@@ -196,11 +210,64 @@ ok = check(ok, pass, 'thinned contractions: every 10th, block medians, extra bea
 
 % compression, 'none', no stale files
 cf = fullfile(resM, 'example9_ratVentricle_contractions.csv');
-MyoDishAnalysisWatch(raw3, resM, q{:}, 'binMinutes', 5, 'contractions', 'thinned', 'thinMode', 'median', 'filter', 'example9', 'compress', true);
+MyoDishAnalysisWatch(raw3, resM, q{:}, 'binMinutes', 5, 'contractions', 'thinned', 'thinMode', 'median', 'filter', 'example9', 'compress', true, 'reanalyze', 'outdated');
 pass = isfile([cf '.gz']) && ~isfile(cf);
-MyoDishAnalysisWatch(raw3, resM, q{:}, 'binMinutes', 5, 'contractions', 'none', 'filter', 'example9');
+MyoDishAnalysisWatch(raw3, resM, q{:}, 'binMinutes', 5, 'contractions', 'none', 'filter', 'example9', 'reanalyze', 'outdated');
 pass = pass && ~isfile([cf '.gz']) && ~isfile(cf) && isfile(fullfile(resM, 'example9_ratVentricle_summary.csv'));
 ok = check(ok, pass, '''compress'' (.csv.gz), ''contractions'',''none'', no files of earlier options left');
+% 2026-10-11: protocol contractions and pulses compressed as well
+MyoDishAnalysisWatch(raw, fullfile(root, 'res5'), q{:}, 'filter', 'example7', 'compress', true);
+pb = fullfile(root, 'res5', 'B', 'example7_pigVentricle_protocols_');
+pass = isfile([pb 'contractions.csv.gz']) && ~isfile([pb 'contractions.csv']) && isfile([pb 'pulses.csv.gz']) && ...
+    ~isfile([pb 'pulses.csv']);
+ok = check(ok, pass, '''compress'': protocol contractions and pulses as .csv.gz');
+
+% schedule (2026-10-12): parsing and next pass as in Python, timer in the background, status, stop
+N = @(s, prev, t) MyoDishAnalysisWatch('nextPass', s, prev, t);
+t0 = datenum(2026, 10, 12, 8, 30, 0);                  %Monday
+same = @(a, b) abs(a - b) < 1e-6;
+pass = same(N('daily 10:00', [], t0), datenum(2026, 10, 12, 10, 0, 0)) && ...
+    same(N('every day at 07:00', [], t0), datenum(2026, 10, 13, 7, 0, 0)) && ...
+    same(N('weekly Sun 05:00', [], t0), datenum(2026, 10, 18, 5, 0, 0)) && ...
+    same(N('Sunday 5:00', [], t0), datenum(2026, 10, 18, 5, 0, 0)) && ...
+    same(N('Mon,Thu 06:30', [], t0), datenum(2026, 10, 15, 6, 30, 0)) && ...
+    same(N('Mon,Thu 06:30', datenum(2026, 10, 15, 6, 30, 0), datenum(2026, 10, 15, 6, 30, 0)), datenum(2026, 10, 19, 6, 30, 0)) && ...
+    same(N('weekdays 07:00', [], datenum(2026, 10, 16, 8, 0, 0)), datenum(2026, 10, 19, 7, 0, 0)) && ...
+    same(N('every 120 min', [], t0), t0) && same(N('every 120 min', t0, t0), datenum(2026, 10, 12, 10, 30, 0)) && ...
+    same(N('every 2 h', t0, t0 + 5 / 24), datenum(2026, 10, 12, 14, 30, 0)) && ...
+    same(N('every 2 days 07:00', datenum(2026, 10, 13, 7, 0, 0), datenum(2026, 10, 13, 7, 5, 0)), datenum(2026, 10, 15, 7, 0, 0));
+bad = {'daily 25:00', 'sometimes', 'every 0 min', 'every 30 s', 'T 10:00'};
+for k = 1:numel(bad)
+    try
+        N(bad{k}, [], t0); pass = false;
+    catch
+    end
+end
+ok = check(ok, pass, 'schedule: daily, weekly, weekdays, every n days, every n min / h, errors (as in Python)');
+MyoDishAnalysisWatch('stop');
+res9 = fullfile(root, 'res9');
+MyoDishAnalysisWatch(raw, res9, q{:}, 'protocols', false, 'filter', 'example9', 'schedule', 'every 60 min');
+[T1, txt1] = MyoDishAnalysisWatch('status');
+t1 = tic;
+while ~isfile(fullfile(res9, 'mda_index.csv')) && toc(t1) < 120, pause(1); end
+pause(2);
+[T2, txt2] = MyoDishAnalysisWatch('status');
+MyoDishAnalysisWatch(raw, res9, q{:}, 'schedule', 'daily 23:59');   %replaces the first one
+T3 = MyoDishAnalysisWatch('status');
+n = MyoDishAnalysisWatch('stop', res9);
+T4 = MyoDishAnalysisWatch('status');
+X9 = readIndex(res9);
+pass = height(T1) == 1 && strcmp(T1.schedule{1}, 'every 60 min') && contains(txt1, 'next pass') && ...
+    height(T2) == 1 && strcmp(T2.lastResult{1}, '1 recording(s) analysed') && contains(txt2, 'last pass') && ...
+    isequal(X9.file', {'A/example9_ratVentricle.mdd'}) && height(T3) == 1 && strcmp(T3.schedule{1}, 'daily 23:59') && ...
+    n == 1 && height(T4) == 0 && isempty(timerfindall('Tag', 'MyoDishAnalysisWatch'));
+ok = check(ok, pass, 'schedule: timer in the background, first pass now, status, replaced, stop');
+try
+    MyoDishAnalysisWatch(raw, res9, q{:}, 'schedule', 'every 1 h', 'interval', 2); pass = false;
+catch
+    pass = true;
+end
+ok = check(ok, pass && isempty(timerfindall('Tag', 'MyoDishAnalysisWatch')), '''schedule'' with ''interval'': error');
 
 if ok, disp('mda_testWatch: all tests passed.'); else, warning('mda_testWatch: TEST FAILED.'); end
 end

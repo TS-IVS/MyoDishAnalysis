@@ -1,4 +1,4 @@
-function figOut = MyoDishAnalysisGUI(mddFile, metadata)
+function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 %MYODISHANALYSISGUI  Interactive contraction analysis of a MyoDish recording (.mdd).
 %
 %   MyoDishAnalysisGUI            opens a file dialog
@@ -6,6 +6,10 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 %   MyoDishAnalysisGUI(mddFile, metadata)   labels per channel (struct / table / file, see mda_labels)
 %   MyoDishAnalysisGUI(resultsFile)         results of MyoDishAnalysis / watcher / GUI export (.xlsx, _info.csv):
 %                                           recording, settings and analysis window restored (mda_readResults)
+%   MyoDishAnalysisGUI(file, 'channel', c, 'window', [from to])   opens the recording or results file at channel c and
+%                                           loads the window from ... to s (commands of the analysis report,
+%                                           mda_report; results file: its settings and the analysis window of this
+%                                           channel; 2026-10-11)
 %
 % Labels per channel (setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, treatment, concentration,
 % concentrationUnit, daysInCulture, cultureStart, comment, analyst): button 'Labels ...' (editable table, load / save as .csv). A file
@@ -81,7 +85,7 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 % Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05 (EP recordings 2026-10-06, protocols 2026-10-07;
 % threshold per channel, arrow keys, overlay of channels / styles / bands 2026-10-07; navigation buttons, trend of several
 % channels, detection mode, open results, rocker artifact window, EP y limits / artefact removal, mouse pointer values
-% 2026-10-09; advanced settings, settings files, legend of the force plot 2026-10-10)
+% 2026-10-09; advanced settings, settings files, legend of the force plot 2026-10-10; report, channel / window 2026-10-11)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -89,10 +93,21 @@ function figOut = MyoDishAnalysisGUI(mddFile, metadata)
 % Additional terms (GPL-3.0 section 7): see the file NOTICE
 
 if nargin < 1, mddFile = ''; end
-if nargin < 2, metadata = []; end
+metadata = []; goCh = []; goWin = [];             %name / value pairs 'channel', 'window' (2026-10-11)
+args = varargin;
+if mod(numel(args), 2) == 1, metadata = args{1}; args = args(2:end); end
+for iArg = 1:2:numel(args)
+    switch lower(char(args{iArg}))
+        case 'channel',  goCh = double(args{iArg+1});
+        case 'window',   goWin = double(args{iArg+1});
+        case 'metadata', metadata = args{iArg+1};
+        otherwise, error('MyoDishAnalysisGUI: unknown option ''%s'' (channel, window, metadata)', char(args{iArg}));
+    end
+end
 
 % ------------------------------------------------------------------ state (shared by the nested functions)
 H = []; S = []; O = []; B = []; C = [];
+reportAll = false;                                 %analysis report with 'All channels -> file' (menu Save / Export)
 ch = 1;
 range = [nan nan];
 winReq = [nan nan];                %loaded window as requested from mda_readMdd (s; exports: open the results again)
@@ -240,6 +255,8 @@ uimenu(mExp, 'Text', 'Export data of the force plot (.xlsx / .csv / .txt) ...', 
 uimenu(mExp, 'Text', 'Export data of the stimulus plot ...', 'MenuSelectedFcn', @(~,~) exportPlotData('stimuli'));
 uimenu(mExp, 'Text', 'Export data of the parameter plot ...', 'MenuSelectedFcn', @(~,~) exportPlotData('parameter'));
 uimenu(mExp, 'Text', 'Rocker artifact (removed signal) ...', 'Separator', 'on', 'MenuSelectedFcn', @(~,~) onRockerWindow());
+hRepMenu = uimenu(mExp, 'Text', 'Analysis report (PDF) with ''All channels -> file''', 'Separator', 'on', ...
+    'Checked', 'off', 'MenuSelectedFcn', @(~,~) toggleReport());
 mView = uimenu(fig, 'Text', 'View');
 hLegMenu = uimenu(mView, 'Text', 'Legend of the force plot', 'Checked', 'on', 'MenuSelectedFcn', @(~,~) toggleLegend());
 axNames = {'overview', 'force', 'stimuli', 'parameter'};
@@ -348,6 +365,7 @@ elseif ~isempty(mddFile)
             status(['Labels: ' ME.message]);
         end
     end
+    goTo(goCh, goWin);
 end
 addlistener(axStim, 'XLim', 'PostSet', @(~,~) stimLabels());
 addlistener(axOv, 'XLim', 'PostSet', @(~,~) ovTicks());   %time labels h:mm:ss of the overview (also toolbar zoom)
@@ -394,7 +412,18 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             end
         end
         W = R.windows;
-        if nargin < 2 || isempty(pick)                  %analysis window: channel, range, chunk
+        win = goWin; goWin = [];                        %channel / window of the call (analysis report), once
+        if nargin < 2, pick = []; end
+        if isempty(pick) && ~isempty(goCh)
+            r = find(W.channel == goCh);
+            if ~isempty(win)
+                r2 = r(W.from(r) <= win(1) + 1e-9 & W.to(r) >= win(1) - 1e-9);
+                if ~isempty(r2), r = r2; end
+            end
+            if ~isempty(r), pick = r(1); else, status(sprintf('Results: no analysis window of channel %d.', goCh)); end
+        end
+        goCh = [];
+        if isempty(pick)                                %analysis window: channel, range, chunk
             pick = 1;
             if height(W) > 1
                 txt = arrayfun(@(r) sprintf('ch %d   %s   %.1f - %.1f s   (threshold %.0f %sN)', W.channel(r), W.range{r}, ...
@@ -431,16 +460,17 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         % data window of the analysis, analysed range, contractions excluded by the user (GUI exports)
         resInfo = '';
-        onLoad([], [], [w.windowFrom w.windowTo]);
+        if isempty(win), onLoad([], [], [w.windowFrom w.windowTo]); else, onLoad([], [], win(1:2)); end
         if isempty(S), return; end
         if opts.rockerFilter && ~strcmp(R.createdBy, 'MyoDishAnalysisGUI')
             rfCtx = S; rfCache = {};                    %as MyoDishAnalysis: estimated from the data window itself
         end
-        range = [max(w.from, S.fromSeconds) min(w.to, S.toSeconds)];
+        if isempty(win), rg = [w.from w.to]; else, rg = win(1:2); end
+        range = [max(rg(1), S.fromSeconds) min(rg(2), S.toSeconds)];
         Tc = [];
         if ~isempty(R.contractions) && all(ismember({'channel', 't_peak'}, R.contractions.Properties.VariableNames))
-            Tc = R.contractions(R.contractions.channel == ch & R.contractions.t_peak >= w.from - 1e-9 & ...
-                R.contractions.t_peak <= w.to + 1e-9, :);
+            Tc = R.contractions(R.contractions.channel == ch & R.contractions.t_peak >= range(1) - 1e-9 & ...
+                R.contractions.t_peak <= range(2) + 1e-9, :);
             if ismember('manuallyExcluded', Tc.Properties.VariableNames)
                 manualOff = Tc.t_peak(Tc.manuallyExcluded == 1);
             end
@@ -610,6 +640,20 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if ishandle(wb), close(wb); end
         plotOverview();
         if ~isempty(O), status('Overview: drag = load a time window, wheel = zoom, shift + wheel = move, double-click = whole file.'); end
+    end
+
+    function goTo(c, w)
+        % show channel c and load the window w = [from to] s (commands of the analysis report, 2026-10-11)
+        if isempty(H), return; end
+        if ~isempty(c)
+            k = find(H.dataChannels == c, 1);
+            if isempty(k)
+                status(sprintf('Channel %d is not in %s.', c, H.file));
+            else
+                hCh.Value = k; ch = c; showThreshold();
+            end
+        end
+        if ~isempty(w), onLoad([], [], w(1:2)); end
     end
 
     function onChannel(~, ~)
@@ -2482,8 +2526,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             optsAll = opts;
             optsAll.zeroForce = zeroUser(H.dataChannels);    %NaN = Offset of the log file
             optsAll.threshold = thrOf(H.dataChannels);       %NaN = auto
-            MyoDishAnalysis(H.file, [], range(1), range(2), optsAll, 'output', fullfile(pn, fn), 'quiet', true, 'metadata', Lbl);
-            status(sprintf('All channels written to %s (same settings, manual exclusions not applied).', fn));
+            rep = reportAll;                           %analysis report (2026-10-11)
+            MyoDishAnalysis(H.file, [], range(1), range(2), optsAll, 'output', fullfile(pn, fn), 'quiet', true, ...
+                'metadata', Lbl, 'report', rep);
+            status(sprintf('All channels written to %s%s (same settings, manual exclusions not applied).', fn, ...
+                repmat(' and the report (_report.pdf)', 1, rep)));
         catch ME
             status(['Error: ' ME.message]);
         end
@@ -2779,7 +2826,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             hPr.tx.String = 'No protocol found (comments ''start ... protocol'' / ''end ... protocol''). Add a range with ''+ selected range''.';
             return;
         end
-        hPr.tProt.Data = [num2cell(~strcmp(prP.type, 'other')), prP.type, prP.name, num2cell(round(prP.from, 2)), ...
+        hPr.tProt.Data = [num2cell(~ismember(prP.type, {'other', 'unknown'})), prP.type, prP.name, num2cell(round(prP.from, 2)), ...
             num2cell(round(prP.to, 2)), prP.groupBy, prP.note];
         hPr.tx.String = sprintf('%d protocol(s) found in the log file.', height(prP));
     end
@@ -3605,6 +3652,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % tests / scripts: legend of the force plot on / off (no input: the legend object, [] if none)
         if nargin > 0 && logical(tf) ~= showLegend, toggleLegend(); end
         lg = findobj(fig, 'Type', 'Legend', 'Tag', 'mdaForceLegend');
+    end
+
+    function toggleReport()
+        % menu Save / Export: analysis report (PDF) with 'All channels -> file' (2026-10-11)
+        reportAll = ~reportAll;
+        if reportAll, hRepMenu.Checked = 'on'; else, hRepMenu.Checked = 'off'; end
     end
 
     function toggleLegend()
@@ -4746,9 +4799,18 @@ D = {
         'regular pulses)'], ...
         1, '', 'Assignment', false;
     'gateMax', 'gateMax: longest pulse -> onset delay', 'num', [], ...
-        ['longest delay from the eliciting pulse to the contraction onset (Dmax). Near threshold the onset can' ...
-        ' be delayed by ~80 ms'], ...
+        ['longest delay from the eliciting pulse to the contraction onset (Dmax) of uncertain contractions (and ' ...
+        'without certainty: manual threshold, unpaced). Near threshold the onset can be delayed by ~80 ms'], ...
         1000, 'ms', 'Assignment', false;
+    'gateMaxCertain', 'gateMaxCertain: ... of certain contractions', 'num', [], ...
+        ['longest pulse -> onset delay of certain contractions (auto threshold, paced: locked to the stimuli or ' ...
+        'large); slices with a long but constant delay (e.g. 0.3 s). At most gateMaxCertainRel x the stimulus ' ...
+        'interval, at least gateMax'], ...
+        1000, 'ms', 'Assignment', false;
+    'gateMaxCertainRel', 'gateMaxCertainRel: ... at most', 'num', [], ...
+        ['the gate of certain contractions is at most this fraction of the interval of the regular pulses ' ...
+        'before the onset (a longer delay cannot be told from an early contraction before the next pulse)'], ...
+        1, 'x stimulus interval', 'Assignment', false;
     'gateCore', 'gateCore: typical delay range', 'num', [], ...
         ['several candidate pulses: pulses before the onset before pulses after it, regular before extra ' ...
         'pulses; of one kind the earliest up to gateCore before the onset, otherwise the latest one'], ...
@@ -4828,7 +4890,8 @@ D = {
     'diastolicLevel', 'Diastolic level (F_dia)', 'popup', {'median before the pulse', 'preStimulusMedian'; 'minimum before the peak (<= 1.0.0-beta.3)', 'minimum'}, ...
         ['level from which amplitude, upstroke levels (10 / 50 / 90 %), AUC and diastolic force are measured. ' ...
         'median before the pulse: median of the unfiltered signal diastoleWindowStart ... diastoleWindowEnd ' ...
-        'before the eliciting pulse (contractions without pulse, or a median above the peak: minimum); ' ...
+        'before the eliciting pulse (before the onset if it follows the pulse by more than gateMax; contractions ' ...
+        'without pulse, or a median above the peak: minimum); ' ...
         'minimum: last minimum of the filtered signal before the peak (versions <= 1.0.0-beta.3). Relaxation ' ...
         'levels: minimum after the peak (both)'], ...
         1, '', 'Detection', false;
@@ -4861,6 +4924,25 @@ D = {
     'certainUnpacedRel', 'certainUnpacedRel', 'num', [], ...
         'certainty, unpaced channels: certain if >= this fraction of the typical amplitude', ...
         1, 'x typical', 'Detection', false;
+    'invertedCheck', 'Inverted signal', 'check', [], ...
+        ['paced channels: if the force falls after the stimuli (magnet out of position), the contractions are ' ...
+        'detected in the inverted signal (rate, capture) and the force and time parameters are NaN (column ' ...
+        'invertedSignal)'], ...
+        1, '', 'Detection', false;
+    'invertedRatio', 'invertedRatio', 'num', [], ...
+        ['inverted signal: the largest fall of the stimulus-triggered median is at least this multiple of its largest ' ...
+        'rise, and the signal deflects downwards (50th - 10th percentile >= this x (90th - 50th percentile))'], ...
+        1, 'x rise', 'Detection', false;
+    'invertedMinAmplitude', 'invertedMinAmplitude', 'num', [], ...
+        'inverted signal: the fall of the stimulus-triggered median is at least this large', ...
+        1, 'uN', 'Detection', false;
+    'invertedMinWidth', 'invertedMinWidth', 'num', [], ...
+        ['inverted signal: the stimulus-triggered median lies below half its fall for at least this time (no ' ...
+        'stimulus artifact)'], ...
+        1000, 'ms', 'Detection', false;
+    'invertedSkip', 'invertedSkip', 'num', [], ...
+        'inverted signal: the stimulus-triggered median starts this time after the pulse (stimulus artifact)', ...
+        1000, 'ms', 'Detection', false;
     'rockerArtifacts', 'Rocker artifact rules', 'check', [], ...
         ['paced channels, auto threshold: peaks of the rocker movement that are not locked to the stimuli are ' ...
         'not counted (artifact gap and rocker rules)'], ...

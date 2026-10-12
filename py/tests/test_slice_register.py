@@ -5,7 +5,8 @@
 """Slice register (slice_register) with synthetic watcher results: experiment expA, series rigA_sampleX (4 recordings,
 channels 1-8) and rigB_sampleY (1 recording). Pendant of mda_testSliceRegister.m (same results and checks).
 
-    ch1  medium changes (2 x 5 min)                               1 slice, beating at end of data
+    ch1  medium changes (2 x 5 min; comments 'medium exchange',    1 slice, beating at end of data
+         'chamber replaced', 'Sensor board exchanged')
     ch2  taken out on day 2 (comment 'discarded'), then empty      1 slice, removed, last amplitude 50 of 200
     ch3  taken out on day 1, one recording empty, new slice day 3  2 slices (after a recording without signal)
     ch4  5 min out with the comment 'new slice'                    2 slices (comment)
@@ -53,8 +54,8 @@ def scenario():
             chan(n, c, sliceID=("S7a" if n[-1] in "01" else "S7b") if c == 7 else "")
         chan(n, 6, status="no slice")
         gap(n, 6, 0, out[n]["L"])
-    gap("rigA_sampleX_1", 1, 4 * H, 4 * H + 300)
-    gap("rigA_sampleX_2", 1, 4 * H, 4 * H + 300)
+    gap("rigA_sampleX_1", 1, 4 * H, 4 * H + 300, "medium exchange")  # no new slice (2026-10-11)
+    gap("rigA_sampleX_2", 1, 4 * H, 4 * H + 300, "chamber replaced | Sensor board exchanged")
     gap("rigA_sampleX_2", 2, 6 * H, DAY, "discarded")
     chan("rigA_sampleX_2", 2, status="removed", endComments="discarded")
     chan("rigA_sampleX_3", 2, status="no slice")
@@ -145,7 +146,7 @@ def test_slice_register(tmp_path):
     assert r["insertedLater"][1] == 1 and math.isnan(r["dayStart"][1])
     assert r["daySource"][1] == "unknown (inserted later)"
     r = get("rigA_sampleX", 4)
-    assert len(r) == 2 and r["startReason"][1].startswith("comment:") and "new slice" in r["startReason"][1]
+    assert len(r) == 2 and r["startReason"][1] == "comment: new slice"
     assert r["endStatus"][0] == "removed" and r["startTime"][1] == "2000-01-03 10:05:00"
     r = get("rigA_sampleX", 5)
     assert len(r) == 2 and r["startReason"][1] == "after 4.0 h without signal"

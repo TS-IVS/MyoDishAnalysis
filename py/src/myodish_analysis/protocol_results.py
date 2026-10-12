@@ -240,7 +240,8 @@ def _s2_results(R, Z, trace, opts):
         of the S1+S2 trace y (grid gy, starting like tg) S2 + 25 ms ... winPeak"""
         yt = y[:nTg]
         pre = (tg >= 0) & (tg <= c + 0.02)
-        aq = float(yt[pre] @ mt[pre] / (mt[pre] @ mt[pre]))
+        with np.errstate(invalid="ignore", divide="ignore"):  # flat template (0/0): NaN, no warning
+            aq = float(yt[pre] @ mt[pre] / (mt[pre] @ mt[pre]))
         r = movmean(yt - aq * mt, w)
         Kw = np.flatnonzero((tg >= c + 0.03) & (tg <= winResp))
         rmax = float(np.max(r[Kw])) if Kw.size else math.nan

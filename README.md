@@ -8,7 +8,7 @@ Each has a command-line function (time range "from – to") and a GUI to view th
 range or single contractions interactively. This file documents the MATLAB version (the reference);
 the Python version (`py/`) gives the same results.
 
-Version 1.0.0-beta.4 (2026-10-10) · Thomas Seidel, Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU) / InVitroSys GmbH.
+Version 1.0.0-beta.5 (2026-10-12) · Thomas Seidel, Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU) / InVitroSys GmbH.
 Public beta version (feedback welcome: GitHub issues or e-mail). Until 2026-10-06 named MyoDishContractionTool (functions MyoDishContractions,
 MyoDishContractionsGUI, mdct_*); now MyoDishAnalysis, MyoDishAnalysisGUI, mda_*.
 Python version with the same results: folder `py/` (see `py/README.md`).
@@ -48,6 +48,10 @@ mda_test                                                                       %
 MyoDishAnalysisWatch('raw', 'results')                                         % new recordings of a folder
 ```
 More examples: `example_MyoDishAnalysis.m`. Help: `help MyoDishAnalysis`, `help mda_options`.
+**Quick-start guides** (2 + 1 pages): [`docs/MyoDishAnalysis_quickstart_GUI.pdf`](docs/MyoDishAnalysis_quickstart_GUI.pdf)
+(first analysis in the GUI, export, reading the results) and
+[`docs/MyoDishAnalysis_quickstart_watcher.pdf`](docs/MyoDishAnalysis_quickstart_watcher.pdf) (automatic analysis of a
+folder, daily run, report).
 **Example recordings** (folder `examples`, see `examples/README.md`): anonymized MyoDish recordings of human ventricle
 and atrium, rabbit, pig and rat ventricle (force-frequency, post-rest potentiation, isoprenaline, stimulation threshold
 and rocker speed protocols) and a sharp-electrode recording with its LabChart export.
@@ -167,6 +171,11 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    you in an export are excluded again. The contractions are detected again and compared with the file (status line:
    *the same as here* or the differences; black o = contraction of the file not found again, e.g. results of another
    version). A reference beat is not stored in the results (create it again).
+   `MyoDishAnalysisGUI(file, 'channel', c, 'window', [from to])` (Python `mda-gui file --channel c --window from to`)
+   opens a recording or results file at channel `c` and loads the window from … to s (results file: its settings and
+   the analysis window of this channel); the analysis report lists these commands for the channels to check.
+   Menu **Save / Export → Analysis report (PDF) with 'All channels → file'** (off by default): the export also writes
+   `<file>_report.pdf` (see "Analysis report").
    **Overlay contractions**: the selected contractions and their mean in an overlay window, aligned at the stimulus
    (default; stimulus = time 0) or at the peak, or the **time course** of the analysed range (t = 0 at the first
    stimulus of each group, since the channels are not stimulated at the same time); baseline = diastolic force
@@ -311,6 +320,8 @@ Own additional fields are kept as extra columns.
   `rockerFilter`), `'externalTrigger','auto'|'on'|'off'` (see "External trigger"), `'stimAssignment','onset'|'peak'`
   and the gate parameters (see "Stimulus assignment"), `'pulseTable',false` (no pulse table), `'showFigures',true`,
   `'quiet',true`; all others see `help mda_options`.
+* **Analysis report** (`'report'`; 2026-10-11): with `'output'` also `<output>_report.pdf` (`'report',false`: none;
+  `'report','file.pdf'`: this file, also without `'output'`). See "Analysis report".
 * Results files (`'output'`; the watcher; GUI exports): sheet / file **info** (key, value) with the version
   (`version`, `implementation` MATLAB / Python, `software`), the recording (`file`, sampling rate, recording start),
   `analysisDate`, `createdBy` (MyoDishAnalysis, MyoDishAnalysisWatch, MyoDishAnalysisGUI), the analysed `channels`,
@@ -331,13 +342,29 @@ Own additional fields are kept as extra columns.
 ```matlab
 MyoDishAnalysisWatch('/data/myodish/raw', '/data/myodish/results', 'rockerFilter', true)
 MyoDishAnalysisWatch(raw, results, 'fromDate', '2026-10-01', 'dryRun', true)   % only list what would be analysed
+MyoDishAnalysisWatch(raw, results, 'schedule', 'daily 10:00')    % in the background: every day at 10:00
+MyoDishAnalysisWatch('status')                                   % scheduled watchers; MyoDishAnalysisWatch('stop')
 ```
 ```bash
 mda-watch /data/myodish/raw /data/myodish/results --rocker-filter --quiet
+mda-watch /data/myodish/raw /data/myodish/results --schedule "weekly Sun 05:00"    # until Ctrl+C
 ```
 Each pass searches the raw folder (with subfolders) for `.mdd` files and analyses the new and changed ones. The
-watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`: every improvement of the analysis applies to
-its results as well.
+watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`.
+* **After an update of MyoDishAnalysis** (or with other analysis options; 2026-10-12): the recordings analysed earlier
+  keep their results, they are **not** analysed again by default (`'reanalyze','new'`). Every pass shows a notice in
+  the command window and at the top of the txt and PDF reports: *"MyoDishAnalysis has been updated (now …):
+  n recording(s) were analysed with another version (…). This may change the results or lead to inconsistencies
+  with new data (see the release notes, CHANGELOG.md)."* with the command that analyses them again:
+  `'reanalyze','outdated'` (`--reanalyze outdated`; all recordings of another version, other options or other core
+  code; after an update this can take hours). `'reanalyze','all'`: every recording again.
+* **Schedule** (`'schedule'`, `--schedule`; 2026-10-12): `'daily 10:00'`, `'weekly Sun 05:00'` (several days:
+  `'Mon,Thu 06:30'`; `'weekdays 07:00'` = Mon–Fri), `'every 2 days 10:00'`, `'every 120 min'` / `'every 6 h'` (first
+  pass now). MATLAB: a timer in the background of the session, MATLAB stays free between the passes (busy during a
+  pass); `MyoDishAnalysisWatch('status')` lists the scheduled watchers with the next and last pass,
+  `MyoDishAnalysisWatch('stop')` stops them (`'stop', resultsFolder`: one); it ends with the MATLAB session. Python:
+  `mda-watch ... --schedule "..."` runs until Ctrl+C (terminal or background process). Missed passes (computer asleep,
+  a pass longer than the interval) are not repeated.
 * **Per recording** (results folder, same subfolders as in the raw folder):
   * `<name>_summary.csv`: one row per channel and time range. The ranges are time bins (`'binMinutes'`, default 60)
     **without the stimulation protocols** (default; `'includeProtocols',true` keeps them, `'protocolMarginSeconds'`
@@ -384,22 +411,26 @@ its results as well.
   `<experiment>/<experiment>_slices.csv` and `mda_slices.csv` (all experiments), updated after every pass.
 * **Index** `mda_index.csv` (one row per recording; the same file for MATLAB and Python): size and time (UTC) of the
   `.mdd` file, size of the log file, status (`ok`, `error`, `running`, `noLog`), version, implementation, fingerprint
-  of the core functions, options, analysis time, number of contractions, message. With `'reanalyze','outdated'`
-  (default) a recording is analysed again when its files, the version, the options or (same implementation) the core
-  functions change; `'new'`: only new and changed files; `'all'`. Errors are retried when something changed or with
-  `'retryErrors',true`.
+  of the core functions, options, analysis time, number of contractions, message. `'reanalyze'`: `'new'` (default)
+  = new and changed recordings; `'outdated'` = also those analysed with another version, other options or (same
+  implementation) other core functions; `'all'`. Recordings with an analysis error are retried when the file, the
+  version, the options or the core functions change, or with `'retryErrors',true`.
 * **Report** `reports/mda_report_<date>_<time>.txt` per pass: for every analysed recording and channel the number of
   contractions, capture (% of the stimuli followed by a contraction), extra beats (% of the detected contractions),
   mean amplitude in the first and last bin with ≥ 10 contractions and flags (no contractions, capture < 90 %, extra
   beats > 10 %, amplitude change > 30 %; `'flagCapture'`, `'flagExtraBeats'`, `'flagAmplitudeChange'`); periods
   without signal by type and the channels that do not end beating.
+* **PDF report** `reports/mda_report_<date>_<time>.pdf` of the same pass (`'report'`, default true; Python
+  `--no-report`): see "Analysis report"; the GUI commands open the `<name>_info.csv` of the recording (settings of the
+  watcher). MATLAB also prints the channels to check as links in the command window.
 * **Skipped**: files changed in the last 10 min (`'minFileAgeMinutes'`), names starting with `.` (rsync temporary
   files, hidden folders), recordings without `Recording stopped` in the log file (status `running`; analysed when
   unchanged for 30 h, `'incompleteAfterHours'`), recordings without log file (`noLog`). A lock file
   (`mda_watch.lock`) prevents two watchers on the same results folder; one left behind by a crashed run is ignored
   after 12 h (or delete it).
-* **Daily**: the scheduler of the operating system (cron / launchd / Windows task scheduler) with `mda-watch ...` or
-  `matlab -batch "MyoDishAnalysisWatch(...)"`; or `'interval', 24` (one pass every 24 h, MATLAB stays busy).
+* **Daily without an open MATLAB / terminal**: the scheduler of the operating system (cron / launchd / Windows task
+  scheduler) with `mda-watch ...` or `matlab -batch "MyoDishAnalysisWatch(...)"`. `'interval', h` (older): one pass
+  every h hours in a loop, MATLAB stays busy; `'schedule'` replaces it.
 * Further options: `'newSliceHours'` (slice register, default 2), `'filter'` (regular expression on the relative
   path), `'maxFiles'`, `'protocols',false`,
   `'quiet',true`; all other name/value pairs are analysis options of `MyoDishAnalysis` for all recordings (e.g.
@@ -585,7 +616,9 @@ interpolated linearly between samples; dF/dt = central difference of the filtere
 Further columns: `t_peak` (s in the file), `clockTime`, `beatType` (`stimulated` = elicited by a pulse of the
 channel, see "Stimulus assignment"; `extra` = no eliciting pulse; `unpaced` = no stimuli in this channel), `t_stim`
 (eliciting pulse), `stimToPeak`, `rockerMoving` (rocker moved at any time between F_dia and 90 % relaxation),
-`included`, `uncertain`, `t_onset` (onset of the contraction), `stimToOnset`, `stimPulse` (pulse ID = raw sample
+`included`, `uncertain`, `t_onset` (onset of the contraction), `stimToOnset`, `t_rise50`, `stimToRise50` (time at which
+the upstroke crosses 50 % of the amplitude and its delay to the pulse; less dependent on the shape of the foot of the
+upstroke than the onset), `invertedSignal` (see "Inverted signal"), `stimPulse` (pulse ID = raw sample
 number of the eliciting pulse in the file, from 0; the key of the pulse table), `stimCurrent` (mA),
 `stimChargeDuration`, `stimPauseDuration`, `stimDechargeDuration` (µs, from the log file), `elicitedByExtraPulse`,
 `stimAmbiguous`, `prePulses`, `postPulses`, `prominence` (detection criterion); with `'rockerFilter',true` also
@@ -668,6 +701,13 @@ channel 10k + c = extra pulse #k of channel c).
 * **Gate**: a pulse can only have elicited a contraction if it lies from onset − `gateMax` (0.15 s) to onset +
   `gateTolerance` (0.015 s, tolerance of the onset estimate). Contractions are assigned in the order of their
   prominence; every pulse elicits at most one contraction.
+* **Longer gate of certain contractions** (`'gateMaxCertain'` 0.5 s, `'gateMaxCertainRel'` 0.5; 1.0.0-beta.5): a
+  certain contraction (auto threshold, paced channel) still without a pulse after the first pass may be elicited by a
+  regular pulse up to min(0.5 s, 0.5 × the interval of the regular pulses before the onset) before the onset (at
+  least `gateMax`), e.g. a slice with a long electromechanical delay. This second pass never takes a pulse from a
+  contraction within `gateMax` of it; uncertain contractions (e.g. rocker artifacts) keep `gateMax`. The diastolic
+  level of such a contraction is the median 60 … 5 ms before its onset (instead of before the pulse).
+  `'gateMaxCertain',0.15` gives the assignment of 1.0.0-beta.4.
 * Several candidates: pulses before the onset before pulses after it; regular pulses before extra pulses (an extra
   pulse after the regular pulse falls into its refractory period, e.g. CCM; a sub-threshold pre-pulse lies further
   before the onset than the regular pulse); of one kind the earliest up to `gateCore` (0.06 s) before the onset,
@@ -709,6 +749,52 @@ channel 10k + c = extra pulse #k of channel c).
   peak 1.5 s after the pulse (human, slow contractions; 23), counted artifact steps of a chamber with saturated signal
   (rabbit, 74), and single contractions in 4 further channels. 8 recordings of 2022–2026 (prepulse threshold
   protocols, CCM, rat, pig, human): see `CHANGELOG.md`.
+
+## Inverted signal (option `'invertedCheck'`, default on; 1.0.0-beta.5)
+In a paced channel whose force **falls** after the stimuli (e.g. the magnet of the MyoDish out of position), the force
+measurement is not valid. Test: the stimulus-triggered median of the filtered signal (`'invertedSkip'` 0.02 s …
+min(1 s, median stimulus interval) after the pulses, baseline 60 … 5 ms before each pulse, at most 300 pulses) falls at
+least `'invertedRatio'` (2) times as much as it rises, by at least `'invertedMinAmplitude'` (50 µN), and stays below
+half the fall for at least `'invertedMinWidth'` (0.05 s); and the signal itself deflects downwards (50th − 10th
+percentile ≥ 2 × (90th − 50th percentile)). The median and the percentiles keep steps (chamber taken out),
+contractions that are not locked to the pulses and upright contractions just before the pulses from being taken for an
+inverted signal (in a sample of 121 recordings, a first version of the test with the mean flagged 38 channels, mostly
+for such reasons; the final test flags the channel whose magnet was out of position and one 30-min period without
+contractions; the analysis report flags a channel only with ≥ 50 contractions in inverted ranges). Then the contractions are detected in the negated signal:
+rate and capture (beat types, missed beats, `peakToPeakFrequency`, `stimFrequency`) are analysed, all force and time
+parameters are NaN, and the column `invertedSignal` (contractions and summary) is true. Use: whether the slice beats
+and follows the pacing, e.g. while it is kept in culture for a later analysis.
+
+## Analysis report (`mda_report`; Python `report.py`; 1.0.0-beta.5)
+A short PDF that says which analyses should be checked, written by the watcher after every pass, by `MyoDishAnalysis`
+with `'output'` and by the GUI on request. Flags per channel (channels with a slice and ≥ 50 detected contractions;
+thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
+* **check the analysis** (red: the analysis may not work, or technical faults put wrong values into the data):
+  **I** inverted signal (the sensor does not work properly; only beating, capture and rate are analysed); **N** noise
+  suspected: uncertain contractions ≥ 25 % **and** extra + missed beats ≥ 15 % (contractions near the detection
+  threshold that do not follow the pacing are mostly noise or artifacts, e.g. rocker waves; uncertain contractions
+  with regular capture are real contractions near the threshold and are not flagged; unpaced channel: uncertain ≥
+  25 %); **S** large extra beats (certain extra beats ≥ 5 % with > 3 × the amplitude of the paced ones: spikes,
+  saturation); **D** median delay pulse → onset > 150 ms. Noise index = uncertain % × (extra % + missed %) / 100; it is
+  listed (e.g. `noise index 54 (uncertain 98 %, extra 0 %, missed 55 %)`) and orders the trace pages.
+* **slice quality** (yellow: possibly poor biological quality, also e.g. an effect of a treatment; the user
+  decides): **C** capture < 90 %, **X** extra beats > 10 % (spontaneous activity; not shown with N), **A** amplitude
+  < 75 µN, **T** amplitude change > 30 % (first → last range with ≥ 10 contractions; listed with the time span, e.g.
+  "amplitude change +660 % over 24 h"), **V** amplitude CV > 30 %.
+* Rules (2026-10-12) from the overnight runs of 2024 and 2026 (4923 recordings) and visual checks: with the former
+  rules (U > 10 % or X > 10 % red) 14–19 % of the channels with a slice were red, half of them only for uncertain
+  contractions. In a sample of 400 recordings of 2026 (2143 channels), 228 channels (11 %) have N (former rules: 367,
+  17 %); in 12 of 12 inspected channels the N decision agreed with the traces (rocker waves detected as contractions
+  vs. real small contractions near the threshold with regular capture).
+
+Page 1: recordings × channels (capture % and the codes; grey: < 50 contractions; red letter P: a stimulation protocol
+was not analysed, E: analysis error; legend below the table); page 2: the channels to check and those with
+slice-quality flags, with the channel label in parentheses if given (treatment with concentration, otherwise
+sliceGroup or sampleGroup, e.g. `ch 7 (PMA 100 nM): extra beats 30 %`); then one page per recording with red
+flags (at most 8, the most flags and the highest noise index first) with traces of up to 4 channels (20 s at the most
+uncertain / extra beats or large extra beats, markers of the analysis) and the commands that open exactly this place in the GUI:
+`MyoDishAnalysisGUI(file, 'channel', c, 'window', [from to])` / `mda-gui file --channel c --window from to`.
+`R = mda_report('flags', S, C)` returns the flags of an analysis as a table.
 
 ## External trigger (external stimulator; option `'externalTrigger'`, GUI *Advanced ...* → *Stimuli*)
 With the external controller unit (one chamber) the slice can be paced by an external stimulator whose TTL pulses
@@ -816,6 +902,10 @@ lower plot, the trend and all exports.
 * Rocker movement causes a periodic artifact (see "Rocker artifact"): remove it with `'rockerFilter',true`, or use
   `'rocker','stopped'` (GUI: "only contractions with rocker at rest") for analyses during rocker stops.
 * "Rise time 90 %" = `TTP90` (10 % of the amplitude → peak). `riseTime10_90` (10 % → 90 %) is reported in addition.
+* **Longer gate**: a stimulus-locked technical artifact 0.15–0.5 s after the pulses (e.g. a periodic disturbance at
+  the pacing rate) counts as a stimulated contraction if it is detected as a certain contraction; with only a pulse and
+  a following contraction, a spontaneous beat cannot be told from an elicited one. Check channels with a long delay
+  (report flag D, `stimToOnset`, `stimToRise50`) in the GUI.
 * **Clock time of old recordings**: MyoDish software 2.0.7717–2.0.7769 (Feb–Apr 2021 builds; on one setup until 2024)
   wrote the clock time of the log file with a 12-hour clock without AM/PM. `mda_clockTime` / `clock_time` correct it
   (AM/PM from the dataLogTime, from `parallel recording` entries or from the time of the .mdd file); if a recording
@@ -847,12 +937,15 @@ lower plot, the trend and all exports.
 | `mda_options.m` | options and defaults (incl. the advanced settings) |
 | `mda_settings.m` | settings files: save / load all options (also from results files) |
 | `docs/MyoDishAnalysis_settings_guide.pdf` | settings guide: legend of the force plot, pulse assignment, every advanced setting with figures |
+| `docs/MyoDishAnalysis_quickstart_GUI.pdf`, `docs/MyoDishAnalysis_quickstart_watcher.pdf` | quick-start guides: first analysis in the GUI and reading the results (2 pages); the watcher (1 page) |
+| `mda_report.m` | analysis report (PDF): channels to check, traces, commands that open the GUI there |
 | `mda_summarize.m`, `mda_writeResults.m` | summary table, Excel/CSV export (info table: version and all settings) |
 | `mda_readResults.m` | read a results file again (settings, analysis windows, contractions; GUI: Open results) |
 | `mda_labels.m`, `mda_addLabels.m` | labels per channel (metadata) |
 | `mda_test.m` | self test (parameters, rocker filter) |
 | `mda_testWatch.m` | test of the watcher with example recordings |
 | `mda_testClockTime.m`, `mda_testSignalGaps.m`, `mda_testSliceRegister.m` | tests of the clock-time correction, the periods without signal and the slice register |
+| `mda_testGateInverted.m` | test of the longer gate of certain contractions, inverted signals and the analysis report |
 | `mda_version.m` | version number |
 | `example_MyoDishAnalysis.m` | examples |
 | `examples/` | anonymized example recordings (`.mdd`, `_log.log`, `_labels.csv`, LabChart `.mat`), see `examples/README.md` |

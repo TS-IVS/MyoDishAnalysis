@@ -14,7 +14,8 @@ range_   [from, to] in s (time in the file); contractions whose peak lies in the
 opts     options from options()
 
 B  pandas DataFrame, one row per contraction (columns as in the MATLAB version); stimulus columns: t_stim,
-   stimToPeak, t_onset, stimToOnset, stimPulse (ID = raw sample number of the eliciting pulse), stimCurrent (mA),
+   stimToPeak, t_onset, stimToOnset, t_rise50, stimToRise50 (50 % of the amplitude on the upstroke, 2026-10-11),
+   stimPulse (ID = raw sample number of the eliciting pulse), stimCurrent (mA),
    stimChargeDuration, stimPauseDuration, stimDechargeDuration (us, log file), elicitedByExtraPulse, stimAmbiguous,
    prePulses, postPulses (see 3.)
 C  Struct: filtered signal (t, f), detection threshold, regular stimulus pulses of the channel (stimTimes), whether
@@ -74,6 +75,7 @@ TS 2026-10-06 (port of mda_analyzeChannel.m, TS 2026-10-05; rocker artifacts, ce
 from __future__ import annotations
 
 import math
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -85,7 +87,8 @@ from .zero_force import zero_force, zero_at
 
 UNITS_FIRST = {"channel": "", "contraction": "", "t_peak": "s", "beatType": "", "t_stim": "s", "stimToPeak": "s",
                "rockerMoving": "", "included": "", "uncertain": ""}
-UNITS_STIM = {"t_onset": "s", "stimToOnset": "s", "stimPulse": "", "stimCurrent": "mA", "stimChargeDuration": "us",
+UNITS_STIM = {"t_onset": "s", "stimToOnset": "s", "t_rise50": "s", "stimToRise50": "s", "stimPulse": "",
+              "stimCurrent": "mA", "stimChargeDuration": "us",
               "stimPauseDuration": "us", "stimDechargeDuration": "us", "elicitedByExtraPulse": "", "stimAmbiguous": "",
               "prePulses": "", "postPulses": ""}
 PULSE_UNITS = {"pulse": "", "channel": "", "t": "s", "extra": "", "current_mA": "mA", "currentReached": "",
@@ -164,6 +167,18 @@ def analyze_channel(S, channel, range_=None, opts=None):
     else:
         maxLat = min(CL, 1.0)
 
+    # ------------------------------------------------------------------ inverted signal (2026-10-11)
+    # paced: the force falls after the stimuli instead of rising (magnet of the chamber out of position): contractions
+    # detected in the inverted signal (rate, capture), force and time parameters NaN (see inverted_signal)
+    sgn = 1.0
+    invRise, invFall = math.nan, math.nan
+    if opts.get("invertedCheck", True) and ST.size >= opts.pacedMinStimuli:
+        inv, invRise, invFall = inverted_signal(t, f, ST, opts)
+        if inv:
+            sgn = -1.0
+            f = -f
+            g = -g
+
     # ------------------------------------------------------------------ detection
     isMax, P = islocalmax(f)
     cand = np.flatnonzero(isMax)
@@ -218,6 +233,7 @@ def analyze_channel(S, channel, range_=None, opts=None):
     # 'sensitive': uncertain contractions are counted and flagged (column uncertain); 'specific': they are removed.
     # Manual threshold: not assessed.
     certain = np.ones(iPk.size, bool)
+    assessed = thrMode == "auto" and ST.size >= opts.pacedMinStimuli  # certainty from the stimuli (longer gate)
     if thrMode == "auto" and iPk.size:
         if ST.size >= opts.pacedMinStimuli:
             o = np.argsort(-promPk, kind="stable")
@@ -266,7 +282,8 @@ def analyze_channel(S, channel, range_=None, opts=None):
                 pOfBeat[ks[np.argmax(promPk[ks])]] = jj  # several peaks after one pulse: the most prominent one
             jAll = j
         else:
-            pOfBeat, amb, tOn = gate_assign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg)
+            gLen = gate_lengths(tOn, certain & assessed, ST, opts)  # certain contractions: longer gate (2026-10-11)
+            pOfBeat, amb, tOn = gate_assign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg, gLen)
             jAll = pOfBeat
         beatType[pOfBeat >= 0] = "stimulated"
     hasB = pOfBeat >= 0
@@ -311,11 +328,12 @@ def analyze_channel(S, channel, range_=None, opts=None):
     names = [p[0] for p in PARAMETERS]
     ix = {nm: k for k, nm in enumerate(names)}
     V = np.full((n, len(names)), np.nan)
+    rise50 = np.full(n, np.nan)  # time of 50 % of the amplitude on the upstroke (2026-10-11)
     rockerMoving = np.zeros(n, bool)
     rockerOn = np.asarray(S.rockerOn, bool)
     maxW = mround(opts.maxBeatWindow / dt)
     useMedian = opts.diastolicLevel != "minimum"  # diastolic level: median before the pulse (2026-10-10)
-    xRaw = np.asarray(S.force[row], dtype=float)  # unfiltered signal (after spike removal / rocker filter)
+    xRaw = sgn * np.asarray(S.force[row], dtype=float)  # unfiltered signal (after spike removal / rocker filter)
     tRaw = np.asarray(S.t, dtype=float).ravel()
     for q in range(n):
         k = sel[q]
@@ -336,15 +354,17 @@ def analyze_channel(S, channel, range_=None, opts=None):
         # diastolic level (2026-10-10): median of the unfiltered signal diastoleWindowStart ... diastoleWindowEnd before
         # the eliciting pulse (default); without pulse, or a median at or above the peak: the minimum before the peak
         if useMedian and not math.isnan(tStimOfBeat[k]):
-            w0 = int(np.searchsorted(tRaw, tStimOfBeat[k] - opts.diastoleWindowStart - 1e-9, side="left"))
-            w1 = int(np.searchsorted(tRaw, tStimOfBeat[k] - opts.diastoleWindowEnd + 1e-9, side="left")) - 1
+            tRef = tStimOfBeat[k]  # window before the pulse; delay > gateMax (longer gate of certain contractions):
+            if tOn[k] - tRef > opts.gateMax + 1e-9:  # before the onset (the force at the pulse may still fall, e.g.
+                tRef = tOn[k]  # incomplete relaxation; 2026-10-11)
+            w0 = int(np.searchsorted(tRaw, tRef - opts.diastoleWindowStart - 1e-9, side="left"))
+            w1 = int(np.searchsorted(tRaw, tRef - opts.diastoleWindowEnd + 1e-9, side="left")) - 1
             if 0 <= w0 <= w1 < xRaw.size:
                 Fm = float(np.nanmedian(xRaw[w0:w1 + 1]))
                 if Fm < Fpk:
                     Fdia = Fm
                     # upstroke crossings: from the window before the pulse on (a median below the filtered minimum)
-                    iu = min(ia, max(a, int(np.searchsorted(t, tStimOfBeat[k] - opts.diastoleWindowStart,
-                                                            side="left"))))
+                    iu = min(ia, max(a, int(np.searchsorted(t, tRef - opts.diastoleWindowStart, side="left"))))
         A = Fpk - Fdia
         if k > 0:
             V[q, ix["peakToPeakInterval"]] = tPk[k] - tPk[k - 1]
@@ -355,6 +375,7 @@ def analyze_channel(S, channel, range_=None, opts=None):
             continue
         up10 = _cross_up(f, t, dt, iu, i, Fdia + 0.1 * A)
         up50 = _cross_up(f, t, dt, iu, i, Fdia + 0.5 * A)
+        rise50[q] = up50
         up90 = _cross_up(f, t, dt, iu, i, Fdia + 0.9 * A)
         V[q, ix["amplitude"]] = A
         V[q, ix["diastolicSignal"]] = Fdia
@@ -425,6 +446,8 @@ def analyze_channel(S, channel, range_=None, opts=None):
     tOnSel = tOn[sel]
     B["t_onset"] = tOnSel
     B["stimToOnset"] = tOnSel - tStim
+    B["t_rise50"] = rise50  # 50 % of the amplitude on the upstroke: robust delay (2026-10-11)
+    B["stimToRise50"] = rise50 - tStim
     B["stimPulse"] = sv[:, 0]
     B["stimCurrent"] = sv[:, 1]
     B["stimChargeDuration"] = sv[:, 2]
@@ -437,6 +460,14 @@ def analyze_channel(S, channel, range_=None, opts=None):
     for k, nm in enumerate(names):
         B[nm] = V[:, k]
     B["prominence"] = promSel
+    B["invertedSignal"] = np.full(n, sgn < 0)
+    if sgn < 0:  # inverted signal: only rate, capture and stimulus timing (2026-10-11)
+        keepCols = ("peakToPeakInterval", "peakToPeakFrequency", "stimInterval", "stimFrequency")
+        for nm in names:
+            if nm not in keepCols:
+                B[nm] = np.nan
+        B["t_rise50"] = np.nan
+        B["stimToRise50"] = np.nan
     units = dict(UNITS_FIRST)
     units.update(UNITS_STIM)
     units.update({p[0]: p[1] for p in PARAMETERS})
@@ -461,6 +492,9 @@ def analyze_channel(S, channel, range_=None, opts=None):
     C.noContractions = bool(noBeats)
     C.noiseLevel = noiseLvl
     C.noiseMedian = noiseMed
+    C.invertedSignal = bool(sgn < 0)  # see inverted_signal; rise / fall of the stimulus-triggered median (uN)
+    C.invertedRise = invRise
+    C.invertedFall = invFall
     C.stimCapturedCertain = stimCapturedCertain
     C.stimTimes = ST
     C.stimCaptured = stimCaptured
@@ -586,7 +620,7 @@ def _phase_onsets(f, t, g, ia, i, im, level=0.25):
     return np.array(out, float)
 
 
-def gate_assign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg=None):
+def gate_assign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg=None, gLen=None):
     """Onset gate: a pulse (regular or extra) can only have elicited a contraction if it lies from onset - gateMax to
     onset + gateTolerance. Contractions in the order of their prominence (the most prominent one first), each pulse
     elicits at most one contraction. Several candidates: see _choose (before the onset before after it, regular before
@@ -599,6 +633,10 @@ def gate_assign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg=None):
     must precede the steepest upstroke - a pulse after the gate up to 5 ms before the maximum dF/dt (onset estimated
     too early, e.g. rocker artifacts) is taken (regular first, the earliest), marked ambiguous. Contractions
     without onset (no upstroke in the data): the last unused pulse minStimToPeak ... maxLat before the peak.
+    Second pass (2026-10-11): contractions without pulse whose gate gLen (see gate_lengths) is longer than gateMax
+    (certain contractions) get an unused pulse of the longer gate (onset and rise phases; same choice and ambiguity);
+    the first pass with gateMax for all contractions keeps a pulse for the contraction right after it (a later one
+    of a longer gate cannot take it).
     Returns p (index into PT, -1 = none), amb and the onsets (tOn, segment onset where used)."""
     nPk = tOn.size
     tOn = np.array(tOn, float)
@@ -614,13 +652,15 @@ def gate_assign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg=None):
         c = np.arange(a, b + 1)
         return c[~used[c]], b
 
-    for k in np.argsort(-np.asarray(promPk, float), kind="stable"):
+    def one(k, second):
         if math.isnan(tOn[k]):
+            if second:
+                return
             idx = np.flatnonzero((PT <= tPk[k] - opts.minStimToPeak) & ~used)
             if idx.size and tPk[k] - PT[idx[-1]] <= maxLat:
                 p[k] = idx[-1]
                 used[idx[-1]] = True
-            continue
+            return
         cand, b = gate(tOn[k])
         forced = False
         if cand.size == 0 and tSeg is not None and np.size(tSeg[k]):
@@ -633,17 +673,19 @@ def gate_assign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg=None):
                     forced = ts > first + gTol + 1e-9  # the upstroke started before (fused event): ambiguous
                     break
         if cand.size == 0:
+            if second:
+                return
             c2 = _lower_bound(PT, tMs[k] - float(opts.steepRiseMargin) + 1e-9) - 1
             cand = np.arange(b + 1, c2 + 1)
             cand = cand[~used[cand]]
             if cand.size == 0:
-                continue
+                return
             r = cand[~PX[cand]]
             j = int(r[0]) if r.size else int(cand[0])
             p[k] = j
             used[j] = True
             amb[k] = True
-            continue
+            return
         j = _choose(cand, PT, PX, tOn[k], gCore)
         o = cand[cand != j]
         oth = o[PX[o] != PX[j]]  # candidates of the other kind (regular / extra)
@@ -656,7 +698,32 @@ def gate_assign(tOn, tMs, tPk, promPk, PT, PX, opts, maxLat, tSeg=None):
                 amb[k] = True
         p[k] = j
         used[j] = True
+
+    order = np.argsort(-np.asarray(promPk, float), kind="stable")
+    for k in order:
+        one(k, False)
+    if gLen is not None:
+        for k in order:
+            if p[k] < 0 and gLen[k] > float(opts.gateMax) + 1e-12:
+                gMax = float(gLen[k])
+                one(k, True)
     return p, amb, tOn
+
+
+def gate_lengths(tOn, longGate, ST, opts):
+    """gate length of every contraction (2026-10-11): gateMax; contractions with longGate (certain contractions of an
+    auto threshold, paced: locked to the stimuli or large) min(gateMaxCertain, gateMaxCertainRel x the interval of
+    the regular pulses before the onset), at least gateMax (slices with a long but constant delay, e.g. 0.3 s; the
+    delay cannot exceed half the stimulus interval)"""
+    gL = np.full(np.size(tOn), float(opts.gateMax))
+    k = np.flatnonzero(np.asarray(longGate, bool) & ~np.isnan(tOn))
+    U = np.unique(np.asarray(ST, float))
+    if k.size and U.size >= 2:
+        j = np.searchsorted(U, tOn[k] + float(opts.gateTolerance), side="right") - 1  # last regular pulse
+        j = np.clip(j, 1, U.size - 1)
+        iv = U[j] - U[j - 1]
+        gL[k] = np.fmax(float(opts.gateMax), np.fmin(float(opts.gateMaxCertain), float(opts.gateMaxCertainRel) * iv))
+    return gL
 
 
 def _choose(cand, PT, PX, t0, gCore):
@@ -951,6 +1018,61 @@ def artifact_gap_threshold(tc, prom, thr, typical, ST, rocker, CL, opts=None):
     thr = math.sqrt(p[g] * p[g + 1])
     keepLow[lo[locked]] = True
     return float(thr), keepLow, int(np.count_nonzero(~locked))
+
+
+def inverted_signal(t, f, ST, opts=None):
+    """paced channels: stimulus-triggered median of the filtered signal from invertedSkip after the pulses to min(1 s,
+    median stimulus interval), each window minus the median of its diastole window before the pulse
+    (diastoleWindowStart ... diastoleWindowEnd); at most 300 pulses, evenly spread. Inverted (force falls after the
+    stimuli, magnet out of position): largest fall >= invertedRatio x largest rise, >= invertedMinAmplitude and below
+    half of it for >= invertedMinWidth (no stimulus artifact), and the signal itself deflects downwards: 50th - 10th
+    percentile >= invertedRatio x (90th - 50th percentile) of the filtered signal of the windows. The median (not the
+    mean) and the percentiles are not changed by a few windows with steps (chamber taken out) or by beats that are not
+    locked to the pulses; the percentiles exclude upright contractions that precede the pulses (2026-10-11, sample of
+    121 recordings). Returns inverted, rise, fall [uN] (2026-10-11)"""
+    if opts is None:
+        opts = _options()
+    t = np.asarray(t, float)
+    f = np.asarray(f, float)
+    ST = np.asarray(ST, float)
+    if ST.size < 2 or t.size < 10:
+        return False, math.nan, math.nan
+    dt = float(np.median(np.diff(t)))
+    L = min(1.0, float(np.median(np.diff(ST))))
+    grid = np.arange(float(opts.invertedSkip), L, dt)
+    if grid.size < 5:
+        return False, math.nan, math.nan
+    ok = (ST - opts.diastoleWindowStart >= t[0]) & (ST + L <= t[-1])
+    P = ST[ok]
+    if P.size > 300:
+        P = P[np.asarray(mround(np.linspace(0, P.size - 1, 300)), int)]  # MATLAB round
+    if P.size < 5:
+        return False, math.nan, math.nan
+    Y = np.full((P.size, grid.size), np.nan)
+    for q, p in enumerate(P):
+        i0 = int(np.searchsorted(t, p - opts.diastoleWindowStart, side="left"))
+        i1 = int(np.searchsorted(t, p - opts.diastoleWindowEnd, side="right"))
+        if i1 - i0 < 2:
+            continue
+        Y[q] = np.interp(p + grid, t, f) - float(np.median(f[i0:i1]))
+    with np.errstate(invalid="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN columns
+        m = np.nanmedian(Y, axis=0)
+    if np.all(np.isnan(m)):
+        return False, math.nan, math.nan
+    rise = max(0.0, float(np.nanmax(m)))
+    fall = max(0.0, -float(np.nanmin(m)))
+    width = float(np.count_nonzero(m < -fall / 2)) * dt
+    inv = (fall >= float(opts.invertedRatio) * rise and fall >= float(opts.invertedMinAmplitude)
+           and width >= float(opts.invertedMinWidth))
+    if inv:  # shape of the signal: deflections downwards
+        x = np.sort(f[(t >= P[0] - opts.diastoleWindowStart) & (t <= P[-1] + L)])
+        x = x[~np.isnan(x)]
+
+        def q(p):  # nearest rank (as MATLAB)
+            return float(x[int(mround(p * (x.size - 1)))])
+        inv = x.size > 0 and q(0.5) - q(0.1) >= float(opts.invertedRatio) * (q(0.9) - q(0.5))
+    return bool(inv), rise, fall
 
 
 def pre_stimulus_noise(t, f, ST, opts=None):

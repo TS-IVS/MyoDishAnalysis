@@ -45,7 +45,7 @@ def stimuli():
     return np.array(t), np.array(cur)
 
 
-def write_recording(f):
+def write_recording(f, rows=None):
     n = T * FS
     x = np.zeros((9, n), dtype="<i2")
     x[:8] = -383
@@ -55,15 +55,20 @@ def write_recording(f):
         x[8, idx] = (cur.astype(int) | (c << 9)).astype("<i2")
     x.T.tofile(f)
     name = f.replace("\\", "/").rsplit("/", 1)[-1]
-    rows = [(0, 0, "samplingRate Recording", "400"), (0, 0, "Recording", "started: " + name),
-            (0, 0, "chargeDuration", "2000"),
-            (300, 0, "comment", "start stimCurrent threshold protocol"),
-            (1000, 0, "comment", "start post rest potentiation protocol"),
-            (1150, 0, "comment", "start FFR protocol"),
-            (1800, 0, "comment", "start pulse duration protocol"),
-            (1800, 0, "chargeDuration", "1000"), (1830, 0, "chargeDuration", "500"),
-            (1860, 0, "chargeDuration", "250"), (1890, 0, "chargeDuration", "2000"),
-            (T, 0, "Recording", "stopped: " + name)]
+    head = [(0, 0, "samplingRate Recording", "400"), (0, 0, "Recording", "started: " + name),
+            (0, 0, "chargeDuration", "2000")]
+    if rows is not None:
+        rows = head + rows + [(T, 0, "Recording", "stopped: " + name)]
+    else:
+        rows = [(0, 0, "samplingRate Recording", "400"), (0, 0, "Recording", "started: " + name),
+                (0, 0, "chargeDuration", "2000"),
+                (300, 0, "comment", "start stimCurrent threshold protocol"),
+                (1000, 0, "comment", "start post rest potentiation protocol"),
+                (1150, 0, "comment", "start FFR protocol"),
+                (1800, 0, "comment", "start pulse duration protocol"),
+                (1800, 0, "chargeDuration", "1000"), (1830, 0, "chargeDuration", "500"),
+                (1860, 0, "chargeDuration", "250"), (1890, 0, "chargeDuration", "2000"),
+                (T, 0, "Recording", "stopped: " + name)]
     lines = ["systemTime;dataLogTime;channel;code;value"]
     for s, ch, code, val in rows:
         hh, mm, ss = 10 + s // 3600, (s % 3600) // 60, s % 60
@@ -91,3 +96,56 @@ def test_protocol_end_estimated(tmp_path):
     P0 = mda.find_protocols(f, regular_minutes=0)
     np.testing.assert_allclose(P0["to"], [1000, 1150, 1800, T])
     assert P0["note"][3] == f"no end comment: end estimated at {T} s (end of the file)"
+
+
+def test_protocol_keywords_and_interruptions(tmp_path):
+    """comments without protocol keyword are no protocol; 'StimThresh' = ST; a protocol of unknown type needs an end
+    comment or regular pacing; a software restart ends a protocol without end comment, a connection lost for 1 s does
+    not (2026-10-11)"""
+    f = str(tmp_path / "pkw_rigA_0.mdd")
+    write_recording(f, [(100, 0, "comment", "Software new started"),
+                        (300, 0, "comment", "Start StimThresh"),
+                        (600, 0, "comment", "not sure if stim protocol started"),
+                        (1000, 0, "comment", "start post rest potentiation protocol"),
+                        (1150, 0, "comment", "start FFR protocol"),
+                        (1200, 0, "event", "Connection lost"), (1201, 0, "event", "Connection re-established"),
+                        (1250, 0, "Event", "LogFile opened: C:/x/pkw_rigA_0_log.log"),
+                        (1250, 0, "programInfo", "Version 2.0.1"),
+                        (1800, 0, "comment", "start training programme"),
+                        (1830, 0, "comment", "end of training programme"),
+                        (2100, 0, "event", "Connection lost")])
+    P = mda.find_protocols(f)
+    assert P["type"].tolist() == ["ST", "PRP", "FFR", "unknown"]
+    np.testing.assert_allclose(P["from"], [300, 1000, 1150, 1800])
+    np.testing.assert_allclose(P["to"], [540, 1150, 1250, 1830])
+    assert P["note"][2] == "no end comment: end estimated at 1250 s (software restarted)"
+    assert P["groupBy"][3] == "none" and P["name"][3] == "training programme"
+
+
+def test_protocols_analysed_one_by_one(tmp_path, monkeypatch):
+    """a protocol outside the recorded data or with an error is not analysed (note), the others are (2026-10-11)"""
+    import pandas as pd
+    from myodish_analysis import analysis as an
+    f = str(tmp_path / "pend_rigA_0.mdd")
+    write_recording(f)
+    P = mda.find_protocols(f)
+    extra = P.iloc[[2]].copy()
+    extra[["number", "from", "to"]] = [2.0, 2500.0, 2600.0]
+    P2 = pd.concat([P, extra], ignore_index=True)
+    C, S, info = mda.myodish_analysis(f, [1], protocol=P2, quiet=True)
+    assert "protocol FFR 2: not analysed: outside the recorded data (2500 ... 2600 s, file length 2400.0 s)" \
+        in info["notes"]
+    assert list(info["rangeLabels"]) == ["ST 1", "PRP 1", "FFR 1", "PD 1"]
+    assert len(info["protocols"]) == 5 and "not analysed: outside the recorded data" in info["protocols"]["note"].iloc[4]
+    # an error in one protocol (here: ST): the others are analysed
+    orig = an.protocol_results
+
+    def failing(by, *a, **k):
+        if by == "stimCurrent":
+            raise RuntimeError("test error")
+        return orig(by, *a, **k)
+    monkeypatch.setattr(an, "protocol_results", failing)
+    C, S, info = mda.myodish_analysis(f, [1], protocol=P, quiet=True)
+    assert "protocol ST 1: not analysed: RuntimeError: test error" in info["notes"]
+    assert sorted(set(S["range"])) == ["FFR 1", "PD 1", "PRP 1"]
+    assert info["protocols"]["note"].iloc[0].endswith("not analysed: RuntimeError: test error")

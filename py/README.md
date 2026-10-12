@@ -4,7 +4,7 @@ Python port of the MATLAB **MyoDishAnalysis** (folder above this one): contracti
 single contraction** in MyoDish recordings (`.mdd`), reference beat, rocker filter, alignment of a parallel EP
 recording (LabChart) and AP parameters. It includes a command line (`mda`) and an interactive GUI (`mda-gui`, PySide6 + pyqtgraph).
 
-Version 1.0.0b4 (2026-10-10; = MATLAB version 1.0.0-beta.4, public beta) · Thomas Seidel, Friedrich-Alexander-Universität
+Version 1.0.0b5 (2026-10-12; = MATLAB version 1.0.0-beta.5, public beta) · Thomas Seidel, Friedrich-Alexander-Universität
 Erlangen-Nürnberg (FAU) / InVitroSys GmbH. Until 2026-10-06 named MyoDishContractionTool (Python package
 `myodish_contractions`, commands `mdct`, `mdct-gui`, `mdct-test`); now `myodish_analysis`, `mda`, `mda-gui`, `mda-test`.
 
@@ -49,6 +49,8 @@ mda file.mdd -c 1 2 3 --from 600 3000 --to 660 3060 --labels baseline drug --roc
 mda file.mdd -c 3 --from 300 --to 500 --rocker-filter --set medianFilterMs=20 meanFilterMs=10
 mda-test                                                     # self test (= mda_test.m)
 mda-watch raw_folder results_folder --rocker-filter          # new recordings of a folder (= MyoDishAnalysisWatch.m)
+mda-watch raw_folder results_folder --schedule "daily 10:00" # every day at 10:00 until Ctrl+C ("weekly Sun 05:00", "every 120 min")
+mda-watch raw_folder results_folder --reanalyze outdated     # after an update: recordings of another version again
 mda --help
 ```
 
@@ -73,6 +75,9 @@ win.open_ep("file.mat"); win.api_set_range([10, 100]); T, Sm = win.api_results()
 All advanced settings (constants of the method, see "Advanced settings" in the main README and
 `docs/MyoDishAnalysis_settings_guide.pdf`): `myodish_analysis.advanced.ROWS`; settings files:
 `settings.save_settings(file, opts)`, `settings.load_settings(file)`, `options(settings=file)`, `--settings file`.
+Analysis report (PDF, see "Analysis report" in the main README): `myodish_analysis(..., output=file)` writes
+`<file>_report.pdf` as well (`report=False`: none), the watcher `reports/mda_report_<date>_<time>.pdf`;
+`mda-gui file --channel c --window from to` opens the GUI at a channel and window.
 Indices returned by the functions (e.g. `C.iPeaks`) are 0-based. Channel numbers are the physical channel numbers (1 … 8), as
 in MATLAB.
 
@@ -97,8 +102,9 @@ in MATLAB.
 | `mda_protocols`, `mda_groupBeats`, `mda_protocolResults` | `find_protocols()`, `group_beats()`, `protocol_results()`; `myodish_analysis(..., protocol=, groupBy=)` (`info['protocolResults']`); `mda FILE --protocol FFR`, `--group-by`, `--list-protocols`; GUI **Protocols ...** |
 | `mda_summarize`, `mda_writeResults` | `summarize()`, `write_results()` |
 | `mda_labels`, `mda_addLabels` | `labels()`, `add_labels()` |
-| `MyoDishAnalysisWatch` | `watch()`, `mda-watch` (same index `mda_index.csv` and results; see the main README) |
-| `mda_test`, `mda_testWatch`, `mda_testClockTime`, `mda_testSignalGaps`, `mda_testSliceRegister`, `mda_testSpikes`, `mda_testProtocolEnd`, `mda_testExtraPulses` | `selftest()`, `mda-test`, `tests/test_mda.py`, `tests/test_watch.py`, `tests/test_clock_time.py`, `tests/test_signal_gaps.py`, `tests/test_slice_register.py`, `tests/test_spikes.py`, `tests/test_protocol_end.py`, `selftest.extra_pulse_test()` |
+| `MyoDishAnalysisWatch` (`'schedule'`, `'reanalyze'`) | `watch()`, `mda-watch` (`--schedule`, `--reanalyze`; same index `mda_index.csv` and results; see the main README). MATLAB's schedule runs as a timer in the background (`'status'`, `'stop'`); Python's `--schedule` runs in the foreground until Ctrl+C |
+| `mda_report` (`'flags'`, `'analysis'`, `'path'`, `'window'`, `'commands'`) | `report.write_report()`, `report.report_flags()`, `report.analysis_report()`, `report.report_path()`, `report.report_window()`, `report.gui_commands()`; `myodish_analysis(..., report=)`, `mda --report FILE / --no-report`, `mda-watch --no-report` |
+| `mda_test`, `mda_testWatch`, `mda_testClockTime`, `mda_testSignalGaps`, `mda_testSliceRegister`, `mda_testSpikes`, `mda_testProtocolEnd`, `mda_testExtraPulses`, `mda_testGateInverted` | `selftest()`, `mda-test`, `tests/test_mda.py`, `tests/test_watch.py`, `tests/test_clock_time.py`, `tests/test_signal_gaps.py`, `tests/test_slice_register.py`, `tests/test_spikes.py`, `tests/test_protocol_end.py`, `selftest.extra_pulse_test()`, `tests/test_gate_inverted.py` |
 
 ## Agreement with MATLAB (R2026a), checked 2026-10-07
 `tests/compare_matlab.py` compares the Python results with MATLAB results of the same calls

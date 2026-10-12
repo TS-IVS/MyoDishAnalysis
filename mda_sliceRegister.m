@@ -14,7 +14,9 @@ function R = mda_sliceRegister(resultsFolder, experiments, varargin)
 % A new slice begins in a channel
 %   - with its first signal ('first signal'),
 %   - after a chamber-out period with a comment such as 'new slice', 'replaced', 'exchanged', 'getauscht' within 5 min
-%     of its start or end ('comment: ...'),
+%     of its start or end ('comment: <the comment>'), if the comment names the slice (slice, Schnitt, tissue, S<n>C<n>)
+%     or nothing else that can be exchanged (not: medium exchange, setup / sensor board / electrode exchanged,
+%     chamber replaced = the same slice in a new chamber; 2026-10-11),
 %   - when the label sliceID (<name>_labels.csv next to the recording) changes ('other sliceID'),
 %   - with the signal after a recording without signal in this channel ('after a recording without signal') or after
 %     >= 'newSliceHours' (default 2 h) without signal ('after # h without signal'), unless a comment within 5 min of
@@ -307,6 +309,11 @@ end
 
 function rows = channelRows(e, series, c, S, hours)
 rx = 'new slice|neues slice|replac|exchang|getauscht|ausgetauscht|ersetzt|swap';
+% 2026-10-11: a comment with rx counts only if it names the slice (rxSlice) or names nothing else that can be exchanged
+% (rxNot: medium exchange, setup / sensor board / electrode exchanged, chamber replaced = same slice in a new chamber)
+rxSlice = 'slice|schnitt|tissue|gewebe|\<LMS\>|\<S\d+C\d+\>';
+rxNot = ['medi(um|a|en)|buffer|solution|l(oe|.)sung|setup|sensor|board|platine|electrode|elektrode|magnet|offset|', ...
+    'calibr|kalibr|chamber|kammer|software|controller|cable|kabel|lid\>|deckel|computer|\<pc\>|pump|lamp|rocker'];
 rxBack = 'moved back|put back|placed back|reinsert|re-insert|wieder eingesetzt|zur.{1,2}ckgesetzt';
 rows = {};
 cur = [];
@@ -366,10 +373,10 @@ for r = 1:numel(S)
             else
                 dur = tOn - outSince;
                 t2 = [outText ' ' cmOn];
-                [m1, m2] = regexpi(t2, rx, 'once');
+                nc = newSliceComment({outText, cmOn}, rx, rxSlice, rxNot);
                 isLong = emptyBetween || dur >= hours * 3600;
-                if ~isempty(m1)
-                    reason = ['comment: ' strtrim(t2(max(1, m1 - 40):min(numel(t2), m2 + 40)))];
+                if ~isempty(nc)
+                    reason = ['comment: ' nc];
                 elseif ~isempty(sid) && ~isempty(cur.lab.sliceID) && ~strcmp(sid, cur.lab.sliceID)
                     reason = 'other sliceID';
                 elseif isLong && ~isempty(regexpi(t2, rxBack, 'once'))
@@ -501,4 +508,22 @@ if n == 0, return; end
 if n == 1, p = x(1); return; end
 pos = 100 * ((1:n)' - 0.5) / n;
 p = interp1(pos, x(:), min(max(q, pos(1)), pos(end)));
+end
+
+function c = newSliceComment(texts, rx, rxSlice, rxNot)
+%the first comment (gap comments, separated by ' | ') that says a new slice was mounted (rx, and the slice named or
+%nothing else that can be exchanged); '' if none. Each comment once (2026-10-11).
+c = '';
+parts = {};
+for k = 1:numel(texts)
+    parts = [parts, strtrim(regexp(char(texts{k}), '\s*\|\s*', 'split'))]; %#ok<AGROW>
+end
+parts = unique(parts(~cellfun(@isempty, parts)), 'stable');
+for k = 1:numel(parts)
+    x = parts{k};
+    if ~isempty(regexpi(x, rx, 'once')) && (~isempty(regexpi(x, rxSlice, 'once')) || isempty(regexpi(x, rxNot, 'once')))
+        c = x(1:min(end, 100));
+        return;
+    end
+end
 end

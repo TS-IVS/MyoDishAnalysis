@@ -17,7 +17,9 @@ Inputs per recording (watcher, gaps=True): <name>_channels.csv (required), <name
 A new slice begins in a channel
   - with its first signal ('first signal'),
   - after a chamber-out period with a comment such as 'new slice', 'replaced', 'exchanged', 'getauscht' within 5 min
-    of its start or end ('comment: ...'),
+    of its start or end ('comment: <the comment>'), if the comment names the slice (slice, Schnitt, tissue, S<n>C<n>) or
+    nothing else that can be exchanged (not: medium exchange, setup / sensor board / electrode exchanged, chamber
+    replaced = the same slice in a new chamber; 2026-10-11),
   - when the label sliceID (<name>_labels.csv next to the recording) changes ('other sliceID'),
   - with the signal after a recording without signal in this channel ('after a recording without signal') or after
     >= new_slice_hours (default 2 h) without signal ('after # h without signal'), unless a comment within 5 min of the
@@ -69,6 +71,13 @@ import pandas as pd
 from .signal_gaps import _prctile
 
 RX_NEW_SLICE = re.compile(r"new slice|neues slice|replac|exchang|getauscht|ausgetauscht|ersetzt|swap", re.I)
+# 2026-10-11: a comment with RX_NEW_SLICE counts only if it names the slice (RX_SLICE_WORD) or names nothing else that
+# can be exchanged (RX_NOT_SLICE: medium exchange, setup / sensor board / electrode exchanged, chamber replaced = same
+# slice in a new chamber)
+RX_SLICE_WORD = re.compile(r"slice|schnitt|tissue|gewebe|\bLMS\b|\bS\d+C\d+\b", re.I)
+RX_NOT_SLICE = re.compile(r"medi(um|a|en)|buffer|solution|l(oe|.)sung|setup|sensor|board|platine|electrode|elektrode|"
+                          r"magnet|offset|calibr|kalibr|chamber|kammer|software|controller|cable|kabel|lid\b|deckel|"
+                          r"computer|\bpc\b|pump|lamp|rocker", re.I)
 RX_PUT_BACK = re.compile(r"moved back|put back|placed back|reinsert|re-insert|wieder eingesetzt|zur.{1,2}ckgesetzt",
                          re.I)
 COLUMNS = ["experiment", "series", "channel", "slice", "setupID", "sampleID", "species", "sliceID", "idDate",
@@ -294,10 +303,10 @@ def _channel(e, series, c, S, hours):
                 else:
                     dur = tOn - outSince
                     txt = outText + " " + cmOn
-                    m = RX_NEW_SLICE.search(txt)
+                    nc = _new_slice_comment(outText, cmOn)
                     long_ = emptyBetween or dur >= hours * 3600
-                    if m:
-                        reason = "comment: " + _snippet(txt, m)
+                    if nc:
+                        reason = "comment: " + nc
                     elif sid and cur["lab"]["sliceID"] and sid != cur["lab"]["sliceID"]:
                         reason = "other sliceID"
                     elif long_ and RX_PUT_BACK.search(txt):
@@ -347,9 +356,19 @@ def _channel(e, series, c, S, hours):
     return rows
 
 
-def _snippet(txt, m):
-    a = max(0, m.start() - 40)
-    return txt[a:m.end() + 40].strip()
+def _new_slice_comment(*texts):
+    """the first comment (gap comments, separated by ' | ') that says a new slice was mounted (RX_NEW_SLICE, and the
+    slice named or nothing else that can be exchanged, see RX_NOT_SLICE); '' if none. Each comment once."""
+    seen = []
+    for t in texts:
+        for c in re.split(r"\s*\|\s*", str(t)):
+            c = c.strip()
+            if c and c not in seen:
+                seen.append(c)
+    for c in seen:
+        if RX_NEW_SLICE.search(c) and (RX_SLICE_WORD.search(c) or not RX_NOT_SLICE.search(c)):
+            return c[:100]
+    return ""
 
 
 def _row(cur, hours):

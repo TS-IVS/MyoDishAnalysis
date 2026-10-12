@@ -4,7 +4,8 @@ function ok = mda_testSliceRegister()
 %
 %   ok = mda_testSliceRegister()   prints the single checks, returns true if all pass
 %
-%   ch1  medium changes (2 x 5 min)                               1 slice, beating at end of data
+%   ch1  medium changes (2 x 5 min; comments 'medium exchange',    1 slice, beating at end of data
+%        'chamber replaced', 'Sensor board exchanged')
 %   ch2  taken out on day 2 (comment 'discarded'), then empty      1 slice, removed, last amplitude 50 of 200
 %   ch3  taken out on day 1, one recording empty, new slice day 3  2 slices (after a recording without signal)
 %   ch4  5 min out with the comment 'new slice'                    2 slices (comment)
@@ -52,7 +53,7 @@ ok = check(ok, 'ch3: new slice after a recording without signal (inserted later)
     r.insertedLater(2) == 1 && isnan(r.dayStart(2)) && strcmp(r.daySource{2}, 'unknown (inserted later)'));
 r = get('rigA_sampleX', 4);
 ok = check(ok, 'ch4: new slice after the comment ''new slice''', height(r) == 2 && ...
-    startsWith(r.startReason{2}, 'comment:') && contains(r.startReason{2}, 'new slice') && ...
+    strcmp(r.startReason{2}, 'comment: new slice') && ...
     strcmp(r.endStatus{1}, 'removed') && strcmp(r.startTime{2}, '2000-01-03 10:05:00'));
 r = get('rigA_sampleX', 5);
 ok = check(ok, 'ch5: new slice after 4 h without signal', height(r) == 2 && ...
@@ -97,8 +98,8 @@ setStatus = @(ch, k, c, st, txt) setRow(ch, k, c, st, txt);
 % gaps: {recording index, channel, from, to, comments}
 gp = {};
 for k = 1:4, gp(end+1, :) = {k, 6, 0, rec{k,3}, ''}; end %#ok<AGROW>
-gp(end+1, :) = {2, 1, 4 * H, 4 * H + 300, ''};
-gp(end+1, :) = {3, 1, 4 * H, 4 * H + 300, ''};
+gp(end+1, :) = {2, 1, 4 * H, 4 * H + 300, 'medium exchange'};   %no new slice (2026-10-11)
+gp(end+1, :) = {3, 1, 4 * H, 4 * H + 300, 'chamber replaced | Sensor board exchanged'};
 gp(end+1, :) = {3, 2, 6 * H, DAY, 'discarded'};
 ch = setStatus(ch, 3, 2, 'removed', 'discarded');
 ch = setStatus(ch, 4, 2, 'no slice', '');

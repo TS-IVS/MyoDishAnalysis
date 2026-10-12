@@ -22,9 +22,18 @@ ROWS = (
      " pulses)",
      1, "", "Assignment", False),
     ("gateMax", "gateMax: longest pulse -> onset delay", "num", None,
-     "longest delay from the eliciting pulse to the contraction onset (Dmax). Near threshold the onset can be "
-     "delayed by ~80 ms",
+     "longest delay from the eliciting pulse to the contraction onset (Dmax) of uncertain contractions (and without "
+     "certainty: manual threshold, unpaced). Near threshold the onset can be delayed by ~80 ms",
      1000, "ms", "Assignment", False),
+    ("gateMaxCertain", "gateMaxCertain: ... of certain contractions", "num", None,
+     "longest pulse -> onset delay of certain contractions (auto threshold, paced: locked to the stimuli or large); "
+     "slices with a long but constant delay (e.g. 0.3 s). At most gateMaxCertainRel x the stimulus interval, at "
+     "least gateMax",
+     1000, "ms", "Assignment", False),
+    ("gateMaxCertainRel", "gateMaxCertainRel: ... at most", "num", None,
+     "the gate of certain contractions is at most this fraction of the interval of the regular pulses before the "
+     "onset (a longer delay cannot be told from an early contraction before the next pulse)",
+     1, "x stimulus interval", "Assignment", False),
     ("gateCore", "gateCore: typical delay range", "num", None,
      "several candidate pulses: pulses before the onset before pulses after it, regular before extra pulses; "
      "of one kind the earliest up to gateCore before the onset, otherwise the latest one",
@@ -104,7 +113,8 @@ ROWS = (
      (("median before the pulse", "preStimulusMedian"), ("minimum before the peak (<= 1.0.0-beta.3)", "minimum")),
      "level from which amplitude, upstroke levels (10 / 50 / 90 %), AUC and diastolic force are measured. "
      "median before the pulse: median of the unfiltered signal diastoleWindowStart ... diastoleWindowEnd "
-     "before the eliciting pulse (contractions without pulse, or a median above the peak: minimum); minimum: "
+     "before the eliciting pulse (before the onset if it follows the pulse by more than gateMax; contractions "
+     "without pulse, or a median above the peak: minimum); minimum: "
      "last minimum of the filtered signal before the peak (versions <= 1.0.0-beta.3). Relaxation levels: "
      "minimum after the peak (both)",
      1, "", "Detection", False),
@@ -136,6 +146,24 @@ ROWS = (
     ("certainUnpacedRel", "certainUnpacedRel", "num", None,
      "certainty, unpaced channels: certain if >= this fraction of the typical amplitude",
      1, "x typical", "Detection", False),
+    ("invertedCheck", "Inverted signal", "check", None,
+     "paced channels: if the force falls after the stimuli (magnet out of position), the contractions are detected "
+     "in the inverted signal (rate, capture) and the force and time parameters are NaN (column invertedSignal)",
+     1, "", "Detection", False),
+    ("invertedRatio", "invertedRatio", "num", None,
+     "inverted signal: the largest fall of the stimulus-triggered median is at least this multiple of its largest "
+     "rise, and the signal deflects downwards (50th - 10th percentile >= this x (90th - 50th percentile))",
+     1, "x rise", "Detection", False),
+    ("invertedMinAmplitude", "invertedMinAmplitude", "num", None,
+     "inverted signal: the fall of the stimulus-triggered median is at least this large",
+     1, "uN", "Detection", False),
+    ("invertedMinWidth", "invertedMinWidth", "num", None,
+     "inverted signal: the stimulus-triggered median lies below half its fall for at least this time (no stimulus "
+     "artifact)",
+     1000, "ms", "Detection", False),
+    ("invertedSkip", "invertedSkip", "num", None,
+     "inverted signal: the stimulus-triggered median starts this time after the pulse (stimulus artifact)",
+     1000, "ms", "Detection", False),
     ("rockerArtifacts", "Rocker artifact rules", "check", None,
      "paced channels, auto threshold: peaks of the rocker movement that are not locked to the stimuli are not "
      "counted (artifact gap and rocker rules)",

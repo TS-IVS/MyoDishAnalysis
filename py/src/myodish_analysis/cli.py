@@ -9,9 +9,10 @@
                   [--rocker-filter] [--external-trigger auto|on|off] [--metadata labels.csv] [--reference ref.mat]
                   [--set name=value ...]
                   [--protocol FFR | RP | ST | PRP | PD | rockerSpeed | all | n ...] [--group-by QUANTITY]
-                  [--list-protocols] [--show-figures] [--quiet]
+                  [--list-protocols] [--report FILE | --no-report] [--show-figures] [--quiet]
 
-Same analysis as MyoDishAnalysis.m (see myodish_analysis). Without --output the summary is printed.
+Same analysis as MyoDishAnalysis.m (see myodish_analysis). Without --output the summary is printed. With --output, the
+analysis report <output>_report.pdf is written as well (report.py; --no-report: not, --report FILE: this file).
 Examples:
     mda examples/example3_humanVentricle.mdd -c 6 --from 0 --to 120
     mda file.mdd -c 1 2 3 --from 600 3000 --to 660 3060 --labels baseline drug --rocker stopped -o results.xlsx
@@ -20,7 +21,7 @@ Examples:
     mda examples/example3_humanVentricle.mdd -c 6 --protocol FFR                  # per pacing frequency
     mda examples/example8_rabbitVentricle_EP.mdd --protocol RP --rocker any       # per S2 interval
 
-TS 2026-10-06 (protocols 2026-10-07)
+TS 2026-10-06 (protocols 2026-10-07; report 2026-10-11)
 """
 from __future__ import annotations
 
@@ -77,6 +78,10 @@ def main(argv=None):
     ap.add_argument("--settings", help="settings file (saved by the GUI or settings.save_settings) or results of an "
                     "analysis: all options from it; the other arguments override them")
     ap.add_argument("--set", nargs="+", default=[], metavar="NAME=VALUE", help="further options (see options)")
+    rp = ap.add_mutually_exclusive_group()
+    rp.add_argument("--report", metavar="FILE", help="analysis report (PDF) to this file (default with --output: "
+                    "<output>_report.pdf)")
+    rp.add_argument("--no-report", action="store_true", help="no analysis report")
     ap.add_argument("--show-figures", action="store_true")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args(argv)
@@ -124,7 +129,8 @@ def main(argv=None):
             a.to_s = [math.inf] * len(a.from_s)
         else:
             ap.error("--from and --to need the same number of values")
-    T, S, info = myodish_analysis(a.mdd, a.channels, a.from_s, a.to_s, output=a.output, labels=a.labels,
+    T, S, info = myodish_analysis(a.mdd, a.channels, a.from_s, a.to_s, output=a.output,
+                                      report=False if a.no_report else a.report, labels=a.labels,
                                       metadata=a.metadata, showFigures=a.show_figures, quiet=a.quiet, protocol=prot,
                                       groupBy=a.group_by, **kw)
     if not a.output and not a.quiet:
@@ -147,19 +153,28 @@ def watch_main(argv=None):
         prog="mda-watch", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Analyse new MyoDish recordings (.mdd) of a folder and its subfolders: every contraction of the "
                     "whole recording, summary per time bin, stimulation protocols; index and report in the results "
-                    "folder. Recordings analysed with another version, other options or changed core code are "
-                    "analysed again (--reanalyze outdated). Same as MyoDishAnalysisWatch.m.",
+                    "folder. Recordings analysed earlier with another version, other options or changed core code "
+                    "are kept and listed in a notice (--reanalyze outdated analyses them again). Same as "
+                    "MyoDishAnalysisWatch.m.",
         epilog="Examples:\n  mda-watch /data/myodish/raw /data/myodish/results --rocker-filter\n"
                "  mda-watch raw results --from-date 2026-10-01 --dry-run\n"
-               "  mda-watch raw results --interval 24          (one pass every 24 h, Ctrl+C stops)\n"
+               "  mda-watch raw results --schedule \"daily 10:00\"       (every day at 10:00, Ctrl+C stops)\n"
+               "  mda-watch raw results --schedule \"weekly Sun 05:00\"  (also \"Mon,Thu 06:30\", \"weekdays 07:00\")\n"
+               "  mda-watch raw results --schedule \"every 120 min\"     (first pass now; also \"every 6 h\")\n"
+               "  mda-watch raw results --reanalyze outdated   (after an update: all recordings of another version)\n"
                "  mda-watch raw results --contractions thinned --thin-mode median --compress --workers 6\n"
                "Daily by the operating system: cron (Linux/macOS), launchd (macOS) or the Windows task scheduler.")
     ap.add_argument("--version", action="version", version=f"MyoDishAnalysis (Python) {__version__}")
     ap.add_argument("raw", help="folder with the recordings (subfolders are searched)")
     ap.add_argument("results", help="results folder (index mda_index.csv, results per recording, reports/)")
-    ap.add_argument("--interval", type=float, default=0, help="hours between passes (default 0 = one pass)")
-    ap.add_argument("--reanalyze", choices=["outdated", "new", "all"], default="outdated",
-                    help="outdated (default): new, changed and outdated recordings; new: only new and changed; all")
+    ap.add_argument("--schedule", help="passes on a schedule until Ctrl+C: 'daily 10:00', 'weekly Sun 05:00', "
+                    "'Mon,Thu 06:30', 'weekdays 07:00', 'every 2 days 10:00', 'every 120 min' (first pass now) or "
+                    "'every 6 h'")
+    ap.add_argument("--interval", type=float, default=0,
+                    help="hours between passes (default 0 = one pass; same as --schedule 'every <h> h')")
+    ap.add_argument("--reanalyze", choices=["new", "outdated", "all"], default="new",
+                    help="new (default): new and changed recordings (recordings of another version or with other "
+                    "options are kept, a notice lists them); outdated: these as well; all: every recording")
     ap.add_argument("--retry-errors", action="store_true", help="analyse recordings with errors again")
     ap.add_argument("--from-date", help="only recordings modified on/after this date (yyyy-mm-dd, dd.mm.yyyy, yymmdd)")
     ap.add_argument("--filter", help="regular expression on the path relative to the raw folder")
@@ -189,6 +204,8 @@ def watch_main(argv=None):
     ap.add_argument("--new-slice-hours", type=float, default=2,
                     help="slice register: a slice after >= n h without signal is a new slice (default 2)")
     ap.add_argument("--workers", type=int, default=1, help="recordings analysed in parallel (processes, default 1)")
+    ap.add_argument("--no-report", action="store_true",
+                    help="no PDF report (reports/mda_report_<date>_<time>.pdf: channels to check with traces)")
     ap.add_argument("--rocker", choices=["any", "stopped", "moving"])
     ap.add_argument("--beats", choices=["all", "stimulated"])
     ap.add_argument("--threshold", type=float, nargs="+", help="detection threshold (uN), one value or one per channel")
@@ -214,14 +231,20 @@ def watch_main(argv=None):
             ap.error(f"--set: NAME=VALUE expected, not '{s}'")
         k, v = s.split("=", 1)
         kw[k] = [_value(x) for x in v.split(",")] if "," in v else _value(v)
-    watch(a.raw, a.results, interval=a.interval, reanalyze=a.reanalyze, retry_errors=a.retry_errors,
-          from_date=a.from_date, filter=a.filter, max_files=a.max_files, dry_run=a.dry_run,
+    if a.schedule:
+        from .watch import parse_schedule
+        try:
+            parse_schedule(a.schedule)
+        except ValueError as ex:
+            ap.error(str(ex))
+    watch(a.raw, a.results, interval=a.interval, schedule=a.schedule, reanalyze=a.reanalyze,
+          retry_errors=a.retry_errors, from_date=a.from_date, filter=a.filter, max_files=a.max_files, dry_run=a.dry_run,
           min_file_age_minutes=a.min_age, incomplete_after_hours=a.incomplete_after, bin_minutes=a.bin_minutes,
           protocols=not a.no_protocols, include_protocols=a.include_protocols,
           protocol_margin_seconds=a.protocol_margin, contractions=a.contractions, thin_factor=a.thin_factor,
           thin_mode=a.thin_mode, compress=a.compress, overview_seconds=a.overview_seconds, events=not a.no_events,
           gaps=not a.no_gaps, register=not a.no_register, new_slice_hours=a.new_slice_hours, workers=a.workers,
-          quiet=a.quiet, **kw)
+          report=not a.no_report, quiet=a.quiet, **kw)
     return 0
 
 

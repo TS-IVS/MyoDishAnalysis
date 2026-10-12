@@ -24,6 +24,9 @@ info          dict: file facts, options, detection threshold per channel and ran
 
 OPTIONS (keywords)
   output='results.xlsx'   write the results (.xlsx: sheets contractions, summary, parameters, info; or .csv)
+  report=None             analysis report (PDF, report.py: channels to check with traces and the commands to open
+                          them in the GUI): default with output: <output without extension>_report.pdf; False: none;
+                          a file name: this file (also without output) (2026-10-11)
   labels=['baseline', 'drug']   names of the time ranges
   metadata=m              labels per channel (dict, DataFrame or .csv/.xlsx file), see labels.py
   showFigures=True        plot the signal with the detected contractions (matplotlib; ranges <= 30 min, <= 16)
@@ -67,6 +70,7 @@ from .options import options as make_options
 from .protocol_results import RESULT_COLUMNS, protocol_results
 from .protocols import add_empty_group_columns, find_protocols, group_beats
 from .read_mdd import read_mdd
+from .report import analysis_report, report_path
 from .rocker_filter import rocker_filter
 from .summarize import summarize
 from .write_results import _mat2str15, _num15, write_results
@@ -80,7 +84,7 @@ def datenum_to_timestamps(dn):
     return pd.to_datetime((dn - DATENUM_1970) * 86400.0, unit="s")
 
 
-def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output=None, labels=None,
+def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output=None, report=None, labels=None,
                          metadata=None, showFigures=False, quiet=False, chunkSeconds=1800, protocol=None, groupBy=None,
                          **opt_kw):
     rockerGiven = any(k.lower() == "rocker" for k in opt_kw)
@@ -135,6 +139,26 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     ranges = np.c_[fr, to]
     ranges[ranges < 0] = H.totalSeconds + ranges[ranges < 0]
     ranges = np.minimum(np.maximum(ranges, 0), H.totalSeconds)
+    protocolsAll = None
+    protRow = list(range(ranges.shape[0]))  # row of every analysed range in protocolsAll
+    if protocols is not None:  # every protocol on its own: one outside the data (or with an error, below) is not
+        # analysed (note), the others are (2026-10-11)
+        protocolsAll = protocols.copy()
+        protocolsAll["note"] = protocolsAll["note"].fillna("").astype(str) if "note" in protocolsAll else ""
+        empty = ranges[:, 1] <= ranges[:, 0]
+        for r in np.flatnonzero(empty):
+            why = (f"not analysed: outside the recorded data ({fr[r]:g} ... {to[r]:g} s, file length "
+                   f"{H.totalSeconds:.1f} s)")
+            H.notes.append(f"protocol {labels[r]}: {why}")
+            _add_note(protocolsAll, r, why)
+        if empty.all():
+            raise ValueError(f"No protocol within the recorded data (file length {H.totalSeconds:.1f} s).")
+        keep = np.flatnonzero(~empty)
+        protRow = [int(k) for k in keep]
+        ranges = ranges[keep]
+        protocols = protocols.iloc[keep].reset_index(drop=True)
+        labels = [labels[k] for k in keep]
+        groupByR = [groupByR[k] for k in keep]
     if np.any(ranges[:, 1] <= ranges[:, 0]):
         raise ValueError(f"Empty time range (file length {H.totalSeconds:.1f} s).")
     nR = ranges.shape[0]
@@ -180,125 +204,140 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     nFig = 0
     f0cache = np.zeros((0, 2))
     for r in range(nR):
-        edges = np.unique(np.r_[colon(ranges[r, 0], chunkSeconds, ranges[r, 1]), ranges[r, 1]])
-        nQ = edges.size - 1
-        Bc = [[None] * nQ for _ in channels]
-        Cs = [[None] * nQ for _ in channels]
-        lastB = [None] * len(channels)
-        lastC = [None] * len(channels)
-        S = None
-        Sres = None  # S2interval results: data of the whole range (traces)
-        for q in range(nQ):
-            S = read_mdd(H, max(0.0, edges[q] - pad), edges[q + 1] + pad, opts)
-            sp = np.asarray(S.get("spikes", np.zeros((0, 4))), float).reshape(-1, 4)
-            if sp.shape[0]:  # within the chunk (the padding belongs to the neighbours), analysed channels
-                ok = (sp[:, 1] >= edges[q]) & ((sp[:, 1] < edges[q + 1]) | (q == nQ - 1) & (sp[:, 1] <= edges[q + 1]))
-                ok &= np.isin(sp[:, 0], np.asarray(channels, float))
-                spikes.append(sp[ok])
-            sub = [edges[q], edges[q + 1]]
-            if q < nQ - 1:
-                sub[1] -= 1e-9  # half-open chunks: no contraction twice
-            if opts.rockerFilter:  # rocker artifact of all channels of this chunk at once
-                oR = Struct(opts)
-                if oR.rockerFrequency is None and f0cache.shape[0]:
-                    oR.rockerFrequency = f0cache
-                S, RFq = rocker_filter(S, channels, oR)
-                if RFq and RFq[0].f0table.shape[0]:
-                    ft = RFq[0].f0table[~np.isnan(RFq[0].f0table[:, 1])]
-                    for row in ft:
-                        same = (f0cache[:, 0] == row[0]) | (np.isnan(f0cache[:, 0]) & np.isnan(row[0]))
-                        if f0cache.shape[0] == 0 or not same.any():
-                            f0cache = np.r_[f0cache, row[None, :]]
+        n0 = [len(x) for x in (parts, sumParts, thrInfo, rfRows, resRows, pulseParts, spikes)]
+        try:
+            edges = np.unique(np.r_[colon(ranges[r, 0], chunkSeconds, ranges[r, 1]), ranges[r, 1]])
+            nQ = edges.size - 1
+            Bc = [[None] * nQ for _ in channels]
+            Cs = [[None] * nQ for _ in channels]
+            lastB = [None] * len(channels)
+            lastC = [None] * len(channels)
+            S = None
+            Sres = None  # S2interval results: data of the whole range (traces)
+            for q in range(nQ):
+                S = read_mdd(H, max(0.0, edges[q] - pad), edges[q + 1] + pad, opts)
+                sp = np.asarray(S.get("spikes", np.zeros((0, 4))), float).reshape(-1, 4)
+                if sp.shape[0]:  # within the chunk (the padding belongs to the neighbours), analysed channels
+                    ok = (sp[:, 1] >= edges[q]) & ((sp[:, 1] < edges[q + 1])
+                                                  | (q == nQ - 1) & (sp[:, 1] <= edges[q + 1]))
+                    ok &= np.isin(sp[:, 0], np.asarray(channels, float))
+                    spikes.append(sp[ok])
+                sub = [edges[q], edges[q + 1]]
+                if q < nQ - 1:
+                    sub[1] -= 1e-9  # half-open chunks: no contraction twice
+                if opts.rockerFilter:  # rocker artifact of all channels of this chunk at once
+                    oR = Struct(opts)
+                    if oR.rockerFrequency is None and f0cache.shape[0]:
+                        oR.rockerFrequency = f0cache
+                    S, RFq = rocker_filter(S, channels, oR)
+                    if RFq and RFq[0].f0table.shape[0]:
+                        ft = RFq[0].f0table[~np.isnan(RFq[0].f0table[:, 1])]
+                        for row in ft:
+                            same = (f0cache[:, 0] == row[0]) | (np.isnan(f0cache[:, 0]) & np.isnan(row[0]))
+                            if f0cache.shape[0] == 0 or not same.any():
+                                f0cache = np.r_[f0cache, row[None, :]]
+                for c, ch in enumerate(channels):
+                    optsC = Struct(opts)
+                    optsC.zeroForce = zero_of(c)
+                    optsC.threshold = thr_of(c)
+                    Bq, Cq = analyze_channel(S, ch, sub, optsC)
+                    Bc[c][q] = Bq
+                    lastB[c] = Bq
+                    lastC[c] = Cq
+                    Cs[c][q] = Struct({k: v for k, v in Cq.items() if k not in ("t", "f", "rockerArtifact")})
+                    thrInfo.append([r + 1, ch, edges[q], edges[q + 1], Cq.threshold, Cq.maxStimToPeak,
+                                    max(0.0, edges[q] - pad), edges[q + 1] + pad])  # data window (GUI: open results)
+                    if opts.rockerFilter and Cq.rockerFilter is not None:
+                        RF = Cq.rockerFilter
+                        rfRows.append([labels[r], ch, edges[q], edges[q + 1], RF.status, RF.f0, RF.artifactPP, RF.r2,
+                                       100 * RF.correctedFraction, RF.message])
             for c, ch in enumerate(channels):
-                optsC = Struct(opts)
-                optsC.zeroForce = zero_of(c)
-                optsC.threshold = thr_of(c)
-                Bq, Cq = analyze_channel(S, ch, sub, optsC)
-                Bc[c][q] = Bq
-                lastB[c] = Bq
-                lastC[c] = Cq
-                Cs[c][q] = Struct({k: v for k, v in Cq.items() if k not in ("t", "f", "rockerArtifact")})
-                thrInfo.append([r + 1, ch, edges[q], edges[q + 1], Cq.threshold, Cq.maxStimToPeak,
-                                max(0.0, edges[q] - pad), edges[q + 1] + pad])  # data window read (GUI: open results)
-                if opts.rockerFilter and Cq.rockerFilter is not None:
-                    RF = Cq.rockerFilter
-                    rfRows.append([labels[r], ch, edges[q], edges[q + 1], RF.status, RF.f0, RF.artifactPP, RF.r2,
-                                   100 * RF.correctedFraction, RF.message])
-        for c, ch in enumerate(channels):
-            B = pd.concat(Bc[c], ignore_index=True)
-            B.attrs = dict(Bc[c][0].attrs)
-            B["contraction"] = np.arange(1, len(B) + 1, dtype=float)
-            CsC = Cs[c]
-            Cm = Struct(CsC[0])
-            Cm.stimTimes = _in_range_of(CsC, "stimTimes", "stimTimes")
-            Cm.stimCaptured = _in_range_of(CsC, "stimCaptured", "stimTimes", bool)
-            Cm.stimCapturedCertain = _in_range_of(CsC, "stimCapturedCertain", "stimTimes", bool)
-            Cm.stimDuringContraction = _in_range_of(CsC, "stimDuringContraction", "stimTimes", bool)
-            Cm.extraTimes = _in_range_of(CsC, "extraTimes", "extraTimes")
-            Cm.extraElicited = _in_range_of(CsC, "extraElicited", "extraTimes", bool)
-            Cm.threshold = float(np.median([x.threshold for x in CsC]))
-            if opts.pulseTable:  # pulses of the range: contraction numbers of the whole range
-                Pc = [x.get("pulses") for x in CsC]
-                Pc = [x for x in Pc if x is not None and len(x) > 0]
-                if Pc:
-                    Pc = pd.concat(Pc, ignore_index=True)
-                    pos = pd.Series(B["contraction"].to_numpy(float), index=B["t_peak"].to_numpy(float))
-                    pos = pos[~pos.index.duplicated()]
-                    Pc["contraction"] = Pc["t_peak"].map(pos).to_numpy(float)
-                    Pc.insert(0, "range", labels[r])
-                    pulseParts.append(Pc)
-            if grouping and groupByR[r].lower() != "none":
-                steadyN = 0  # FFR protocols: steady state per frequency (2026-10-10)
-                if protocols is not None and str(protocols["type"].iloc[r]).upper() == "FFR":
-                    steadyN = int(opts.steadyStateBeats)
-                B, T, Z, gNotes = group_beats(H, B, Cm, ranges[r], groupByR[r], opts, return_stimuli=True,
-                                              steady_n=steadyN, return_notes=True)
-                for nt in gNotes:
-                    H.notes.append("%s, channel %d: %s" % (labels[r], ch, nt))
-                gb = groupByR[r].lower()
-                if gb in ("pacingfrequency", "stimcurrent", "s2interval", "pauselength"):
-                    trace = None
-                    if gb == "s2interval":  # S2 response: traces of the whole range
-                        if Sres is None:
-                            Sres = read_mdd(H, max(0.0, ranges[r, 0] - 2), ranges[r, 1] + 2, opts)
-                        optsC = Struct(opts)
-                        optsC.zeroForce = zero_of(c)
-                        optsC.threshold = thr_of(c)
-                        _, Cx = analyze_channel(Sres, ch, ranges[r], optsC)
-                        trace = dict(t=Cx.t, f=Cx.f, tR=Sres.t, rockerOn=Sres.rockerOn)
-                    Rr = protocol_results(groupByR[r], T, Z, trace, opts)
-                    pNote = str(protocols["note"].iloc[r]) if protocols is not None and "note" in protocols else ""
-                    resRows.append(dict({"range": labels[r], "channel": ch, "from": float(ranges[r, 0]),
-                                         "to": float(ranges[r, 1]), "groupBy": groupByR[r]}, **Rr,
-                                        protocolNote=pNote))
-            else:
-                T = summarize(B, Cm, ranges[r])
-                if grouping:  # same columns as the grouped ranges
-                    B, T = add_empty_group_columns(B, T)
-            T.insert(0, "range", labels[r])
-            sumParts.append(T)
-            B.insert(0, "range", labels[r])
-            parts.append(B)
-            if not quiet:
-                print(f"  {labels[r]}, channel {ch}: {len(B)} contractions detected ({int(B['uncertain'].sum())} "
-                      f"uncertain), {int(B['included'].sum())} included (threshold {Cm.threshold:.0f} uN, "
-                      f"{Cm.thresholdMode})")
-                if (opts.rocker == "stopped" and len(B) > 0 and not B["included"].any()
-                        and B["rockerMoving"].astype(bool).all()):
-                    print("    the rocker moved during every contraction: rocker='any' includes them")
-                if opts.rockerFilter and rfRows:
-                    msgs = []
-                    for row in rfRows:
-                        if row[0] == labels[r] and row[1] == ch:
-                            import re
-                            m = re.sub(r"^Rocker filter, channel \d+: ", "", row[9])
-                            if m not in msgs:
-                                msgs.append(m)
-                    print("    rocker filter: " + " | ".join(msgs[:3]))
-            if showFigures and nFig < 16 and nQ == 1:
-                nFig += 1
-                _plot_channel(lastC[c], lastB[c], S, ranges[r],
-                              f"{os.path.basename(H.file)} - channel {ch} - {labels[r]}")
+                B = pd.concat(Bc[c], ignore_index=True)
+                B.attrs = dict(Bc[c][0].attrs)
+                B["contraction"] = np.arange(1, len(B) + 1, dtype=float)
+                CsC = Cs[c]
+                Cm = Struct(CsC[0])
+                Cm.stimTimes = _in_range_of(CsC, "stimTimes", "stimTimes")
+                Cm.stimCaptured = _in_range_of(CsC, "stimCaptured", "stimTimes", bool)
+                Cm.stimCapturedCertain = _in_range_of(CsC, "stimCapturedCertain", "stimTimes", bool)
+                Cm.stimDuringContraction = _in_range_of(CsC, "stimDuringContraction", "stimTimes", bool)
+                Cm.extraTimes = _in_range_of(CsC, "extraTimes", "extraTimes")
+                Cm.extraElicited = _in_range_of(CsC, "extraElicited", "extraTimes", bool)
+                Cm.threshold = float(np.median([x.threshold for x in CsC]))
+                Cm.invertedSignal = any(bool(x.get("invertedSignal", False)) for x in CsC)  # 2026-10-11
+                if opts.pulseTable:  # pulses of the range: contraction numbers of the whole range
+                    Pc = [x.get("pulses") for x in CsC]
+                    Pc = [x for x in Pc if x is not None and len(x) > 0]
+                    if Pc:
+                        Pc = pd.concat(Pc, ignore_index=True)
+                        pos = pd.Series(B["contraction"].to_numpy(float), index=B["t_peak"].to_numpy(float))
+                        pos = pos[~pos.index.duplicated()]
+                        Pc["contraction"] = Pc["t_peak"].map(pos).to_numpy(float)
+                        Pc.insert(0, "range", labels[r])
+                        pulseParts.append(Pc)
+                if grouping and groupByR[r].lower() != "none":
+                    steadyN = 0  # FFR protocols: steady state per frequency (2026-10-10)
+                    if protocols is not None and str(protocols["type"].iloc[r]).upper() == "FFR":
+                        steadyN = int(opts.steadyStateBeats)
+                    B, T, Z, gNotes = group_beats(H, B, Cm, ranges[r], groupByR[r], opts, return_stimuli=True,
+                                                  steady_n=steadyN, return_notes=True)
+                    for nt in gNotes:
+                        H.notes.append("%s, channel %d: %s" % (labels[r], ch, nt))
+                    gb = groupByR[r].lower()
+                    if gb in ("pacingfrequency", "stimcurrent", "s2interval", "pauselength"):
+                        trace = None
+                        if gb == "s2interval":  # S2 response: traces of the whole range
+                            if Sres is None:
+                                Sres = read_mdd(H, max(0.0, ranges[r, 0] - 2), ranges[r, 1] + 2, opts)
+                            optsC = Struct(opts)
+                            optsC.zeroForce = zero_of(c)
+                            optsC.threshold = thr_of(c)
+                            _, Cx = analyze_channel(Sres, ch, ranges[r], optsC)
+                            trace = dict(t=Cx.t, f=Cx.f, tR=Sres.t, rockerOn=Sres.rockerOn)
+                        Rr = protocol_results(groupByR[r], T, Z, trace, opts)
+                        pNote = str(protocols["note"].iloc[r]) if protocols is not None and "note" in protocols else ""
+                        resRows.append(dict({"range": labels[r], "channel": ch, "from": float(ranges[r, 0]),
+                                             "to": float(ranges[r, 1]), "groupBy": groupByR[r]}, **Rr,
+                                            protocolNote=pNote))
+                else:
+                    T = summarize(B, Cm, ranges[r])
+                    if grouping:  # same columns as the grouped ranges
+                        B, T = add_empty_group_columns(B, T)
+                T["invertedSignal"] = bool(Cm.invertedSignal)  # signal inverted in (a chunk of) the range
+                T.insert(0, "range", labels[r])
+                sumParts.append(T)
+                B.insert(0, "range", labels[r])
+                parts.append(B)
+                if not quiet:
+                    print(f"  {labels[r]}, channel {ch}: {len(B)} contractions detected ({int(B['uncertain'].sum())} "
+                          f"uncertain), {int(B['included'].sum())} included (threshold {Cm.threshold:.0f} uN, "
+                          f"{Cm.thresholdMode})")
+                    if (opts.rocker == "stopped" and len(B) > 0 and not B["included"].any()
+                            and B["rockerMoving"].astype(bool).all()):
+                        print("    the rocker moved during every contraction: rocker='any' includes them")
+                    if opts.rockerFilter and rfRows:
+                        msgs = []
+                        for row in rfRows:
+                            if row[0] == labels[r] and row[1] == ch:
+                                import re
+                                m = re.sub(r"^Rocker filter, channel \d+: ", "", row[9])
+                                if m not in msgs:
+                                    msgs.append(m)
+                        print("    rocker filter: " + " | ".join(msgs[:3]))
+                if showFigures and nFig < 16 and nQ == 1:
+                    nFig += 1
+                    _plot_channel(lastC[c], lastB[c], S, ranges[r],
+                                  f"{os.path.basename(H.file)} - channel {ch} - {labels[r]}")
+        except Exception as ex:  # noqa: BLE001  protocols: the others are analysed (2026-10-11)
+            if protocols is None:
+                raise
+            for x, k in zip((parts, sumParts, thrInfo, rfRows, resRows, pulseParts, spikes), n0):
+                del x[k:]
+            why = f"not analysed: {type(ex).__name__}: {ex}"
+            H.notes.append(f"protocol {labels[r]}: {why}")
+            _add_note(protocolsAll, protRow[r], why)
+    if not parts:
+        raise ValueError("No range analysed: " + " | ".join(H.notes[-nR:]))
     thrInfo = sorted(thrInfo, key=lambda x: (x[0], x[1], x[2]))  # order: range, channel, time
     units = dict(parts[0].attrs.get("units", {})) if parts else {}
     contractions = pd.concat(parts, ignore_index=True)
@@ -342,7 +381,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     info["channels"] = channels
     info["ranges"] = ranges
     info["rangeLabels"] = labels
-    info["protocols"] = protocols
+    info["protocols"] = protocolsAll if protocolsAll is not None else protocols  # all, with notes
     info["groupBy"] = groupByR
     info["labels"] = Lbl
     info["options"] = opts
@@ -375,8 +414,20 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
         write_results(output, contractions, summary, info)
         if not quiet:
             print(f"  results written to {output}")
+    rep = report_path(output, report)
+    if rep:  # analysis report (2026-10-11)
+        R = analysis_report(rep, H.file, contractions, summary, info, results=output or None)
+        if not quiet:
+            n = int((R["level"] == "check").sum())
+            print(f"  report written to {rep}" + (f" ({n} channel(s) to check)" if n else ""))
     return contractions, summary, info
 
+
+
+def _add_note(P, r, why):
+    """note of protocol row r (protocols table)"""
+    old = str(P.at[P.index[r], "note"]) if "note" in P else ""
+    P.at[P.index[r], "note"] = "; ".join(x for x in (old if old != "nan" else "", why) if x)
 
 def _in_range_of(CsC, field, time_field, dtype=float):
     """values of the field of all chunks (channel info of analyze_channel) whose times lie in the chunk's range"""

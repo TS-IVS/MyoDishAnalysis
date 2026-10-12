@@ -664,6 +664,13 @@ def test_results_reopened_in_gui_and_rocker_window(tmp_path):
         ws.append(w3)
         assert w3.ch == 5 and w3.zero_user == {5: -4000.0} and w3.manual_off == [t0]
         assert "the same as here" in w3.lStatus.text()
+        # opened at a channel and window (commands of the analysis report, 2026-10-11)
+        w4 = MainWindow(rx, channel=5, window=[70, 90])
+        ws.append(w4)
+        assert w4.ch == 5 and w4.thr_user == {5: 150.0} and w4.range == [70.0, 90.0]
+        w5 = MainWindow(f, channel=5, window=[70, 90])
+        ws.append(w5)
+        assert w5.ch == 5 and w5.cCh.currentIndex() == 4 and abs(w5.S.fromSeconds - 70) < 1 and w5.B is not None
         # rocker artifact window: data with the settings (table info), figure
         rw = w2.on_rocker_window()
         names, tabs = rw.export_tables()
