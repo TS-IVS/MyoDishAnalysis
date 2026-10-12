@@ -109,7 +109,8 @@ def test_analysis_report(tmp_path):
     assert R2.loc[2, "python"] == f'mda-gui "{out}" --channel 3 --window 149 169'
     # stricter flags: amplitude below 1000 uN is a slice-quality flag; no inversion check: ch3 not flagged red
     assert report_flags(S, C, amplitude=1000)["flags"].tolist()[:2] == ["A", "DA"]
-    assert report_path("a/res.xlsx") == os.path.join("a", "res_report.pdf") and report_path("res.csv", False) is None
+    assert report_path(os.path.join("a", "res.xlsx")) == os.path.join("a", "res_report.pdf")
+    assert report_path("res.csv", False) is None
     assert report_path(None) is None and report_path(None, "r.pdf") == "r.pdf" and report_path("r.txt", "on") == \
         "r.txt_report.pdf"
     mda.myodish_analysis(f, [1], 0, 60, output=str(tmp_path / "n.csv"), report=False, quiet=True)
