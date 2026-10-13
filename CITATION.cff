@@ -17,7 +17,7 @@ authors:
     email: "thomas.seidel@fau.de"
     orcid: "https://orcid.org/0000-0002-3127-1693"
 version: "1.0.0-beta.5"
-date-released: "2026-10-12"
+date-released: "2026-10-13"
 license: "GPL-3.0-or-later"
 repository-code: "https://github.com/TS-IVS/MyoDishAnalysis"
 doi: "10.5281/zenodo.23287809"

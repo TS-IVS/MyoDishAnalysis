@@ -4,50 +4,12 @@ All notable changes. Versions: `MAJOR.MINOR.PATCH` (pre-releases `-beta.N`; Pyth
 MATLAB and Python versions have the same version number and give the same results.
 
 ## [Unreleased]
-### Added
-- **Arrhythmic pacing** (2026-10-13; options `'arrhythmicChannels'`, `'arrhythmicDetection'` (on),
-  `'arrhythmicMinVariability'` 0.1, `'arrhythmicMinFraction'` 0.5, `'arrhythmicWindow'` 60 s; GUI *Advanced ...* →
-  *Protocols*): slices paced continuously at a high or irregular rate (e.g. right atrium at 5 Hz with a stimulus
-  interval CV of 30–60 %) miss many pulses by design. A channel is marked (summary column `arrhythmicPacing`) if it is
-  listed in `'arrhythmicChannels'` or if the CV of its stimulus intervals exceeds 10 % in windows that make up more
-  than 50 % of the paced time (60-s windows with ≥ 6 regular pulses that do not overlap a stimulation protocol of the
-  log file; analyses of the protocols: only `'arrhythmicChannels'`). New summary columns `stimVariability_percent`,
-  `arrhythmicFraction`, `pacedSeconds`, `arrhythmicPacing`. The analysis report does not flag the capture (C) and the
-  amplitude CV (V) of these channels and does not count their missed beats in the noise index (N); the capture is
-  shown with `~`. The text report of the watcher writes `arrhythmic pacing` instead of the capture flag.
-  Check on all human right-atrium recordings of 2022–2026 (1769 recordings): of 714 channels paced at 5 Hz with an
-  interval CV of 35–60 %, 712 are detected (the 2 others: misread status channel, flag F; 5th percentile of the
-  variable fraction 0.70); channels with regular pacing at 0.5 Hz (1813) or 1 Hz (1171): 20 detected, all paced
-  arrhythmically during most of the recording or with intervals of 0.86–1.2 s (CV 10.5 %, one experiment, just above
-  the threshold); daily protocol schedules of arrhythmically paced cultures (regular pacing between the protocols,
-  arrhythmic pacing after them) have a variable fraction of about 0.4 and are not marked. 396 recordings of other
-  tissues (2024, 2026; 3168 channels) and 41 atrial recordings of other species: no channel detected.
-- **Analysis report: red flag F** (2026-10-13; watcher option `'flagStimFrequency'` / `flag_stim_frequency`, 10 Hz):
-  stimulus frequency (1 / median stimulus interval of a range) above 10 Hz; such rates (30–100 Hz in 9 recordings of
-  2022–2026 that are not paced arrhythmically) come from a misread status channel.
 
-### Changed
-- **Inverted signal confirmed by the detection** (2026-10-12; option `'invertedMinCapture'` 0.2): the test of
-  1.0.0-beta.5 is the suspicion; the inversion is kept only if the normal detection in the negated signal finds certain
-  stimulated contractions for ≥ 20 % of the pulses of the section, otherwise the section is analysed again as it is.
-  Rocker waves partly in phase with the pulses and upright contractions just before the pulses were taken for an
-  inverted signal by 1.0.0-beta.5; their contractions in the negated signal are uncertain. Check on all 1581 ranges
-  (301 channels) that 1.0.0-beta.5 flagged in the recordings of 2023, 2024 and 2026 (Python; MATLAB gives the same
-  result in 18 of 18 ranges checked): 1069 ranges stay inverted (2023: 437 → 25); channels flagged I in the analysis
-  report 103 → 90; all 10 channels checked visually as rocker waves or upright contractions lose the flag, 14 of 15
-  checked visually as inverted keep it (the one lost: 60 µN deflections, < 20 % certain capture in the suspected
-  section). The certain capture in the negated signal is bimodal (499 of 1581 ranges ≈ 0, 1024 ≥ 90 %, 55 in between).
-  Rules tested before and not taken over: fall ≥ 0.25 × (90th − 10th percentile of the signal) removed 4 of the 15
-  inverted channels and only 2 of 9 rocker channels; a lock test against sham triggers with a consistency test kept
-  the upright contractions before the pulses. Sign changes within a recording occur, mostly with a large step of the
-  baseline (chamber taken out and put back); the decision is made per section (chunk of ≤ 30 min).
-- **Analysis report**: an inverted signal in less than 1 % of the contractions is given as "< 1 %" (before e.g.
-  "0 %").
-
-## [1.0.0-beta.5] – 2026-10-12
+## [1.0.0-beta.5] – 2026-10-13
 Fifth pre-release for testers (Git tag `v1.0.0-beta.5`). **Analysis results change** for contractions with a long
 delay after the pulse (longer gate, diastolic window), inverted signals and protocols found in comments (below);
-`gateMaxCertain = 0.15` and `invertedCheck = false` give the former stimulus assignment and force values.
+`gateMaxCertain = 0.15` and `invertedCheck = false` give the former stimulus assignment and force values. New summary
+columns after `stimFrequency` (arrhythmic pacing).
 **The watcher no longer analyses all recordings again after an update** (`'reanalyze','new'` is the default; a notice
 names the recordings of another version and the command `'reanalyze','outdated'`).
 
@@ -66,12 +28,14 @@ names the recordings of another version and the command `'reanalyze','outdated'`
     rate analysed); **N** noise suspected = uncertain contractions ≥ 25 % and extra + missed beats ≥ 15 % (noise index
     = uncertain % × (extra % + missed %) / 100, listed and used for the order; unpaced channel: uncertain ≥ 25 %);
     **S** large extra beats (certain extra beats ≥ 5 % with > 3 × the paced amplitude); **D** delay pulse → onset >
-    150 ms. Uncertain contractions with regular capture (few extra and missed beats) are not flagged: in visual checks
+    150 ms; **F** stimulus frequency > 10 Hz (see below). Uncertain contractions with regular capture (few extra and
+    missed beats) are not flagged: in visual checks
     they were real contractions near the detection threshold, while uncertain contractions with many missed or extra
     beats were mostly rocker waves.
   - slice quality (yellow: possibly poor biological quality, also e.g. an effect of a treatment; the user decides):
     capture < 90 %, extra beats > 10 % (spontaneous activity), amplitude < 75 µN, amplitude change > 30 % (first →
     last range, listed with its time span, e.g. "amplitude change +660 % over 24 h"), amplitude CV > 30 %.
+  - An inverted signal in less than 1 % of the contractions is given as "< 1 %".
   - Page 1: recordings × channels with capture and flag codes, legend below; page 2: list of the channels to check and
     of those with slice-quality flags, with the channel label in parentheses if given (treatment with concentration,
     otherwise sliceGroup / sampleGroup, e.g. `ch 7 (PMA 100 nM): extra beats 30 %`); then one page per recording with
@@ -117,6 +81,40 @@ names the recordings of another version and the command `'reanalyze','outdated'`
   (`beatType`, missed beats, `peakToPeakFrequency`, `stimFrequency`) are still analysed; all force and time parameters
   are NaN; column `invertedSignal` in the contractions and in the summary. Before, the force values of such a channel
   were meaningless (e.g. contractions detected at the relaxation).
+- **Inverted signal confirmed by the detection** (2026-10-12; option `'invertedMinCapture'` 0.2): the test above is
+  the suspicion; the inversion is kept only if the normal detection in the negated signal finds certain stimulated
+  contractions for ≥ 20 % of the pulses of the section, otherwise the section is analysed again as it is. Rocker
+  waves partly in phase with the pulses and upright contractions just before the pulses were taken for an inverted
+  signal by the test alone; their contractions in the negated signal are uncertain. Check on all 1581 ranges (301
+  channels) that the test alone flagged in the recordings of 2023, 2024 and 2026 (Python; MATLAB gives the same
+  result in 18 of 18 ranges checked): 1069 ranges stay inverted (2023: 437 → 25); channels flagged I in the analysis
+  report 103 → 90; all 10 channels checked visually as rocker waves or upright contractions lose the flag, 14 of 15
+  checked visually as inverted keep it (the one lost: 60 µN deflections, < 20 % certain capture in the suspected
+  section). The certain capture in the negated signal is bimodal (499 of 1581 ranges ≈ 0, 1024 ≥ 90 %, 55 in between).
+  Rules tested before and not taken over: fall ≥ 0.25 × (90th − 10th percentile of the signal) removed 4 of the 15
+  inverted channels and only 2 of 9 rocker channels; a lock test against sham triggers with a consistency test kept
+  the upright contractions before the pulses. Sign changes within a recording occur, mostly with a large step of the
+  baseline (chamber taken out and put back); the decision is made per section (chunk of ≤ 30 min).
+- **Arrhythmic pacing** (2026-10-13; options `'arrhythmicChannels'`, `'arrhythmicDetection'` (on),
+  `'arrhythmicMinVariability'` 0.1, `'arrhythmicMinFraction'` 0.5, `'arrhythmicWindow'` 60 s; GUI *Advanced ...* →
+  *Protocols*): slices paced continuously at a high or irregular rate (e.g. right atrium at 5 Hz with a stimulus
+  interval CV of 30–60 %) miss many pulses by design. A channel is marked (summary column `arrhythmicPacing`) if it is
+  listed in `'arrhythmicChannels'` or if the CV of its stimulus intervals exceeds 10 % in windows that make up more
+  than 50 % of the paced time (60-s windows with ≥ 6 regular pulses that do not overlap a stimulation protocol of the
+  log file; analyses of the protocols: only `'arrhythmicChannels'`). New summary columns `stimVariability_percent`,
+  `arrhythmicFraction`, `pacedSeconds`, `arrhythmicPacing`. The analysis report does not flag the capture (C) and the
+  amplitude CV (V) of these channels and does not count their missed beats in the noise index (N); the capture is
+  shown with `~`. The text report of the watcher writes `arrhythmic pacing` instead of the capture flag.
+  Check on all human right-atrium recordings of 2022–2026 (1769 recordings): of 714 channels paced at 5 Hz with an
+  interval CV of 35–60 %, 712 are detected (the 2 others: misread status channel, flag F; 5th percentile of the
+  variable fraction 0.70); channels with regular pacing at 0.5 Hz (1813) or 1 Hz (1171): 20 detected, all paced
+  arrhythmically during most of the recording or with intervals of 0.86–1.2 s (CV 10.5 %, one experiment, just above
+  the threshold); daily protocol schedules of arrhythmically paced cultures (regular pacing between the protocols,
+  arrhythmic pacing after them) have a variable fraction of about 0.4 and are not marked. 396 recordings of other
+  tissues (2024, 2026; 3168 channels) and 41 atrial recordings of other species: no channel detected.
+- **Analysis report: red flag F** (2026-10-13; watcher option `'flagStimFrequency'` / `flag_stim_frequency`, 10 Hz):
+  stimulus frequency (1 / median stimulus interval of a range) above 10 Hz; such rates (30–100 Hz in 9 recordings of
+  2022–2026 that are not paced arrhythmically) come from a misread status channel.
 
 ### Changed
 - **Watcher: default `'reanalyze','new'`** (2026-10-12; before `'outdated'`): recordings analysed with another version

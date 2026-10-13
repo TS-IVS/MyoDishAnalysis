@@ -8,7 +8,7 @@ Each has a command-line function (time range "from – to") and a GUI to view th
 range or single contractions interactively. This file documents the MATLAB version (the reference);
 the Python version (`py/`) gives the same results.
 
-Version 1.0.0-beta.5 (2026-10-12) · Thomas Seidel, Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU) / InVitroSys GmbH.
+Version 1.0.0-beta.5 (2026-10-13) · Thomas Seidel, Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU) / InVitroSys GmbH.
 Public beta version (feedback welcome: GitHub issues or e-mail). Until 2026-10-06 named MyoDishContractionTool (functions MyoDishContractions,
 MyoDishContractionsGUI, mdct_*); now MyoDishAnalysis, MyoDishAnalysisGUI, mda_*.
 Python version with the same results: folder `py/` (see `py/README.md`).
@@ -761,13 +761,13 @@ percentile ≥ 2 × (90th − 50th percentile)). The median and the percentiles 
 contractions that are not locked to the pulses and upright contractions just before the pulses from being taken for an
 inverted signal (in a sample of 121 recordings, a first version of the test with the mean flagged 38 channels, mostly
 for such reasons; the final test flags the channel whose magnet was out of position and one 30-min period without
-contractions; the analysis report flags a channel only with ≥ 50 contractions in inverted ranges). This is the suspicion. Since 2026-10-12 (after 1.0.0-beta.5) the
-inversion must be **confirmed by the detection**: the normal detection in the negated signal finds certain stimulated
+contractions; the analysis report flags a channel only with ≥ 50 contractions in inverted ranges). This is the
+suspicion. The inversion must be **confirmed by the detection** (2026-10-12): the normal detection in the negated signal finds certain stimulated
 contractions for at least `'invertedMinCapture'` (20 %) of the pulses; otherwise (e.g. waves of the rocker partly in
 phase with the pulses, no contractions) the section is analysed as it is. The detection alone cannot tell the
 direction: in a clean signal both directions give regular, locked "contractions" (the plateau between the deflections);
-the suspicion decides the direction, the detection confirms it. Check on all 1581 ranges (301 channels) that
-1.0.0-beta.5 flagged in the recordings of 2023, 2024 and 2026: 1069 ranges stay inverted; channels with ≥ 50
+the suspicion decides the direction, the detection confirms it. Check on all 1581 ranges (301 channels) that the
+test alone flagged in the recordings of 2023, 2024 and 2026: 1069 ranges stay inverted; channels with ≥ 50
 contractions in inverted ranges 103 → 90; all 10 channels checked visually as rocker waves or upright contractions
 lose the flag, 14 of 15 channels checked visually as inverted keep it (the one lost has 60 µN deflections and < 20 %
 certain capture in the suspected section). The second detection runs only for suspected sections. Then
