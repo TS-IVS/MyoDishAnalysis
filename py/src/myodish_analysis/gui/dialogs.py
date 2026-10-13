@@ -676,7 +676,7 @@ def _adv_default_text(row, d0):
     elif kind == "numauto":
         t = "s (default: auto)" if isinstance(v, str) else f"s (default: {v:g})"
     elif kind == "vec":
-        t = f"{unit} (default: {' '.join(f'{x * scale:g}' for x in v)})".strip()
+        t = f"{unit} (default: {' '.join(f'{x * scale:g}' for x in v) or 'none'})".strip()
     else:
         t = f"{unit} (default: {float(v) * scale:g})".strip()
     return t + (" *" if reread else "")

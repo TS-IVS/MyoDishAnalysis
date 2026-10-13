@@ -352,7 +352,7 @@ for q = 1:numel(keys)
     Cg.extraTimes = xT(strcmp(xLbl, keys{q}));
     Cg.extraElicited = xE(strcmp(xLbl, keys{q}));
     Bg = B(strcmp(B.group, keys{q}), :);
-    T = mda_summarize(Bg, Cg, range);
+    T = mda_summarize(Bg, Cg, range, opts);
     T.stimFrequency = 1 / median(prevInt(js), 'omitnan');
     if ~any(js), T.stimFrequency = nan; end
     capt = nan; reach = nan;

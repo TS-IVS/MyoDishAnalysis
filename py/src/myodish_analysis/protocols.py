@@ -642,7 +642,7 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
         Cg.extraTimes = xT[xLbl == keys[q]] if xT.size else np.zeros(0)
         Cg.extraElicited = xE[xLbl == keys[q]] if xT.size else np.zeros(0, bool)
         Bg = B[B["group"].to_numpy() == keys[q]]
-        T = summarize(Bg, Cg, [r0, r1])
+        T = summarize(Bg, Cg, [r0, r1], opts)
         pj = prevInt[js]
         pj = pj[~np.isnan(pj)]
         T["stimFrequency"] = 1.0 / float(np.median(pj)) if js.any() and pj.size else math.nan

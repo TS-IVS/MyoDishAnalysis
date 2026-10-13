@@ -14,7 +14,9 @@ to_s       end of the time range. Lists define several ranges, e.g. from_s=[600,
 contractions  DataFrame, one row per detected contraction (also the excluded ones, see column 'included'); column
               'uncertain': contraction found with high sensitivity only (option detection, see options.py)
 summary       DataFrame, one row per channel and range: numbers of contractions/stimuli, mean and SD of all
-              parameters of the included contractions
+              parameters of the included contractions; column arrhythmicPacing (2026-10-13): channel paced
+              arrhythmically (option arrhythmicChannels, or detected from the stim-to-stim variability outside the
+              stimulation protocols of the log file: arrhythmicDetection, see options.py and summarize.py)
 info          dict: file facts, options, detection threshold per channel and range, notes; info['pulses'] (option
               pulseTable, default True; sheet / file 'pulses'): one row per stimulus pulse of the analysed channels and
               ranges (pulse ID, time, extra pulse, current, durations, outcome, role, contraction, coupling interval,
@@ -125,6 +127,14 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
             opts.rocker = "stopped"  # protocols: contractions with the rocker at rest ...
         if not beatsGiven:
             opts.beats = "stimulated"  # ... that follow a stimulus
+    protW = np.zeros((0, 2))  # stimulation protocols: not used for the detection of arrhythmic pacing (2026-10-13)
+    if protocols is None and opts.arrhythmicDetection:
+        try:
+            P0 = find_protocols(H)
+            if P0 is not None and len(P0):
+                protW = np.c_[P0["from"].to_numpy(float), P0["to"].to_numpy(float)]
+        except Exception:  # noqa: BLE001  no log file / protocols: all windows
+            pass
     dc = [int(c) for c in np.asarray(H.dataChannels).ravel()]
     if channels is None or np.size(channels) == 0:
         channels = dc
@@ -300,7 +310,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
                                              "to": float(ranges[r, 1]), "groupBy": groupByR[r]}, **Rr,
                                             protocolNote=pNote))
                 else:
-                    T = summarize(B, Cm, ranges[r])
+                    T = summarize(B, Cm, ranges[r], opts, protW)
                     if grouping:  # same columns as the grouped ranges
                         B, T = add_empty_group_columns(B, T)
                 T["invertedSignal"] = bool(Cm.invertedSignal)  # signal inverted in (a chunk of) the range
@@ -342,6 +352,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     units = dict(parts[0].attrs.get("units", {})) if parts else {}
     contractions = pd.concat(parts, ignore_index=True)
     summary = pd.concat(sumParts, ignore_index=True)
+    summary = arrhythmic_pacing(summary, opts, protocols is not None)  # 2026-10-13
 
     # absolute time of every contraction (if the log file contains the recording start)
     rs = H.recordingStart
@@ -476,3 +487,27 @@ def _plot_channel(C, B, S, range_, ttl):
                  "shaded = rocker moving", fontsize=9)
     fig.tight_layout()
     plt.show(block=False)
+
+
+def arrhythmic_pacing(T, opts, protocol_mode=False):
+    """column arrhythmicPacing after pacedSeconds (2026-10-13): channels of arrhythmicChannels and (arrhythmicDetection,
+    not in analyses of the stimulation protocols) channels whose variable windows (stimulus interval CV >
+    arrhythmicMinVariability) make up more than arrhythmicMinFraction of the paced time of the analysed ranges
+    (windows overlapping a stimulation protocol of the log file are not counted, see summarize)"""
+    if T is None or "pacedSeconds" not in T.columns or "channel" not in T.columns:
+        return T
+    ap = np.zeros(len(T), bool)
+    user = {int(c) for c in opts.get("arrhythmicChannels", ())}
+    chan = T["channel"].to_numpy(float)
+    for c in np.unique(chan[~np.isnan(chan)]):
+        m = chan == c
+        on = int(c) in user
+        if not on and opts.get("arrhythmicDetection", True) and not protocol_mode:
+            w = T.loc[m, "pacedSeconds"].to_numpy(float)
+            f = T.loc[m, "arrhythmicFraction"].to_numpy(float)
+            ok = (w > 0) & ~np.isnan(f)
+            on = bool(ok.any() and np.sum(w[ok] * f[ok]) / np.sum(w[ok]) > float(opts.get("arrhythmicMinFraction", 0.5)))
+        ap[m] = on
+    T = T.copy()
+    T.insert(list(T.columns).index("pacedSeconds") + 1, "arrhythmicPacing", ap)
+    return T

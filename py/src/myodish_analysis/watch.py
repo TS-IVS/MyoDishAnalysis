@@ -74,14 +74,16 @@ results_folder/mda_index.csv
 results_folder/reports/mda_report_<date>_<time>.txt
   report of a pass with analysed recordings: per channel contractions, capture (% of the stimuli followed by a
   contraction), extra beats (% of the detected contractions), mean amplitude in the first and last range (>= 10
-  included contractions) and flags (no contractions, capture < flag_capture %, extra beats > flag_extra_beats %,
-  amplitude change > flag_amplitude_change %).
+  included contractions) and flags (no contractions, capture < flag_capture % (not with arrhythmic pacing, summary
+  column arrhythmicPacing: 'arrhythmic pacing'), extra beats > flag_extra_beats %, amplitude change >
+  flag_amplitude_change %).
 results_folder/reports/mda_report_<date>_<time>.pdf (report=True, 2026-10-11)
   analysis report of the same pass (report.py): overview of the recordings x channels with flags, the channels whose
   analysis should be checked (red: inverted signal; noise suspected = uncertain >= flag_uncertain % and extra +
-  missed beats >= flag_irregular %; large extra beats; delay pulse -> onset > flag_delay s) and those with
-  slice-quality flags (yellow: capture < flag_capture %, extra beats > flag_extra_beats %, amplitude < flag_amplitude
-  uN, amplitude change > flag_amplitude_change %, amplitude CV > flag_amplitude_cv %); channels with fewer than
+  missed beats >= flag_irregular %; large extra beats; delay pulse -> onset > flag_delay s; stimulus frequency >
+  flag_stim_frequency Hz) and those with slice-quality flags (yellow: capture < flag_capture %, extra beats >
+  flag_extra_beats %, amplitude < flag_amplitude uN, amplitude change > flag_amplitude_change %, amplitude CV >
+  flag_amplitude_cv %; arrhythmic pacing: no capture and amplitude CV flags); channels with fewer than
   flag_min_beats detected contractions are not flagged. Pages with traces of the red channels
   and the commands that open them in the GUI (MyoDishAnalysisGUI(<name>_info.csv, 'channel', c, 'window', [a b]) /
   mda-gui <name>_info.csv --channel c --window a b).
@@ -109,17 +111,17 @@ thin_factor (10), thin_mode ('nth'), compress (False), overview_seconds (60), ev
 <name>_gaps.csv, <name>_channels.csv, summary columns noSignal_s, nChamberOut), register (True: slice register),
 new_slice_hours (2), workers (1; > 1: recordings analysed in parallel processes), flag_capture (90), flag_extra_beats
 (10), flag_amplitude_change (30), report (True: PDF report), flag_uncertain (25), flag_irregular (15), flag_amplitude
-(75 uN), flag_amplitude_cv (30), flag_delay (0.15 s), flag_min_beats (50), quiet. All other keywords are analysis options of
-myodish_analysis (e.g. rockerFilter=True, rocker='stopped', threshold=300), applied to all recordings; settings=file:
-analysis options from a settings file (settings.py) or earlier results (the index records their values: after a change
-of the file the earlier recordings count as analysed with other options).
+(75 uN), flag_amplitude_cv (30), flag_delay (0.15 s), flag_min_beats (50), flag_stim_frequency (10 Hz), quiet. All
+other keywords are analysis options of myodish_analysis (e.g. rockerFilter=True, rocker='stopped', threshold=300),
+applied to all recordings; settings=file: analysis options from a settings file (settings.py) or earlier results (the
+index records their values: after a change of the file the earlier recordings count as analysed with other options).
 
 Keep it running with schedule='daily 07:00' (mda-watch ... --schedule "daily 07:00"), or start one pass a day by the
 scheduler of the operating system (cron / launchd / Windows task scheduler), e.g.
     0 7 * * *  /path/to/venv/bin/mda-watch /data/myodish/raw /data/myodish/results --quiet
 
 TS 2026-10-08 (watcher settings in the info table 2026-10-09; pulse table 2026-10-10; schedule and reanalyze 'new'
-2026-10-12)
+2026-10-12; arrhythmic pacing, flag_stim_frequency 2026-10-13)
 """
 from __future__ import annotations
 
@@ -160,7 +162,7 @@ WATCH_DEFAULTS = dict(interval=0.0, schedule=None, reanalyze="new", retry_errors
                       events=True, gaps=True, register=True, new_slice_hours=2.0, workers=1,
                       flag_capture=90.0, flag_extra_beats=10.0, flag_amplitude_change=30.0, report=True,
                       flag_uncertain=25.0, flag_irregular=15.0, flag_amplitude=75.0, flag_amplitude_cv=30.0,
-                      flag_delay=0.15, flag_min_beats=50, quiet=False)
+                      flag_delay=0.15, flag_min_beats=50, flag_stim_frequency=10.0, quiet=False)
 _TIME_FMT = "%Y-%m-%d %H:%M:%S"
 _SET_BY_WATCHER = ("output", "labels", "metadata", "protocol", "groupby")  # not allowed as analysis options
 _NOT_IN_OPTIONS = ("showfigures", "quiet", "chunkseconds")  # keywords of myodish_analysis, not of options()
@@ -577,7 +579,7 @@ def _pdf_report(out, raw, res, rows, o, version, otext, now_, notice=()):
               extra=float(o["flag_extra_beats"]), capture=float(o["flag_capture"]),
               amplitude_change=float(o["flag_amplitude_change"]), amplitude=float(o["flag_amplitude"]),
               amplitude_cv=float(o["flag_amplitude_cv"]), delay=float(o["flag_delay"]),
-              min_beats=float(o["flag_min_beats"]))
+              min_beats=float(o["flag_min_beats"]), stim_frequency=float(o["flag_stim_frequency"]))
     recs = []
     for row in rows:
         rel = row["file"]
@@ -1183,9 +1185,13 @@ def _report_block(rel, H, S, o, CH=None, G=None):
         a1 = good["amplitude_mean"].iloc[0] if len(good) else math.nan
         a2 = good["amplitude_mean"].iloc[-1] if len(good) else math.nan
         chg = 100 * (a2 - a1) / a1 if len(good) > 1 and a1 > 0 else math.nan
+        arr = "arrhythmicPacing" in s.columns and bool(
+            s["arrhythmicPacing"].astype(str).str.strip().str.lower().isin(["true", "1", "1.0"]).any())
         flags = []
         if nDet == 0:
             flags.append("no contractions")
+        elif arr:  # capture < 100 % expected (2026-10-13)
+            flags.append("arrhythmic pacing")
         elif cap < o["flag_capture"]:
             flags.append("capture < %s %%" % _g(o["flag_capture"]))
         if extra > o["flag_extra_beats"]:

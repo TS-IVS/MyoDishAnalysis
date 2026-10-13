@@ -34,7 +34,9 @@ DETECTION OF CONTRACTIONS
                    (2026-10-11). invertedRatio (2): the fall of the stimulus-triggered median >= this x its rise,
                    and 50th - 10th percentile of the signal >= this x (90th - 50th percentile); invertedMinAmplitude
                    (50 uN); invertedMinWidth (0.05 s below half the fall); invertedSkip (0.02 s after the pulse:
-                   stimulus artifact)
+                   stimulus artifact). Confirmation (2026-10-12): invertedMinCapture (0.2): the normal detection in
+                   the negated signal finds certain stimulated contractions for >= this fraction of the pulses;
+                   otherwise (e.g. rocker waves) the channel is analysed as it is
 
 SELECTION OF CONTRACTIONS (the excluded ones stay in the table with included = False)
   beats            'all' (default) | 'stimulated' (only contractions that follow a stimulus of the channel)
@@ -94,6 +96,15 @@ STIMULUS ASSIGNMENT (which pulse elicited a contraction; see analyze_channel)
                    analysed channel, MyoDish pulses ignored), 'off' (never)
   pulseTable       True (default) | False: table of all stimulus pulses of the analysed channels and ranges
                    (info["pulses"], sheet / file 'pulses'; see analysis)
+  arrhythmicChannels  channels paced arrhythmically (e.g. [3, 5]; default []): column arrhythmicPacing of the
+                   summary; the analysis report does not flag their capture, amplitude CV and missed beats (noise
+                   index), which are expected with arrhythmic pacing (2026-10-13)
+  arrhythmicDetection True (default) | False: channels detected as arrhythmically paced: the stim-to-stim
+                   variability (CV of the stimulus intervals in windows of arrhythmicWindow) exceeds
+                   arrhythmicMinVariability during more than arrhythmicMinFraction of the paced time of the analysed
+                   ranges (windows overlapping a stimulation protocol of the log file do not count; analyses of the
+                   protocols: only arrhythmicChannels); summary columns stimVariability_percent, arrhythmicFraction,
+                   pacedSeconds
 
 DIASTOLIC FORCE
   zeroForce        sensor signal without load [uN] for diastolicForce = F_dia - zeroForce (None = 'Offset' entry of
@@ -297,13 +308,18 @@ ADVANCED SETTINGS (2026-10-10; before: constants in the code, based on assumptio
                           amplitude_CV) exceeds this value: conduction block, alternans or extra beats (default 0.15)
  minGroupBeats            FFR protocols: a note lists the frequencies summarized from fewer included contractions (0 =
                           no note) [contractions] (default 5)
+ arrhythmicMinVariability arrhythmic pacing: a window is variable if the CV of its stimulus intervals exceeds this
+                          [fraction] (default 0.1)
+ arrhythmicMinFraction    ... a channel is arrhythmically paced if the variable windows make up more than this
+                          fraction of the paced time (stimulation protocols take less) [fraction] (default 0.5)
+ arrhythmicWindow         ... windows of this length (paced: >= 5 intervals) [s] (default 60)
  EXPORT
  pulseTextMax             prePulses / postPulses: at most this many pulses (those nearest to the eliciting pulse), then
                           '&+<number of the others>' [pulses] (default 10)
 
 TS 2026-10-06 (port of mda_options.m, TS 2026-10-05; rockerSource, pauseDiastoleWindow 2026-10-07;
 rockerArtifacts, detection 2026-10-09; onset gate, extra pulses, pulse table, advanced settings, diastolic level,
-FFR steady state, PRP reference 2026-10-10)
+FFR steady state, PRP reference 2026-10-10; arrhythmic pacing 2026-10-13)
 """
 from __future__ import annotations
 
@@ -323,6 +339,7 @@ _DEFAULTS = dict(
     invertedRatio=2.0,
     invertedMinAmplitude=50.0,
     invertedMinWidth=0.05,
+    invertedMinCapture=0.2,
     invertedSkip=0.02,
     detection="sensitive",
     beats="all",
@@ -348,6 +365,8 @@ _DEFAULTS = dict(
     stimChannel=None,
     externalTrigger="auto",
     pulseTable=True,
+    arrhythmicChannels=(),
+    arrhythmicDetection=True,
     diastolicLevel="preStimulusMedian",
     ffrRockerFallback=True,
     prpReference="preceding",
@@ -366,6 +385,9 @@ _DEFAULTS = dict(
     contractionEnd=90,
     offsetSnap=0.005,
     pacedMinStimuli=3,
+    arrhythmicMinVariability=0.1,
+    arrhythmicMinFraction=0.5,
+    arrhythmicWindow=60.0,
     pauseMinInterval=2.5,
     pauseIntervalRatio=1.5,
     diastoleWindowStart=0.06,
@@ -577,7 +599,7 @@ def options(base=None, **changes):
               "keepNoiseAbs", "dropRel", "smallNoiseRel", "smallTypicalRel", "smallRhythmMinPerCycle",
               "smallRhythmTypicalRel", "spikeJumpFactor", "spikeGroupGap", "spikeCoincidence", "rfMinRun",
               "rfSmoothBaseline", "rfRidge", "rfMinRefBlock", "rfMaxBorrow", "rfMaskMargin", "irregularCV",
-              "invertedRatio", "invertedMinAmplitude", "invertedMinWidth", "invertedSkip"):
+              "invertedRatio", "invertedMinAmplitude", "invertedMinWidth", "invertedMinCapture", "invertedSkip"):
         v = _number(opts[k])
         if not (v >= 0):
             raise ValueError(f"options: '{k}' must be a number >= 0.")
@@ -616,6 +638,25 @@ def options(base=None, **changes):
     for k in ("rockerFrequency", "stimChannel", "zeroForce", "samplingRate", "nChannels"):
         if _is_empty(opts[k]):
             opts[k] = None
+    # 2026-10-13: arrhythmic pacing
+    ac = opts.arrhythmicChannels
+    ac = [] if ac is None or (isinstance(ac, str) and not ac.strip()) else \
+        [float(x) for x in (ac.replace(",", " ").split() if isinstance(ac, str) else np.ravel(np.asarray(ac, float)))]
+    if not all(x >= 1 and x == round(x) for x in ac):
+        raise ValueError("options: 'arrhythmicChannels' must be channel numbers (integers >= 1).")
+    opts.arrhythmicChannels = tuple(int(x) for x in ac)
+    ad = opts.arrhythmicDetection
+    opts.arrhythmicDetection = (ad is True) or (not isinstance(ad, str) and ad is not None and not _is_empty(ad)
+                                                and bool(ad == 1)) or (isinstance(ad, str) and ad.lower() in ("on", "true"))
+    for k in ("arrhythmicMinVariability", "arrhythmicMinFraction"):
+        v = _number(opts[k])
+        if not (0 <= v <= 1):
+            raise ValueError(f"options: '{k}' must be a number from 0 to 1.")
+        opts[k] = v
+    v = _number(opts.arrhythmicWindow)
+    if not (v > 0):
+        raise ValueError("options: 'arrhythmicWindow' must be a number > 0.")
+    opts.arrhythmicWindow = v
     # 2026-10-10: diastolic level, FFR steps without rocker stop, PRP reference
     vals = {"prestimulusmedian": "preStimulusMedian", "minimum": "minimum"}
     if str(opts.diastolicLevel).lower() not in vals:

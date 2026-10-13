@@ -40,6 +40,8 @@ function varargout = mda_report(varargin)
 %     S  large extra beats: certain extra beats >= artifactShare (5) % of the contractions with a median amplitude >
 %        artifactRatio (3) times that of the certain stimulated contractions (spikes, saturation; needs C)
 %     D  median delay pulse -> onset of the stimulated contractions > delay (0.15 s)
+%     F  stimulus frequency > stimFrequency (10 Hz) in a range (median stimulus interval; implausible: status channel
+%        probably misread; 2026-10-13)
 %   slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
 %     C  capture < capture (90) % of the stimuli
 %     X  extra beats > extra (10) % of the detected contractions (spontaneous activity; not shown with N)
@@ -48,6 +50,10 @@ function varargout = mda_report(varargin)
 %        (shown with the time between the start of the first and the end of the last of these ranges, e.g. 'amplitude
 %        change +660 % over 24 h')
 %     V  median amplitude CV of the ranges > amplitudeCV (30) %
+% Arrhythmic pacing (summary column arrhythmicPacing: option arrhythmicChannels or detected, see mda_options;
+% 2026-10-13): capture and amplitude CV are not flagged (C, V) and the missed beats do not count in the noise index (N:
+% extra beats only); missed beats, uncertain contractions and a variable amplitude are expected. The capture is still
+% shown (overview: '~' after it).
 % Channel label (lists and trace pages, e.g. 'ch 7 (PMA)'): the values of the label treatment (with concentration and
 % unit), otherwise sliceGroup, otherwise sampleGroup of the summary, if given.
 % Pages: overview (recordings x channels: capture % and codes), list of the channels to check (red) and of those with
@@ -58,7 +64,8 @@ function varargout = mda_report(varargin)
 %     Python  mda-gui file --channel c --window from to
 % Needs MATLAB R2021b or newer (exportgraphics with 'Append').
 %
-% TS 2026-10-11 (noise index N, large extra beats S, extra beats as slice quality 2026-10-12)
+% TS 2026-10-11 (noise index N, large extra beats S, extra beats as slice quality 2026-10-12; arrhythmic pacing, F
+% 2026-10-13)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -103,7 +110,7 @@ end
 % =====================================================================================================
 function fl = defaults()
 fl = struct('uncertain', 25, 'irregular', 15, 'artifactShare', 5, 'artifactRatio', 3, 'extra', 10, 'capture', 90, ...
-    'amplitudeChange', 30, 'amplitude', 75, 'amplitudeCV', 30, 'delay', 0.15, 'minBeats', 50);
+    'amplitudeChange', 30, 'amplitude', 75, 'amplitudeCV', 30, 'delay', 0.15, 'minBeats', 50, 'stimFrequency', 10);
 end
 
 
@@ -211,11 +218,11 @@ chans = unique(chans);
 n = numel(chans);
 R = table(chans, repmat({''}, n, 1), repmat({''}, n, 1), zeros(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), ...
     nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), false(n, 1), ...
-    repmat({''}, n, 1), repmat({''}, n, 1), repmat({''}, n, 1), repmat({''}, n, 1), ...
+    false(n, 1), nan(n, 1), repmat({''}, n, 1), repmat({''}, n, 1), repmat({''}, n, 1), repmat({''}, n, 1), ...
     'VariableNames', {'channel', 'label', 'status', 'nDetected', 'capture_percent', 'extra_percent', ...
     'uncertain_percent', 'extraMissed_percent', 'noiseIndex', 'largeExtra_percent', 'largeExtra_ratio', ...
     'amplitude_uN', 'amplitudeChange_percent', 'amplitudeChange_hours', 'amplitudeCV_percent', 'delay_ms', ...
-    'invertedSignal', 'flags', 'level', 'red', 'yellow'});
+    'invertedSignal', 'arrhythmicPacing', 'stimFrequency_Hz', 'flags', 'level', 'red', 'yellow'});
 for k = 1:n
     c = chans(k);
     if isKey(st, c), R.status{k} = st(c); end
@@ -227,9 +234,16 @@ for k = 1:n
     R.nDetected(k) = nDet;
     if nStim > 0, R.capture_percent(k) = 100 * (1 - nMiss / nStim); end
     if nDet > 0, R.extra_percent(k) = 100 * nX / nDet; R.uncertain_percent(k) = 100 * nU / nDet; end
+    if ~isempty(s) && height(s) > 0 && ismember('arrhythmicPacing', s.Properties.VariableNames)
+        R.arrhythmicPacing(k) = any(truthy(s.arrhythmicPacing));
+    end
+    if ~isempty(s) && ismember('stimFrequency', s.Properties.VariableNames) && any(~isnan(double(s.stimFrequency)))
+        R.stimFrequency_Hz(k) = max(double(s.stimFrequency), [], 'omitnan');
+    end
+    arr = R.arrhythmicPacing(k);
     if nDet > 0                 %noise index: uncertain contractions in a channel that does not follow the pacing
-        if nStim > 0
-            R.extraMissed_percent(k) = R.extra_percent(k) + 100 - R.capture_percent(k);
+        if nStim > 0            %arrhythmic pacing: missed beats expected, not counted (2026-10-13)
+            R.extraMissed_percent(k) = R.extra_percent(k) + (~arr) * (100 - R.capture_percent(k));
             R.noiseIndex(k) = R.uncertain_percent(k) * min(100, R.extraMissed_percent(k)) / 100;
         else
             R.noiseIndex(k) = R.uncertain_percent(k);
@@ -281,13 +295,19 @@ for k = 1:n
     yel = {}; ycodes = '';
     if ~strcmp(R.status{k}, 'no slice') && nDet >= fl.minBeats
         if nInv >= fl.minBeats                     %ranges with an inverted signal and enough contractions
-            if nInv < nDet, red{end+1} = sprintf('inverted signal (%.0f %% of the contractions)', 100 * nInv / nDet); %#ok<AGROW>
-            else, red{end+1} = 'inverted signal'; end %#ok<AGROW>
+            share = 100 * nInv / nDet;
+            if nInv >= nDet, red{end+1} = 'inverted signal'; %#ok<AGROW>
+            elseif share < 1, red{end+1} = 'inverted signal (< 1 % of the contractions)'; %#ok<AGROW>
+            else, red{end+1} = sprintf('inverted signal (%.0f %% of the contractions)', share); %#ok<AGROW>
+            end
             codes(end+1) = 'I'; %#ok<AGROW>
         end
         noise = R.uncertain_percent(k) >= fl.uncertain && (nStim <= 0 || R.extraMissed_percent(k) >= fl.irregular);
         if noise
-            if nStim > 0
+            if nStim > 0 && arr
+                red{end+1} = sprintf('noise index %.0f (uncertain %.0f %%, extra %.0f %%, arrhythmic pacing)', ...
+                    R.noiseIndex(k), R.uncertain_percent(k), R.extra_percent(k)); %#ok<AGROW>
+            elseif nStim > 0
                 red{end+1} = sprintf('noise index %.0f (uncertain %.0f %%, extra %.0f %%, missed %.0f %%)', ...
                     R.noiseIndex(k), R.uncertain_percent(k), R.extra_percent(k), 100 - R.capture_percent(k)); %#ok<AGROW>
             else
@@ -303,7 +323,10 @@ for k = 1:n
         if R.delay_ms(k) > 1000 * fl.delay
             red{end+1} = sprintf('delay %.0f ms', R.delay_ms(k)); codes(end+1) = 'D'; %#ok<AGROW>
         end
-        if R.capture_percent(k) < fl.capture
+        if R.stimFrequency_Hz(k) > fl.stimFrequency
+            red{end+1} = sprintf('stimulus frequency %.0f Hz', R.stimFrequency_Hz(k)); codes(end+1) = 'F'; %#ok<AGROW>
+        end
+        if R.capture_percent(k) < fl.capture && ~arr
             yel{end+1} = sprintf('capture %.0f %%', R.capture_percent(k)); ycodes(end+1) = 'C'; %#ok<AGROW>
         end
         if ~noise && R.extra_percent(k) > fl.extra
@@ -318,7 +341,7 @@ for k = 1:n
             yel{end+1} = sprintf('amplitude change %+.0f %% %s', R.amplitudeChange_percent(k), d); %#ok<AGROW>
             ycodes(end+1) = 'T'; %#ok<AGROW>
         end
-        if R.amplitudeCV_percent(k) > fl.amplitudeCV
+        if R.amplitudeCV_percent(k) > fl.amplitudeCV && ~arr
             yel{end+1} = sprintf('amplitude CV %.0f %%', R.amplitudeCV_percent(k)); ycodes(end+1) = 'V'; %#ok<AGROW>
         end
     end
@@ -453,7 +476,7 @@ for i = 1:nR
 end
 if nR, Rall = vertcat(Rs{:}); else, Rall = reportFlags([], [], [], fl); end
 isCheck = cellfun(@(R) any(strcmp(R.level, 'check')), Rs);
-nRed = cellfun(@(R) sum(cellfun(@(x) sum(ismember(x, 'INSD')), R.flags(strcmp(R.level, 'check')))), Rs);
+nRed = cellfun(@(R) sum(cellfun(@(x) sum(ismember(x, 'INSDF')), R.flags(strcmp(R.level, 'check')))), Rs);
 maxNI = cellfun(@(R) max([0; R.noiseIndex(strcmp(R.level, 'check') & ~isnan(R.noiseIndex))]), Rs);
 check = find(isCheck | arrayfun(@(r) ~isempty(r.notes), recs(:)));
 det = find(isCheck);
@@ -566,7 +589,8 @@ for p = 1:nP
                     elseif strcmp(R.level{r}, 'quality'), col = hex('#fbe8a6');
                     else, col = [1 1 1]; end
                     s = R.flags{r};
-                    if ~isnan(R.capture_percent(r)), s = strtrim(sprintf('%.0f %s', R.capture_percent(r), s)); end
+                    tl = ''; if R.arrhythmicPacing(r), tl = '~'; end
+                    if ~isnan(R.capture_percent(r)), s = strtrim(sprintf('%.0f%s %s', R.capture_percent(r), tl, s)); end
             end
             x1 = X(x0 + (j - 1) * cw + 0.002); y1 = Y(yk - rh + 0.001);
             rectangle(ax, 'Position', [x1, y1, 0.92 * (cw - 0.004), (top - 0.10) * (rh - 0.002)], ...
@@ -585,11 +609,11 @@ end
 function L = legendText(fl)
 % {cell colour ('' = none), text} of the legend below the overview table
 mu = char(181);
-L = {'', ['Each cell: capture (% of the stimuli followed by a contraction) and the letters of the flags. White: ' ...
-        'no flag; empty: no slice.']
-    '#f8c9c4', sprintf(['Red = check the analysis:  I inverted signal,  N noise (uncertain %s %g %% with extra + ' ...
-        'missed %s %g %%),  S large extra beats (> %g x paced),  D delay to onset > %g ms'], char(8805), ...
-        fl.uncertain, char(8805), fl.irregular, fl.artifactRatio, 1000 * fl.delay)
+L = {'', ['Each cell: capture (% of the stimuli followed by a contraction; ~ arrhythmic pacing, C and V not ' ...
+        'flagged) and the letters of the flags. White: no flag; empty: no slice.']
+    '#f8c9c4', sprintf(['Red = check the analysis:  I inverted signal,  N noise (uncertain %s %g %%, ' ...
+        'extra+missed %s %g %%),  S large extra beats (> %g x paced),  D delay > %g ms,  F pacing > %g Hz'], ...
+        char(8805), fl.uncertain, char(8805), fl.irregular, fl.artifactRatio, 1000 * fl.delay, fl.stimFrequency)
     '#fbe8a6', sprintf(['Yellow = slice quality:  C capture < %g %%,  X extra beats > %g %%,  A amplitude < %g %sN,  ' ...
         'T amplitude changes by > %g %% during the recording,  V amplitude CV > %g %%'], fl.capture, fl.extra, ...
         fl.amplitude, mu, fl.amplitudeChange, fl.amplitudeCV)

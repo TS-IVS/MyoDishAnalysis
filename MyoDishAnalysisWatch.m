@@ -81,14 +81,16 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 % resultsFolder/reports/mda_report_<date>_<time>.txt
 %   report of a pass with analysed recordings: per channel contractions, capture (% of the stimuli followed by a
 %   contraction), extra beats (% of the detected contractions), mean amplitude in the first and last range (>= 10
-%   included contractions) and flags (no contractions, capture < flagCapture %, extra beats > flagExtraBeats %,
-%   amplitude change > flagAmplitudeChange %).
+%   included contractions) and flags (no contractions, capture < flagCapture % (not with arrhythmic pacing, summary
+%   column arrhythmicPacing: 'arrhythmic pacing'), extra beats > flagExtraBeats %, amplitude change >
+%   flagAmplitudeChange %).
 % resultsFolder/reports/mda_report_<date>_<time>.pdf ('report', true; 2026-10-11)
 %   analysis report of the same pass (mda_report): overview of the recordings x channels with flags, the channels whose
 %   analysis should be checked (red: inverted signal; noise suspected = uncertain >= flagUncertain % and extra +
-%   missed beats >= flagIrregular %; large extra beats; delay pulse -> onset > flagDelay s) and those with
-%   slice-quality flags (yellow: capture < flagCapture %, extra beats > flagExtraBeats %, amplitude < flagAmplitude
-%   uN, amplitude change > flagAmplitudeChange %, amplitude CV > flagAmplitudeCV %); channels with fewer than
+%   missed beats >= flagIrregular %; large extra beats; delay pulse -> onset > flagDelay s; stimulus frequency >
+%   flagStimFrequency Hz) and those with slice-quality flags (yellow: capture < flagCapture %, extra beats >
+%   flagExtraBeats %, amplitude < flagAmplitude uN, amplitude change > flagAmplitudeChange %, amplitude CV >
+%   flagAmplitudeCV %; arrhythmic pacing: no capture and amplitude CV flags); channels with fewer than
 %   flagMinBeats detected contractions are not flagged. Pages with traces of the red
 %   channels and the commands that open them in the GUI (MyoDishAnalysisGUI(<name>_info.csv, 'channel', c, 'window',
 %   [a b]); without 'quiet' also as links in the command window).
@@ -123,8 +125,9 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   'newSliceHours', h       slice register: new slice after >= h without signal (default 2)
 %   'flagCapture', 'flagExtraBeats', 'flagAmplitudeChange'   report flags (default 90, 10, 30 %)
 %   'report', tf             PDF report (default true)
-%   'flagUncertain', 'flagIrregular', 'flagAmplitude', 'flagAmplitudeCV', 'flagDelay', 'flagMinBeats'   flags of the
-%                            PDF report (default 25 %, 15 %, 75 uN, 30 %, 0.15 s, 50 contractions; see mda_report)
+%   'flagUncertain', 'flagIrregular', 'flagAmplitude', 'flagAmplitudeCV', 'flagDelay', 'flagMinBeats',
+%   'flagStimFrequency'      flags of the PDF report (default 25 %, 15 %, 75 uN, 30 %, 0.15 s, 50 contractions,
+%                            10 Hz; see mda_report)
 %   'quiet', tf              no messages
 %   all other name/value pairs: analysis options of MyoDishAnalysis for all recordings, e.g. 'rockerFilter', true,
 %   'rocker', 'stopped', 'threshold', 300 (not 'output', 'labels', 'metadata', 'protocol', 'groupBy')
@@ -145,7 +148,7 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   matlab -batch "MyoDishAnalysisWatch('raw', 'results', 'quiet', true)"   or the Python version (mda-watch).
 %
 % TS 2026-10-08 (watcher settings in the info table 2026-10-09; pulse table 2026-10-10; PDF report 2026-10-11;
-% schedule and 'reanalyze','new' 2026-10-12)
+% schedule and 'reanalyze','new' 2026-10-12; arrhythmic pacing, flagStimFrequency 2026-10-13)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -178,7 +181,7 @@ W = struct('interval', 0, 'schedule', '', 'reanalyze', 'new', 'retryErrors', fal
     'register', true, 'newSliceHours', 2, ...
     'flagCapture', 90, 'flagExtraBeats', 10, 'flagAmplitudeChange', 30, 'report', true, 'flagUncertain', 25, ...
     'flagIrregular', 15, 'flagAmplitude', 75, 'flagAmplitudeCV', 30, 'flagDelay', 0.15, 'flagMinBeats', 50, ...
-    'quiet', false);
+    'flagStimFrequency', 10, 'quiet', false);
 wNames = fieldnames(W);
 args = {};
 for i = 1:2:numel(varargin)
@@ -410,7 +413,7 @@ function R = pdfReport(out, raw, res, rows, W, version, otext, now_, notice)
 ccols = {'channel', 't_peak', 'beatType', 'uncertain', 'included', 'amplitude', 'stimToOnset'};
 fl = struct('uncertain', W.flagUncertain, 'irregular', W.flagIrregular, 'extra', W.flagExtraBeats, 'capture', ...
     W.flagCapture, 'amplitudeChange', W.flagAmplitudeChange, 'amplitude', W.flagAmplitude, 'amplitudeCV', ...
-    W.flagAmplitudeCV, 'delay', W.flagDelay, 'minBeats', W.flagMinBeats);
+    W.flagAmplitudeCV, 'delay', W.flagDelay, 'minBeats', W.flagMinBeats, 'stimFrequency', W.flagStimFrequency);
 recs = struct('name', {}, 'file', {}, 'open', {}, 'S', {}, 'C', {}, 'P', {}, 'P_file', {}, 'R', {}, 'status', {}, ...
     'notes', {});
 for i = 1:numel(rows)
@@ -1202,9 +1205,17 @@ for ch = unique(S.channel)'
     good = s(s.nContractions >= 10, :);
     if height(good) > 0, a1 = good.amplitude_mean(1); a2 = good.amplitude_mean(end); end
     if height(good) > 1 && a1 > 0, chg = 100 * (a2 - a1) / a1; end
+    arr = false;
+    if ismember('arrhythmicPacing', s.Properties.VariableNames)
+        x = s.arrhythmicPacing;
+        if iscell(x) || isstring(x), arr = any(strcmpi(string(x), "true") | string(x) == "1");
+        else, arr = any(double(x) ~= 0 & ~isnan(double(x))); end
+    end
     flags = {};
     if nDet == 0
         flags{end+1} = 'no contractions'; %#ok<AGROW>
+    elseif arr                                      %capture < 100 % expected (2026-10-13)
+        flags{end+1} = 'arrhythmic pacing'; %#ok<AGROW>
     elseif cap < W.flagCapture
         flags{end+1} = sprintf('capture < %g %%', W.flagCapture); %#ok<AGROW>
     end

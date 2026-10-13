@@ -161,6 +161,10 @@ ROWS = (
      "inverted signal: the stimulus-triggered median lies below half its fall for at least this time (no stimulus "
      "artifact)",
      1000, "ms", "Detection", False),
+    ("invertedMinCapture", "invertedMinCapture", "num", None,
+     "inverted signal confirmed: the normal detection in the negated signal finds certain stimulated contractions for "
+     "at least this fraction of the pulses; otherwise (e.g. rocker waves) the channel is analysed as it is",
+     100, "% of pulses", "Detection", False),
     ("invertedSkip", "invertedSkip", "num", None,
      "inverted signal: the stimulus-triggered median starts this time after the pulse (stimulus artifact)",
      1000, "ms", "Detection", False),
@@ -430,6 +434,27 @@ ROWS = (
     ("minGroupBeats", "minGroupBeats: few contractions", "int", None,
      "FFR protocols: a note lists the frequencies summarized from fewer included contractions (0 = no note)",
      1, "contractions", "Protocols", False),
+    ("arrhythmicChannels", "Arrhythmically paced channels", "vec", None,
+     "channels paced arrhythmically (e.g. 3 5; summary column arrhythmicPacing): the analysis report does not flag "
+     "their capture and amplitude CV and does not count their missed beats in the noise index (expected with "
+     "arrhythmic pacing); the capture is still analysed",
+     1, "channels", "Protocols", False),
+    ("arrhythmicDetection", "Detect arrhythmic pacing", "check", None,
+     "channels are also detected as arrhythmically paced if the stim-to-stim variability exceeds "
+     "arrhythmicMinVariability during more than arrhythmicMinFraction of the paced time (windows overlapping a "
+     "stimulation protocol of the log file do not count; analyses of the protocols: only the channels above)",
+     1, "", "Protocols", False),
+    ("arrhythmicMinVariability", "arrhythmicMinVariability", "num", None,
+     "arrhythmic pacing: a window is variable if the coefficient of variation (population SD / mean) of its "
+     "stimulus intervals exceeds this value (regular pacing: < 1 %)",
+     100, "% (CV)", "Protocols", False),
+    ("arrhythmicMinFraction", "arrhythmicMinFraction", "num", None,
+     "arrhythmic pacing: the variable windows make up more than this fraction of the paced time of the analysed "
+     "ranges",
+     100, "% of the paced time", "Protocols", False),
+    ("arrhythmicWindow", "arrhythmicWindow", "num", None,
+     "arrhythmic pacing: length of the windows (from the start of each range; paced: at least 6 regular pulses)",
+     1, "s", "Protocols", False),
     ("pulseTable", "Pulse table", "check", None,
      "exports and All channels -> file: table of all stimulus pulses (sheet / file pulses: pulse ID, time, "
      "extra pulse, current, durations, outcome, role, contraction, phase)",

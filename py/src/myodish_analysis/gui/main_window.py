@@ -67,7 +67,7 @@ from ..add_labels import add_labels
 from ..advanced import ROWS as ADVANCED_ROWS
 from ..analyze_ap import AP_PARAMETERS, analyze_ap, remove_artefacts
 from ..analyze_channel import analyze_channel
-from ..analysis import datenum_to_timestamps, myodish_analysis
+from ..analysis import arrhythmic_pacing, datenum_to_timestamps, myodish_analysis
 from ..labels import labels as make_labels
 from ..log_entries import log_entries
 from ..options import options as make_options
@@ -1037,7 +1037,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def summary_row(self):
         Bs = self.B.copy()
         Bs["included"] = self.selected()
-        Sm = summarize(Bs, self.C, self.range)
+        Sm = arrhythmic_pacing(summarize(Bs, self.C, self.range, self.opts), self.opts)  # 2026-10-13
         Sm.insert(0, "file", os.path.basename(self.H.file))
         when = None
         if not math.isnan(self.H.recordingStart):

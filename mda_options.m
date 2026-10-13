@@ -30,7 +30,10 @@ function opts = mda_options(varargin)
 %                      column invertedSignal (2026-10-11). 'invertedRatio' (2): the fall of the stimulus-triggered
 %                      median >= this x its rise, and 50th - 10th percentile of the signal >= this x (90th - 50th
 %                      percentile); 'invertedMinAmplitude' (50 uN); 'invertedMinWidth' (0.05 s below half the fall);
-%                      'invertedSkip' (0.02 s after the pulse: stimulus artifact)
+%                      'invertedSkip' (0.02 s after the pulse: stimulus artifact). Confirmation (2026-10-12):
+%                      'invertedMinCapture' (0.2): the normal detection in the negated signal finds certain
+%                      stimulated contractions for >= this fraction of the pulses; otherwise (e.g. rocker waves) the
+%                      channel is analysed as it is
 %
 % SELECTION OF CONTRACTIONS (the excluded ones stay in the table with included = false)
 %   'beats'            'all' (default) | 'stimulated' (only contractions that follow a stimulus of the channel)
@@ -97,6 +100,15 @@ function opts = mda_options(varargin)
 %                      'on' (always; for every analysed channel, MyoDish pulses ignored), 'off' (never)
 %   'pulseTable'       true (default) | false: table of all stimulus pulses of the analysed channels and ranges
 %                      (info.pulses, sheet / file 'pulses'; see MyoDishAnalysis)
+%   'arrhythmicChannels'  channels paced arrhythmically (e.g. [3 5]; default []): column arrhythmicPacing of the
+%                      summary; the analysis report does not flag their capture, amplitude CV and missed beats (noise
+%                      index), which are expected with arrhythmic pacing (2026-10-13)
+%   'arrhythmicDetection' true (default) | false: channels detected as arrhythmically paced: the stim-to-stim
+%                      variability (CV of the stimulus intervals in windows of arrhythmicWindow) exceeds
+%                      arrhythmicMinVariability during more than arrhythmicMinFraction of the paced time of the analysed
+%                      ranges (windows overlapping a stimulation protocol of the log file do not count; analyses of the
+%                      protocols: only arrhythmicChannels); summary columns stimVariability_percent, arrhythmicFraction,
+%                      pacedSeconds
 %
 % DIASTOLIC FORCE
 %   'zeroForce'        sensor signal without load [uN] for diastolicForce = F_dia - zeroForce ([] = 'Offset' entry of
@@ -304,12 +316,18 @@ function opts = mda_options(varargin)
 %                           amplitude_CV) exceeds this value: conduction block, alternans or extra beats (default 0.15)
 %  'minGroupBeats'          FFR protocols: a note lists the frequencies summarized from fewer included contractions (0 =
 %                           no note) [contractions] (default 5)
+%  'arrhythmicMinVariability' arrhythmic pacing: a window is variable if the CV of its stimulus intervals exceeds this
+%                           [fraction] (default 0.1)
+%  'arrhythmicMinFraction'  ... a channel is arrhythmically paced if the variable windows make up more than this
+%                           fraction of the paced time (stimulation protocols take less) [fraction] (default 0.5)
+%  'arrhythmicWindow'       ... windows of this length (paced: >= 5 intervals) [s] (default 60)
 %  EXPORT
 %  'pulseTextMax'           prePulses / postPulses: at most this many pulses (those nearest to the eliciting pulse),
 %                           then '&+<number of the others>' [pulses] (default 10)
 %
 % TS 2026-10-05 (rockerSource, pauseDiastoleWindow 2026-10-07; rockerArtifacts, detection 2026-10-09; onset gate,
-% extra pulses, pulse table, advanced settings 2026-10-10; diastolic level, FFR steady state, PRP reference 2026-10-10)
+% extra pulses, pulse table, advanced settings 2026-10-10; diastolic level, FFR steady state, PRP reference 2026-10-10;
+% arrhythmic pacing 2026-10-13)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -326,6 +344,7 @@ opts = struct( ...
     'invertedRatio', 2, ...
     'invertedMinAmplitude', 50, ...
     'invertedMinWidth', 0.05, ...
+    'invertedMinCapture', 0.2, ...
     'invertedSkip', 0.02, ...
     'detection', 'sensitive', ...
     'beats', 'all', ...
@@ -351,6 +370,8 @@ opts = struct( ...
     'stimChannel', [], ...
     'externalTrigger', 'auto', ...
     'pulseTable', true, ...
+    'arrhythmicChannels', [], ...
+    'arrhythmicDetection', true, ...
     'diastolicLevel', 'preStimulusMedian', ...
     'ffrRockerFallback', true, ...
     'prpReference', 'preceding', ...
@@ -368,6 +389,9 @@ opts = struct( ...
     'contractionEnd', 90, ...
     'offsetSnap', 0.005, ...
     'pacedMinStimuli', 3, ...
+    'arrhythmicMinVariability', 0.1, ...
+    'arrhythmicMinFraction', 0.5, ...
+    'arrhythmicWindow', 60, ...
     'pauseMinInterval', 2.5, ...
     'pauseIntervalRatio', 1.5, ...
     'diastoleWindowStart', 0.06, ...
@@ -561,7 +585,8 @@ for nm = {'steepRiseMargin', 'offsetSnap', 'pauseMinInterval', 'pauseIntervalRat
         'artifactMaxRel', 'noiseAbsMax', 'noiseRelMax', 'rhythmMinPerCycle', 'keepNoiseRel', 'keepNoiseAbs', ...
         'dropRel', 'smallNoiseRel', 'smallTypicalRel', 'smallRhythmMinPerCycle', 'smallRhythmTypicalRel', ...
         'spikeJumpFactor', 'spikeGroupGap', 'spikeCoincidence', 'rfMinRun', 'rfSmoothBaseline', 'rfRidge', ...
-        'rfMinRefBlock', 'rfMaxBorrow', 'rfMaskMargin', 'irregularCV', 'invertedRatio', 'invertedMinAmplitude', 'invertedMinWidth', 'invertedSkip'}
+        'rfMinRefBlock', 'rfMaxBorrow', 'rfMaskMargin', 'irregularCV', 'invertedRatio', 'invertedMinAmplitude', 'invertedMinWidth', ...
+        'invertedMinCapture', 'invertedSkip'}
     v = opts.(nm{1});
     if ~(isnumeric(v) && isscalar(v) && ~isnan(v)), v = nan; end
     if ~(v >= 0), error('mda_options: ''%s'' must be a number >= 0.', nm{1}); end
@@ -602,6 +627,30 @@ end
 opts.rfBandNoLog = v;
 opts.pulseTable = isequal(opts.pulseTable, true) || isequal(opts.pulseTable, 1) || ...
     ((ischar(opts.pulseTable) || isstring(opts.pulseTable)) && any(strcmpi(opts.pulseTable, {'on','true'})));
+% 2026-10-13: arrhythmic pacing
+ac = opts.arrhythmicChannels;
+if ischar(ac) || isstring(ac)
+    t = strtrim(strrep(char(ac), ',', ' '));
+    if isempty(t), ac = []; else, ac = str2double(strsplit(t)); end
+end
+ac = double(ac(:)');
+if ~all(ac >= 1 & ac == round(ac))
+    error('mda_options: ''arrhythmicChannels'' must be channel numbers (integers >= 1).');
+end
+opts.arrhythmicChannels = ac;
+opts.arrhythmicDetection = isequal(opts.arrhythmicDetection, true) || isequal(opts.arrhythmicDetection, 1) || ...
+    ((ischar(opts.arrhythmicDetection) || isstring(opts.arrhythmicDetection)) && ...
+    any(strcmpi(opts.arrhythmicDetection, {'on','true'})));
+for nm = {'arrhythmicMinVariability', 'arrhythmicMinFraction'}
+    v = opts.(nm{1});
+    if ~(isnumeric(v) && isscalar(v) && ~isnan(v)), v = nan; end
+    if ~(v >= 0 && v <= 1), error('mda_options: ''%s'' must be a number from 0 to 1.', nm{1}); end
+    opts.(nm{1}) = double(v);
+end
+v = opts.arrhythmicWindow;
+if ~(isnumeric(v) && isscalar(v) && ~isnan(v)), v = nan; end
+if ~(v > 0), error('mda_options: ''arrhythmicWindow'' must be a number > 0.'); end
+opts.arrhythmicWindow = double(v);
 % 2026-10-10: diastolic level, FFR steps without rocker stop, PRP reference
 vals = {'preStimulusMedian', 'minimum'};
 k = find(strcmpi(char(opts.diastolicLevel), vals), 1);

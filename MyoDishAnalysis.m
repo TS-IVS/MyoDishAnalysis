@@ -12,7 +12,9 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %   contractions table, one row per detected contraction (also the excluded ones, see column 'included'); column
 %                'uncertain': contraction found with high sensitivity only (option 'detection', see mda_options)
 %   summary      table, one row per channel and range: numbers of contractions/stimuli, mean and SD of all
-%                parameters of the included contractions
+%                parameters of the included contractions; column arrhythmicPacing (2026-10-13): channel paced
+%                arrhythmically (option arrhythmicChannels, or detected from the stim-to-stim variability outside
+%                the stimulation protocols of the log file: arrhythmicDetection, see mda_options, mda_summarize)
 %   info         struct: file facts, options, detection threshold per channel and range, notes; with grouped
 %                protocols (FFR, ST, RP, PRP) info.protocolResults: characteristic values per protocol and channel
 %                (max. captured frequency, FFR ratios, current thresholds, refractory periods, PRP at 15 / 30 /
@@ -168,6 +170,14 @@ grouping = any(~strcmpi(groupByR, 'none'));
 if ~isempty(protocols) && ~any(strcmpi(groupByR, 'rockerSpeed'))
     if ~rockerGiven, opts.rocker = 'stopped'; end   %protocols: contractions with the rocker at rest ...
     if ~beatsGiven, opts.beats = 'stimulated'; end  %... that follow a stimulus
+end
+protW = zeros(0, 2);   %stimulation protocols: not used for the detection of arrhythmic pacing (2026-10-13)
+if isempty(protocols) && opts.arrhythmicDetection
+    try
+        P0 = mda_protocols(H);
+        if ~isempty(P0) && height(P0) > 0, protW = [P0.from(:) P0.to(:)]; end
+    catch                                           %no log file / protocols: all windows
+    end
 end
 if isempty(channels), channels = H.dataChannels; end
 channels = channels(:)';
@@ -344,7 +354,7 @@ for r = 1:nR
                         table(pNote, 'VariableNames', {'protocolNote'})]; %#ok<AGROW>
                 end
             else
-                T = mda_summarize(B, Cm, ranges(r,:));
+                T = mda_summarize(B, Cm, ranges(r,:), opts, protW);
                 if grouping                            %same columns as the grouped ranges
                     B.group = repmat({'all'}, height(B), 1); B.groupValue = nan(height(B), 1); B.groupRole = repmat({''}, height(B), 1);
                     B.groupStep = nan(height(B), 1);
@@ -392,6 +402,7 @@ end
 thrInfo = sortrows(thrInfo, [1 2 3]);                %order: range, channel, time
 contractions = vertcat(parts{:});
 summary = vertcat(sumParts{:});
+summary = arrhythmicPacing(summary, opts, ~isempty(protocols));   %2026-10-13
 
 % absolute time of every contraction (if the log file contains the recording start)
 if ~isnan(H.recordingStart) && height(contractions) > 0
@@ -487,6 +498,29 @@ end
 
 
 % =====================================================================================================
+function T = arrhythmicPacing(T, opts, protocolMode)
+% column arrhythmicPacing after pacedSeconds (2026-10-13): channels of arrhythmicChannels and (arrhythmicDetection,
+% not in analyses of the stimulation protocols) channels whose variable windows (stimulus interval CV >
+% arrhythmicMinVariability) make up more than arrhythmicMinFraction of the paced time of the analysed ranges
+% (windows overlapping a stimulation protocol of the log file are not counted, see mda_summarize)
+if isempty(T) || ~all(ismember({'pacedSeconds', 'channel'}, T.Properties.VariableNames)), return; end
+ap = false(height(T), 1);
+chan = double(T.channel);
+uc = unique(chan(~isnan(chan)));
+for k = 1:numel(uc)
+    m = chan == uc(k);
+    on = ismember(uc(k), opts.arrhythmicChannels);
+    if ~on && opts.arrhythmicDetection && ~protocolMode
+        w = T.pacedSeconds(m); f = T.arrhythmicFraction(m);
+        ok = w > 0 & ~isnan(f);
+        on = any(ok) && sum(w(ok) .* f(ok)) / sum(w(ok)) > opts.arrhythmicMinFraction;
+    end
+    ap(m) = on;
+end
+T = addvars(T, ap, 'After', 'pacedSeconds', 'NewVariableNames', 'arrhythmicPacing');
+end
+
+
 function v = inRangeOf(CsC, field, timeField)
 % values of the field of all chunks (channel info of mda_analyzeChannel) whose times lie in the chunk's range
 parts = cell(numel(CsC), 1);

@@ -1,19 +1,26 @@
-function T = mda_summarize(B, C, range)
+function T = mda_summarize(B, C, range, opts, exclude)
 %MDA_SUMMARIZE  One summary row (mean and SD of the included contractions) for one channel and time range.
 %
 %   T = mda_summarize(B, C, range)
+%   T = mda_summarize(B, C, range, opts, exclude)
 %
-%   B      contraction table of one channel (mda_analyzeChannel); only rows with included = true and a peak
-%          within range are averaged
-%   C      channel info from mda_analyzeChannel (stimulus times, threshold)
-%   range  [from to] in s
+%   B        contraction table of one channel (mda_analyzeChannel); only rows with included = true and a peak
+%            within range are averaged
+%   C        channel info from mda_analyzeChannel (stimulus times, threshold)
+%   range    [from to] in s
+%   opts     options (arrhythmicWindow, arrhythmicMinVariability; [] = defaults)
+%   exclude  [from to] rows of the stimulation protocols (stim-to-stim variability: windows overlapping them are
+%            skipped)
 %
 % Columns: channel, from, to, nContractions (included), nDetected, nStimulated, nExtraBeats, nStimuli, nMissedBeats,
 % extraBeats_percent, missedBeats_percent, nUncertain, nStimulatedUncertain, nExtraBeatsUncertain,
 % nMissedBeatsUncertain (uncertain contractions, see mda_analyzeChannel, option 'detection'; missed: stimuli followed
 % only by an uncertain contraction), nMissedDuringContraction (missed: the regular pulse fell into a contraction
 % elicited by another pulse), nExtraPulses (status channel bit 16), nElicitedByExtraPulse, nAmbiguous (stimAmbiguous),
-% stimFrequency (Hz, from the median stimulus interval in the range),
+% stimFrequency (Hz, from the median stimulus interval in the range), stimVariability_percent (median CV of the stimulus
+% intervals in windows of arrhythmicWindow, %), arrhythmicFraction (fraction of the paced time in windows whose CV
+% exceeds arrhythmicMinVariability), pacedSeconds (paced time of these windows: >= 5 intervals, no overlap with
+% exclude; 2026-10-13; MyoDishAnalysis adds arrhythmicPacing),
 % detectionThreshold (uN), zeroForce (uN, zero of diastolicForce), then <parameter>_mean, <parameter>_SD and
 % <parameter>_n (number of included contractions with a value of this parameter, 2026-10-05) for every parameter;
 % amplitude_CV after amplitude_n (population SD / mean of the included amplitudes, NaN with < 2; 2026-10-10).
@@ -21,13 +28,15 @@ function T = mda_summarize(B, C, range)
 % diastolicForce_dRef / diastolicSignal_dRef _mean / _SD (difference to the reference, uN), 2026-10-06.
 % With AP columns (EP recording, mda_analyzeAP): AP_dVdtMax, AP_RMP, AP_Vmax, APD25, APD50, APD90 _mean / _SD / _n.
 %
-% TS 2026-10-04 (uncertain contractions 2026-10-09; extra pulses 2026-10-10)
+% TS 2026-10-04 (uncertain contractions 2026-10-09; extra pulses 2026-10-10; stimulus variability 2026-10-13)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
 % SPDX-License-Identifier: GPL-3.0-or-later
 % Additional terms (GPL-3.0 section 7): see the file NOTICE
 
+if nargin < 4 || isempty(opts), opts = mda_options(); end
+if nargin < 5, exclude = []; end
 PI = mda_parameters();
 params = PI(:,1)';
 
@@ -71,6 +80,11 @@ if ismember('elicitedByExtraPulse', B.Properties.VariableNames), nEl = sum(inRan
 if ismember('stimAmbiguous', B.Properties.VariableNames), nAmb = sum(inRange & B.stimAmbiguous); end
 T = addvars(T, nDur, nXP, nEl, nAmb, 'After', 'nMissedBeatsUncertain', 'NewVariableNames', ...
     {'nMissedDuringContraction', 'nExtraPulses', 'nElicitedByExtraPulse', 'nAmbiguous'});
+% 2026-10-13: stim-to-stim variability of the regular pulses (arrhythmic pacing)
+[vCV, vFrac, vDur] = stimVariability(ST(J), range, optionOr(opts, 'arrhythmicWindow', 60), ...
+    optionOr(opts, 'arrhythmicMinVariability', 0.1), exclude);
+T = addvars(T, vCV, vFrac, vDur, 'After', 'stimFrequency', 'NewVariableNames', ...
+    {'stimVariability_percent', 'arrhythmicFraction', 'pacedSeconds'});
 for k = 1:numel(params)
     v = B.(params{k})(I);
     T.([params{k} '_mean']) = mean(v, 'omitnan');
@@ -98,4 +112,41 @@ for k = 1:size(AP, 1)
     T.([AP{k,1} '_SD']) = std(v, 'omitnan');
     T.([AP{k,1} '_n']) = sum(~isnan(v));
 end
+end
+
+
+function [medCV, frac, dur] = stimVariability(ST, range, window, minCV, X)
+% stim-to-stim variability of the regular pulses ST in range (2026-10-13): windows of window s from the start of the
+% range (the last one shorter); paced windows: >= 6 pulses and no overlap with the [from to] rows of X (stimulation
+% protocols); CV = population SD / mean of their intervals. Median CV (%), fraction of the paced time with CV > minCV,
+% paced time (s); NaN, NaN, 0 without paced windows.
+ST = sort(double(ST(:)));
+if isempty(X), X = zeros(0, 2); else, X = reshape(double(X), [], 2); end
+a = double(range(1)); b = double(range(2));
+cvs = []; dur = 0; tVar = 0;
+w = a;
+while w < b
+    e = min(w + double(window), b);
+    x = ST(ST >= w & ST < e);
+    if numel(x) >= 6 && ~any(X(:,1) < e & X(:,2) > w)
+        iv = diff(x);
+        cv = std(iv, 1) / mean(iv);
+        cvs(end+1) = cv; %#ok<AGROW>
+        dur = dur + (e - w);
+        if cv > minCV, tVar = tVar + (e - w); end
+    end
+    w = e;
+end
+if isempty(cvs)
+    medCV = nan; frac = nan; dur = 0;
+else
+    medCV = 100 * median(cvs); frac = tVar / dur;
+end
+end
+
+
+function v = optionOr(opts, name, default)
+% option of opts, default if missing (options of older versions)
+v = default;
+if isstruct(opts) && isfield(opts, name), v = opts.(name); end
 end

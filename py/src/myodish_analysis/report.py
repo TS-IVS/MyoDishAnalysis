@@ -33,6 +33,8 @@ Flags per channel (channels with a slice and at least min_beats (50) detected co
     S  large extra beats: certain extra beats >= artifact_share (5) % of the contractions with a median amplitude >
        artifact_ratio (3) times that of the certain stimulated contractions (spikes, saturation; needs C)
     D  median delay pulse -> onset of the stimulated contractions > delay (0.15 s)
+    F  stimulus frequency > stim_frequency (10 Hz) in a range (median stimulus interval; implausible: status channel
+       probably misread; 2026-10-13)
   slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
     C  capture < capture (90) % of the stimuli
     X  extra beats > extra (10) % of the detected contractions (spontaneous activity; not shown with N)
@@ -41,6 +43,10 @@ Flags per channel (channels with a slice and at least min_beats (50) detected co
        (shown with the time between the start of the first and the end of the last of these ranges, e.g. 'amplitude
        change +660 % over 24 h')
     V  median amplitude CV of the ranges > amplitude_cv (30) %
+Arrhythmic pacing (summary column arrhythmicPacing: option arrhythmicChannels or detected, see options; 2026-10-13):
+capture and amplitude CV are not flagged (C, V) and the missed beats do not count in the noise index (N: extra beats
+only); missed beats, uncertain contractions and a variable amplitude are expected. The capture is still shown
+(overview: '~' after it).
 Channel label (lists and trace pages, e.g. 'ch 7 (PMA)'): the values of the label treatment (with concentration and
 unit), otherwise sliceGroup, otherwise sampleGroup of the summary, if given.
 Pages: overview (recordings x channels: capture % and codes), list of the channels to check (red) and of those with
@@ -50,7 +56,8 @@ uncertain / extra beats (N) or large extra beats (S)) with the commands to open 
     MATLAB  MyoDishAnalysisGUI(file, 'channel', c, 'window', [from to])
     Python  mda-gui file --channel c --window from to
 
-TS 2026-10-11 (noise index N, large extra beats S, extra beats as slice quality 2026-10-12)
+TS 2026-10-11 (noise index N, large extra beats S, extra beats as slice quality 2026-10-12; arrhythmic pacing, F
+2026-10-13)
 """
 from __future__ import annotations
 
@@ -62,8 +69,9 @@ import numpy as np
 import pandas as pd
 
 FLAG_DEFAULTS = dict(uncertain=25.0, irregular=15.0, artifact_share=5.0, artifact_ratio=3.0, extra=10.0, capture=90.0,
-                     amplitude_change=30.0, amplitude=75.0, amplitude_cv=30.0, delay=0.15, min_beats=50)
-RED_CODES = (("inverted", "I"), ("noise", "N"), ("large", "S"), ("delay", "D"))
+                     amplitude_change=30.0, amplitude=75.0, amplitude_cv=30.0, delay=0.15, min_beats=50,
+                     stim_frequency=10.0)
+RED_CODES = (("inverted", "I"), ("noise", "N"), ("large", "S"), ("delay", "D"), ("frequency", "F"))
 YELLOW_CODES = (("capture", "C"), ("extra", "X"), ("amplitude", "A"), ("change", "T"), ("cv", "V"))
 RED_LETTERS = "".join(c for _, c in RED_CODES)
 _CELL_RED, _CELL_YELLOW, _CELL_GREY = "#f8c9c4", "#fbe8a6", "#eeeeee"
@@ -175,10 +183,15 @@ def report_flags(S, C=None, status=None, **flags):
                  amplitudeChange_hours=span if len(good) > 1 and a1 > 0 else math.nan,
                  amplitudeCV_percent=100 * float(np.median(cv[~np.isnan(cv)])) if np.any(~np.isnan(cv)) else math.nan,
                  delay_ms=math.nan,
-                 invertedSignal=False)
+                 invertedSignal=False,
+                 arrhythmicPacing=bool(_truthy(s["arrhythmicPacing"]).any()) if "arrhythmicPacing" in s.columns
+                 and len(s) else False,
+                 stimFrequency_Hz=float(np.nanmax(s["stimFrequency"].to_numpy(float)))
+                 if "stimFrequency" in s.columns and s["stimFrequency"].notna().any() else math.nan)
+        arr = r["arrhythmicPacing"]
         if nDet > 0:  # noise index: uncertain contractions in a channel that does not follow the pacing
-            if nStim > 0:
-                r["extraMissed_percent"] = r["extra_percent"] + 100 - r["capture_percent"]
+            if nStim > 0:  # arrhythmic pacing: missed beats expected, not counted (2026-10-13)
+                r["extraMissed_percent"] = r["extra_percent"] + (0.0 if arr else 100 - r["capture_percent"])
                 r["noiseIndex"] = r["uncertain_percent"] * min(100.0, r["extraMissed_percent"]) / 100
             else:
                 r["noiseIndex"] = r["uncertain_percent"]
@@ -211,20 +224,25 @@ def report_flags(S, C=None, status=None, **flags):
         red, yellow = [], []
         if r["status"] != "no slice" and nDet >= fl["min_beats"]:
             if nInv >= fl["min_beats"]:  # ranges with an inverted signal and enough contractions
-                red.append(("inverted", "inverted signal" + (f" ({100 * nInv / nDet:.0f} % of the contractions)"
-                                                              if nInv < nDet else "")))
+                share = 100 * nInv / nDet
+                part = "" if nInv >= nDet else " (< 1 % of the contractions)" if share < 1 else \
+                    f" ({share:.0f} % of the contractions)"
+                red.append(("inverted", "inverted signal" + part))
             noise = r["uncertain_percent"] >= fl["uncertain"] and (nStim <= 0 or
                                                                     r["extraMissed_percent"] >= fl["irregular"])
             if noise:
                 red.append(("noise", "noise index %.0f (uncertain %.0f %%, " % (r["noiseIndex"], r["uncertain_percent"])
-                            + ("extra %.0f %%, missed %.0f %%)" % (r["extra_percent"], 100 - r["capture_percent"])
+                            + ("extra %.0f %%, arrhythmic pacing)" % r["extra_percent"] if nStim > 0 and arr else
+                               "extra %.0f %%, missed %.0f %%)" % (r["extra_percent"], 100 - r["capture_percent"])
                                if nStim > 0 else "unpaced)")))
             if r["largeExtra_percent"] >= fl["artifact_share"] and r["largeExtra_ratio"] > fl["artifact_ratio"]:
                 red.append(("large", "large extra beats %.0f %% (%.1f x the paced amplitude)"
                             % (r["largeExtra_percent"], r["largeExtra_ratio"])))
             if r["delay_ms"] > 1000 * fl["delay"]:
                 red.append(("delay", "delay %.0f ms" % r["delay_ms"]))
-            if r["capture_percent"] < fl["capture"]:
+            if r["stimFrequency_Hz"] > fl["stim_frequency"]:
+                red.append(("frequency", "stimulus frequency %.0f Hz" % r["stimFrequency_Hz"]))
+            if r["capture_percent"] < fl["capture"] and not arr:
                 yellow.append(("capture", "capture %.0f %%" % r["capture_percent"]))
             if not noise and r["extra_percent"] > fl["extra"]:
                 yellow.append(("extra", "extra beats %.0f %%" % r["extra_percent"]))
@@ -234,7 +252,7 @@ def report_flags(S, C=None, status=None, **flags):
                 d = duration_text(r["amplitudeChange_hours"])
                 yellow.append(("change", "amplitude change %+.0f %% " % r["amplitudeChange_percent"]
                                + (f"over {d}" if d else "(first vs. last range)")))
-            if r["amplitudeCV_percent"] > fl["amplitude_cv"]:
+            if r["amplitudeCV_percent"] > fl["amplitude_cv"] and not arr:
                 yellow.append(("cv", "amplitude CV %.0f %%" % r["amplitudeCV_percent"]))
         code = dict(RED_CODES + YELLOW_CODES)
         r["flags"] = "".join(code[k] for k, _ in red + yellow)
@@ -247,7 +265,7 @@ def report_flags(S, C=None, status=None, **flags):
     cols = ["channel", "label", "status", "nDetected", "capture_percent", "extra_percent", "uncertain_percent",
             "extraMissed_percent", "noiseIndex", "largeExtra_percent", "largeExtra_ratio", "amplitude_uN",
             "amplitudeChange_percent", "amplitudeChange_hours", "amplitudeCV_percent", "delay_ms", "invertedSignal",
-            "flags", "level", "red", "yellow"]
+            "arrhythmicPacing", "stimFrequency_Hz", "flags", "level", "red", "yellow"]
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -433,7 +451,8 @@ def _overview_pages(pdf, recs, title, subtitle, fl, nDetail, notice=()):
                            "protocols only": "prot"}.get(r["status"], str(r["nDetected"]))
                 else:
                     col = _CELL_RED if r["level"] == "check" else (_CELL_YELLOW if r["level"] == "quality" else "white")
-                    cap = "" if math.isnan(r["capture_percent"]) else "%.0f" % r["capture_percent"]
+                    cap = "" if math.isnan(r["capture_percent"]) else "%.0f" % r["capture_percent"] \
+                        + ("~" if r.get("arrhythmicPacing", False) else "")
                     txt = (cap + " " + r["flags"]).strip()
                 ax.add_patch(matplotlib_rect(x0 + j * cw + 0.002, yk - rh + 0.001, cw - 0.004, rh - 0.002, col))
                 ax.text(x0 + (j + 0.5) * cw, yk - rh / 2, txt, fontsize=5.5, ha="center", va="center")
@@ -445,11 +464,11 @@ def legend_lines(fl):
     """(cell colour, text) of the legend below the overview table"""
     mu = "\u00b5"
     return [
-        (None, "Each cell: capture (% of the stimuli followed by a contraction) and the letters of the flags. White: "
-               "no flag; empty: no slice."),
-        ("check", f"Red = check the analysis:  I inverted signal,  N noise (uncertain \u2265 {fl['uncertain']:g} % "
-                  f"with extra + missed \u2265 {fl['irregular']:g} %),  S large extra beats (> {fl['artifact_ratio']:g} x "
-                  f"paced),  D delay to onset > {1000 * fl['delay']:g} ms"),
+        (None, "Each cell: capture (% of the stimuli followed by a contraction; ~ arrhythmic pacing, C and V not "
+               "flagged) and the letters of the flags. White: no flag; empty: no slice."),
+        ("check", f"Red = check the analysis:  I inverted signal,  N noise (uncertain \u2265 {fl['uncertain']:g} %, "
+                  f"extra+missed \u2265 {fl['irregular']:g} %),  S large extra beats (> {fl['artifact_ratio']:g} x "
+                  f"paced),  D delay > {1000 * fl['delay']:g} ms,  F pacing > {fl['stim_frequency']:g} Hz"),
         ("quality", f"Yellow = slice quality:  C capture < {fl['capture']:g} %,  X extra beats > {fl['extra']:g} %,  "
                     f"A amplitude < {fl['amplitude']:g} {mu}N,  T amplitude changes by > {fl['amplitude_change']:g} % "
                     f"during the recording,  V amplitude CV > {fl['amplitude_cv']:g} %"),

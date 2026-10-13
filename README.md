@@ -333,7 +333,8 @@ Own additional fields are kept as extra columns.
 * `contractions`: one row per detected contraction; `summary`: one row per channel and range
   (counts incl. nExtraBeats, nMissedBeats, extraBeats_percent, missedBeats_percent, nUncertain,
   nStimulatedUncertain, nExtraBeatsUncertain, nMissedBeatsUncertain, nMissedDuringContraction, nExtraPulses,
-  nElicitedByExtraPulse, nAmbiguous; mean, SD and n of all parameters of the included contractions). Column
+  nElicitedByExtraPulse, nAmbiguous; stimFrequency, stimVariability_percent, arrhythmicFraction, pacedSeconds,
+  arrhythmicPacing (see "Arrhythmic pacing"); mean, SD and n of all parameters of the included contractions). Column
   `uncertain` of `contractions`: contraction found with high sensitivity only (option `'detection'`, see "Signal
   processing and detection"). `info.pulses` (sheet / file **pulses**, option `'pulseTable'`, default on): one row per
   stimulus pulse (see "Stimulus assignment").
@@ -760,10 +761,41 @@ percentile ≥ 2 × (90th − 50th percentile)). The median and the percentiles 
 contractions that are not locked to the pulses and upright contractions just before the pulses from being taken for an
 inverted signal (in a sample of 121 recordings, a first version of the test with the mean flagged 38 channels, mostly
 for such reasons; the final test flags the channel whose magnet was out of position and one 30-min period without
-contractions; the analysis report flags a channel only with ≥ 50 contractions in inverted ranges). Then the contractions are detected in the negated signal:
+contractions; the analysis report flags a channel only with ≥ 50 contractions in inverted ranges). This is the suspicion. Since 2026-10-12 (after 1.0.0-beta.5) the
+inversion must be **confirmed by the detection**: the normal detection in the negated signal finds certain stimulated
+contractions for at least `'invertedMinCapture'` (20 %) of the pulses; otherwise (e.g. waves of the rocker partly in
+phase with the pulses, no contractions) the section is analysed as it is. The detection alone cannot tell the
+direction: in a clean signal both directions give regular, locked "contractions" (the plateau between the deflections);
+the suspicion decides the direction, the detection confirms it. Check on all 1581 ranges (301 channels) that
+1.0.0-beta.5 flagged in the recordings of 2023, 2024 and 2026: 1069 ranges stay inverted; channels with ≥ 50
+contractions in inverted ranges 103 → 90; all 10 channels checked visually as rocker waves or upright contractions
+lose the flag, 14 of 15 channels checked visually as inverted keep it (the one lost has 60 µN deflections and < 20 %
+certain capture in the suspected section). The second detection runs only for suspected sections. Then
+the contractions are detected in the negated signal:
 rate and capture (beat types, missed beats, `peakToPeakFrequency`, `stimFrequency`) are analysed, all force and time
 parameters are NaN, and the column `invertedSignal` (contractions and summary) is true. Use: whether the slice beats
 and follows the pacing, e.g. while it is kept in culture for a later analysis.
+
+## Arrhythmic pacing (options `'arrhythmicChannels'`, `'arrhythmicDetection'`; 2026-10-13)
+Some slices are paced continuously at a high or irregular rate, e.g. right atrium at up to 5–6 Hz with a
+stimulus-to-stimulus SD of 30 %. Many pulses then elicit no contraction (often they fall into the previous one) and the
+amplitude varies with the preceding interval; this is expected and no fault of the analysis. Such channels are marked
+in the summary column `arrhythmicPacing`:
+* `'arrhythmicChannels'` (e.g. `[3 5]`; GUI *Advanced ...* → *Protocols*): channels paced arrhythmically;
+* `'arrhythmicDetection'` (default on): in addition, a channel is detected as arrhythmically paced if the coefficient
+  of variation (population SD / mean) of its stimulus intervals exceeds `'arrhythmicMinVariability'` (10 %) in windows
+  that make up more than `'arrhythmicMinFraction'` (50 %) of the paced time of the analysed ranges. Windows:
+  `'arrhythmicWindow'` (60 s) from the start of each range, with ≥ 6 regular pulses (extra pulses do not count) and no
+  overlap with a stimulation protocol of the log file, so FFR, PRP or threshold protocols do not make a channel
+  arrhythmic (in analyses of the protocols, `'protocol'`, only `'arrhythmicChannels'` applies). Check on the human
+  right-atrium recordings of 2022–2026: 712 of 714 channels paced at 5 Hz with an interval CV of 35–60 % detected (the
+  2 others: misread status channel); no channel in 396 recordings of other tissues (details: `CHANGELOG.md`).
+
+Summary columns: `stimVariability_percent` (median CV of the windows), `arrhythmicFraction` (variable fraction of the
+paced time), `pacedSeconds` (time of the windows that count), `arrhythmicPacing`. The capture is analysed as usual;
+the analysis report shows it with `~` and does not flag the capture (C) and the amplitude CV (V) of these channels, and
+their missed beats do not count in the noise index (N: uncertain contractions with extra beats only). The text report
+of the watcher writes `arrhythmic pacing` instead of `capture < 90 %`.
 
 ## Analysis report (`mda_report`; Python `report.py`; 1.0.0-beta.5)
 A short PDF that says which analyses should be checked, written by the watcher after every pass, by `MyoDishAnalysis`
@@ -775,8 +807,11 @@ thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
   threshold that do not follow the pacing are mostly noise or artifacts, e.g. rocker waves; uncertain contractions
   with regular capture are real contractions near the threshold and are not flagged; unpaced channel: uncertain ≥
   25 %); **S** large extra beats (certain extra beats ≥ 5 % with > 3 × the amplitude of the paced ones: spikes,
-  saturation); **D** median delay pulse → onset > 150 ms. Noise index = uncertain % × (extra % + missed %) / 100; it is
-  listed (e.g. `noise index 54 (uncertain 98 %, extra 0 %, missed 55 %)`) and orders the trace pages.
+  saturation); **D** median delay pulse → onset > 150 ms; **F** stimulus frequency > 10 Hz in a range (1 / median
+  stimulus interval; such rates are implausible and point to a misread status channel; 2026-10-13). Noise index =
+  uncertain % × (extra % + missed %) / 100; it is listed (e.g. `noise index 54 (uncertain 98 %, extra 0 %, missed
+  55 %)`) and orders the trace pages. Arrhythmically paced channels (see "Arrhythmic pacing"): missed beats not counted,
+  no C and V flags, capture shown with `~`.
 * **slice quality** (yellow: possibly poor biological quality, also e.g. an effect of a treatment; the user
   decides): **C** capture < 90 %, **X** extra beats > 10 % (spontaneous activity; not shown with N), **A** amplitude
   < 75 µN, **T** amplitude change > 30 % (first → last range with ≥ 10 contractions; listed with the time span, e.g.

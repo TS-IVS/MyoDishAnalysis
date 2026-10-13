@@ -4,24 +4,30 @@
 # Additional terms (GPL-3.0 section 7): see the file NOTICE
 """One summary row (mean and SD of the included contractions) for one channel and time range. Port of mda_summarize.m.
 
-    T = summarize(B, C, range_)
+    T = summarize(B, C, range_, opts=None, exclude=None)
 
 B       contraction table of one channel (analyze_channel); only rows with included = True and a peak within range
         are averaged
 C       channel info from analyze_channel (stimulus times, threshold)
 range_  [from, to] in s
+opts    options (arrhythmicWindow, arrhythmicMinVariability; None = defaults)
+exclude [from to] rows of the stimulation protocols (stim-to-stim variability: windows overlapping them are skipped)
 
 Columns: channel, from, to, nContractions (included), nDetected, nStimulated, nExtraBeats, nStimuli, nMissedBeats,
 extraBeats_percent, missedBeats_percent, nUncertain, nStimulatedUncertain, nExtraBeatsUncertain,
 nMissedBeatsUncertain (uncertain contractions, see analyze_channel, option detection; missed: stimuli followed only by
 an uncertain contraction), nMissedDuringContraction (missed: the regular pulse fell into a contraction elicited by
 another pulse), nExtraPulses (status channel bit 16), nElicitedByExtraPulse, nAmbiguous (stimAmbiguous), stimFrequency
-(Hz, from the median stimulus interval in the range), detectionThreshold (uN), zeroForce (uN), then <parameter>_mean,
+(Hz, from the median stimulus interval in the range), stimVariability_percent (median CV of the stimulus intervals in
+windows of arrhythmicWindow, %), arrhythmicFraction (fraction of the paced time in windows whose CV exceeds
+arrhythmicMinVariability), pacedSeconds (paced time of these windows: >= 5 intervals, no overlap with exclude =
+[from to] of the stimulation protocols; 2026-10-13; analysis adds arrhythmicPacing), detectionThreshold (uN), zeroForce (uN), then <parameter>_mean,
 <parameter>_SD and <parameter>_n for every parameter; amplitude_CV after amplitude_n (population SD / mean of the
 included amplitudes, NaN with < 2; 2026-10-10);
 with a reference beat <parameter>_pctRef / _dRef _mean / _SD; with AP columns (analyze_ap) _mean / _SD / _n.
 
-TS 2026-10-06 (port of mda_summarize.m, TS 2026-10-04; uncertain contractions 2026-10-09; extra pulses 2026-10-10)
+TS 2026-10-06 (port of mda_summarize.m, TS 2026-10-04; uncertain contractions 2026-10-09; extra pulses 2026-10-10;
+stimulus variability 2026-10-13)
 """
 from __future__ import annotations
 
@@ -34,8 +40,38 @@ from ._matlab import nanmean, nanstd
 from .parameters import PARAMETERS
 
 
-def summarize(B, C, range_):
+def stim_variability(ST, range_, window=60.0, min_cv=0.1, exclude=None):
+    """stim-to-stim variability of the regular pulses ST in range_ (2026-10-13): windows of window s from the start of
+    the range (the last one shorter); paced windows: >= 6 pulses and no overlap with the [from to] rows of exclude
+    (stimulation protocols); CV = population SD / mean of their intervals.
+    Returns median CV (%), fraction of the paced time with CV > min_cv, paced time (s); NaN, NaN, 0 without paced
+    windows."""
+    ST = np.sort(np.asarray(ST, dtype=float))
+    X = np.zeros((0, 2)) if exclude is None else np.asarray(exclude, dtype=float).reshape(-1, 2)
+    a, b = float(range_[0]), float(range_[1])
+    cvs, dur, var = [], 0.0, 0.0
+    w = a
+    while w < b:
+        e = min(w + float(window), b)
+        x = ST[(ST >= w) & (ST < e)]
+        if x.size >= 6 and not np.any((X[:, 0] < e) & (X[:, 1] > w)):
+            iv = np.diff(x)
+            cv = float(np.std(iv) / np.mean(iv))
+            cvs.append(cv)
+            dur += e - w
+            if cv > min_cv:
+                var += e - w
+        w = e
+    if not cvs:
+        return math.nan, math.nan, 0.0
+    return 100 * float(np.median(cvs)), var / dur, dur
+
+
+def summarize(B, C, range_, opts=None, exclude=None):
     from .analyze_ap import AP_PARAMETERS
+    if opts is None:
+        from .options import options
+        opts = options()
     params = [p[0] for p in PARAMETERS]
     tp = B["t_peak"].to_numpy(dtype=float)
     inRange = (tp >= range_[0]) & (tp <= range_[1])
@@ -82,6 +118,8 @@ def summarize(B, C, range_):
     row["nElicitedByExtraPulse"] = nEl
     row["nAmbiguous"] = nAmb
     row["stimFrequency"] = fStim
+    row["stimVariability_percent"], row["arrhythmicFraction"], row["pacedSeconds"] = stim_variability(
+        ST[J], range_, opts.get("arrhythmicWindow", 60.0), opts.get("arrhythmicMinVariability", 0.1), exclude)
     row["detectionThreshold"] = C.threshold
     row["zeroForce"] = zeroF
     for p in params:

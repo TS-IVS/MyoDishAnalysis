@@ -110,6 +110,7 @@ def analyze_channel(S, channel, range_=None, opts=None):
     if range_ is None or np.size(range_) == 0:
         range_ = [S.fromSeconds, S.toSeconds]
     range_ = [float(range_[0]), float(range_[1])]
+    S0 = S  # as passed (second pass without the inversion, see the end)
 
     # rocker artifact (option rockerFilter): subtracted here, unless S was filtered before (with more context)
     RF = None
@@ -495,6 +496,7 @@ def analyze_channel(S, channel, range_=None, opts=None):
     C.invertedSignal = bool(sgn < 0)  # see inverted_signal; rise / fall of the stimulus-triggered median (uN)
     C.invertedRise = invRise
     C.invertedFall = invFall
+    C.invertedCapture = math.nan  # certain capture in the negated signal (NaN: not inverted)
     C.stimCapturedCertain = stimCapturedCertain
     C.stimTimes = ST
     C.stimCaptured = stimCaptured
@@ -535,6 +537,17 @@ def analyze_channel(S, channel, range_=None, opts=None):
             B[nm] = Vrel[nm].to_numpy()
         units.update(Vrel.attrs.get("units", {}))
     B.attrs["units"] = units
+    # inverted signal confirmed by the detection (2026-10-12): the normal detection in the negated signal finds certain
+    # stimulated contractions for >= invertedMinCapture of the pulses; otherwise (e.g. rocker waves, no contractions)
+    # the channel is analysed again as it is
+    if C.invertedSignal:
+        cap = float(np.mean(stimCapturedCertain)) if stimCapturedCertain.size else 0.0
+        if cap < float(opts.get("invertedMinCapture", 0.2)):
+            o = Struct(opts)
+            o.invertedCheck = False
+            B, C = analyze_channel(S0, channel, range_, o)
+            C.invertedRise, C.invertedFall = invRise, invFall
+        C.invertedCapture = cap
     return B, C
 
 
@@ -1029,7 +1042,9 @@ def inverted_signal(t, f, ST, opts=None):
     percentile >= invertedRatio x (90th - 50th percentile) of the filtered signal of the windows. The median (not the
     mean) and the percentiles are not changed by a few windows with steps (chamber taken out) or by beats that are not
     locked to the pulses; the percentiles exclude upright contractions that precede the pulses (2026-10-11, sample of
-    121 recordings). Returns inverted, rise, fall [uN] (2026-10-11)"""
+    121 recordings). This is the suspicion: the inversion is kept only if the normal detection in the negated signal
+    finds certain stimulated contractions (option invertedMinCapture, see analyze_channel; 2026-10-12).
+    Returns inverted, rise, fall [uN] (2026-10-11)"""
     if opts is None:
         opts = _options()
     t = np.asarray(t, float)
@@ -1048,16 +1063,8 @@ def inverted_signal(t, f, ST, opts=None):
         P = P[np.asarray(mround(np.linspace(0, P.size - 1, 300)), int)]  # MATLAB round
     if P.size < 5:
         return False, math.nan, math.nan
-    Y = np.full((P.size, grid.size), np.nan)
-    for q, p in enumerate(P):
-        i0 = int(np.searchsorted(t, p - opts.diastoleWindowStart, side="left"))
-        i1 = int(np.searchsorted(t, p - opts.diastoleWindowEnd, side="right"))
-        if i1 - i0 < 2:
-            continue
-        Y[q] = np.interp(p + grid, t, f) - float(np.median(f[i0:i1]))
-    with np.errstate(invalid="ignore"), warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN columns
-        m = np.nanmedian(Y, axis=0)
+    Y = _triggered_windows(t, f, P, grid, opts)
+    m = _nanmedian_rows(Y)
     if np.all(np.isnan(m)):
         return False, math.nan, math.nan
     rise = max(0.0, float(np.nanmax(m)))
@@ -1073,6 +1080,24 @@ def inverted_signal(t, f, ST, opts=None):
             return float(x[int(mround(p * (x.size - 1)))])
         inv = x.size > 0 and q(0.5) - q(0.1) >= float(opts.invertedRatio) * (q(0.9) - q(0.5))
     return bool(inv), rise, fall
+
+
+def _triggered_windows(t, f, T0, grid, opts):
+    """windows of f at T0 + grid, each minus the median of f in its diastole window before T0 (one row per time)"""
+    Y = np.full((T0.size, grid.size), np.nan)
+    for q, p in enumerate(T0):
+        i0 = int(np.searchsorted(t, p - opts.diastoleWindowStart, side="left"))
+        i1 = int(np.searchsorted(t, p - opts.diastoleWindowEnd, side="right"))
+        if i1 - i0 < 2:
+            continue
+        Y[q] = np.interp(p + grid, t, f) - float(np.median(f[i0:i1]))
+    return Y
+
+
+def _nanmedian_rows(Y):
+    with np.errstate(invalid="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN columns
+        return np.nanmedian(Y, axis=0)
 
 
 def pre_stimulus_noise(t, f, ST, opts=None):

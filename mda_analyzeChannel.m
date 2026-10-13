@@ -122,6 +122,7 @@ if isempty(row)
     error('mda_analyzeChannel: channel %d is not in the file (data channels: %s).', channel, mat2str(S.dataChannels));
 end
 if isempty(range), range = [S.fromSeconds S.toSeconds]; end
+S0 = S;                                             %as passed (second pass without the inversion, see the end)
 
 % rocker artifact (option 'rockerFilter'): subtracted here, unless S was filtered before (mda_rockerFilter with
 % more context, e.g. by the GUI)
@@ -503,6 +504,7 @@ C.noiseMedian = noiseMed;
 C.invertedSignal = sgn < 0;                         %see invertedSignal; rise / fall of the stimulus-triggered median (uN)
 C.invertedRise = invRise;
 C.invertedFall = invFall;
+C.invertedCapture = NaN;                            %certain capture in the negated signal (NaN: not inverted)
 C.stimCapturedCertain = stimCapturedCertain;
 C.stimTimes = ST(:);
 C.stimCaptured = stimCaptured;
@@ -540,6 +542,20 @@ end
 % option referenceBeat is set (NaN for channels without own reference), so that tables of all channels match
 if ~isempty(opts.referenceBeat)
     B = [B, mda_referenceBeat('relative', B, C.referenceBeat)];
+end
+% inverted signal confirmed by the detection (2026-10-12): the normal detection in the negated signal finds certain
+% stimulated contractions for >= invertedMinCapture of the pulses; otherwise (e.g. rocker waves, no contractions) the
+% channel is analysed again as it is
+if C.invertedSignal
+    if isempty(stimCapturedCertain), cap = 0; else, cap = mean(stimCapturedCertain); end
+    if cap < optionOr(opts, 'invertedMinCapture', 0.2)
+        o = opts;
+        o.invertedCheck = false;
+        [B, C] = mda_analyzeChannel(S0, channel, range, o);
+        C.invertedRise = invRise;
+        C.invertedFall = invFall;
+    end
+    C.invertedCapture = cap;
 end
 end
 
@@ -1027,6 +1043,8 @@ function [inv, rise, fall] = invertedSignal(t, f, ST, opts)
 % invertedRatio x (90th - 50th percentile) of the filtered signal of the windows. The median (not the mean) and the
 % percentiles are not changed by a few windows with steps (chamber taken out) or by beats that are not locked to the
 % pulses; the percentiles exclude upright contractions that precede the pulses (2026-10-11, sample of 121 recordings).
+% This is the suspicion: the inversion is kept only if the normal detection in the negated signal finds certain
+% stimulated contractions (option invertedMinCapture, see the end of mda_analyzeChannel; 2026-10-12).
 % TS 2026-10-11
 inv = false; rise = nan; fall = nan;
 t = t(:); f = f(:); ST = ST(:);
@@ -1038,13 +1056,7 @@ if numel(grid) < 5, return; end
 P = ST(ST - opts.diastoleWindowStart >= t(1) & ST + L <= t(end));
 if numel(P) > 300, P = P(round(linspace(0, numel(P) - 1, 300)) + 1); end
 if numel(P) < 5, return; end
-Y = nan(numel(P), numel(grid));
-for q = 1:numel(P)
-    i0 = lowerBound(t, P(q) - opts.diastoleWindowStart);
-    i1 = lowerBound(t, P(q) - opts.diastoleWindowEnd + 1e-12) - 1;
-    if i1 - i0 + 1 < 2, continue; end
-    Y(q, :) = interp1(t, f, P(q) + grid, 'linear')' - median(f(i0:i1));
-end
+Y = triggeredWindows(t, f, P, grid, opts);
 m = median(Y, 1, 'omitnan');
 if all(isnan(m)), return; end
 rise = max(0, max(m));
@@ -1057,6 +1069,24 @@ if inv                                             %shape of the signal: deflect
     q = @(p) x(round(p * (numel(x) - 1)) + 1);     %nearest rank (as Python)
     inv = ~isempty(x) && q(0.5) - q(0.1) >= opts.invertedRatio * (q(0.9) - q(0.5));
 end
+end
+
+
+function Y = triggeredWindows(t, f, T0, grid, opts)
+% windows of f at T0 + grid, each minus the median of f in its diastole window before T0 (one row per time)
+Y = nan(numel(T0), numel(grid));
+for q = 1:numel(T0)
+    i0 = lowerBound(t, T0(q) - opts.diastoleWindowStart);
+    i1 = lowerBound(t, T0(q) - opts.diastoleWindowEnd + 1e-12) - 1;
+    if i1 - i0 + 1 < 2, continue; end
+    Y(q, :) = interp1(t, f, T0(q) + grid, 'linear')' - median(f(i0:i1));
+end
+end
+
+
+function v = optionOr(opts, name, default)
+% option value, or the default if the field is missing (opts not from mda_options)
+if isfield(opts, name), v = opts.(name); else, v = default; end
 end
 
 
