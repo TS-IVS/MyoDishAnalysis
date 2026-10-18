@@ -454,10 +454,6 @@ included = ~isnan(V(:,1));
 if strcmp(opts.beats, 'stimulated'), included = included & strcmp(beatType, 'stimulated'); end
 if strcmp(opts.rocker, 'stopped'),   included = included & ~rockerMoving; end
 if strcmp(opts.rocker, 'moving'),    included = included & rockerMoving; end
-% stimulation faster than 10 Hz (median interval of the regular pulses < 0.1 s, >= 20 pulses): status channel misread,
-% technical error: no contraction included (2026-10-18; report flag F)
-stimError = ~isnan(CL) && CL < 0.1 && numel(ST) >= 20;
-if stimError, included(:) = false; end
 
 B = table(repmat(channel, n, 1), (1:n)', tPeakSel, beatType, tStim, tPeakSel - tStim, rockerMoving, included, ...
     uncertain, 'VariableNames', {'channel','contraction','t_peak','beatType','t_stim','stimToPeak','rockerMoving', ...
@@ -524,7 +520,6 @@ if ~isfield(opts, 'pulseTable') || opts.pulseTable
         tEnd, tPk, sel, pNom, snapMs);
 end
 C.stimInterval = CL;
-C.stimError = stimError;                            %stimulation > 10 Hz: technical error, no contraction included
 C.maxStimToPeak = maxLat;
 C.range = range;
 C.zeroForce = zeroAt(zeroT, zeroV, mean(range));

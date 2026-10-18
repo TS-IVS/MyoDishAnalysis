@@ -236,9 +236,12 @@ MATLAB and Python versions have the same version number and give the same result
 - **`mda_timepoints` / `mda_poolTimepoints`: mean of the channels in the course images** as two lines: solid = only
   where all channels have values, dashed = gaps of up to 3 h interpolated per channel; SEM bands lighter (alpha 0.12)
   and interrupted at gaps.
-- **Stimulation above 10 Hz** (cycle length < 0.1 s with at least 20 pulses in a range; status channel misread, e.g.
-  pseudo-pulses at 30–100 Hz in 9 recordings): treated as a technical error, the contractions of the range are not
-  included (note *stimulation > 10 Hz (status channel misread): technical error, contractions not included*).
+- **Report flag F** (stimulus frequency > 10 Hz, red): description only; the contractions of such ranges are analysed
+  as usual. The pseudo-pulses at 30–100 Hz of 2022 came from old 8-channel files read as 9-channel files (see Fixed,
+  files of the first MyoDish version); such rates otherwise come from real stimulation: pulse pairs or groups (CCM
+  pulses as a second normal pulse 50 ms after the first, 2022, or without the extra-pulse bit), bursts (17 Hz) and
+  pulse trains (13 Hz), or pulses over consecutive samples (400/500 Hz); in the complete analysis of 2020–2026: 137
+  channels of 28 recordings with F.
 - **Watcher: PDF report per experiment** `<experiment>/<experiment>_report.pdf` instead of one report per pass
   (`reports/mda_report_<date>_<time>.pdf`): all analysed recordings of the experiment with their flags (the
   recordings of the last pass in bold, the earlier ones from `mda_flags.csv`, so that red flags of earlier days stay

@@ -280,9 +280,6 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
                 Cm.extraElicited = _in_range_of(CsC, "extraElicited", "extraTimes", bool)
                 Cm.threshold = float(np.median([x.threshold for x in CsC]))
                 Cm.invertedSignal = any(bool(x.get("invertedSignal", False)) for x in CsC)  # 2026-10-11
-                if any(bool(x.get("stimError", False)) for x in CsC):  # 2026-10-18
-                    H.notes.append("%s, channel %d: stimulation > 10 Hz (status channel misread): technical error, "
-                                   "contractions not included" % (labels[r], ch))
                 if opts.pulseTable:  # pulses of the range: contraction numbers of the whole range
                     Pc = [x.get("pulses") for x in CsC]
                     Pc = [x for x in Pc if x is not None and len(x) > 0]

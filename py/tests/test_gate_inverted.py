@@ -303,7 +303,7 @@ def test_report_arrhythmic_pacing_and_stimulus_frequency():
 
 def write_fast_stimulation(f):
     """2 channels, 60 s, 400 Hz: twitches (1000 uN, 30 ms after the pulse) at 1 Hz in both channels; ch1 pulses at 1 Hz,
-    ch2 pulses at 20 Hz (status channel misread)"""
+    ch2 pulses at 20 Hz"""
     Tf, n = 60, 60 * FS
     t = np.arange(n) / FS
     x = np.zeros((3, n))
@@ -326,14 +326,18 @@ def write_fast_stimulation(f):
 
 
 def test_stimulation_above_10_hz(tmp_path):
-    """stimulation > 10 Hz (median interval of the regular pulses < 0.1 s): status channel misread, technical error:
-    no contraction included, parameters NaN, note (2026-10-18); 1 Hz unchanged"""
+    """stimulation > 10 Hz (real stimulation such as CCM pulse pairs, bursts or pulses over consecutive samples): the
+    contractions are analysed as at 1 Hz, report flag F (2026-10-18: the exclusion of the contractions was removed
+    again)"""
+    from myodish_analysis.report import report_flags
     f = str(tmp_path / "fast_rigA_0.mdd")
     write_fast_stimulation(f)
     C, S, info = mda.myodish_analysis(f, [1, 2], 0, 60, quiet=True)
     s1, s2 = S.iloc[0], S.iloc[1]
     assert s1["nContractions"] == 56 and abs(s1["stimFrequency"] - 1) < 1e-9 and s1["amplitude_mean"] > 800
-    assert s2["nContractions"] == 0 and abs(s2["stimFrequency"] - 20) < 1e-6 and math.isnan(s2["amplitude_mean"])
-    assert not C.loc[C["channel"] == 2, "included"].any() and (C["channel"] == 2).sum() >= 50
-    assert any("channel 2: stimulation > 10 Hz (status channel misread): technical error, contractions not included"
-               in n for n in info["notes"])
+    assert s2["nContractions"] == 56 and abs(s2["stimFrequency"] - 20) < 1e-6
+    assert abs(s2["amplitude_mean"] - s1["amplitude_mean"]) < 1e-6 and s2["nStimuli"] == 1120
+    assert C.loc[C["channel"] == 2, "included"].all() and (C["channel"] == 2).sum() == 56
+    assert not any("stimulation > 10 Hz" in n for n in info["notes"])
+    R = report_flags(S)
+    assert R.loc[1, "flags"] == "FC" and R.loc[1, "red"] == "stimulus frequency 20 Hz" and R.loc[0, "flags"] == ""

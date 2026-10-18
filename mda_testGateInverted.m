@@ -162,17 +162,20 @@ ok = check(ok, 'report: arrhythmic pacing (no C, V), F above 10 Hz (as in Python
     strcmp(RA2.red{2}, 'noise index 1 (uncertain 30 %, extra 2 %, arrhythmic pacing)') && ...
     isequal(RA3.flags', {'NCV', '', 'NCV', ''}));
 
-% stimulation > 10 Hz (2026-10-18): status channel misread, technical error, no contraction included (as in Python)
+% stimulation > 10 Hz (real stimulation such as CCM pulse pairs, bursts or pulses over consecutive samples): the
+% contractions are analysed as at 1 Hz, report flag F (2026-10-18: exclusion of the contractions removed again; as in
+% Python)
 f3 = fullfile(folder, 'fast_rigA_0.mdd');
 writeFastStimulation(f3, fs);
 [C3, S3, I3] = MyoDishAnalysis(f3, [1 2], 0, 60, 'quiet', true);
 nt = I3.notes; if ~iscell(nt), nt = cellstr(nt); end
-ok = check(ok, 'stimulation > 10 Hz: no contraction included, parameters NaN, note; 1 Hz unchanged', ...
+R3 = mda_report('flags', S3);
+ok = check(ok, 'stimulation > 10 Hz: contractions analysed as at 1 Hz, flag F', ...
     S3.nContractions(1) == 56 && abs(S3.stimFrequency(1) - 1) < 1e-9 && S3.amplitude_mean(1) > 800 && ...
-    S3.nContractions(2) == 0 && abs(S3.stimFrequency(2) - 20) < 1e-6 && isnan(S3.amplitude_mean(2)) && ...
-    ~any(C3.included(C3.channel == 2)) && sum(C3.channel == 2) >= 50 && ...
-    any(contains(nt, ['channel 2: stimulation > 10 Hz (status channel misread): technical error, contractions ' ...
-    'not included'])));
+    S3.nContractions(2) == 56 && abs(S3.stimFrequency(2) - 20) < 1e-6 && ...
+    abs(S3.amplitude_mean(2) - S3.amplitude_mean(1)) < 1e-6 && S3.nStimuli(2) == 1120 && ...
+    all(C3.included(C3.channel == 2)) && sum(C3.channel == 2) == 56 && ~any(contains(nt, 'stimulation > 10 Hz')) && ...
+    strcmp(R3.flags{2}, 'FC') && strcmp(R3.red{2}, 'stimulus frequency 20 Hz') && isempty(R3.flags{1}));
 end
 
 
@@ -220,7 +223,7 @@ end
 
 function writeFastStimulation(f, fs)
 % 2 channels, 60 s: twitches (1000 uN, 30 ms after the pulse) at 1 Hz in both channels; ch1 pulses at 1 Hz, ch2 pulses
-% at 20 Hz (status channel misread)
+% at 20 Hz
 Tf = 60; n = Tf * fs;
 t = (0:n-1) / fs;
 x = zeros(3, n);

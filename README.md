@@ -1136,7 +1136,8 @@ thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
   with regular capture are real contractions near the threshold and are not flagged; unpaced channel: uncertain ≥
   25 %); **S** large extra beats (certain extra beats ≥ 5 % with > 3 × the amplitude of the paced ones: spikes,
   saturation); **D** median delay pulse → onset > 150 ms; **F** stimulus frequency > 10 Hz in a range (1 / median
-  stimulus interval; such rates are implausible and point to a misread status channel; 2026-10-13). Noise index =
+  stimulus interval; 2026-10-13): pulse pairs or groups (e.g. CCM pulses without the extra-pulse bit), bursts, pulses
+  over consecutive samples or a misread status channel; the contractions are analysed as usual. Noise index =
   uncertain % × (extra % + missed %) / 100; it is listed (e.g. `noise index 54 (uncertain 98 %, extra 0 %, missed
   55 %)`) and orders the trace pages. Arrhythmically paced channels (see "Arrhythmic pacing"): missed beats not counted,
   no C and V flags, capture shown with `~`.

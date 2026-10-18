@@ -428,11 +428,6 @@ def analyze_channel(S, channel, range_=None, opts=None):
         included &= ~rockerMoving
     if opts.rocker == "moving":
         included &= rockerMoving
-    # stimulation faster than 10 Hz (median interval of the regular pulses < 0.1 s, >= 20 pulses): status channel
-    # misread, technical error: no contraction included (2026-10-18; report flag F)
-    stimError = bool(not math.isnan(CL) and CL < 0.1 and ST.size >= 20)
-    if stimError:
-        included[:] = False
     B = pd.DataFrame({"channel": np.full(n, channel, dtype=float), "contraction": np.arange(1, n + 1, dtype=float),
                       "t_peak": tPeakSel, "beatType": pd.Series(list(beatSel), dtype=object), "t_stim": tStim,
                       "stimToPeak": tPeakSel - tStim, "rockerMoving": rockerMoving, "included": included,
@@ -515,7 +510,6 @@ def analyze_channel(S, channel, range_=None, opts=None):
         C.pulses = pulse_table(channel, PT, PX, PC, PR, pDur, fs, range_, pOfBeat, owner, during, tStimOfBeat, tOn,
                                tEnd, tPk, sel, pNom, snapMs)
     C.stimInterval = CL
-    C.stimError = stimError  # stimulation > 10 Hz: technical error, no contraction included (2026-10-18)
     C.maxStimToPeak = maxLat
     C.range = range_
     C.zeroForce = zero_at(zeroT, zeroV, float(np.mean(range_)))

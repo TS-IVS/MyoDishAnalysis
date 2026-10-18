@@ -42,8 +42,9 @@ Flags per channel (channels with a slice and at least min_beats (50) detected co
     S  large extra beats: certain extra beats >= artifact_share (5) % of the contractions with a median amplitude >
        artifact_ratio (3) times that of the certain stimulated contractions (spikes, saturation; needs C)
     D  median delay pulse -> onset of the stimulated contractions > delay (0.15 s)
-    F  stimulus frequency > stim_frequency (10 Hz) in a range (median stimulus interval; implausible: status channel
-       probably misread; 2026-10-13)
+    F  stimulus frequency > stim_frequency (10 Hz) in a range (median stimulus interval; 2026-10-13): pulse pairs or
+       groups (e.g. CCM pulses without the extra-pulse bit), bursts, pulses over consecutive samples or a misread
+       status channel; the contractions are analysed as usual (check the stimulation)
   slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
     C  capture < capture (90) % of the stimuli
     X  extra beats > extra (10) % of the detected contractions (spontaneous activity; not shown with N)
