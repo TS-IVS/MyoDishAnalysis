@@ -786,10 +786,10 @@ def test_series_folders_flags_and_reorganize(tmp_path, monkeypatch):
                                                          n1 + "_overview.csv.gz", n1 + "_pulses.csv.gz"]
     assert W.results_of(res, "E/" + n1 + ".mdd") == (os.path.join(s, "01"), "series")
     assert f"PDF report: {os.path.join(e, 'E_report.pdf')}" in report
-    x = pd.ExcelFile(os.path.join(s, "rigX_sampleA_trends.xlsx"))
-    assert x.sheet_names == ["course", "last24h", "comments", "slices"]
-    Tc, Tl = x.parse("course"), x.parse("last24h")  # one slice (recordings of a series follow each other)
-    assert set(Tc["slice"]) == {1} and (Tc["binMinutes"] == 10).all() and len(x.parse("slices")) == 1
+    with pd.ExcelFile(os.path.join(s, "rigX_sampleA_trends.xlsx")) as x:  # closed: Windows locks open files
+        assert x.sheet_names == ["course", "last24h", "comments", "slices"]
+        Tc, Tl, Ts = x.parse("course"), x.parse("last24h"), x.parse("slices")  # one slice (recordings follow each other)
+    assert set(Tc["slice"]) == {1} and (Tc["binMinutes"] == 10).all() and len(Ts) == 1
     assert (Tc["bin"].str[14:16].astype(int) % 10 == 0).all() and Tc["bin"].str[17:].eq("00").all()  # bins of the clock
     Ov1 = pd.read_csv(os.path.join(s, "01", n1 + "_overview.csv.gz"))
     assert len(Tl) == Ov1.loc[Ov1["included"] == 1, "t_from"].nunique()  # last 24 h: recording 1 only
@@ -803,7 +803,7 @@ def test_series_folders_flags_and_reorganize(tmp_path, monkeypatch):
         orig = getattr(rp, fn)
         monkeypatch.setattr(rp, fn, lambda out, D, _o=orig, _f=fn: (seen.__setitem__(_f, D), _o(out, D))[1])
     X2, report2 = W.watch(raw, res, quiet=True, protocols=False, reanalyze="all", include="*_1.mdd")
-    assert n1 + ".mdd" in report2 and n0 + ".mdd" not in report2
+    assert n1 + ".mdd" in report2 and n0 + ".mdd" not in report2 and "slice register: 1 slices" in report2, report2
     assert seen["experiment_image"]["cells"][0]["nRed"] == 1 and len(seen["course_image"]["red"]) == 1
     txt = " ".join(p.extract_text() for p in pypdf.PdfReader(os.path.join(e, "E_report.pdf")).pages)
     assert "test flag of yesterday" in txt and "2 recording(s) (1 new = bold)" in txt
