@@ -772,7 +772,7 @@ def test_series_folders_flags_and_reorganize(tmp_path, monkeypatch):
     image per channel and workbook in <experiment>/<series>/, overview image and PDF report per experiment with all
     its recordings (red flags of earlier passes stay visible); timepoints on these results; reorganize into the flat
     layout and back (timepoints/ kept)"""
-    import pypdf
+    pypdf = pytest.importorskip("pypdf")  # text of the PDF report (test extra)
     import myodish_analysis.report as rp
     raw = _series_raw(tmp_path)
     res = str(tmp_path / "res")
