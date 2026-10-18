@@ -299,3 +299,41 @@ def test_report_arrhythmic_pacing_and_stimulus_frequency():
     R = report_flags(S, uncertain=20, irregular=1)
     assert R.loc[1, "red"] == "noise index 1 (uncertain 30 %, extra 2 %, arrhythmic pacing)"
     assert list(report_flags(S, stim_frequency=60)["flags"]) == ["NCV", "", "NCV", ""]
+
+
+def write_fast_stimulation(f):
+    """2 channels, 60 s, 400 Hz: twitches (1000 uN, 30 ms after the pulse) at 1 Hz in both channels; ch1 pulses at 1 Hz,
+    ch2 pulses at 20 Hz (status channel misread)"""
+    Tf, n = 60, 60 * FS
+    t = np.arange(n) / FS
+    x = np.zeros((3, n))
+    x[:2] = -383 + np.round(3 * np.sin(2 * np.pi * 37.3 * t) + 2 * np.sin(2 * np.pi * 91.7 * t))
+    beats = np.arange(2.0, Tf - 2)
+    for c in (0, 1):
+        for p in beats:
+            x[c] += 1000 * twitch(t - p - 0.03)
+    p1 = 4 * np.round(beats * FS / 4) / FS
+    p2 = np.arange(2.0, Tf - 2, 0.05) + 1 / FS
+    for c, p in ((1, p1), (2, p2)):
+        x[2, np.round(p * FS).astype(int)] = 50 | (c << 9)
+    np.round(x).astype("<i2").T.tofile(f)
+    name = f.replace("\\", "/").rsplit("/", 1)[-1]
+    with open(f[:-4] + "_log.log", "w") as fh:
+        fh.write("\n".join(["systemTime;dataLogTime;channel;code;value",
+                            "2000 01 01 10:00:00:000;0;0;samplingRate Recording;400",
+                            f"2000 01 01 10:00:00:000;0;0;Recording;started: {name}",
+                            f"2000 01 01 10:01:00:000;{Tf * 1000};0;Recording;stopped: {name}"]) + "\n")
+
+
+def test_stimulation_above_10_hz(tmp_path):
+    """stimulation > 10 Hz (median interval of the regular pulses < 0.1 s): status channel misread, technical error:
+    no contraction included, parameters NaN, note (2026-10-18); 1 Hz unchanged"""
+    f = str(tmp_path / "fast_rigA_0.mdd")
+    write_fast_stimulation(f)
+    C, S, info = mda.myodish_analysis(f, [1, 2], 0, 60, quiet=True)
+    s1, s2 = S.iloc[0], S.iloc[1]
+    assert s1["nContractions"] == 56 and abs(s1["stimFrequency"] - 1) < 1e-9 and s1["amplitude_mean"] > 800
+    assert s2["nContractions"] == 0 and abs(s2["stimFrequency"] - 20) < 1e-6 and math.isnan(s2["amplitude_mean"])
+    assert not C.loc[C["channel"] == 2, "included"].any() and (C["channel"] == 2).sum() >= 50
+    assert any("channel 2: stimulation > 10 Hz (status channel misread): technical error, contractions not included"
+               in n for n in info["notes"])

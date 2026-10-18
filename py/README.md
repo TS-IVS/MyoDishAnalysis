@@ -53,6 +53,8 @@ mda-watch raw_folder results_folder --schedule "daily 10:00" # every day at 10:0
 mda-watch raw_folder results_folder --reanalyze outdated     # after an update: recordings of another version again
 mda-timepoints results_folder Mava100 --series Setup1_ABC000101 --channels 1 3 5 --time "2000-01-01 15:20" --offsets -10 10 60 240 1440 --sample-id ABC000101
 mda-pool-timepoints results_folder --name myosinModulators   # all analyses of mda-timepoints pooled by treatment
+mda-pool-timepoints results_folder --exclude ABC000101:6::arrhythmic   # without slice ch6 of sample ABC000101
+mda-study design.xlsx --results results_folder --name OME_2026   # whole study from a design table (--template FILE)
 mda --help
 ```
 
@@ -95,7 +97,9 @@ in MATLAB.
 | `mda_removeSpikes` | `spikes.remove_spikes()` |
 | `mda_sliceRegister` | `slice_register()` |
 | `mda_timepoints` | `timepoints()`, `mda-timepoints` (images `.png` and `.svg` instead of `.fig`) |
-| `mda_poolTimepoints` | `pool_timepoints()`, `mda-pool-timepoints` (images `.png` and `.svg`) |
+| `mda_poolTimepoints` | `pool_timepoints()`, `mda-pool-timepoints` (images `.png` and `.svg`; `exclude=`, `--exclude`) |
+| `mda_plotTimepoints` | `plot_timepoints()`, `prism_tables()` |
+| `mda_study` | `study()`, `study_template()`, `mda-study` |
 | `mda_calibrationFactor`, `mda_zeroForce` | `calibration_factor()`, `zero_force()` |
 | `mda_options`, `mda_parameters` | `options()`, `parameters()` |
 | `mda_analyzeChannel` | `analyze_channel()` |

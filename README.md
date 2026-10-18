@@ -715,7 +715,14 @@ overview) from 30 min before the first to 30 min after the last window, `beats`,
 `_averageBeatsMean_abs/_norm` (Python: `.png` and `.svg`; without baseline window only `_abs`). `TP` is a struct
 (Python: dict) with the same data (`TP.summary`, `TP.matrix.amplitude` (means), `TP.pctBaseline.amplitude`, ...).
 Times of a substance added during a recording: the comment in the MyoDish log file (shown in the course images of the
-watcher); a comment is often typed a few minutes after the addition.
+watcher); a comment is often typed a few minutes before or up to an hour after the addition. **`'t0','chamberIn'`**
+(Python `t0="chamberIn"`, `--t0 chamberIn`; 2026-10-18): per channel the end of the chamber-out period nearest to the
+given time (periods ending within ± `'t0Window'` minutes, default 90) = the chamber with the substance put back; without
+such a period the given time (note per window; columns `timeGiven`, `t0`). **Paced windows** (stimulated or extra
+beats in the window; 2026-10-18): only the stimulated contractions are averaged; from 5 % extra beats the note
+*arrhythmic: n extra beats (x % of the contractions)*. In the course images the mean of the channels is drawn twice:
+solid where all channels have values, dashed with gaps of up to 3 h interpolated per channel. `'outputFolder'`: files in
+`<outputFolder>/<experiment>/<label>_<time>/` (used by `mda_study`).
 
 **Average beats** (`'averageBeats'`, default true; reads the recordings, read only; `'rawFolder'` if the raw folder is
 mounted elsewhere than during the analysis): per window the mean of the included beats (no extra beats, no other
@@ -762,6 +769,47 @@ slices of the same sample at the same time point, otherwise all control slices; 
 are not independent: use the sheet `samples`, or the slices with the sample as random effect. The sample ID comes
 from `mda_timepoints` (`'sampleID'`); analyses of earlier versions (without sample ID and SEM) are skipped and listed
 in the sheet `analyses` – call `mda_timepoints` again.
+
+**Exclusions, QC and statistics** (2026-10-18): column `qc` per window (codes from the notes: arrhythmic, capture,
+noContractions, alternans, irregular, protocol, signal, otherSlice, comment, pending). `'exclude'` (Python `exclude=`,
+`--exclude ID[:CH[:FROM[:REASON]]]`) leaves out a slice or its windows from a time point on, e.g.
+`'exclude', {'ABC000101', 6, [], 'arrhythmic'}` (id = sampleID, series or sliceID; channel empty = all; from empty = the
+whole slice); listed in the sheet `excluded` and in `info`. Sheet **`statistics`** per treatment, time point and
+parameter (normalized values): mean and SEM of the slices and of the controls, difference, paired difference of the
+samples with both, and a linear mixed model y ~ treatment + (1 | sample) (REML; degrees of freedom n − 2 as `fitlme`
+'Residual') only if both groups have ≥ 3 samples, otherwise descriptive only. Exploratory: not corrected for multiple
+comparisons; confirm results for a publication with a dedicated tool. Also written: `<name>_figure_norm.pdf/.svg/.png`
+and `<name>_prism.xlsx` (below).
+
+## Figures for a manuscript and GraphPad Prism (`mda_plotTimepoints`; Python `plot_timepoints`; 2026-10-18)
+```matlab
+[h, files] = mda_plotTimepoints(PT, 'parameters', {'amplitude', 'diastolicForce'}, 'output', 'fig2')
+[h, files] = mda_plotTimepoints('pool.xlsx', 'mode', 'abs', 'panelSize', [50 40], 'timeUnit', 'min')
+T = mda_plotTimepoints('prism', PT)            % T.amplitude_pctBaseline: one row per time point, one column per slice
+```
+One panel per parameter (default amplitude, diastolicForce, TTP90, TTR90), x = time after the treatment (h or min), per
+treatment the mean ± SEM of the slices (markers, error bars) and the single slices (thin lines), legend *treatment (n =
+slices/samples)*, controls black, other treatments in the colour-blind safe Okabe-Ito colours, Arial 7 pt, panel size in
+mm; files `.pdf` and `.svg` (vector) and `.png` (300 dpi). Modes `'norm'` (% of baseline, diastolic force as change in
+µN), `'abs'`, `'vsControl'`. The Prism tables: one sheet per value column in `<name>_prism.xlsx`, columns
+`treatment|sample slice` (grouped table: paste per treatment).
+
+## A study from one design table (`mda_study`; Python `mda-study`; 2026-10-18)
+```matlab
+mda_study('template', 'design.xlsx')           % empty design table with an example row
+S = mda_study('design.xlsx', 'resultsFolder', res, 'name', 'OME_2026', 'offsets', [-30 10 60 240], 't0', 'chamberIn')
+```
+```
+mda-study design.xlsx --results results --name OME_2026
+```
+One row per slice (sheet `slices`; settings in the sheet `settings` or as name, value pairs): `series`, `channel`,
+`treatment`, `time`, `sampleID`, `group`, `exclude`
+(empty, `all` or minutes from which on), `excludeReason`. Settings: `offsets`, `seconds`, `baseline`, `t0`, `t0Window`,
+`control`, `order`, `parameters`, `rawFolder`, `averageBeats`, `figures`, `outputFolder`. Runs `mda_timepoints` once per
+treatment (`<study>/analyses/`), pools them with the exclusions into the study folder (default
+`<results>/studies/<name>/`) and writes a copy of the design and `<name>_methods.txt` (English methods text: version,
+windows, t0, paced beats, normalization, groups with slices and samples, exclusions, statistics) – the design table is
+the record of what was analysed and why slices were left out.
 
 ## Stimulation protocols (`'protocol'`, `'groupBy'`; GUI: **Protocols ...**)
 Protocols such as force-frequency (FFR), refractory period (RP, S1-S2), stimulation threshold (ST), post-rest
@@ -1249,6 +1297,8 @@ lower plot, the trend and all exports.
 | `mda_testClockTime.m`, `mda_testSignalGaps.m`, `mda_testSliceRegister.m` | tests of the clock-time correction, the periods without signal and the slice register |
 | `mda_timepoints.m`, `mda_testTimepoints.m` | windows before and after a treatment (from the watcher results) and its test |
 | `mda_poolTimepoints.m` | analyses of `mda_timepoints` pooled by treatment (one table of all slices, images; test in `mda_testTimepoints.m`) |
+| `mda_plotTimepoints.m` | figure for a manuscript and GraphPad Prism tables from a pool (test in `mda_testTimepoints.m`) |
+| `mda_study.m` | time points of a study from a design table: analyses, pool with exclusions, methods text (test in `mda_testTimepoints.m`) |
 | `mda_testGateInverted.m` | test of the longer gate of certain contractions, inverted signals and the analysis report |
 | `mda_version.m` | version number |
 | `example_MyoDishAnalysis.m` | examples |

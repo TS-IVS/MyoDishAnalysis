@@ -324,6 +324,10 @@ for r = 1:nR
             Cm.extraElicited = inRangeOf(CsC, 'extraElicited', 'extraTimes');
             Cm.threshold = median(cellfun(@(x) x.threshold, CsC));
             Cm.invertedSignal = any(cellfun(@(x) isfield(x, 'invertedSignal') && x.invertedSignal, CsC));   %2026-10-11
+            if any(cellfun(@(x) isfield(x, 'stimError') && x.stimError, CsC))                             %2026-10-18
+                H.notes{end+1} = sprintf(['%s, channel %d: stimulation > 10 Hz (status channel misread): technical ' ...
+                    'error, contractions not included'], labels{r}, channels(c));
+            end
             if opts.pulseTable                         %pulses of the range: contraction numbers of the whole range
                 Pc = cellfun(@(x) x.pulses, CsC(:), 'UniformOutput', false);
                 Pc = vertcat(Pc{~cellfun(@isempty, Pc)});

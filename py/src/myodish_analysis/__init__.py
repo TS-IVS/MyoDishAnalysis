@@ -13,7 +13,7 @@ analyze_channel, ...); option names, column names and units are the same as in M
 
 Command line: mda (analysis), mda-gui (interactive), mda-watch (new recordings of a folder), mda-timepoints (windows
 before and after a treatment, from the results of mda-watch), mda-pool-timepoints (analyses of mda-timepoints pooled by
-treatment), mda-test (self test).
+treatment), mda-study (time points of a study from a design table), mda-test (self test).
 
 TS 2026-10-06
 """
@@ -40,9 +40,11 @@ from .protocols import find_protocols, group_beats  # noqa: E402
 from .protocol_results import protocol_results  # noqa: E402
 from .selftest import selftest  # noqa: E402
 from .watch import watch  # noqa: E402
-from .timepoints import pool_timepoints, timepoints  # noqa: E402
+from .timepoints import plot_timepoints, pool_timepoints, prism_tables, timepoints  # noqa: E402
+from .study import study, study_template  # noqa: E402
 
 __all__ = ["options", "parameters", "PARAMETERS", "LABEL_NAMES", "read_mdd", "read_header", "read_data",
            "read_overview", "log_entries", "calibration_factor", "zero_force", "analyze_channel", "rocker_filter",
            "reference_beat", "read_ep_recording", "analyze_ap", "remove_artefacts", "AP_PARAMETERS", "summarize", "write_results", "read_results",
-           "labels", "add_labels", "myodish_analysis", "find_protocols", "group_beats", "protocol_results", "selftest", "watch", "__version__"]
+           "labels", "add_labels", "myodish_analysis", "find_protocols", "group_beats", "protocol_results", "selftest", "watch", "timepoints", "pool_timepoints",
+           "plot_timepoints", "prism_tables", "study", "study_template", "__version__"]

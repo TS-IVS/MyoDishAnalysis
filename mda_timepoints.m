@@ -43,11 +43,20 @@ function TP = mda_timepoints(resultsFolder, label, series, channels, time, offse
 %   'sampleID'     sample (tissue, heart) of the slices: one text or one per series (default: the slice register, else
 %                  the series name after the setup: Setup1_ABC000101 --> ABC000101); for mda_poolTimepoints
 %   'group'        group of the sample, e.g. 'HTX' or 'LVAD': one text or one per series (default '')
+%   't0'           'given' (default) or 'chamberIn' (2026-10-18): time 0 of every channel = the end of its chamber-out
+%                  period (gaps of the watcher) nearest to the given time, among the periods that end within
+%                  +- 't0Window' minutes (default 90). The substance is added while the chamber is out; comments are
+%                  often typed before or up to an hour after. Rows timeGiven and t0 (note), info t0; without such a
+%                  period the given time
+%   'outputFolder' files in <outputFolder>/<experiment>/<label>_<time>/ instead of the results folder (2026-10-18;
+%                  e.g. the folder of a study, mda_study)
 %
 % WINDOWS start exactly at time + offset and last 'seconds' ([start, start + seconds), clock time of the peak of the
 % contraction); they are never shifted. Values per window of the included contractions (column included of the
-% contraction table, all beat types): mean (column <parameter>), SD, SEM (SD / sqrt(n)), median, quartiles (q25, q75);
-% nBeats (all contractions), nIncluded, nExtra (extra beats); normalized to the baseline window of the same channel:
+% contraction table; paced channels: only the stimulated beats, extra beats excluded, 2026-10-18): mean (column
+% <parameter>), SD, SEM (SD / sqrt(n)), median, quartiles (q25, q75); nBeats (all contractions), nIncluded (the beats
+% of the values), nExtra (extra beats); beatsPerMinute counts all contractions; normalized to the baseline window of
+% the same channel:
 % <parameter>_pctBaseline = 100 * mean / mean of the baseline window, for the diastolic force the absolute change
 % diastolicForce_delta = mean - mean of the baseline window (uN; a diastolic force near 0 or negative has no
 % meaningful % of baseline). Windows without contractions although recorded (no gap of the signal): the slice does not
@@ -56,7 +65,8 @@ function TP = mda_timepoints(resultsFolder, label, series, channels, time, offse
 % force from the signal'). Notes (column
 % note) say what may make a window unusual: stimulation protocols, periods without signal (chamber out, no signal,
 % technical; from the gaps of the watcher), user comments in the window, fewer than 80 % of the expected contractions
-% included (expected = seconds x median stimulation or beat frequency of the window), another slice than in the
+% included (expected = seconds x median stimulation or beat frequency of the window), 'arrhythmic: n extra beats
+% (x % of the contractions)' if >= 5 % of the contractions are extra beats, another slice than in the
 % baseline window (slice register; then no pctBaseline), a window that ends after the treatment (baseline), windows
 % without recording, and 'pending: no data yet' for windows after the end of the analysed recordings (call
 % mda_timepoints again after the next pass of the watcher), and two amplitude groups of the included beats (1-D
@@ -111,8 +121,8 @@ function TP = mda_timepoints(resultsFolder, label, series, channels, time, offse
 %                                  diastolic force, TTP90, TTR90 and their change against the baseline, note)
 %
 % TP  struct with the same data: label, time (earliest treatment time), offsets, seconds, baseline (offset, NaN =
-%     none), parameters, units, rows (table series, channel, sampleID, group, time, experiment: one row per channel =
-%     rows of the matrices), summary, matrix.<parameter> (means) and pctBaseline.<parameter> (normalized;
+%     none), parameters, units, rows (table series, channel, sampleID, group, time, experiment, timeGiven, t0: one row
+%     per channel = rows of the matrices), t0, t0Window, summary, matrix.<parameter> (means) and pctBaseline.<parameter> (normalized;
 %     diastolicForce: delta in uN) (channels x offsets), course, beats, averageBeats, averageBeatsMean, notes, info,
 %     folder (char; cell for several experiments), files
 %
@@ -142,7 +152,7 @@ if ~isempty(a) && isnumeric(a{1}), sec = a{1}; a = a(2:end); end
 P = struct('parameters', {{'amplitude', 'diastolicForce', 'TTP90', 'TTR90', 'CD50', 'CD90', 'dFdtMax', 'dFdtMin', ...
     'AUC', 'beatsPerMinute'}}, ...
     'baseline', [], 'write', true, 'figures', true, 'seconds', [], 'averageBeats', true, 'rawFolder', '', ...
-    'sampleID', '', 'group', '');
+    'sampleID', '', 'group', '', 't0', 'given', 't0Window', 90, 'outputFolder', '');
 if mod(numel(a), 2) ~= 0, error('mda_timepoints: options as name, value pairs expected.'); end
 for i = 1:2:numel(a)
     name = validatestring(a{i}, fieldnames(P));
@@ -189,6 +199,19 @@ if nP == 0, error('mda_timepoints: no channel with contractions in the windows.'
 iS = cellfun(@(s) find(strcmp(S, s), 1), pS);
 pSmp = smpS(iS); pGrp = grpS(iS);                  %sample ID and group of the channels ('' = from the data)
 units = parameterUnits(pars);
+% time 0 (2026-10-18): the given time, or the end of the chamber-out period of the channel nearest to it
+t0m = lower(regexprep(char(P.t0), '[\s_-]', ''));
+if ~ismember(t0m, {'given', 'chamberin'}), error('mda_timepoints: t0: ''given'' or ''chamberIn'' expected.'); end
+if ~(isnumeric(P.t0Window) && isscalar(P.t0Window) && P.t0Window > 0)
+    error('mda_timepoints: t0Window: minutes > 0 expected.');
+end
+pGiven = pT; t0Notes = repmat({''}, nP, 1);
+if strcmp(t0m, 'chamberin')
+    for p = 1:nP
+        [pT(p), t0Notes{p}, cache] = chamberIn(recs.(fieldName(pS{p})), cache, pars, pC(p), pT(p), ...
+            double(P.t0Window));
+    end
+end
 
 % ---------------------------------------------------------------------------------------------------- windows
 cols = summaryColumns(pars);
@@ -231,12 +254,20 @@ for p = 1:nP
         C = sortrows(C, 'clock');
         nB = height(C);
         inc = C.included == 1;
+        bt = cellstr(string(C.beatType));
+        if any(strcmp(bt, 'stimulated') | strcmp(bt, 'extra'))   %paced: values of the stimulated beats (2026-10-18)
+            inc = inc & strcmp(bt, 'stimulated');
+        end
         nI = sum(inc);
-        nE = sum(strcmp(C.beatType, 'extra'));
+        nE = sum(strcmp(bt, 'extra'));
         f = median(C.stimFrequency, 'omitnan');
         if isnan(f), f = median(C.peakToPeakFrequency, 'omitnan'); end
         if ~isnan(f) && f > 0 && nI < 0.8 * sec * f
             notes{end+1} = sprintf('%d of ~%d expected contractions included', nI, round(sec * f)); %#ok<AGROW>
+        end
+        if nB > 0 && nE >= 0.05 * nB                   %arrhythmic: >= 5 % extra beats (2026-10-18)
+            notes{end+1} = sprintf('arrhythmic: %d extra beats (%d %% of the contractions)', nE, ...
+                round(100 * nE / nB)); %#ok<AGROW>
         end
         if nB == 0 && ~isempty(inR), notes{end+1} = 'no contractions'; end %#ok<AGROW>
         if ~isempty(kb) && k == kb && b0 > pT(p)
@@ -384,7 +415,10 @@ if isempty(kb), TP.baseline = nan; else, TP.baseline = offsets(kb); end
 TP.parameters = pars;
 TP.units = units;
 TP.rows = table(pS(:), pC(:), pSmp(:), pGrp(:), cellstr(arrayfun(@clockText, pT(:), 'UniformOutput', false)), ...
-    exps(:), 'VariableNames', {'series', 'channel', 'sampleID', 'group', 'time', 'experiment'});
+    exps(:), cellstr(arrayfun(@clockText, pGiven(:), 'UniformOutput', false)), t0Notes(:), 'VariableNames', ...
+    {'series', 'channel', 'sampleID', 'group', 'time', 'experiment', 'timeGiven', 't0'});
+if strcmp(t0m, 'given'), TP.t0 = 'given'; else, TP.t0 = 'chamberIn'; end
+TP.t0Window = double(P.t0Window);
 TP.summary = Summary;
 TP.matrix = struct(); TP.pctBaseline = struct();
 for i = 1:numel(pars)
@@ -408,7 +442,10 @@ for e = 1:numel(ue)
     sel = strcmp(exps, ue{e});
     t0 = min(pT(sel));
     base = sprintf('%s_%s', label, char(datetime(t0, 'Format', 'yyyy-MM-dd-HH-mm')));
-    if isempty(ue{e}), d = fullfile(res, 'timepoints', base);
+    if ~isempty(P.outputFolder)          %e.g. a study (2026-10-18): <outputFolder>/<experiment>/<label>_<time>/
+        if isempty(ue{e}), q = {'results'}; else, q = strsplit(ue{e}, '/'); end
+        d = fullfile(char(P.outputFolder), q{end}, base);
+    elseif isempty(ue{e}), d = fullfile(res, 'timepoints', base);
     else, q = strsplit(ue{e}, '/'); d = fullfile(res, q{:}, 'timepoints', base); end
     if ~isfolder(d), mkdir(d); end
     folders{e} = d;
@@ -529,7 +566,7 @@ end
 
 function res = indexFolder(f)
 % the results folder of the watcher: f or the first parent folder with mda_index.csv
-f = char(java.io.File(f).getCanonicalPath());
+f = canonicalPath(f);
 d = f;
 while true
     if isfile(fullfile(d, 'mda_index.csv')), res = d; return; end
@@ -741,6 +778,40 @@ end
 end
 
 
+function s = t0Text(TP)
+% info: time 0 of the channels
+if ~isfield(TP, 't0') || strcmp(TP.t0, 'given'), s = 'given time'; return; end
+x = strcat(TP.rows.series, {' ch'}, arrayfun(@num2str, TP.rows.channel, 'UniformOutput', false), {': '}, TP.rows.t0);
+s = sprintf(['end of the chamber-out period of the channel nearest to the given time (chamber in; periods ending ' ...
+    'within +-%s min): %s'], num2str(TP.t0Window), strjoin(x, '; '));
+end
+
+
+function [t, note, cache] = chamberIn(R, cache, pars, c, T, w)
+% end of the chamber-out period of channel c (gaps of the watcher) nearest to the time T, among the periods that end
+% within T +- w minutes (2026-10-18; the substance is added while the chamber is out, comments are often typed before
+% or up to an hour after)
+a0 = T - minutes(w); b0 = T + minutes(w);
+ends = T([]);
+for j = find(R.start < b0 & R.stop > a0)'
+    [D, cache] = recordingData(cache, R, j, pars);
+    G = D.G;
+    if height(G) == 0, continue; end
+    s = G.channel == c & strcmp(G.type, 'chamber out') & G.b >= a0 & G.b <= b0;
+    ends = [ends; G.b(s)]; %#ok<AGROW>
+end
+ends = unique(ends);
+if isempty(ends)
+    t = T; note = sprintf('no chamber-out period within +-%s min: given time %s', num2str(w), hms(T));
+    return;
+end
+[~, i] = min(abs(seconds(ends - T)));
+t = ends(i);
+note = sprintf('chamber in %s (given %s, %+.1f min; %d chamber-out period(s) within +-%s min)', hms(t), hms(T), ...
+    minutes(t - T), numel(ends), num2str(w));
+end
+
+
 function notes = windowNotes(D, c, a0, b0)
 % protocols, periods without signal and user comments in the window [a0, b0)
 notes = {};
@@ -941,16 +1012,17 @@ function T = infoTable(TP, res, used)
 % key, value: call, version and the recordings used
 k = {'function'; 'version'; 'implementation'; 'analysisDate'; 'resultsFolder'; 'label'; 'sampleID'; 'group'; ...
     'time'; 'offsets_min'; ...
-    'seconds'; 'baseline_min'; 'parameters'; 'units'; 'windows'; 'values'; 'pctBaseline'; 'averageBeats'; ...
+    'seconds'; 'baseline_min'; 'parameters'; 'units'; 't0'; 'windows'; 'values'; 'pctBaseline'; 'averageBeats'; ...
     'alternans'; 'notes'; 'recordings'};
 if isnan(TP.baseline), b = 'none'; else, b = num2str(TP.baseline); end
 v = {'mda_timepoints'; mda_version(); 'MATLAB'; char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss')); res; ...
     TP.label; strjoin(unique(TP.rows.sampleID, 'stable'), ' '); strjoin(unique(TP.rows.group, 'stable'), ' '); ...
     TP.time; strjoin(arrayfun(@num2str, TP.offsets, 'UniformOutput', false), ' '); num2str(TP.seconds); b; ...
-    strjoin(TP.parameters, ' '); strjoin(strcat(TP.parameters, '=', TP.units), ' '); ...
+    strjoin(TP.parameters, ' '); strjoin(strcat(TP.parameters, '=', TP.units), ' '); t0Text(TP); ...
     '[time + offset, time + offset + seconds), clock time of the peak'; ...
-    ['mean (column <parameter>), SD, SEM (SD / sqrt(n)), median, q25, q75 of the included contractions; ' ...
-    'beatsPerMinute = all contractions per minute; dFdtMax, dFdtMin in mN/s']; ...
+    ['mean (column <parameter>), SD, SEM (SD / sqrt(n)), median, q25, q75 of the included contractions (paced: ' ...
+    'stimulated beats only); beatsPerMinute = all contractions per minute; dFdtMax, dFdtMin in mN/s; note ' ...
+    '''arrhythmic'' if >= 5 % extra beats']; ...
     ['<parameter>_pctBaseline = 100 * mean / mean of the baseline window of the channel (same slice); ' ...
     'diastolicForce_delta = mean - mean of the baseline window (uN); course: the same with the 1-min medians and ' ...
     'the medians of the baseline window; no contractions (recorded, no gap): amplitude, AUC, dFdtMax, dFdtMin 0, ' ...
@@ -1169,10 +1241,13 @@ for i = 1:numel(pars)
         plot(ax, C.minutes(s) / f, y, '-', 'Color', col(p, :), 'LineWidth', 0.8, 'DisplayName', lab{p});
         yy = [yy; y(isfinite(y))]; %#ok<AGROW>
     end
-    if nP > 1                                          %mean +- SEM of the channels (minutes rounded)
-        [mx, my, ms] = courseMean(C, TP.rows, v);
+    if nP > 1          %mean +- SEM of the channels (minutes rounded): solid where all channels have values, dashed
+        %               with the gaps of single channels interpolated (2026-10-18)
+        [mx, my, ms, mi] = courseMean(C, TP.rows, v);
+        plot(ax, mx / f, mi, '--', 'Color', 'k', 'LineWidth', 1.1, 'DisplayName', ...
+            sprintf('mean, gaps <= %g h interpolated', courseGapMinutes() / 60));
         shade(ax, mx / f, my, ms, [0 0 0]);
-        plot(ax, mx / f, my, '-', 'Color', 'k', 'LineWidth', 1.6, 'DisplayName', 'mean +- SEM');
+        plot(ax, mx / f, my, '-', 'Color', 'k', 'LineWidth', 1.6, 'DisplayName', 'mean +- SEM (all)');
     end
     if isempty(yy)
         yl = ylim(ax);
@@ -1202,19 +1277,49 @@ sgtitle(h, [figureTitle(TP) ' - 1-min values' w ', windows grey'], 'FontSize', 1
 end
 
 
-function [x, y, e] = courseMean(C, rows, v)
-% mean and SEM of the channels rows of the course column v per minute (minutes after the treatment rounded)
-x = zeros(0, 1); y = x; e = x;
-s = false(height(C), 1);
-for p = 1:height(rows), s = s | (strcmp(C.series, rows.series{p}) & C.channel == rows.channel(p)); end
-m = round(C.minutes(s)); val = C.(v)(s);
-ok = isfinite(val);
-if ~any(ok), return; end
-[g, x] = findgroups(m(ok));
-y = splitapply(@mean, val(ok), g);
-n = splitapply(@numel, val(ok), g);
-sd = splitapply(@(z) std(z), val(ok), g);
-e = sd ./ sqrt(n); e(n < 2) = nan;
+function g = courseGapMinutes()
+% course images: gaps of a channel up to this length interpolated for the dashed mean (2026-10-18)
+g = 180;
+end
+
+
+function [x, y, e, yi] = courseMean(C, rows, v)
+% mean and SEM of the channels rows of the course column v per minute (minutes after the treatment rounded): x, y and
+% e only where all channels with values have a value (NaN elsewhere), yi = mean with the gaps of single channels up to
+% courseGapMinutes linearly interpolated (within the data of the channel; NaN where a channel has no value)
+x = zeros(0, 1); y = x; e = x; yi = x;
+m = round(C.minutes); val = C.(v);
+per = {};                                           %per channel: minutes and mean value per minute
+for p = 1:height(rows)
+    s = strcmp(C.series, rows.series{p}) & C.channel == rows.channel(p) & isfinite(val);
+    if any(s)
+        [g, xm] = findgroups(m(s));
+        per{end+1} = [xm(:), splitapply(@mean, val(s), g)]; %#ok<AGROW>
+    end
+end
+if isempty(per), return; end
+x = unique(cell2mat(cellfun(@(q) q(:, 1), per(:), 'UniformOutput', false)));
+nS = numel(per);
+V = nan(nS, numel(x)); Vi = V;
+for i = 1:nS
+    xm = per{i}(:, 1); ym = per{i}(:, 2);
+    [~, k] = ismember(xm, x);
+    V(i, k) = ym;
+    j = arrayfun(@(t) sum(xm < t), x)';             %number of data minutes before x (searchsorted)
+    j = j(:)'; inside = j > 0 & j < numel(xm);
+    j0 = max(j, 1); j1 = min(j + 1, numel(xm));
+    ok = inside & (xm(j1)' - xm(j0)' <= courseGapMinutes());
+    d = xm(j1)' - xm(j0)'; d(d <= 0) = 1;
+    w = (x(:)' - xm(j0)') ./ d;
+    Vi(i, ok) = ym(j0(ok))' + w(ok) .* (ym(j1(ok))' - ym(j0(ok))');
+    Vi(i, k) = ym;
+end
+full = all(isfinite(V), 1);
+y = nan(numel(x), 1); e = y; yi = y;
+y(full) = mean(V(:, full), 1);
+if nS > 1, e(full) = std(V(:, full), 0, 1) / sqrt(nS); end
+fi = all(isfinite(Vi), 1);
+yi(fi) = mean(Vi(:, fi), 1);
 end
 
 
@@ -1497,11 +1602,17 @@ end
 
 
 function shade(ax, t, y, e, color)
-% standard error as a band around y
-if all(isnan(e)), return; end
+% standard error as a band around y (one band per run of finite values of y; lighter since 2026-10-18, before 0.2)
+t = t(:); y = y(:); e = e(:);
+if ~any(isfinite(e) & isfinite(y)), return; end
 e(isnan(e)) = 0;
-patch(ax, [t; flipud(t)], [y - e; flipud(y + e)], color, 'FaceAlpha', 0.2, 'EdgeColor', 'none', ...
-    'HandleVisibility', 'off');
+ok = isfinite(y);
+k = find(diff([0; ok; 0]));
+for r = 1:2:numel(k)
+    a = k(r); b = k(r + 1) - 1;
+    patch(ax, [t(a:b); flipud(t(a:b))], [y(a:b) - e(a:b); flipud(y(a:b) + e(a:b))], color, 'FaceAlpha', 0.12, ...
+        'EdgeColor', 'none', 'HandleVisibility', 'off');
+end
 end
 
 
@@ -1824,4 +1935,13 @@ end
 
 function deleteIfExists(f)
 if isfile(f), delete(f); end
+end
+
+
+function p = canonicalPath(p)
+% absolute path without . and .. (java.io.File resolves relative paths against the folder MATLAB was started in,
+% not against pwd)
+p = char(p);
+if isempty(regexp(p, '^([/\\]|[A-Za-z]:[/\\])', 'once')), p = fullfile(pwd, p); end
+p = char(java.io.File(p).getCanonicalPath());
 end

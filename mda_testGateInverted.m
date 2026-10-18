@@ -161,6 +161,18 @@ ok = check(ok, 'report: arrhythmic pacing (no C, V), F above 10 Hz (as in Python
     strcmp(RA.red{4}, 'stimulus frequency 50 Hz') && RA.stimFrequency_Hz(1) == 5 && ...
     strcmp(RA2.red{2}, 'noise index 1 (uncertain 30 %, extra 2 %, arrhythmic pacing)') && ...
     isequal(RA3.flags', {'NCV', '', 'NCV', ''}));
+
+% stimulation > 10 Hz (2026-10-18): status channel misread, technical error, no contraction included (as in Python)
+f3 = fullfile(folder, 'fast_rigA_0.mdd');
+writeFastStimulation(f3, fs);
+[C3, S3, I3] = MyoDishAnalysis(f3, [1 2], 0, 60, 'quiet', true);
+nt = I3.notes; if ~iscell(nt), nt = cellstr(nt); end
+ok = check(ok, 'stimulation > 10 Hz: no contraction included, parameters NaN, note; 1 Hz unchanged', ...
+    S3.nContractions(1) == 56 && abs(S3.stimFrequency(1) - 1) < 1e-9 && S3.amplitude_mean(1) > 800 && ...
+    S3.nContractions(2) == 0 && abs(S3.stimFrequency(2) - 20) < 1e-6 && isnan(S3.amplitude_mean(2)) && ...
+    ~any(C3.included(C3.channel == 2)) && sum(C3.channel == 2) >= 50 && ...
+    any(contains(nt, ['channel 2: stimulation > 10 Hz (status channel misread): technical error, contractions ' ...
+    'not included'])));
 end
 
 
@@ -202,6 +214,32 @@ if protocol
     fprintf(fid, '2000 01 01 10:08:20:000;500000;0;comment;FFR protocol ended\n');
 end
 fprintf(fid, '2000 01 01 10:10:00:000;%d;0;Recording;stopped: %s\n', T2 * 1000, name);
+fclose(fid);
+end
+
+
+function writeFastStimulation(f, fs)
+% 2 channels, 60 s: twitches (1000 uN, 30 ms after the pulse) at 1 Hz in both channels; ch1 pulses at 1 Hz, ch2 pulses
+% at 20 Hz (status channel misread)
+Tf = 60; n = Tf * fs;
+t = (0:n-1) / fs;
+x = zeros(3, n);
+x(1:2,:) = repmat(-383 + round(3 * sin(2 * pi * 37.3 * t) + 2 * sin(2 * pi * 91.7 * t)), 2, 1);
+beats = 2:Tf - 3;
+for c = 1:2
+    for p = beats, x(c,:) = x(c,:) + 1000 * twitch(t - p - 0.03); end
+end
+p1 = 4 * round(beats * fs / 4) / fs;
+p2 = (2:0.05:Tf - 2 - 1e-9) + 1 / fs;
+x(3, round(p1 * fs) + 1) = bitor(50, bitshift(1, 9));
+x(3, round(p2 * fs) + 1) = bitor(50, bitshift(2, 9));
+fid = fopen(f, 'w'); fwrite(fid, int16(round(x)), 'int16'); fclose(fid);
+[~, name, ext] = fileparts(f); name = [name ext];
+fid = fopen(strrep(f, '.mdd', '_log.log'), 'w');
+fprintf(fid, 'systemTime;dataLogTime;channel;code;value\n');
+fprintf(fid, '2000 01 01 10:00:00:000;0;0;samplingRate Recording;400\n');
+fprintf(fid, '2000 01 01 10:00:00:000;0;0;Recording;started: %s\n', name);
+fprintf(fid, '2000 01 01 10:01:00:000;%d;0;Recording;stopped: %s\n', Tf * 1000, name);
 fclose(fid);
 end
 

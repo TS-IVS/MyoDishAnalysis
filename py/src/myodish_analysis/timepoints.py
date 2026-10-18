@@ -42,19 +42,26 @@ negative offset; NaN: none), write (default True), figures (default True, with w
 needs the recordings, read only), raw_folder (raw folder of the watcher: recordings at <raw_folder>/<path in
 mda_index.csv>; default: the path of the analysis, info sheet 'file'), sampleID (sample of the slices: one text or one
 per series; default: the slice register, else the series name after the setup: Setup1_ABC000101 --> ABC000101; for
-pool_timepoints), group (group of the sample, e.g. 'HTX': one text or one per series; default '').
+pool_timepoints), group (group of the sample, e.g. 'HTX': one text or one per series; default ''), t0 ('given'
+(default) or 'chamberIn', 2026-10-18: time 0 of every channel = the end of its chamber-out period (gaps of the watcher)
+nearest to the given time, among the periods that end within +- t0_window minutes (default 90): the substance is added
+while the chamber is out, comments are often typed before or up to an hour after; rows timeGiven and t0, info t0;
+without such a period the given time), output_folder (2026-10-18: files in <output_folder>/<experiment>/<label>_<time>/
+instead of the results folder, e.g. for a study).
 
 Windows start exactly at time + offset and last `seconds` ([start, start + seconds), clock time of the peak of the
-contraction); they are never shifted. Values per window of the included contractions (column included, all beat types):
-mean (column <parameter>), SD, SEM (SD / sqrt(n)), median, quartiles (q25, q75); nBeats (all contractions), nIncluded,
-nExtra (extra beats); normalized to the baseline window of the same channel: <parameter>_pctBaseline = 100 * mean / mean
-of the baseline window, for the diastolic force the absolute change diastolicForce_delta = mean - mean of the baseline
-window (uN; a diastolic force near 0 or negative has no meaningful % of baseline). Windows without contractions although
-recorded (no gap of the signal): the slice does not contract: amplitude, AUC, dFdtMax, dFdtMin and beatsPerMinute 0,
-TTP90, TTR90, CD50, CD90 NaN, the diastolic force from the signal (median of the force filtered as in the analysis -
-zero force; needs the recording; note 'diastolic force from the signal'). Notes (column note): stimulation protocols,
-periods without signal (gaps of the watcher), user comments in the window, fewer than 80 % of the expected contractions
-included (expected = seconds x median stimulation or beat frequency of the window), another slice than in the baseline
+contraction); they are never shifted. Values per window of the included contractions (column included; paced channels:
+only the stimulated beats, extra beats excluded, 2026-10-18): mean (column <parameter>), SD, SEM (SD / sqrt(n)), median,
+quartiles (q25, q75); nBeats (all contractions), nIncluded (the beats of the values), nExtra (extra beats);
+beatsPerMinute counts all contractions; normalized to the baseline window of the same channel: <parameter>_pctBaseline =
+100 * mean / mean of the baseline window, for the diastolic force the absolute change diastolicForce_delta = mean - mean
+of the baseline window (uN; a diastolic force near 0 or negative has no meaningful % of baseline). Windows without
+contractions although recorded (no gap of the signal): the slice does not contract: amplitude, AUC, dFdtMax, dFdtMin and
+beatsPerMinute 0, TTP90, TTR90, CD50, CD90 NaN, the diastolic force from the signal (median of the force filtered as in
+the analysis - zero force; needs the recording; note 'diastolic force from the signal'). Notes (column note):
+stimulation protocols, periods without signal (gaps of the watcher), user comments in the window, fewer than 80 % of the
+expected contractions included (expected = seconds x median stimulation or beat frequency of the window), 'arrhythmic: n
+extra beats (x % of the contractions)' if >= 5 % of the contractions are extra beats, another slice than in the baseline
 window (slice register; then no pctBaseline), a baseline window that ends after the treatment, windows without
 recording, and 'pending: no data yet' for windows after the end of the analysed recordings (call again after the next
 pass of the watcher), and two amplitude groups of the included beats (1-D 2-means: each group >= 20 % of the beats,
@@ -102,10 +109,11 @@ watcher never changes these folders):
       their change against the baseline, note)
 
 Returns a dict with the same data: label, time (earliest treatment time), offsets, seconds, baseline (offset, NaN =
-none), parameters, units, rows (DataFrame series, channel, sampleID, group, time, experiment: one row per channel = rows
-of the matrices), summary, matrix[parameter] (means) and pctBaseline[parameter] (normalized; diastolicForce:
-delta in uN) (channels x offsets, numpy arrays), course, beats, averageBeats, averageBeatsMean, notes, info, folder
-(str; list for several experiments), files. Several analyses (experiments, samples) by treatment: pool_timepoints.
+none), parameters, units, rows (DataFrame series, channel, sampleID, group, time, experiment, timeGiven, t0: one row per
+channel = rows of the matrices), t0, t0Window, summary, matrix[parameter] (means) and pctBaseline[parameter]
+(normalized; diastolicForce: delta in uN) (channels x offsets, numpy arrays), course, beats, averageBeats,
+averageBeatsMean, notes, info, folder (str; list for several experiments), files. Several analyses (experiments,
+samples) by treatment: pool_timepoints.
 
 TS 2026-10-15 (average beats, alternans, standard errors, slides per channel 2026-10-15; means, SD, SEM, CD90, dF/dt,
 AUC, diastolic force as change in uN, windows without contractions, images absolute and normalized 2026-10-16)
@@ -128,7 +136,8 @@ DEFAULT_PARAMETERS = ("amplitude", "diastolicForce", "TTP90", "TTR90", "CD50", "
 
 
 def timepoints(results_folder, label, series, channels, time, offsets, seconds=120.0, parameters=DEFAULT_PARAMETERS,
-               baseline=None, write=True, figures=True, average_beats=True, raw_folder="", sampleID="", group=""):
+               baseline=None, write=True, figures=True, average_beats=True, raw_folder="", sampleID="", group="",
+               t0="given", t0_window=90.0, output_folder=""):
     """Contraction parameters in time windows around a treatment; see the module documentation."""
     from .watch import read_index, results_of
 
@@ -168,6 +177,16 @@ def timepoints(results_folder, label, series, channels, time, offsets, seconds=1
         raise ValueError("timepoints: no channel with contractions in the windows.")
     pSmp = [smp_s[S.index(s)] for s in pS]  # sample ID and group of the channels ('' = from the data)
     pGrp = [grp_s[S.index(s)] for s in pS]
+    # time 0 (2026-10-18): the given time, or the end of the chamber-out period of the channel nearest to it
+    t0m = re.sub(r"[\s_-]", "", str(t0 or "given")).lower()
+    if t0m not in ("given", "chamberin"):
+        raise ValueError("timepoints: t0: 'given' or 'chamberIn' expected.")
+    if not (_is_number(t0_window) and float(t0_window) > 0):
+        raise ValueError("timepoints: t0_window: minutes > 0 expected.")
+    pGiven, t0notes = list(pT), [""] * nP
+    if t0m == "chamberin":
+        for p in range(nP):
+            pT[p], t0notes[p] = _chamber_in(recs[pS[p]], cache, pars, pC[p], pT[p], float(t0_window))
     units = _units(pars)
 
     # windows
@@ -204,13 +223,18 @@ def timepoints(results_folder, label, series, channels, time, offsets, seconds=1
             C = C.sort_values("clock", kind="mergesort").reset_index(drop=True)
             nB = len(C)
             inc = C["included"].to_numpy(float) == 1
+            bt = C["beatType"].astype(str).to_numpy()
+            if np.any((bt == "stimulated") | (bt == "extra")):  # paced: values of the stimulated beats (2026-10-18)
+                inc &= bt == "stimulated"
             nI = int(inc.sum())
-            nE = int((C["beatType"].astype(str) == "extra").sum())
+            nE = int((bt == "extra").sum())
             f = _nanmedian(C["stimFrequency"].to_numpy(float))
             if math.isnan(f):
                 f = _nanmedian(C["peakToPeakFrequency"].to_numpy(float))
             if not math.isnan(f) and f > 0 and nI < 0.8 * sec * f:
                 notes.append(f"{nI} of ~{_mround(sec * f)} expected contractions included")
+            if nB > 0 and nE >= 0.05 * nB:  # arrhythmic: >= 5 % extra beats (2026-10-18)
+                notes.append(f"arrhythmic: {nE} extra beats ({_mround(100 * nE / nB)} % of the contractions)")
             if nB == 0 and inR:
                 notes.append("no contractions")
             if kb is not None and k == kb and b0 > pT[p]:
@@ -344,7 +368,9 @@ def timepoints(results_folder, label, series, channels, time, offsets, seconds=1
     TP = {"label": label, "time": _clock_text(min(pT)), "offsets": off.copy(), "seconds": sec,
           "baseline": np.nan if kb is None else float(off[kb]), "parameters": pars, "units": units,
           "rows": pd.DataFrame({"series": pS, "channel": [int(c) for c in pC], "sampleID": pSmp, "group": pGrp,
-                                "time": [_clock_text(t) for t in pT], "experiment": exps}),
+                                "time": [_clock_text(t) for t in pT], "experiment": exps,
+                                "timeGiven": [_clock_text(t) for t in pGiven], "t0": t0notes}),
+          "t0": "given" if t0m == "given" else "chamberIn", "t0Window": float(t0_window),
           "summary": summary, "matrix": {par: M[:, :, i].copy() for i, par in enumerate(pars)},
           "pctBaseline": {par: Pct[:, :, i].copy() for i, par in enumerate(pars)}, "course": course,
           "beats": beats, "averageBeats": AB, "averageBeatsMean": _average_beats_mean(AB, off),
@@ -360,7 +386,10 @@ def timepoints(results_folder, label, series, channels, time, offsets, seconds=1
         sel = np.array([x == e for x in exps])
         t0 = min(t for t, s in zip(pT, sel) if s)
         base = f"{label}_{t0.strftime('%Y-%m-%d-%H-%M')}"
-        d = os.path.join(res, *(e.split("/") if e else []), "timepoints", base)
+        if output_folder:  # e.g. the folder of a study (2026-10-18): <output_folder>/<experiment>/<label>_<time>/
+            d = os.path.join(str(output_folder), e.split("/")[-1] if e else "results", base)
+        else:
+            d = os.path.join(res, *(e.split("/") if e else []), "timepoints", base)
         os.makedirs(d, exist_ok=True)
         folders.append(d)
         Te = _subset(TP, sel, nK)
@@ -705,6 +734,28 @@ def _window_notes(D, c, a0, b0):
     return notes
 
 
+def _chamber_in(R, cache, pars, c, T, w):
+    """end of the chamber-out period of channel c (gaps of the watcher) nearest to the time T, among the periods that
+    end within T +- w minutes: new time and note (2026-10-18; the treatment is added while the chamber is out, comments
+    are often typed before or up to an hour after)"""
+    a0, b0 = T - pd.Timedelta(minutes=w), T + pd.Timedelta(minutes=w)
+    ends = []
+    for j in range(len(R["rel"])):
+        if R["start"][j] < b0 and R["stop"][j] > a0:
+            G = _recording_data(cache, R, j, pars)["G"]
+            if len(G):
+                s = (G["channel"].to_numpy(float) == c) & (G["type"].astype(str).to_numpy() == "chamber out") & \
+                    (G["b"] >= a0).to_numpy() & (G["b"] <= b0).to_numpy()
+                ends += list(G["b"][s])
+    ends = sorted(set(ends))
+    if not ends:
+        return T, f"no chamber-out period within +-{_g(w)} min: given time {_hms(T)}"
+    e = min(ends, key=lambda x: (abs((x - T).total_seconds()), x))
+    d = (e - T).total_seconds() / 60
+    return e, (f"chamber in {_hms(e)} (given {_hms(T)}, {d:+.1f} min; {len(ends)} chamber-out period(s) within "
+               f"+-{_g(w)} min)")
+
+
 def _coverage_gap(R, inR, a0, b0):
     s = sorted(R["start"][j] for j in inR)
     e = sorted(R["stop"][j] for j in inR)
@@ -893,9 +944,15 @@ def _info_table(TP, res, used):
             ("offsets_min", " ".join(_g(o) for o in TP["offsets"])),
             ("seconds", _g(TP["seconds"])), ("baseline_min", b), ("parameters", " ".join(TP["parameters"])),
             ("units", " ".join(f"{p}={u}" for p, u in zip(TP["parameters"], TP["units"]))),
+            ("t0", "given time" if TP.get("t0", "given") == "given" else
+             f"end of the chamber-out period of the channel nearest to the given time (chamber in; periods ending "
+             f"within +-{_g(TP['t0Window'])} min): " + "; ".join(
+                 f"{s_} ch{c_}: {n_}" for s_, c_, n_ in zip(TP["rows"]["series"], TP["rows"]["channel"],
+                                                            TP["rows"]["t0"]))),
             ("windows", "[time + offset, time + offset + seconds), clock time of the peak"),
             ("values", "mean (column <parameter>), SD, SEM (SD / sqrt(n)), median, q25, q75 of the included "
-             "contractions; beatsPerMinute = all contractions per minute; dFdtMax, dFdtMin in mN/s"),
+             "contractions (paced: stimulated beats only); beatsPerMinute = all contractions per minute; dFdtMax, "
+             "dFdtMin in mN/s; note 'arrhythmic' if >= 5 % extra beats"),
             ("pctBaseline", "<parameter>_pctBaseline = 100 * mean / mean of the baseline window of the channel (same "
              "slice); diastolicForce_delta = mean - mean of the baseline window (uN); course: the same with the "
              "1-min medians and the medians of the baseline window; no contractions (recorded, no gap): amplitude, "
@@ -1163,10 +1220,13 @@ def _course_figure(TP, mode):
             s = (C["series"] == R["series"].iloc[p]).to_numpy() & (C["channel"].to_numpy(float) == R["channel"].iloc[p])
             ax.plot(C["minutes"].to_numpy(float)[s] / f, C[v].to_numpy(float)[s], "-", color=col[p], linewidth=0.8,
                     label=lab[p])
-        if nP > 1:  # mean +- SEM of the channels (minutes rounded)
-            mx, my, ms = _course_mean(C, R, v)
+        if nP > 1:  # mean +- SEM of the channels (minutes rounded): solid where all channels have values, dashed
+            # with the gaps of single channels interpolated (2026-10-18)
+            mx, my, ms, mi = _course_mean(C, R, v)
+            ax.plot(mx / f, mi, "--", color="k", linewidth=1.1,
+                    label=f"mean, gaps <= {_g(COURSE_GAP_MINUTES / 60)} h interpolated")
             _shade(ax, mx / f, my, ms, "k")
-            ax.plot(mx / f, my, "-", color="k", linewidth=1.6, label="mean +- SEM")
+            ax.plot(mx / f, my, "-", color="k", linewidth=1.6, label="mean +- SEM (all)")
         ax.axvline(0, linestyle="--", color="0.3")
         ax.set_xlim((off.min() - 30) / f, (off.max() + 30 + TP["seconds"] / 60) / f)
         ax.tick_params(labelsize=8)
@@ -1183,22 +1243,48 @@ def _course_figure(TP, mode):
     return fig
 
 
+COURSE_GAP_MINUTES = 180  # course images: gaps of a channel up to this length interpolated for the dashed mean
+
+
 def _course_mean(C, R, v):
-    """mean and SEM of the channels R of the course column v per minute (minutes after the treatment rounded)"""
-    keys = set(zip(R["series"], R["channel"].astype(int)))
-    s = np.array([(a, int(b)) in keys for a, b in zip(C["series"], C["channel"])], bool)
-    mm = C["minutes"].to_numpy(float)[s]
+    """mean and SEM of the channels R of the course column v per minute (minutes after the treatment rounded): x, y and
+    e only where all channels with values have a value (NaN elsewhere), yi = mean with the gaps of single channels up to
+    COURSE_GAP_MINUTES linearly interpolated (within the data of the channel; NaN where a channel has no value)"""
+    z = np.zeros(0)
+    mm = C["minutes"].to_numpy(float)
     m = np.sign(mm) * np.floor(np.abs(mm) + 0.5)  # MATLAB round
-    val = C[v].to_numpy(float)[s]
-    ok = np.isfinite(val)
-    if not ok.any():
-        return np.zeros(0), np.zeros(0), np.zeros(0)
-    G = pd.DataFrame({"m": m[ok], "v": val[ok]}).groupby("m")["v"]
-    x = np.asarray(G.mean().index, float)
-    y, n, sd = G.mean().to_numpy(float), G.count().to_numpy(float), G.std(ddof=1).to_numpy(float)
-    e = sd / np.sqrt(n)
-    e[n < 2] = np.nan
-    return x, y, e
+    val = C[v].to_numpy(float)
+    ser, ch = C["series"].astype(str).to_numpy(), C["channel"].to_numpy(float)
+    per = []  # per channel: minutes and mean value per minute
+    for a, b in zip(R["series"], R["channel"].astype(int)):
+        s = (ser == a) & (ch == b) & np.isfinite(val)
+        if s.any():
+            G = pd.DataFrame({"m": m[s], "v": val[s]}).groupby("m")["v"].mean()
+            per.append((np.asarray(G.index, float), G.to_numpy(float)))
+    if not per:
+        return z, z, z, z
+    x = np.unique(np.concatenate([q[0] for q in per]))
+    V, Vi = np.full((len(per), x.size), np.nan), np.full((len(per), x.size), np.nan)
+    for i, (xm, ym) in enumerate(per):
+        k = np.searchsorted(x, xm)
+        V[i, k] = ym
+        j = np.searchsorted(xm, x)  # interpolation inside gaps <= COURSE_GAP_MINUTES
+        inside = (j > 0) & (j < xm.size)
+        j0, j1 = np.clip(j - 1, 0, xm.size - 1), np.clip(j, 0, xm.size - 1)
+        ok = inside & (xm[j1] - xm[j0] <= COURSE_GAP_MINUTES)
+        w = np.where(ok, (x - xm[j0]) / np.where(xm[j1] > xm[j0], xm[j1] - xm[j0], 1), 0)
+        Vi[i, ok] = ym[j0[ok]] + w[ok] * (ym[j1[ok]] - ym[j0[ok]])
+        Vi[i, k] = ym
+    full = np.all(np.isfinite(V), axis=0)
+    y, e = np.full(x.size, np.nan), np.full(x.size, np.nan)
+    if full.any():
+        y[full] = V[:, full].mean(axis=0)
+        if len(per) > 1:
+            e[full] = V[:, full].std(axis=0, ddof=1) / math.sqrt(len(per))
+    fi = np.all(np.isfinite(Vi), axis=0)
+    yi = np.full(x.size, np.nan)
+    yi[fi] = Vi[:, fi].mean(axis=0)
+    return x, y, e, yi
 
 
 def _save(fig, f):
@@ -1407,12 +1493,19 @@ AB_TITLES = ("force (uN)", "baseline amplitude = 1, baseline diastole = 0",
              "own amplitude = 1, diastole: change in baseline amplitudes")
 
 
+SHADE_ALPHA = 0.12  # transparency of the standard error bands (lighter since 2026-10-18; before 0.2)
+
+
 def _shade(ax, t, y, e, color):
-    """standard error as a band around y"""
-    e = np.asarray(e, float)
-    if np.any(~np.isnan(e)):
-        e = np.nan_to_num(e)
-        ax.fill_between(t, y - e, y + e, color=color, alpha=0.2, linewidth=0)
+    """standard error as a band around y (one band per run of finite values of y)"""
+    t, y, e = (np.asarray(a, float) for a in (t, y, e))
+    if not np.any(np.isfinite(e) & np.isfinite(y)):
+        return
+    e = np.nan_to_num(e)
+    ok = np.isfinite(y)
+    k = np.flatnonzero(np.diff(np.r_[0, ok.astype(int), 0]))
+    for a, b in zip(k[::2], k[1::2]):
+        ax.fill_between(t[a:b], y[a:b] - e[a:b], y[a:b] + e[a:b], color=color, alpha=SHADE_ALPHA, linewidth=0)
 
 
 def _beat_panel(ax, TP, AB, sel, ycol, ecol, col, legend, fs):
@@ -1676,7 +1769,7 @@ def _unique(x):
 
 # ------------------------------------------------------------------------------------------------------------- pool
 def pool_timepoints(source, labels=None, order=None, name="pooled", output_folder="", write=True, figures=True,
-                    control=None):
+                    control=None, exclude=None):
     """Analyses of timepoints (several experiments, samples, days) pooled by treatment: one table with all slices and
     time points (for statistics), tables per sample and per treatment, and the images of timepoints per treatment with
     all its slices. Port of mda_poolTimepoints.m (same arguments, files and values; images as .png and .svg).
@@ -1689,7 +1782,11 @@ def pool_timepoints(source, labels=None, order=None, name="pooled", output_folde
     Options: labels (treatments to pool; default all), order (order of the treatments in the images; default: controls
     first, then by substance and concentration), control (treatments that are controls; default: the labels starting
     with CTRL, control, vehicle or DMSO), name (default 'pooled': name of the folder and of the workbook), output_folder
-    (default <results folder>/timepoints_pooled/<name>), write, figures.
+    (default <results folder>/timepoints_pooled/<name>), write, figures, exclude (2026-10-18: slices or windows left
+    out, with the reason: a list of (id, channel, from_min, reason) or of dicts with these keys, or a DataFrame with
+    these columns; id = sampleID, series or sliceID; channel None = all channels of id; from_min None = all windows,
+    otherwise the windows from this offset on, e.g. ("ABC000101", 6, 720, "arrhythmic from +12 h"); left out of all
+    tables, the course and the images; sheet excluded).
 
     Pooling: treatment = label of timepoints, with substance, concentration and unit taken from it (OME0.5uM --> OME,
     0.5, uM); sample = sampleID of timepoints (option sampleID, slice register or the series name after the setup);
@@ -1707,14 +1804,20 @@ def pool_timepoints(source, labels=None, order=None, name="pooled", output_folde
     substance, concentration, concentrationUnit, group, sampleID, sliceID, timePoint, offset_min, isBaseline, the
     summary columns of timepoints, analysis, controlReference, nControlSlices, <...>_vsControl), samples, treatments
     (per treatment and time point: n slices, n samples; per parameter and normalized value mean, SD, SEM of the slices,
-    mean and SEM of the samples: <parameter>_samples, <parameter>_samplesSEM), course (mean and SEM of the 1-min values
-    of the slices per minute after the treatment), averageBeatsMean, analyses and info;
+    mean and SEM of the samples: <parameter>_samples, <parameter>_samplesSEM), statistics (2026-10-18: per treatment,
+    time point and normalized parameter against the controls: means, difference, paired difference of the sample means
+    (same sample), linear mixed model with the sample as random intercept if both groups have >= 3 samples), qc
+    (windows with notes: column qc with codes), excluded (option exclude), course (mean and SEM of the 1-min values of
+    the slices per minute after the treatment), averageBeatsMean, analyses and info;
     <treatment>/<treatment>_timepoints_abs / _norm, _course_abs / _norm, _averageBeatsMean_abs / _norm (.png, .svg);
     treatments_abs / _norm / _vsControl (.png, .svg): per parameter and time point the slices (dots) and their mean +-
-    SEM for every treatment.
+    SEM for every treatment; <name>_figure_norm (.pdf, .svg, .png; 2026-10-18): figure for a manuscript
+    (plot_timepoints: amplitude, diastolic force, TTP90, TTR90 over time, mean +- SEM and single slices per treatment);
+    <name>_prism.xlsx: the normalized values for GraphPad Prism (prism_tables: one sheet per parameter, one row per time
+    point, one column per slice: treatment|sample slice).
 
     Returns a dict with the same data: name, parameters, units, slices, samples, treatments, course, averageBeatsMean,
-    analyses, notes, controls, info, folder, files.
+    statistics, qc, excluded, analyses, notes, controls, info, folder, files.
 
     TS 2026-10-16"""
     name = str(name)
@@ -1736,14 +1839,28 @@ def pool_timepoints(source, labels=None, order=None, name="pooled", output_folde
     units = [u for p, u in zip(A[0]["parameters"], A[0]["units"]) if p in pars]
     treat = _treatment_order(_unique([a["label"] for a in A]), [order] if isinstance(order, str) else list(order or []))
     Sl = _slice_table(A, pars)
+    Sl.insert(int(Sl.columns.get_loc("note")) + 1, "qc", [_qc_codes(x) for x in Sl["note"]])
+    Sl, Ex, cut, nt, xtxt = _apply_exclude(Sl, exclude)
+    notes += nt
+    left = [t for t in treat if t not in set(Sl["treatment"])]
+    if left:
+        notes.append("no slices left (exclude): " + " ".join(left))
+        treat = [t for t in treat if t not in left]
+        A = [a for a in A if a["label"] in treat]
+    if not treat:
+        raise ValueError("pool_timepoints: exclude: no slices left.")
     ctrl = ([control] if isinstance(control, str) else list(control)) if control else [
         t for t in treat if re.match(r"(ctrl|control|vehicle|dmso)", t, re.I)]
     Sl, nt = _control_columns(Sl, pars, ctrl)
     notes += nt
     Sm = _sample_table(Sl, pars)
     Tr = _treatment_table(Sl, Sm, pars, treat)
-    Co, Ab, TPs = _treatment_data(A, Sl, pars, units, treat)
+    St = _statistics_table(Sl, Sm, pars, treat, ctrl)
+    Q = Sl.loc[Sl["qc"] != "", ["treatment", "sampleID", "sliceID", "series", "channel", "timePoint", "offset_min",
+                               "qc", "note"]].reset_index(drop=True)
+    Co, Ab, TPs = _treatment_data(A, Sl, pars, units, treat, cut)
     PT = {"name": name, "parameters": pars, "units": units, "slices": Sl, "samples": Sm, "treatments": Tr,
+          "statistics": St, "qc": Q, "excluded": Ex, "excludeText": xtxt,
           "course": Co, "averageBeatsMean": Ab, "analyses": An, "notes": notes, "controls": ctrl}
     PT["info"] = _pool_info(PT, treat)
     PT["folder"], PT["files"] = "", []
@@ -1759,8 +1876,9 @@ def pool_timepoints(source, labels=None, order=None, name="pooled", output_folde
     if os.path.isfile(x):
         os.remove(x)
     with pd.ExcelWriter(x, engine="openpyxl") as w:
-        for sh, T in (("slices", Sl), ("samples", Sm), ("treatments", Tr), ("course", Co), ("averageBeatsMean", Ab),
-                      ("analyses", An), ("info", PT["info"])):
+        for sh, T in (("slices", Sl), ("samples", Sm), ("treatments", Tr), ("statistics", St), ("qc", Q),
+                      ("excluded", Ex), ("course", Co), ("averageBeatsMean", Ab), ("analyses", An),
+                      ("info", PT["info"])):
             T.to_excel(w, sheet_name=sh, index=False)
     files = [x]
     if figures:
@@ -1774,6 +1892,17 @@ def pool_timepoints(source, labels=None, order=None, name="pooled", output_folde
             f = os.path.join(d, "treatments_" + m)
             _save(_treatments_figure(Sl, pars, units, treat, TPs, m, name), f)
             files += [f + ".png", f + ".svg"]
+        import matplotlib.pyplot as plt  # figure for a manuscript (2026-10-18)
+        fig, fl = plot_timepoints(PT, output=os.path.join(d, name + "_figure_norm"))
+        plt.close(fig)
+        files += fl
+    xp = os.path.join(d, name + "_prism.xlsx")  # tables for GraphPad Prism (2026-10-18)
+    if os.path.isfile(xp):
+        os.remove(xp)
+    with pd.ExcelWriter(xp, engine="openpyxl") as w:
+        for sh, T in prism_tables(PT).items():
+            T.to_excel(w, sheet_name=sh[:31], index=False)
+    files.append(xp)
     PT["folder"], PT["files"] = d, files
     return PT
 
@@ -2056,7 +2185,7 @@ def _treatment_table(Sl, Sm, pars, treat):
     return T.sort_values(["_o", "offset_min"], kind="mergesort").drop(columns="_o").reset_index(drop=True)
 
 
-def _treatment_data(A, Sl, pars, units, treat):
+def _treatment_data(A, Sl, pars, units, treat, cut=None):
     """per treatment: course (mean and SEM of the slices per minute), mean of the average beats, TP dict for the
     images"""
     cols = [x for p in pars for x in (p, _norm_name(p))]
@@ -2105,7 +2234,11 @@ def _treatment_data(A, Sl, pars, units, treat):
         C = (pd.concat(cp, ignore_index=True) if cp
              else pd.DataFrame({c: pd.Series([], dtype=float) for c in ["series", "channel", "minutes"] + cols}))
         if len(C):
-            C = C[np.isin([f"{s_}|{int(c_)}" for s_, c_ in zip(C["series"], C["channel"])], u)].reset_index(drop=True)
+            kc_ = [f"{s_}|{int(c_)}" for s_, c_ in zip(C["series"], C["channel"])]
+            keep = np.isin(kc_, u)
+            if cut:  # exclude from an offset on: 1-min values from this minute on
+                keep &= np.array([m_ < cut.get(k_, math.inf) for k_, m_ in zip(kc_, C["minutes"].to_numpy(float))])
+            C = C[keep].reset_index(drop=True)
         TP["course"] = C
         if len(C):
             mm = C["minutes"].to_numpy(float)
@@ -2129,8 +2262,11 @@ def _treatment_data(A, Sl, pars, units, treat):
             ap.append(B)
         AB = pd.concat(ap, ignore_index=True) if ap else pd.DataFrame()
         if len(AB):
-            AB = AB[np.isin([f"{s_}|{int(c_)}" for s_, c_ in zip(AB["series"], AB["channel"])], u)].reset_index(
-                drop=True)
+            ka_ = [f"{s_}|{int(c_)}" for s_, c_ in zip(AB["series"], AB["channel"])]
+            keep = np.isin(ka_, u)
+            if cut:
+                keep &= np.array([o_ < cut.get(k_, math.inf) for k_, o_ in zip(ka_, AB["offset_min"].to_numpy(float))])
+            AB = AB[keep].reset_index(drop=True)
         TP["averageBeats"] = AB
         TP["averageBeatsMean"] = _average_beats_mean(AB, off)
         if len(TP["averageBeatsMean"]):
@@ -2146,6 +2282,313 @@ def _treatment_data(A, Sl, pars, units, treat):
     Ab = (pd.concat(aparts, ignore_index=True) if aparts else
           pd.concat([pd.DataFrame({"treatment": pd.Series([], dtype=object)}), _average_beats_mean(None, [0])], axis=1))
     return Co, Ab, TPs
+
+
+_QC = (("arrhythmic", ("arrhythmic:",)), ("capture", ("expected contractions included",)),
+       ("noContractions", ("no contractions",)), ("alternans", ("alternans:",)),
+       ("irregular", ("irregular amplitudes:",)), ("protocol", ("protocol ",)),
+       ("signal", ("chamber out", "no signal", "technical", "window partly without recording", "no recording")),
+       ("otherSlice", ("other slice than in the baseline window",)), ("comment", ("comment ",)),
+       ("pending", ("pending:",)))
+
+
+def _qc_codes(note):
+    """codes of the notes of a window (column qc, 2026-10-18): arrhythmic, capture, noContractions, alternans,
+    irregular, protocol, signal, otherSlice, comment, pending"""
+    t = str(note or "")
+    return " ".join(c for c, keys in _QC if any(k in t for k in keys))
+
+
+def _exclude_entries(exclude):
+    """exclude option: list of (id, channel, from_min, reason)"""
+    if exclude is None:
+        return []
+    if isinstance(exclude, pd.DataFrame):
+        items = exclude.to_dict("records")
+    elif isinstance(exclude, (dict, tuple, str)):
+        items = [exclude]
+    else:
+        items = list(exclude)
+    out = []
+    for e in items:
+        if isinstance(e, dict):
+            d = {str(k).lower(): v for k, v in e.items()}
+            i_ = next((d[k] for k in ("id", "sampleid", "sliceid", "series") if k in d), "")
+            c_, f_, r_ = d.get("channel"), d.get("from_min", d.get("from")), d.get("reason")
+        else:
+            e = [e] if isinstance(e, str) else list(e)
+            i_, c_, f_, r_ = (e + [None] * 4)[:4]
+        nan = lambda v: v is None or (isinstance(v, float) and math.isnan(v))  # noqa: E731
+        out.append((str(i_), math.nan if nan(c_) else float(c_), -math.inf if nan(f_) else float(f_),
+                    "" if nan(r_) else str(r_)))
+    return out
+
+
+def _apply_exclude(Sl, exclude):
+    """rows of the slices left out (option exclude): kept rows, excluded rows (with excludeReason), minute from which
+    the course and the average beats of a slice are left out (key analysis|series|channel), notes, text"""
+    E = _exclude_entries(exclude)
+    drop = np.zeros(len(Sl), bool)
+    why = [""] * len(Sl)
+    cut, notes, txt = {}, [], []
+    ch, off = Sl["channel"].to_numpy(float), Sl["offset_min"].to_numpy(float)
+    for i_, c_, f_, r_ in E:
+        m = (Sl["sampleID"].astype(str).to_numpy() == i_) | (Sl["series"].astype(str).to_numpy() == i_) | \
+            (Sl["sliceID"].astype(str).to_numpy() == i_)
+        if not math.isnan(c_):
+            m &= ch == c_
+        w = f"{i_}" + ("" if math.isnan(c_) else f" ch{int(c_)}") + ("" if f_ == -math.inf else f" from {_g(f_)} min")
+        txt.append(w + (": " + r_ if r_ else ""))
+        if not m.any():
+            notes.append(f"exclude {w}: no slice found")
+            continue
+        m &= off >= f_
+        for k in np.flatnonzero(m):
+            why[k] = r_ if not why[k] else (why[k] if r_ in why[k].split("; ") else why[k] + "; " + r_)
+            key = f"{Sl['analysis'].iloc[k]}|{Sl['series'].iloc[k]}|{int(ch[k])}"
+            cut[key] = min(cut.get(key, math.inf), f_)
+        drop |= m
+    Ex = Sl[drop].copy()
+    Ex.insert(0, "excludeReason", [why[k] for k in np.flatnonzero(drop)])
+    return Sl[~drop].reset_index(drop=True), Ex.reset_index(drop=True), cut, notes, "; ".join(txt)
+
+
+def _lme_ri(y, x, g):
+    """linear mixed model y ~ 1 + x + (1 | g) (random intercept per sample), REML: estimate of x, its SE, the degrees
+    of freedom (n - 2, as fitlme 'Residual'), the p-value (t test) and the variance ratio sample / residual. The REML
+    criterion is minimized over the variance ratio (grid and golden section, the same in MATLAB and Python)."""
+    y, x = np.asarray(y, float), np.asarray(x, float)
+    n = y.size
+    X = np.column_stack([np.ones(n), x])
+    p = 2
+    nan = (math.nan,) * 5
+    if n - p < 1 or np.all(x == x[0]):
+        return nan
+    _, gi = np.unique(np.asarray(g, dtype=str), return_inverse=True)
+    G = int(gi.max()) + 1
+    m = np.bincount(gi, minlength=G).astype(float)
+    Sx = np.column_stack([np.bincount(gi, X[:, j], G) for j in range(p)])
+    Sy = np.bincount(gi, y, G)
+    XtX, Xty, yty = X.T @ X, X.T @ y, float(y @ y)
+
+    def parts(th):
+        c = th / (1 + th * m)
+        A = XtX - (Sx * c[:, None]).T @ Sx
+        b = Xty - (Sx * c[:, None]).T @ Sy
+        return A, b, yty - float(np.sum(c * Sy * Sy)), float(np.sum(np.log1p(th * m)))
+
+    def crit(th):
+        A, b, q, ld = parts(th)
+        dA = A[0, 0] * A[1, 1] - A[0, 1] * A[1, 0]
+        if not dA > 0:
+            return math.inf
+        beta = np.array([A[1, 1] * b[0] - A[0, 1] * b[1], A[0, 0] * b[1] - A[1, 0] * b[0]]) / dA
+        s2 = (q - float(b @ beta)) / (n - p)
+        return math.inf if not s2 > 0 else (n - p) * math.log(s2) + ld + math.log(dA)
+
+    us = np.linspace(-12.0, 8.0, 201)
+    cv = [crit(math.exp(u)) for u in us]
+    k = int(np.argmin(cv))
+    a, b_ = us[max(k - 1, 0)], us[min(k + 1, us.size - 1)]
+    r = (math.sqrt(5) - 1) / 2
+    c1, c2 = b_ - r * (b_ - a), a + r * (b_ - a)
+    f1, f2 = crit(math.exp(c1)), crit(math.exp(c2))
+    for _ in range(80):
+        if f1 <= f2:
+            b_, c2, f2 = c2, c1, f1
+            c1 = b_ - r * (b_ - a)
+            f1 = crit(math.exp(c1))
+        else:
+            a, c1, f1 = c1, c2, f2
+            c2 = a + r * (b_ - a)
+            f2 = crit(math.exp(c2))
+    th = math.exp((a + b_) / 2)
+    if crit(0.0) <= crit(th):
+        th = 0.0
+    A, b, q, _ = parts(th)
+    dA = A[0, 0] * A[1, 1] - A[0, 1] * A[1, 0]
+    beta = np.array([A[1, 1] * b[0] - A[0, 1] * b[1], A[0, 0] * b[1] - A[1, 0] * b[0]]) / dA
+    s2 = (q - float(b @ beta)) / (n - p)
+    se = math.sqrt(s2 * A[0, 0] / dA)
+    df = n - p
+    t = beta[1] / se
+    from scipy.special import betainc
+    pv = float(betainc(df / 2, 0.5, df / (df + t * t)))
+    return float(beta[1]), se, float(df), pv, th
+
+
+def _statistics_table(Sl, Sm, pars, treat, ctrl):
+    """per treatment (not a control), time point after the baseline and normalized parameter, against the controls of
+    the same time point: slices and samples, means and SEM, difference of the means, paired difference of the sample
+    means (samples with both), linear mixed model (sample as random intercept; only with >= 3 samples in both
+    groups, otherwise descriptive only)"""
+    cols = ["treatment", "control", "offset_min", "timePoint", "parameter", "nSlices", "nSamples", "mean", "SEM",
+            "nControlSlices", "nControlSamples", "controlMean", "controlSEM", "difference", "nPairedSamples",
+            "pairedDifference", "pairedDifference_SEM", "lme_estimate", "lme_SE", "lme_df", "lme_p", "lme_note"]
+    rows = []
+    isC = Sl["treatment"].isin(ctrl).to_numpy()
+    if not isC.any():
+        return pd.DataFrame(columns=cols)
+    off_all, trt = Sl["offset_min"].to_numpy(float), Sl["treatment"].to_numpy()
+    base = Sl["isBaseline"].to_numpy(float) == 1
+    for t in treat:
+        if t in ctrl:
+            continue
+        for off in np.unique(off_all[trt == t]):
+            st = (trt == t) & (off_all == off)
+            if np.all(base[st]):
+                continue  # baseline window: normalized values 100 / 0
+            sc = isC & (off_all == off)
+            for par in pars:
+                c = _norm_name(par)
+                v = Sl[c].to_numpy(float)
+                a_, b_ = st & np.isfinite(v), sc & np.isfinite(v)
+                yt, yc = v[a_], v[b_]
+                gt, gc = Sl["sampleID"].astype(str).to_numpy()[a_], Sl["sampleID"].astype(str).to_numpy()[b_]
+                r = {"treatment": t, "control": " ".join(ctrl), "offset_min": _num(off),
+                     "timePoint": _pool_offset_labels([off])[0], "parameter": c,
+                     "nSlices": int(yt.size), "nSamples": len(set(gt)), "mean": _nanmean(yt), "SEM": _sem_of(yt),
+                     "nControlSlices": int(yc.size), "nControlSamples": len(set(gc)), "controlMean": _nanmean(yc),
+                     "controlSEM": _sem_of(yc)}
+                r["difference"] = r["mean"] - r["controlMean"]
+                mt = {k: float(np.mean(yt[gt == k])) for k in sorted(set(gt))}
+                mc = {k: float(np.mean(yc[gc == k])) for k in sorted(set(gc))}
+                d = np.array([mt[k] - mc[k] for k in sorted(set(mt) & set(mc))], float)
+                r["nPairedSamples"], r["pairedDifference"], r["pairedDifference_SEM"] = (
+                    int(d.size), _nanmean(d), _sem_of(d))
+                if r["nSamples"] >= 3 and r["nControlSamples"] >= 3:
+                    e, se, df, pv, _ = _lme_ri(np.r_[yc, yt], np.r_[np.zeros(yc.size), np.ones(yt.size)],
+                                               np.r_[gc, gt])
+                    r.update(lme_estimate=e, lme_SE=se, lme_df=df, lme_p=pv, lme_note="")
+                else:
+                    r.update(lme_estimate=math.nan, lme_SE=math.nan, lme_df=math.nan, lme_p=math.nan,
+                             lme_note="fewer than 3 samples in a group: descriptive only")
+                rows.append(r)
+    return pd.DataFrame(rows, columns=cols)
+
+
+# ===================================================================================================== figures (2026-10-18)
+FIGURE_PARAMETERS = ("amplitude", "diastolicForce", "TTP90", "TTR90")
+OKABE_ITO = ("#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#999999")
+
+
+def _pool_slices(PT):
+    """slices table and treatment order of a pool (dict of pool_timepoints or its workbook <name>.xlsx)"""
+    if isinstance(PT, dict):
+        Sl, tr = PT["slices"], list(PT["treatments"]["treatment"].drop_duplicates())
+        ctrl = list(PT.get("controls", []))
+    else:
+        x = str(PT)
+        Sl = pd.read_excel(x, sheet_name="slices")
+        tr = list(pd.read_excel(x, sheet_name="treatments")["treatment"].drop_duplicates())
+        I = pd.read_excel(x, sheet_name="info")
+        c = _info_get(I, "controls")
+        ctrl = c.split() if c else []
+    for c_ in ("treatment", "sampleID", "sliceID"):
+        Sl[c_] = Sl[c_].astype(str)
+    return Sl, tr, ctrl
+
+
+def _value_column(p, mode):
+    if mode == "abs":
+        return p
+    if mode == "norm":
+        return _norm_name(p)
+    if mode == "vsControl":
+        return _norm_name(p) + "_vsControl"
+    raise ValueError("plot_timepoints: mode: 'norm', 'abs' or 'vsControl' expected.")
+
+
+def prism_tables(PT, parameters=None, mode="norm", time_unit="h"):
+    """tables for GraphPad Prism (grouped / XY with replicates) per parameter: one row per time point (column time),
+    per treatment one column per slice (column names treatment|sliceID); values as in plot_timepoints"""
+    Sl, tr, _ = _pool_slices(PT)
+    pars = list(parameters or [p for p in FIGURE_PARAMETERS if _value_column(p, "abs") in Sl.columns])
+    f = 60.0 if time_unit == "h" else 1.0
+    off = np.unique(Sl["offset_min"].to_numpy(float))
+    out = {}
+    for p in pars:
+        v = _value_column(p, mode)
+        T = pd.DataFrame({"time_" + time_unit: off / f})
+        for t in tr:
+            St = Sl[Sl["treatment"] == t]
+            for sid in _unique(list(St["sampleID"] + "|" + St["sliceID"])):
+                smp, sl = sid.split("|", 1)
+                g = St[(St["sampleID"] == smp) & (St["sliceID"] == sl)]
+                col = np.full(off.size, np.nan)
+                col[np.searchsorted(off, g["offset_min"].to_numpy(float))] = g[v].to_numpy(float)
+                T[f"{t}|{smp} {sl}"] = col
+        out[v] = T
+    return out
+
+
+def plot_timepoints(PT, parameters=None, treatments=None, mode="norm", slices=True, output="",
+                    formats=("pdf", "svg", "png"), panel_mm=(60.0, 45.0), ncols=None, font_size=7.0, time_unit="h",
+                    colors=None):
+    """figure for a manuscript from a pool (dict of pool_timepoints or its workbook): per parameter one panel, x = time
+    after the treatment, per treatment the mean +- SEM of the slices (markers, error bars, line) and the single slices
+    (thin lines); controls black, the other treatments in the Okabe-Ito colours (colour-blind safe); legend with
+    n = slices / samples; Arial (else Helvetica, Liberation Sans, DejaVu Sans) at font_size pt, panels of panel_mm
+    (width, height) mm. mode 'norm' (% of baseline, diastolic force: change in uN; default), 'abs' or 'vsControl'.
+    Files <output>.pdf / .svg / .png (300 dpi) if output is given. Returns (figure, files)."""
+    import matplotlib
+    import matplotlib.pyplot as plt
+    Sl, tr, ctrl = _pool_slices(PT)
+    pars = list(parameters or [p for p in FIGURE_PARAMETERS if p in Sl.columns])
+    tr = [t for t in (treatments or tr) if t in set(Sl["treatment"])]
+    f = 60.0 if time_unit == "h" else 1.0
+    nc = int(ncols or min(2, len(pars)))
+    nr = int(math.ceil(len(pars) / nc))
+    others = iter(colors or OKABE_ITO)
+    col = {t: ("k" if t in ctrl else next(others, "0.5")) for t in tr}
+    rc = {"font.family": "sans-serif", "font.sans-serif": ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"],
+          "font.size": font_size, "axes.linewidth": 0.6, "xtick.major.width": 0.6, "ytick.major.width": 0.6,
+          "xtick.direction": "out", "ytick.direction": "out", "svg.fonttype": "none", "pdf.fonttype": 42}
+    with matplotlib.rc_context(rc):
+        fig, axs = plt.subplots(nr, nc, figsize=(nc * panel_mm[0] / 25.4, nr * panel_mm[1] / 25.4), squeeze=False)
+        for i, p in enumerate(pars):
+            ax = axs[i // nc][i % nc]
+            v = _value_column(p, mode)
+            for t in tr:
+                St = Sl[Sl["treatment"] == t]
+                if slices:
+                    for _, g in St.groupby(["sampleID", "sliceID"], sort=False):
+                        g = g.sort_values("offset_min")
+                        ax.plot(g["offset_min"].to_numpy(float) / f, g[v].to_numpy(float), "-", color=col[t],
+                                linewidth=0.4, alpha=0.35)
+                G = St.groupby("offset_min")[v]
+                x = np.asarray(G.mean().index, float) / f
+                m = G.mean().to_numpy(float)
+                e = G.agg(lambda z: _sem_of(z)).to_numpy(float)
+                lab = f"{t} (n = {St.drop_duplicates(['sampleID', 'sliceID']).shape[0]}/{St['sampleID'].nunique()})"
+                ax.errorbar(x, m, yerr=np.nan_to_num(e), fmt="-o", color=col[t], linewidth=1.0, markersize=2.5,
+                            elinewidth=0.6, capsize=1.5, label=lab if i == 0 else None)
+            if mode != "abs":
+                ax.axhline(0 if p == "diastolicForce" and mode == "norm" else 100, color="0.6", linewidth=0.5,
+                           linestyle="--", zorder=0)
+            ax.axvline(0, color="0.6", linewidth=0.5, linestyle=":", zorder=0)
+            u = ""
+            if isinstance(PT, dict) and p in PT.get("parameters", []):
+                u = PT["units"][PT["parameters"].index(p)]
+            ylab = {"abs": f"{p} ({u})" if u else p,
+                    "norm": "diastolic force, change (uN)" if p == "diastolicForce" else f"{p} (% of baseline)",
+                    "vsControl": "diastolic force - control (uN)" if p == "diastolicForce"
+                    else f"{p} (% of control)"}[mode]
+            ax.set_ylabel(ylab)
+            ax.set_xlabel("time after the treatment (" + time_unit + ")")
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+        for i in range(len(pars), nr * nc):
+            axs[i // nc][i % nc].set_visible(False)
+        fig.legend(loc="upper center", ncol=min(len(tr), 4), frameon=False, fontsize=font_size)
+        fig.tight_layout(rect=(0, 0, 1, 1 - 0.08 / nr))
+        files = []
+        if output:
+            for fm in formats:
+                fn = f"{output}.{fm}"
+                fig.savefig(fn, dpi=300 if fm == "png" else None)
+                files.append(fn)
+    return fig, files
 
 
 def _pool_info(PT, treat):
@@ -2165,7 +2608,19 @@ def _pool_info(PT, treat):
              "independent)"),
             ("treatmentsSheet", "per treatment and window: mean, SD and SEM of the slices; <parameter>_samples, "
              "<parameter>_samplesSEM: mean and SEM of the sample means"),
-            ("course", "mean and SEM of the 1-min values of the slices per minute after the treatment (rounded)"),
+            ("course", "mean and SEM of the 1-min values of the slices per minute after the treatment (rounded); "
+             "images: solid = mean +- SEM where all slices have values, dashed = gaps of single slices up to "
+             f"{_g(COURSE_GAP_MINUTES)} min interpolated"),
+            ("statistics", "per treatment, time point after the baseline and normalized parameter against the "
+             "controls of the same time point: n, mean and SEM of the slices and samples, difference of the means, "
+             "pairedDifference = mean of (treatment - control) of the sample means of samples with both; lme_*: "
+             "linear mixed model value ~ 1 + treatment + (1 | sampleID), REML, t test with n - 2 degrees of freedom, "
+             "only if both groups have >= 3 samples (otherwise descriptive only); exploratory, not corrected for "
+             "multiple comparisons"),
+            ("qc", "codes of the notes of a window (column qc): arrhythmic (>= 5 % extra beats), capture (< 80 % of "
+             "the expected contractions included), noContractions, alternans, irregular (amplitudes), protocol, "
+             "signal (chamber out, no signal, window partly without recording), otherSlice, comment, pending"),
+            ("exclude", PT.get("excludeText") or "none"),
             ("notes", "; ".join(PT["notes"]))]
     return pd.DataFrame(rows, columns=["key", "value"])
 

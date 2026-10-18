@@ -24,6 +24,12 @@ function PT = mda_poolTimepoints(source, varargin)
 %   'name'          name of the pooled analysis (default 'pooled'): name of the folder and of the workbook
 %   'outputFolder'  folder of the files (default <results folder of the watcher>/timepoints_pooled/<name>)
 %   'write'         write the files (default true); 'figures' the images (default true, with 'write')
+%   'exclude'       slices or windows left out, with the reason (2026-10-18): a cell array with one row per entry
+%                   {id, channel, from_min, reason} (id = sampleID, series or sliceID; channel [] or NaN = all
+%                   channels of id; from_min [] or NaN = all windows, otherwise the windows from this offset on), a
+%                   cell array of ids (whole slices), or a table with the variables id (or sampleID, sliceID, series),
+%                   channel, from_min, reason; e.g. {'ABC000101', 6, 720, 'arrhythmic from +12 h'}. Left out of all
+%                   tables, the course and the images; listed in the sheet excluded
 %
 % POOLING: treatment = label of mda_timepoints, with substance, concentration and unit taken from it (OME0.5uM --> OME,
 % 0.5, uM; CTRL --> CTRL, NaN, ''); sample = sampleID of mda_timepoints (option 'sampleID', slice register, or the
@@ -47,7 +53,14 @@ function PT = mda_poolTimepoints(source, varargin)
 %                 treatment, sample and time point: number of slices
 %                 and their mean of every parameter), treatments (per treatment and time point: number of slices and
 %                 samples; per parameter and normalized value the mean, SD and SEM of the slices and the mean and SEM
-%                 of the samples: <parameter>_samples, <parameter>_samplesSEM), course (per treatment and minute after
+%                 of the samples: <parameter>_samples, <parameter>_samplesSEM), statistics (2026-10-18: per
+%                 treatment, time point after the baseline and normalized parameter against the controls of the same
+%                 time point: n, means and SEM of the slices, difference, paired difference of the sample means
+%                 (samples with both), linear mixed model value ~ 1 + treatment + (1 | sampleID) (REML, t test with
+%                 n - 2 degrees of freedom) if both groups have >= 3 samples, otherwise descriptive only), qc (windows
+%                 with notes; column qc of the slices: arrhythmic, capture, noContractions, alternans, irregular,
+%                 protocol, signal, otherSlice, comment, pending), excluded (option 'exclude'), course (per treatment
+%                 and minute after
 %                 the treatment: mean and SEM of the 1-min values of the slices), averageBeatsMean (per treatment and
 %                 time point: mean, SD and SE of the average beats of the slices), analyses (the analyses pooled or
 %                 skipped) and info
@@ -56,25 +69,37 @@ function PT = mda_poolTimepoints(source, varargin)
 %                 SEM of the slices
 %   treatments_abs / _norm / _vsControl (.png, .fig)   per parameter and time point: the slices (dots) and their
 %                 mean +- SEM for every treatment (norm, vsControl: the windows after the baseline)
+%   <name>_figure_norm (.pdf, .svg, .png; 2026-10-18)   figure for a manuscript (mda_plotTimepoints: amplitude,
+%                 diastolic force, TTP90, TTR90 over time, mean +- SEM and single slices per treatment)
+%   <name>_prism.xlsx   the normalized values for GraphPad Prism (one sheet per parameter, one row per time point,
+%                 one column per slice: treatment|sample slice)
 %
-% PT  struct with the same data: name, parameters, units, slices, samples, treatments, course, averageBeatsMean,
-%     analyses, notes, controls, info, folder, files
+% PT  struct with the same data: name, parameters, units, slices, samples, treatments, statistics, qc, excluded,
+%     course, averageBeatsMean, analyses, notes, controls, info, folder, files
 %
 % EXAMPLE (statistics of the amplitude 2 h after the treatment, sample as random effect):
 %   S = PT.slices; s = S.offset_min == 120;
 %   BarsWithErrorsFromList(S.amplitude_pctBaseline(s), S.treatment(s), 'lme', 'IDs', S.sampleID(s))
 %
+% Mixed model of the sheet statistics alone: M = mda_poolTimepoints('lme', y, x, g) (fields estimate, SE, df, p,
+% varianceRatio; y values, x 0 = control / 1 = treatment, g sample IDs).
+%
 % Python: myodish_analysis.timepoints.pool_timepoints (same arguments, files and values; images as .png and .svg).
 %
-% TS 2026-10-16
+% TS 2026-10-16 (exclude, qc, statistics: 2026-10-18)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
 % SPDX-License-Identifier: GPL-3.0-or-later
 % Additional terms (GPL-3.0 section 7): see the file NOTICE
 
+if (ischar(source) || isstring(source)) && strcmp(source, 'lme')   %mixed model of the sheet statistics (tests)
+    [e, se, df, pv, th] = lmeRI(varargin{:});
+    PT = struct('estimate', e, 'SE', se, 'df', df, 'p', pv, 'varianceRatio', th);
+    return;
+end
 P = struct('labels', {{}}, 'order', {{}}, 'control', {{}}, 'name', 'pooled', 'outputFolder', '', 'write', true, ...
-    'figures', true);
+    'figures', true, 'exclude', {{}});
 if mod(numel(varargin), 2) ~= 0, error('mda_poolTimepoints: options as name, value pairs expected.'); end
 for i = 1:2:numel(varargin)
     P.(validatestring(varargin{i}, fieldnames(P))) = varargin{i+1};
@@ -106,13 +131,26 @@ treat = treatmentOrder(treat, cellstr(P.order));
 
 % ---------------------------------------------------------------------------------------------------- slices
 Sl = sliceTable(A, pars);
+Sl = addvars(Sl, cellfun(@qcCodes, Sl.note, 'UniformOutput', false), 'After', 'note', 'NewVariableNames', 'qc');
+[Sl, Ex, cut, nt, xtxt] = applyExclude(Sl, P.exclude);
+notes = [notes, nt];
+left = treat(~ismember(treat, unique(Sl.treatment)));
+if ~isempty(left)
+    notes{end+1} = ['no slices left (exclude): ' strjoin(left, ' ')];
+    treat = treat(~ismember(treat, left));
+    A = A(ismember({A.label}, treat));
+end
+if isempty(treat), error('mda_poolTimepoints: exclude: no slices left.'); end
 ctrl = cellstr(P.control);
 if isempty(ctrl), ctrl = treat(~cellfun(@isempty, regexpi(treat, '^(ctrl|control|vehicle|dmso)', 'once'))); end
 [Sl, nt] = controlColumns(Sl, pars, ctrl);
 notes = [notes, nt];
 Sm = sampleTable(Sl, pars);
 Tr = treatmentTable(Sl, Sm, pars, treat);
-[Co, Ab, TPs] = treatmentData(A, Sl, pars, units, treat);
+St = statisticsTable(Sl, pars, treat, ctrl);
+Q = Sl(~cellfun(@isempty, Sl.qc), {'treatment', 'sampleID', 'sliceID', 'series', 'channel', 'timePoint', ...
+    'offset_min', 'qc', 'note'});
+[Co, Ab, TPs] = treatmentData(A, Sl, pars, units, treat, cut);
 
 PT = struct();
 PT.name = name;
@@ -121,6 +159,10 @@ PT.units = units;
 PT.slices = Sl;
 PT.samples = Sm;
 PT.treatments = Tr;
+PT.statistics = St;
+PT.qc = Q;
+PT.excluded = Ex;
+PT.excludeText = xtxt;
 PT.course = Co;
 PT.averageBeatsMean = Ab;
 PT.analyses = An;
@@ -144,6 +186,9 @@ if isfile(x), delete(x); end
 writetable(Sl, x, 'Sheet', 'slices');
 writetable(Sm, x, 'Sheet', 'samples');
 writetable(Tr, x, 'Sheet', 'treatments');
+writeSheet(St, x, 'statistics');
+writeSheet(Q, x, 'qc');
+writeSheet(Ex, x, 'excluded');
 writetable(Co, x, 'Sheet', 'course');
 writetable(Ab, x, 'Sheet', 'averageBeatsMean');
 writetable(An, x, 'Sheet', 'analyses');
@@ -163,7 +208,17 @@ if logical(P.figures)
         saveFigure(treatmentsFigure(Sl, pars, units, treat, TPs, m{1}, name), f);
         files = [files, {[f '.png'], [f '.fig']}]; %#ok<AGROW>
     end
+    [hf, fl] = mda_plotTimepoints(PT, 'output', fullfile(d, [name '_figure_norm']));   %for a manuscript (2026-10-18)
+    close(hf);
+    files = [files, fl];
 end
+xp = fullfile(d, [name '_prism.xlsx']);            %tables for GraphPad Prism (2026-10-18)
+if isfile(xp), delete(xp); end
+T = mda_plotTimepoints('prism', PT);
+for fn = fieldnames(T)'
+    writetable(T.(fn{1}), xp, 'Sheet', fn{1}(1:min(31, end)));
+end
+files{end+1} = xp;
 PT.folder = d;
 PT.files = files;
 end
@@ -196,7 +251,7 @@ D = {};
 for i = 1:numel(F)
     f = char(F{i});
     if ~isfolder(f), error('mda_poolTimepoints: %s: no folder.', f); end
-    f = char(java.io.File(f).getCanonicalPath());
+    f = canonicalPath(f);
     n = folderName(f);
     if isfile(fullfile(f, [n '.xlsx']))
         D{end+1} = f; %#ok<AGROW>
@@ -494,7 +549,7 @@ if numel(x) < 2, s = nan; else, s = std(x) / sqrt(numel(x)); end
 end
 
 
-function [Co, Ab, TPs] = treatmentData(A, Sl, pars, units, treat)
+function [Co, Ab, TPs] = treatmentData(A, Sl, pars, units, treat, cut)
 % per treatment: course (mean and SEM of the slices per minute), mean of the average beats, TP struct for the images
 cols = reshape([pars; cellfun(@normName, pars, 'UniformOutput', false)], 1, []);
 Cparts = {}; Aparts = {}; TPs = cell(1, numel(treat));
@@ -545,7 +600,14 @@ for t = 1:numel(treat)
     else
         C = vertcat(cp{:});
     end
-    C = C(ismember(strcat(C.series, '|', arrayfun(@num2str, C.channel, 'UniformOutput', false)), u), :);
+    kc = strcat(C.series, '|', arrayfun(@num2str, C.channel, 'UniformOutput', false));
+    keep = ismember(kc, u);
+    if ~isempty(cut) && cut.Count > 0              %exclude from an offset on: 1-min values from this minute on
+        for r = find(keep)'
+            if isKey(cut, kc{r}) && C.minutes(r) >= cut(kc{r}), keep(r) = false; end
+        end
+    end
+    C = C(keep, :);
     TP.course = C;
     if height(C) > 0
         m = round(C.minutes);
@@ -570,7 +632,14 @@ for t = 1:numel(treat)
     end
     if isempty(ap), AB = table(); else, AB = vertcat(ap{:}); end
     if height(AB) > 0
-        AB = AB(ismember(strcat(AB.series, '|', arrayfun(@num2str, AB.channel, 'UniformOutput', false)), u), :);
+        ka = strcat(AB.series, '|', arrayfun(@num2str, AB.channel, 'UniformOutput', false));
+        keep = ismember(ka, u);
+        if ~isempty(cut) && cut.Count > 0
+            for r = find(keep)'
+                if isKey(cut, ka{r}) && AB.offset_min(r) >= cut(ka{r}), keep(r) = false; end
+            end
+        end
+        AB = AB(keep, :);
     end
     TP.averageBeats = AB;
     TP.averageBeatsMean = averageBeatsMean(AB, off);
@@ -634,9 +703,228 @@ if ~isempty(parts), M = vertcat(parts{:}); end
 end
 
 
+function c = qcCodes(note)
+% codes of the notes of a window (column qc, 2026-10-18): arrhythmic, capture, noContractions, alternans, irregular,
+% protocol, signal, otherSlice, comment, pending
+codes = {'arrhythmic', {'arrhythmic:'}; 'capture', {'expected contractions included'}; ...
+    'noContractions', {'no contractions'}; 'alternans', {'alternans:'}; 'irregular', {'irregular amplitudes:'}; ...
+    'protocol', {'protocol '}; 'signal', {'chamber out', 'no signal', 'technical', ...
+    'window partly without recording', 'no recording'}; 'otherSlice', {'other slice than in the baseline window'}; ...
+    'comment', {'comment '}; 'pending', {'pending:'}};
+if ~(ischar(note) || isstring(note)), note = ''; end
+note = char(note);
+c = {};
+for i = 1:size(codes, 1)
+    if any(cellfun(@(k) contains(note, k), codes{i, 2})), c{end+1} = codes{i, 1}; end %#ok<AGROW>
+end
+c = strjoin(c, ' ');
+end
+
+
+function E = excludeEntries(X)
+% option 'exclude' as a cell array {id, channel, from_min, reason} per row
+E = cell(0, 4);
+if isempty(X), return; end
+if istable(X)
+    v = lower(X.Properties.VariableNames);
+    col = @(names) find(ismember(v, names), 1);
+    ki = col({'id', 'sampleid', 'sliceid', 'series'}); kc = col({'channel'}); kf = col({'from_min', 'from'});
+    kr = col({'reason'});
+    for r = 1:height(X)
+        e = {char(string(X{r, ki})), [], [], ''};
+        if ~isempty(kc), e{2} = X{r, kc}; end
+        if ~isempty(kf), e{3} = X{r, kf}; end
+        if ~isempty(kr), e{4} = char(string(X{r, kr})); end
+        E(end+1, :) = e; %#ok<AGROW>
+    end
+elseif isstruct(X)
+    for r = 1:numel(X)
+        f = fieldnames(X(r)); lf = lower(f);
+        get = @(names) X(r).(f{find(ismember(lf, names), 1)});
+        e = {'', [], [], ''};
+        if any(ismember(lf, {'id', 'sampleid', 'sliceid', 'series'}))
+            e{1} = char(string(get({'id', 'sampleid', 'sliceid', 'series'})));
+        end
+        if any(ismember(lf, {'channel'})), e{2} = get({'channel'}); end
+        if any(ismember(lf, {'from_min', 'from'})), e{3} = get({'from_min', 'from'}); end
+        if any(ismember(lf, {'reason'})), e{4} = char(string(get({'reason'}))); end
+        E(end+1, :) = e; %#ok<AGROW>
+    end
+elseif ischar(X) || isstring(X) || (iscell(X) && isvector(X) && all(cellfun(@(z) ischar(z) || isstring(z), X)))
+    ids = cellstr(X);
+    E = [ids(:), cell(numel(ids), 2), repmat({''}, numel(ids), 1)];
+elseif iscell(X)
+    if size(X, 2) > 4, X = X'; end
+    for r = 1:size(X, 1)
+        e = [X(r, :), cell(1, 4 - size(X, 2))];
+        e{1} = char(string(e{1}));
+        if isempty(e{4}), e{4} = ''; end
+        E(end+1, :) = e; %#ok<AGROW>
+    end
+else
+    error('mda_poolTimepoints: exclude: cell array, table or struct expected.');
+end
+for r = 1:size(E, 1)
+    if isempty(E{r, 2}) || (isnumeric(E{r, 2}) && isnan(E{r, 2})), E{r, 2} = nan; else, E{r, 2} = double(E{r, 2}); end
+    if isempty(E{r, 3}) || (isnumeric(E{r, 3}) && isnan(E{r, 3})), E{r, 3} = -inf; else, E{r, 3} = double(E{r, 3}); end
+    E{r, 4} = char(string(E{r, 4}));
+end
+end
+
+
+function [Sl, Ex, cut, notes, txt] = applyExclude(Sl, X)
+% rows of the slices left out (option 'exclude'): kept rows, excluded rows (with excludeReason), minute from which the
+% course and the average beats of a slice are left out (key analysis|series|channel), notes, text
+E = excludeEntries(X);
+drop = false(height(Sl), 1); why = repmat({''}, height(Sl), 1);
+cut = containers.Map('KeyType', 'char', 'ValueType', 'double');
+notes = {}; t = {};
+for r = 1:size(E, 1)
+    [id, ch, fr, rs] = E{r, :};
+    m = strcmp(Sl.sampleID, id) | strcmp(Sl.series, id) | strcmp(Sl.sliceID, id);
+    if ~isnan(ch), m = m & Sl.channel == ch; end
+    w = id;
+    if ~isnan(ch), w = sprintf('%s ch%d', w, ch); end
+    if fr > -inf, w = sprintf('%s from %g min', w, fr); end
+    if isempty(rs), t{end+1} = w; else, t{end+1} = [w ': ' rs]; end %#ok<AGROW>
+    if ~any(m), notes{end+1} = ['exclude ' w ': no slice found']; continue; end %#ok<AGROW>
+    m = m & Sl.offset_min >= fr;
+    for k = find(m)'
+        if isempty(why{k}), why{k} = rs;
+        elseif ~any(strcmp(strsplit(why{k}, '; '), rs)), why{k} = [why{k} '; ' rs];
+        end
+        key = sprintf('%s|%s|%d', Sl.analysis{k}, Sl.series{k}, Sl.channel(k));
+        if isKey(cut, key), cut(key) = min(cut(key), fr); else, cut(key) = fr; end
+    end
+    drop = drop | m;
+end
+Ex = [table(why(drop), 'VariableNames', {'excludeReason'}), Sl(drop, :)];
+Sl = Sl(~drop, :);
+txt = strjoin(t, '; ');
+end
+
+
+function [est, se, df, pv, th] = lmeRI(y, x, g)
+% linear mixed model y ~ 1 + x + (1 | g) (random intercept per sample), REML: estimate of x, its SE, the degrees of
+% freedom (n - 2, as fitlme 'Residual'), the p-value (t test) and the variance ratio sample / residual. The REML
+% criterion is minimized over the variance ratio (grid and golden section, the same in MATLAB and Python).
+y = double(y(:)); x = double(x(:)); n = numel(y);
+X = [ones(n, 1), x]; p = 2;
+[est, se, df, pv, th] = deal(nan);
+if n - p < 1 || all(x == x(1)), return; end
+[~, ~, gi] = unique(cellstr(string(g(:))));
+G = max(gi);
+m = accumarray(gi, 1, [G 1]);
+Sx = [accumarray(gi, X(:, 1), [G 1]), accumarray(gi, X(:, 2), [G 1])];
+Sy = accumarray(gi, y, [G 1]);
+XtX = X' * X; Xty = X' * y; yty = y' * y;
+    function [A, b, q, ld] = parts(t)
+        c = t ./ (1 + t * m);
+        A = XtX - (Sx .* c)' * Sx;
+        b = Xty - (Sx .* c)' * Sy;
+        q = yty - sum(c .* Sy .* Sy);
+        ld = sum(log1p(t * m));
+    end
+    function v = crit(t)
+        [A, b, q, ld] = parts(t);
+        dA = A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1);
+        if ~(dA > 0), v = inf; return; end
+        beta = [A(2, 2) * b(1) - A(1, 2) * b(2); A(1, 1) * b(2) - A(2, 1) * b(1)] / dA;
+        s2 = (q - b' * beta) / (n - p);
+        if ~(s2 > 0), v = inf; else, v = (n - p) * log(s2) + ld + log(dA); end
+    end
+us = linspace(-12, 8, 201);
+cv = arrayfun(@(u) crit(exp(u)), us);
+[~, k] = min(cv);
+a = us(max(k - 1, 1)); bb = us(min(k + 1, numel(us)));
+r = (sqrt(5) - 1) / 2;
+c1 = bb - r * (bb - a); c2 = a + r * (bb - a);
+f1 = crit(exp(c1)); f2 = crit(exp(c2));
+for it = 1:80
+    if f1 <= f2
+        bb = c2; c2 = c1; f2 = f1; c1 = bb - r * (bb - a); f1 = crit(exp(c1));
+    else
+        a = c1; c1 = c2; f1 = f2; c2 = a + r * (bb - a); f2 = crit(exp(c2));
+    end
+end
+th = exp((a + bb) / 2);
+if crit(0) <= crit(th), th = 0; end
+[A, b, q] = parts(th);
+dA = A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1);
+beta = [A(2, 2) * b(1) - A(1, 2) * b(2); A(1, 1) * b(2) - A(2, 1) * b(1)] / dA;
+s2 = (q - b' * beta) / (n - p);
+se = sqrt(s2 * A(1, 1) / dA);
+df = n - p;
+tt = beta(2) / se;
+pv = betainc(df / (df + tt^2), df / 2, 0.5);
+est = beta(2);
+end
+
+
+function St = statisticsTable(Sl, pars, treat, ctrl)
+% per treatment (not a control), time point after the baseline and normalized parameter, against the controls of the
+% same time point: slices and samples, means and SEM, difference of the means, paired difference of the sample means
+% (samples with both), linear mixed model (sample as random intercept; only with >= 3 samples in both groups)
+names = {'treatment', 'control', 'offset_min', 'timePoint', 'parameter', 'nSlices', 'nSamples', 'mean', 'SEM', ...
+    'nControlSlices', 'nControlSamples', 'controlMean', 'controlSEM', 'difference', 'nPairedSamples', ...
+    'pairedDifference', 'pairedDifference_SEM', 'lme_estimate', 'lme_SE', 'lme_df', 'lme_p', 'lme_note'};
+rows = cell(0, numel(names));
+isC = ismember(Sl.treatment, ctrl);
+if any(isC)
+    for t = 1:numel(treat)
+        if ismember(treat{t}, ctrl), continue; end
+        for off = unique(Sl.offset_min(strcmp(Sl.treatment, treat{t})))'
+            st = strcmp(Sl.treatment, treat{t}) & Sl.offset_min == off;
+            if all(Sl.isBaseline(st) == 1), continue; end   %baseline window: normalized values 100 / 0
+            sc = isC & Sl.offset_min == off;
+            L = offsetLabels(off);
+            for i = 1:numel(pars)
+                c = normName(pars{i});
+                v = Sl.(c);
+                a_ = st & isfinite(v); b_ = sc & isfinite(v);
+                yt = v(a_); yc = v(b_); gt = Sl.sampleID(a_); gc = Sl.sampleID(b_);
+                ut = unique(gt); uc = unique(gc);
+                if isempty(yt), mt = nan; else, mt = mean(yt); end
+                if isempty(yc), mc = nan; else, mc = mean(yc); end
+                both = intersect(ut, uc);
+                d = nan(numel(both), 1);
+                for k = 1:numel(both)
+                    d(k) = mean(yt(strcmp(gt, both{k}))) - mean(yc(strcmp(gc, both{k})));
+                end
+                if isempty(d), md = nan; else, md = mean(d); end
+                if numel(ut) >= 3 && numel(uc) >= 3
+                    [e, se, df, pv] = lmeRI([yc; yt], [zeros(numel(yc), 1); ones(numel(yt), 1)], [gc; gt]);
+                    nt = '';
+                else
+                    [e, se, df, pv] = deal(nan); nt = 'fewer than 3 samples in a group: descriptive only';
+                end
+                rows(end+1, :) = {treat{t}, strjoin(ctrl, ' '), off, L{1}, c, numel(yt), numel(ut), mt, ...
+                    semOf(yt), numel(yc), numel(uc), mc, semOf(yc), mt - mc, numel(d), md, semOf(d), e, se, df, ...
+                    pv, nt}; %#ok<AGROW>
+            end
+        end
+    end
+end
+St = cell2table(rows, 'VariableNames', names);
+if isempty(rows)
+    St = cell2table(cell(0, numel(names)), 'VariableNames', names);
+end
+end
+
+
+function writeSheet(T, x, sheet)
+% table as a sheet; an empty table: only the header
+if height(T) > 0
+    writetable(T, x, 'Sheet', sheet);
+else
+    writecell(T.Properties.VariableNames, x, 'Sheet', sheet);
+end
+end
+
+
 function T = infoTable(PT, treat)
 k = {'function'; 'version'; 'implementation'; 'analysisDate'; 'name'; 'treatments'; 'controls'; 'parameters'; ...
-    'units'; 'values'; 'vsControl'; 'samples'; 'treatmentsSheet'; 'course'; 'notes'};
+    'units'; 'values'; 'vsControl'; 'samples'; 'treatmentsSheet'; 'course'; 'statistics'; 'qc'; 'exclude'; 'notes'};
 v = {'mda_poolTimepoints'; mda_version(); 'MATLAB'; char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss')); ...
     PT.name; strjoin(treat, ' '); strjoin(PT.controls, ' '); strjoin(PT.parameters, ' '); ...
     strjoin(strcat(PT.parameters, '=', PT.units), ' '); ...
@@ -649,9 +937,26 @@ v = {'mda_poolTimepoints'; mda_version(); 'MATLAB'; char(datetime('now', 'Format
     'mean of the slices of a sample per treatment and window (slices of a sample are not independent)'; ...
     ['per treatment and window: mean, SD and SEM of the slices; <parameter>_samples, <parameter>_samplesSEM: ' ...
     'mean and SEM of the sample means']; ...
-    'mean and SEM of the 1-min values of the slices per minute after the treatment (rounded)'; ...
+    sprintf(['mean and SEM of the 1-min values of the slices per minute after the treatment (rounded); images: ' ...
+    'solid = mean +- SEM where all slices have values, dashed = gaps of single slices up to %g min interpolated'], ...
+    180); ...
+    ['per treatment, time point after the baseline and normalized parameter against the controls of the same time ' ...
+    'point: n, mean and SEM of the slices and samples, difference of the means, pairedDifference = mean of ' ...
+    '(treatment - control) of the sample means of samples with both; lme_*: linear mixed model value ~ 1 + ' ...
+    'treatment + (1 | sampleID), REML, t test with n - 2 degrees of freedom, only if both groups have >= 3 ' ...
+    'samples (otherwise descriptive only); exploratory, not corrected for multiple comparisons']; ...
+    ['codes of the notes of a window (column qc): arrhythmic (>= 5 % extra beats), capture (< 80 % of the ' ...
+    'expected contractions included), noContractions, alternans, irregular (amplitudes), protocol, signal ' ...
+    '(chamber out, no signal, window partly without recording), otherSlice, comment, pending']; ...
+    excludeTextOrNone(PT); ...
     strjoin(PT.notes, '; ')};
 T = table(k, v, 'VariableNames', {'key', 'value'});
+end
+
+
+function s = excludeTextOrNone(PT)
+s = 'none';
+if isfield(PT, 'excludeText') && ~isempty(PT.excludeText), s = PT.excludeText; end
 end
 
 
@@ -734,4 +1039,13 @@ print(h, [f '.png'], '-dpng', '-r150');
 set(h, 'CreateFcn', 'set(gcbo, ''Visible'', ''on'')');
 savefig(h, [f '.fig']);
 close(h);
+end
+
+
+function p = canonicalPath(p)
+% absolute path without . and .. (java.io.File resolves relative paths against the folder MATLAB was started in,
+% not against pwd)
+p = char(p);
+if isempty(regexp(p, '^([/\\]|[A-Za-z]:[/\\])', 'once')), p = fullfile(pwd, p); end
+p = char(java.io.File(p).getCanonicalPath());
 end

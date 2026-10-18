@@ -354,6 +354,10 @@ def timepoints_main(argv=None):
     ap.add_argument("--sample-id", nargs="+", default=[], help="sample of the slices: one or one per series (default: "
                     "slice register, else the series name after the setup)")
     ap.add_argument("--group", nargs="+", default=[], help="group of the sample: one or one per series (default none)")
+    ap.add_argument("--t0", default="given", choices=["given", "chamberIn"], help="time 0: the given time (default) or "
+                    "the end of the chamber-out period of the channel nearest to it (chamberIn)")
+    ap.add_argument("--t0-window", type=float, default=90.0, help="chamberIn: periods ending within +- this many "
+                    "minutes of the given time (default 90)")
     ap.add_argument("--no-average-beats", action="store_true", help="no average beats (the recordings are not read)")
     ap.add_argument("--no-figures", action="store_true", help="no images")
     ap.add_argument("--no-write", action="store_true", help="no files (the summary is printed)")
@@ -365,7 +369,7 @@ def timepoints_main(argv=None):
         TP = timepoints(a.results, a.label, a.series, a.channels, time_, a.offsets, a.seconds,
                         parameters=a.parameters, baseline=b, write=not a.no_write, figures=not a.no_figures,
                         average_beats=not a.no_average_beats, raw_folder=a.raw_folder, sampleID=one(a.sample_id),
-                        group=one(a.group))
+                        group=one(a.group), t0=a.t0, t0_window=a.t0_window)
     except ValueError as ex:
         ap.error(str(ex))
     import pandas as pd
@@ -380,8 +384,8 @@ def timepoints_main(argv=None):
 
 def pool_timepoints_main(argv=None):
     """mda-pool-timepoints SOURCE [SOURCE ...] [--labels L ...] [--order L ...] [--control L ...] [--name NAME]
-    [--output-folder F] [--no-figures] [--no-write]: analyses of mda-timepoints pooled by treatment (timepoints.py pool_timepoints,
-    mda_poolTimepoints.m)"""
+    [--output-folder F] [--exclude ID[:CH[:FROM[:REASON]]] ...] [--no-figures] [--no-write]: analyses of mda-timepoints
+    pooled by treatment (timepoints.py pool_timepoints, mda_poolTimepoints.m)"""
     from .timepoints import pool_timepoints
     ap = argparse.ArgumentParser(
         prog="mda-pool-timepoints",
@@ -391,7 +395,8 @@ def pool_timepoints_main(argv=None):
                     "timepoints_pooled/<name>/.",
         epilog="Examples:\n"
                "  mda-pool-timepoints results\n"
-               "  mda-pool-timepoints results --labels CTRL OME3uM MAVA1uM --name myosinModulators",
+               "  mda-pool-timepoints results --labels CTRL OME3uM MAVA1uM --name myosinModulators\n"
+               "  mda-pool-timepoints results --exclude \"ABC000101:6:720:arrhythmic from +12 h\" ABC000102:3",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("source", nargs="+", help="results folder of mda-watch (all analyses below it) or analysis folders")
     ap.add_argument("--labels", nargs="+", default=None, help="treatments to pool (default: all)")
@@ -401,13 +406,22 @@ def pool_timepoints_main(argv=None):
     ap.add_argument("--name", default="pooled", help="name of the pooled analysis (default pooled)")
     ap.add_argument("--output-folder", default="", help="folder of the files (default <results>/timepoints_pooled/"
                     "<name>)")
+    ap.add_argument("--exclude", nargs="+", default=None, metavar="ID[:CH[:FROM[:REASON]]]",
+                    help="slices or windows left out: sampleID, series or sliceID, channel (empty = all), from offset "
+                    "(min; empty = all windows) and the reason, separated by ':'")
     ap.add_argument("--no-figures", action="store_true", help="no images")
     ap.add_argument("--no-write", action="store_true", help="no files (the treatments are printed)")
     a = ap.parse_args(argv)
+    ex = None
+    if a.exclude:
+        ex = []
+        for e in a.exclude:
+            q = (e.split(":", 3) + [""] * 4)[:4]
+            ex.append((q[0], float(q[1]) if q[1].strip() else None, float(q[2]) if q[2].strip() else None, q[3]))
     try:
         PT = pool_timepoints(a.source[0] if len(a.source) == 1 else a.source, labels=a.labels, order=a.order,
                              name=a.name, output_folder=a.output_folder, write=not a.no_write,
-                             figures=not a.no_figures, control=a.control)
+                             figures=not a.no_figures, control=a.control, exclude=ex)
     except ValueError as ex:
         ap.error(str(ex))
     import pandas as pd
@@ -420,6 +434,46 @@ def pool_timepoints_main(argv=None):
         print("note: " + n)
     for f in PT["files"]:
         print(f)
+    return 0
+
+
+def study_main(argv=None):
+    """mda-study DESIGN [--results R] [--name N] [--output-folder F] [--no-figures] [--no-average-beats]
+    | --template FILE: time points of a study from a design table (study.py, mda_study.m)"""
+    from .study import study, study_template
+    ap = argparse.ArgumentParser(
+        prog="mda-study",
+        description="Time points of a study from a design table (one row per slice: series, channel, treatment, time, "
+                    "sampleID, group, exclude, excludeReason; sheet settings: resultsFolder, offsets, ...): "
+                    "mda-timepoints per treatment and mda-pool-timepoints into one folder, with the design, a figure, "
+                    "tables for Prism and a methods text.",
+        epilog="Examples:\n  mda-study --template design.xlsx\n  mda-study design.xlsx --results results",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("design", nargs="?", help="design table (.xlsx: sheets slices and settings; or .csv)")
+    ap.add_argument("--template", default="", help="write a design table to fill in and stop")
+    ap.add_argument("--results", default=None, help="results folder of mda-watch (default: settings of the design)")
+    ap.add_argument("--name", default=None, help="name of the study")
+    ap.add_argument("--output-folder", default=None, help="folder of the study (default <results>/studies/<name>)")
+    ap.add_argument("--no-figures", action="store_true", help="no images")
+    ap.add_argument("--no-average-beats", action="store_true", help="no average beats")
+    a = ap.parse_args(argv)
+    if a.template:
+        print(study_template(a.template))
+        return 0
+    if not a.design:
+        ap.error("design table expected (or --template FILE)")
+    kw = {k: v for k, v in (("resultsFolder", a.results), ("name", a.name), ("outputFolder", a.output_folder))
+          if v is not None}
+    if a.no_figures:
+        kw["figures"] = "false"
+    if a.no_average_beats:
+        kw["averageBeats"] = "false"
+    try:
+        R = study(a.design, **kw)
+    except ValueError as ex:
+        ap.error(str(ex))
+    print(R["methods"])
+    print(R["folder"])
     return 0
 
 

@@ -59,6 +59,10 @@ def _recording(d, n, start, day, parallel=False):
         if c == 1 and day == 1 and not parallel:
             rows.append((1, _clock(pd.Timestamp("2000-01-01 11:00:30.5")), "extra", 1, math.nan, math.nan, 40.0, 0.1,
                          10.0, 5000.0))
+        if c == 2 and day == 1 and not parallel:  # 4 extra beats in the window +120 min: arrhythmic (2026-10-18)
+            for s_ in (10.5, 30.5, 50.5, 70.5):
+                rows.append((2, _clock(pd.Timestamp("2000-01-01 14:00:00") + pd.Timedelta(seconds=s_)), "extra", 1,
+                             math.nan, math.nan, 80.0, 0.1, 50.0, 5000.0))
     C = pd.DataFrame(rows, columns=["channel", "clockTime", "beatType", "included", "stimFrequency",
                                     "peakToPeakFrequency", "amplitude", "TTP90", "diastolicForce", "dFdtMax"]
                      ).sort_values(["channel", "clockTime"])
@@ -117,12 +121,12 @@ def test_windows_notes_files(tmp_path):
     g = lambda c, o: S[(S["channel"] == c) & (S["offset_min"] == o)].iloc[0]  # noqa: E731
     r = g(1, -60)
     assert (r["from"], r["to"], r["nBeats"], r["nIncluded"], r["nExtra"]) == ("2000-01-01 11:00:00",
-                                                                             "2000-01-01 11:02:00", 61, 61, 1)
-    a0 = np.r_[np.full(60, 100.0), 40.0]  # baseline ch1: 60 beats of 100 uN and the extra beat of 40 uN (included)
+                                                                             "2000-01-01 11:02:00", 61, 60, 1)
+    a0 = np.full(60, 100.0)  # baseline ch1: 60 stimulated beats of 100 uN; the extra beat (40 uN) not in the values
     assert r["amplitude"] == pytest.approx(a0.mean()) and r["amplitude_median"] == 100 and \
         r["recording"] == "rigT_S_0" and r["note"] == ""  # parallel recording not used
     assert r["amplitude_SD"] == pytest.approx(a0.std(ddof=1)) and \
-        r["amplitude_SEM"] == pytest.approx(a0.std(ddof=1) / math.sqrt(61))
+        r["amplitude_SEM"] == pytest.approx(a0.std(ddof=1) / math.sqrt(60))
     assert (r["amplitude_q25"], r["amplitude_q75"], r["diastolicForce"], r["dFdtMax"]) == (100, 100, 10, 5)
     r = g(1, 10)
     assert r["amplitude"] == 150 and r["amplitude_pctBaseline"] == pytest.approx(15000 / a0.mean())
@@ -140,7 +144,10 @@ def test_windows_notes_files(tmp_path):
     r = g(2, 10)
     assert r["nIncluded"] == 30 and r["note"] == ("chamber out 12:09:30-12:11:00; comment 12:11:00 medium exchange; "
                                                   "30 of ~60 expected contractions included")
-    assert all(g(c, 120)["note"] == "protocol P1 13:59:00-14:03:00" for c in (1, 2))
+    assert g(1, 120)["note"] == "protocol P1 13:59:00-14:03:00"
+    r = g(2, 120)  # paced: values of the stimulated beats; >= 5 % extra beats: arrhythmic
+    assert r["note"] == "protocol P1 13:59:00-14:03:00; arrhythmic: 4 extra beats (6 % of the contractions)"
+    assert (r["nBeats"], r["nIncluded"], r["nExtra"], r["amplitude"], r["beatsPerMinute"]) == (64, 60, 4, 200, 32)
     r = g(3, 120)
     assert r["note"] == ("protocol P1 13:59:00-14:03:00; alternans: 2 amplitude groups 150 / 300 uN (50 % small beats, "
                          "100 % of successive beats switch)") and r["amplitude"] == 225 and r["amplitude_median"] == 225
@@ -240,7 +247,7 @@ def test_pool(tmp_path):
     assert (c["substance"] == "CTRL").all() and c["concentration"].isna().all() and (c["sliceID"] == "rigT_S_ch3").all()
     assert sorted(set(o["sliceID"])) == ["rigT_S_ch1", "rigT_S_ch2"] and list(o["timePoint"][:2]) == ["-1 h", "+10 min"]
     assert list(S["isBaseline"][:2]) == [1, 0] and set(o["group"]) == {"HTX", ""}
-    a0 = np.r_[np.full(60, 100.0), 40.0]
+    a0 = np.full(60, 100.0)  # baseline ch1: stimulated beats only
     T = PT["treatments"]
     assert list(T["treatment"]) == ["CTRL", "CTRL", "OME0.5uM", "OME0.5uM"]  # controls first
     r = T[(T["treatment"] == "OME0.5uM") & (T["offset_min"] == 10)].iloc[0]
@@ -260,12 +267,15 @@ def test_pool(tmp_path):
     assert r1["nControlSlices"] == 1 and r1["amplitude_pctBaseline_vsControl"] == pytest.approx(15000 / a0.mean())
     assert r1["diastolicForce_delta_vsControl"] == 20 and (c["amplitude_pctBaseline_vsControl"] == 100).all()
     d = os.path.join(os.path.realpath(res), "timepoints_pooled", "test")
-    assert PT["folder"] == d and sorted(os.listdir(d)) == ["CTRL", "OME0.5uM", "test.xlsx"] + [
-        f"treatments_{m}{e}" for m in ("abs", "norm", "vsControl") for e in (".png", ".svg")]
+    assert PT["folder"] == d and sorted(os.listdir(d)) == sorted(["CTRL", "OME0.5uM", "test.xlsx",
+                                                                 "test_prism.xlsx"] + [
+        f"treatments_{m}{e}" for m in ("abs", "norm", "vsControl") for e in (".png", ".svg")] + [
+        f"test_figure_norm.{e}" for e in ("pdf", "svg", "png")])
     assert sorted(os.listdir(os.path.join(d, "CTRL"))) == sorted(
         f"CTRL_{g}_{m}{e}" for g in ("timepoints", "course") for m in ("abs", "norm") for e in (".png", ".svg"))
     x = pd.ExcelFile(os.path.join(d, "test.xlsx"))
-    assert x.sheet_names == ["slices", "samples", "treatments", "course", "averageBeatsMean", "analyses", "info"]
+    assert x.sheet_names == ["slices", "samples", "treatments", "statistics", "qc", "excluded", "course",
+                             "averageBeatsMean", "analyses", "info"]
     # the dicts of timepoints: the same values without reading the files
     P2 = pool_timepoints(TPs, write=False)
     k = ["treatment", "sampleID", "sliceID", "offset_min"]
@@ -277,4 +287,150 @@ def test_pool(tmp_path):
         pool_timepoints(res, labels=["nothing"], write=False)
     from myodish_analysis.cli import pool_timepoints_main
     assert pool_timepoints_main([res, "--labels", "OME0.5uM", "--name", "cli", "--no-figures"]) == 0
-    assert os.listdir(os.path.join(os.path.realpath(res), "timepoints_pooled", "cli")) == ["cli.xlsx"]
+    assert sorted(os.listdir(os.path.join(os.path.realpath(res), "timepoints_pooled", "cli"))) == ["cli.xlsx",
+                                                                                                   "cli_prism.xlsx"]
+
+
+def test_pool_exclude_qc_statistics(tmp_path):
+    """pool_timepoints (2026-10-18): option exclude (a window from an offset on; a whole slice), column qc and sheet qc
+    (codes of the notes), sheet statistics against the controls (descriptive with < 3 samples), course and average
+    beats of excluded windows left out"""
+    res = _results(tmp_path)
+    timepoints(res, "OME0.5uM", "rigT_S", [1, 2], "2000-01-01 12:00", [-60, 10], sampleID="H1", average_beats=False)
+    timepoints(res, "CTRL", "rigT_S", [3], "2000-01-01 12:00", [-60, 10], sampleID="H2", average_beats=False)
+    PT = pool_timepoints(res, name="ex", exclude=[("H1", 2, 10, "test reason"), ("nothing", None, None, "")],
+                         figures=False)
+    S, E = PT["slices"], PT["excluded"]
+    assert len(S) == 5 and len(E) == 1 and E["excludeReason"].iloc[0] == "test reason"
+    assert (E["sliceID"].iloc[0], E["offset_min"].iloc[0]) == ("rigT_S_ch2", 10)
+    assert "exclude nothing: no slice found" in PT["notes"]
+    i = PT["info"]
+    assert i.loc[i["key"] == "exclude", "value"].iloc[0] == "H1 ch2 from 10 min: test reason; nothing"
+    C = PT["course"]  # OME: from minute 10 on only ch1
+    o = C[C["treatment"] == "OME0.5uM"]
+    assert (o.loc[o["minutes"] >= 10, "nSlices"] == 1).all() and (o.loc[o["minutes"] < 10, "nSlices"] == 2).all()
+    q = S.set_index(["sliceID", "offset_min"])["qc"]
+    assert q[("rigT_S_ch1", -60)] == "" and PT["qc"].empty  # ch2 +10 (chamber out, comment) excluded
+    PT2 = pool_timepoints(res, name="ex2", figures=False)
+    Q = PT2["qc"]
+    assert list(Q["qc"]) == ["capture signal comment"] and Q["sliceID"].iloc[0] == "rigT_S_ch2"
+    St = PT2["statistics"]
+    r = St[(St["treatment"] == "OME0.5uM") & (St["parameter"] == "amplitude_pctBaseline")].iloc[0]
+    assert (r["offset_min"], r["nSlices"], r["nSamples"], r["nControlSlices"], r["nPairedSamples"]) == (10, 2, 1, 1, 0)
+    assert r["mean"] == pytest.approx(125) and r["controlMean"] == 100 and r["difference"] == pytest.approx(25)
+    assert math.isnan(r["lme_p"]) and r["lme_note"] == "fewer than 3 samples in a group: descriptive only"
+    assert len(St) == len(PT2["parameters"])  # one time point after the baseline
+    PT3 = pool_timepoints(res, name="ex3", exclude=pd.DataFrame({"id": ["rigT_S_ch1"], "reason": ["whole slice"]}),
+                          write=False)
+    assert set(PT3["slices"]["sliceID"]) == {"rigT_S_ch2", "rigT_S_ch3"} and len(PT3["excluded"]) == 2
+    from myodish_analysis.cli import pool_timepoints_main
+    assert pool_timepoints_main([res, "--name", "cli2", "--no-figures", "--exclude", "H1:2:10:test"]) == 0
+    x = pd.read_excel(os.path.join(os.path.realpath(res), "timepoints_pooled", "cli2", "cli2.xlsx"), "excluded")
+    assert list(x["excludeReason"]) == ["test"]
+
+
+def test_lme_random_intercept():
+    """linear mixed model of the statistics sheet (REML, random intercept per sample) against statsmodels MixedLM
+    (estimate 18.2215, SE 3.8915, variance ratio 4.2369 for these data)"""
+    from myodish_analysis.timepoints import _lme_ri
+    y = [96, 104, 120, 126, 81, 85, 99, 92, 110, 131, 112, 118, 140]
+    x = [0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1]
+    g = ["A", "A", "A", "A", "B", "B", "B", "B", "C", "C", "D", "D", "D"]
+    e, se, df, p, th = _lme_ri(y, x, g)
+    assert e == pytest.approx(18.2215, rel=1e-4) and se == pytest.approx(3.8915, rel=2e-3)
+    assert th == pytest.approx(4.2369, rel=2e-3) and df == 11 and 0.0006 < p < 0.0008
+    assert all(math.isnan(v) for v in _lme_ri([1, 2], [0, 1], ["a", "b"]))  # too few values
+
+
+def test_t0_chamber_in(tmp_path):
+    """t0='chamberIn' (2026-10-18): time 0 = end of the chamber-out period of the channel nearest to the given time
+    (ch2: chamber out 12:09:30-12:11:00); channels without such a period keep the given time"""
+    res = _results(tmp_path)
+    TP = timepoints(res, "T7", "rigT_S", [1, 2], "2000-01-01 12:00", [-60, 10], t0="chamberIn", average_beats=False,
+                    write=False)
+    R = TP["rows"]
+    assert list(R["time"]) == ["2000-01-01 12:00:00", "2000-01-01 12:11:00"]
+    assert list(R["timeGiven"]) == ["2000-01-01 12:00:00"] * 2 and TP["t0"] == "chamberIn"
+    assert R["t0"].iloc[0] == "no chamber-out period within +-90 min: given time 12:00:00"
+    assert R["t0"].iloc[1] == "chamber in 12:11:00 (given 12:00:00, +11.0 min; 1 chamber-out period(s) within +-90 min)"
+    S = TP["summary"]
+    assert S[(S["channel"] == 2) & (S["offset_min"] == 10)]["from"].iloc[0] == "2000-01-01 12:21:00"
+    i = TP["info"]
+    assert i.loc[i["key"] == "t0", "value"].iloc[0] == (
+        "end of the chamber-out period of the channel nearest to the given time (chamber in; periods ending within "
+        "+-90 min): rigT_S ch1: no chamber-out period within +-90 min: given time 12:00:00; rigT_S ch2: chamber in "
+        "12:11:00 (given 12:00:00, +11.0 min; 1 chamber-out period(s) within +-90 min)")
+    TP2 = timepoints(res, "T8", "rigT_S", [2], "2000-01-01 12:00", [10], t0="chamberIn", t0_window=5,
+                     average_beats=False, write=False)
+    assert TP2["rows"]["time"].iloc[0] == "2000-01-01 12:00:00"  # period ends 11 min later: outside +-5 min
+    with pytest.raises(ValueError):
+        timepoints(res, "T9", "rigT_S", [2], "2000-01-01 12:00", [10], t0="chamberOut", write=False)
+
+
+def test_figure_and_prism(tmp_path):
+    """plot_timepoints (figure for a manuscript) and prism_tables (2026-10-18): from the dict and from the workbook"""
+    from myodish_analysis.timepoints import plot_timepoints, prism_tables
+    res = _results(tmp_path)
+    timepoints(res, "OME0.5uM", "rigT_S", [1, 2], "2000-01-01 12:00", [-60, 10], sampleID="H1", average_beats=False)
+    timepoints(res, "CTRL", "rigT_S", [3], "2000-01-01 12:00", [-60, 10], sampleID="H2", average_beats=False)
+    PT = pool_timepoints(res, name="fig", figures=False)
+    x = os.path.join(PT["folder"], "fig_prism.xlsx")
+    P = prism_tables(PT)
+    assert list(P) == ["amplitude_pctBaseline", "diastolicForce_delta", "TTP90_pctBaseline", "TTR90_pctBaseline"]
+    A = P["amplitude_pctBaseline"]
+    assert list(A.columns) == ["time_h", "CTRL|H2 rigT_S_ch3", "OME0.5uM|H1 rigT_S_ch1", "OME0.5uM|H1 rigT_S_ch2"]
+    np.testing.assert_allclose(A["time_h"], [-1, 1 / 6])
+    np.testing.assert_allclose(A["OME0.5uM|H1 rigT_S_ch1"], [100, 150])
+    B = pd.read_excel(x, sheet_name="amplitude_pctBaseline")
+    np.testing.assert_allclose(B.to_numpy(float), A.to_numpy(float))
+    out = str(tmp_path / "f1")
+    fig, files = plot_timepoints(PT, output=out, parameters=["amplitude", "diastolicForce"], mode="norm")
+    assert files == [out + ".pdf", out + ".svg", out + ".png"] and all(os.path.getsize(f) > 1000 for f in files)
+    ax = fig.axes[0]
+    assert ax.get_ylabel() == "amplitude (% of baseline)" and fig.axes[1].get_ylabel() == "diastolic force, change (uN)"
+    labels = [t.get_text() for t in fig.legends[0].get_texts()]
+    assert labels == ["CTRL (n = 1/1)", "OME0.5uM (n = 2/1)"]
+    fig2, f2 = plot_timepoints(os.path.join(PT["folder"], "fig.xlsx"), mode="abs", slices=False)
+    assert f2 == [] and len([a for a in fig2.axes if a.get_visible()]) == 4
+
+
+def test_study(tmp_path):
+    """study (2026-10-18): design table (one row per slice, exclusions) -> timepoints per treatment and pool_timepoints
+    in one study folder, with the design, a methods text and the Prism tables; template; t0 = chamberIn"""
+    from myodish_analysis.study import study, study_template
+    res = _results(tmp_path)
+    tpl = study_template(str(tmp_path / "design.xlsx"))
+    x = pd.ExcelFile(tpl)
+    assert x.sheet_names == ["slices", "settings"] and list(x.parse("slices").columns) == [
+        "series", "channel", "treatment", "time", "sampleID", "group", "exclude", "excludeReason"]
+    D = pd.DataFrame({"series": ["rigT_S"] * 3, "channel": [1, 2, 3], "treatment": ["OME0.5uM", "OME0.5uM", "CTRL"],
+                      "time": ["2000-01-01 12:00"] * 3, "sampleID": ["H1", "H1", "H2"], "group": "",
+                      "exclude": ["", "10", ""], "excludeReason": ["", "test reason", ""]})
+    f = str(tmp_path / "d.csv")
+    D.to_csv(f, index=False)
+    R = study(f, resultsFolder=res, offsets="-60 10", name="s1", averageBeats="false", figures="false")
+    d = os.path.join(res, "studies", "s1")
+    assert R["folder"] == d and sorted(os.listdir(d)) == ["analyses", "design_s1.csv", "s1.xlsx", "s1_methods.txt",
+                                                          "s1_prism.xlsx"]
+    assert sorted(os.listdir(os.path.join(d, "analyses", "expT"))) == ["CTRL_2000-01-01-12-00",
+                                                                      "OME0.5uM_2000-01-01-12-00"]
+    PT = R["pool"]
+    assert len(PT["slices"]) == 5 and list(PT["excluded"]["excludeReason"]) == ["test reason"]
+    assert R["methods"].startswith("Contraction parameters were analysed with MyoDishAnalysis ")
+    assert "windows of 120 s starting -1 h, +10 min relative to the treatment (time 0 = the documented time of " \
+        "the addition)" in R["methods"]
+    assert "Groups: CTRL 1 slice from 1 sample; OME0.5uM 2 slices from 1 sample." in R["methods"]
+    assert "Excluded: H1 rigT_S_ch2 (windows from +10 min; test reason)." in R["methods"]
+    assert open(os.path.join(d, "s1_methods.txt"), encoding="utf-8").read().strip() == R["methods"]
+    R2 = study(D, resultsFolder=res, offsets=[-60, 10], name="s2", t0="chamberIn", averageBeats="false",
+               figures="false")
+    S = R2["pool"]["slices"]
+    assert S.loc[(S["sliceID"] == "rigT_S_ch2") & (S["offset_min"] == -60), "treatmentTime"].iloc[0] == \
+        "2000-01-01 12:11:00"
+    assert "design_s2.xlsx" in os.listdir(R2["folder"]) and "reinsertion of the chamber" in R2["methods"]
+    with pytest.raises(ValueError):
+        study(D.drop(columns="time"), resultsFolder=res, offsets="-60 10")
+    with pytest.raises(ValueError):
+        study(f, offsets="-60 10")  # no results folder
+    from myodish_analysis.cli import study_main
+    assert study_main(["--template", str(tmp_path / "t2.xlsx")]) == 0 and os.path.isfile(str(tmp_path / "t2.xlsx"))

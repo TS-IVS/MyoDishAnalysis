@@ -39,6 +39,7 @@ mda-test = "myodish_analysis.cli:selftest_main"
 mda-watch = "myodish_analysis.cli:watch_main"
 mda-timepoints = "myodish_analysis.cli:timepoints_main"
 mda-pool-timepoints = "myodish_analysis.cli:pool_timepoints_main"
+mda-study = "myodish_analysis.cli:study_main"
 
 [project.gui-scripts]
 mda-gui = "myodish_analysis.gui:main"

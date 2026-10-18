@@ -5,6 +5,9 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
+- **MATLAB `mda_timepoints`, `mda_poolTimepoints`: relative results folder** (e.g. `mda_timepoints('results', ...)`)
+  was resolved against the folder MATLAB was started in (Java), not the current folder: *no mda_index.csv in ...* or
+  no analyses found after `cd`. Relative paths now refer to the current folder (`pwd`), as in Python.
 - **Python watcher with several workers, new results folder: a recording failed with `FileNotFoundError`** (1 of
   10,565 recordings in a complete run): when two recordings of the same experiment started at the same time, one
   worker removed the still empty experiment folder (clean-up of results in the other folder layout) while the other
@@ -75,6 +78,40 @@ MATLAB and Python versions have the same version number and give the same result
   course, average beats; values against the controls of the same time point (`_vsControl`: pctBaseline in % of the
   controls, diastolic Δ − Δ of the controls; controls of the same sample, otherwise all); images per treatment and all
   treatments side by side (`_abs`, `_norm`, `_vsControl`).
+- **`mda_poolTimepoints` (2026-10-18)**: option **`'exclude'`** (Python `exclude=`, `mda-pool-timepoints --exclude
+  ID[:CH[:FROM[:REASON]]]`): table or cell array with the columns id (sampleID, series or sliceID), channel (empty = all),
+  from (minutes after the treatment; empty = the whole slice) and reason; excluded windows are left out of all sheets,
+  images and statistics and listed in the sheet `excluded`, treatments without slices are dropped with a note. Column
+  **`qc`** per window (codes from the notes: arrhythmic, capture, noContractions, alternans, irregular, protocol,
+  signal, otherSlice, comment, pending) for the decision what to exclude. Sheet **`statistics`** per treatment, time
+  point and parameter: mean and SEM of the slices, the same of the controls, difference, paired difference of the
+  samples with treatment and control, and a linear mixed model y ~ treatment + (1 | sample) (REML, own implementation
+  in MATLAB and Python without toolboxes; validated against statsmodels MixedLM: estimate 18.2215, SE 3.8915, variance
+  ratio 4.2369) only if both groups have at least 3 samples, otherwise descriptive only. Degrees of freedom n − 2 (as
+  `fitlme` 'Residual'): exploratory and not corrected for multiple comparisons; for a publication confirm with a
+  dedicated tool (e.g. lme4/lmerTest with Satterthwaite degrees of freedom). Also written: `<name>_figure_norm` (pdf,
+  svg, png) and `<name>_prism.xlsx`.
+- **`mda_plotTimepoints`** (Python `plot_timepoints`, `prism_tables`; new file `mda_plotTimepoints.m`): figure for a
+  manuscript from a pool (struct or workbook): one panel per parameter (default amplitude, diastolicForce, TTP90,
+  TTR90), x = time after the treatment, per treatment mean ± SEM of the slices and thin lines of the single slices,
+  legend *treatment (n = slices/samples)*, controls black, other treatments in the colour-blind safe Okabe-Ito colours,
+  Arial 7 pt, panel size in mm, files `.pdf` / `.svg` / `.png` (300 dpi); modes `'norm'`, `'abs'`, `'vsControl'`.
+  `mda_plotTimepoints('prism', PT)`: tables for GraphPad Prism (one row per time point, one column per slice, header
+  `treatment|sample slice`).
+- **`mda_study`** (Python `study`, `mda-study`; new files `mda_study.m`, `py/src/myodish_analysis/study.py`): time
+  points of a whole study from one design table (xlsx with the sheets slices and settings, or csv; one row per slice:
+  series, channel, treatment, time, sampleID, group, exclude, excludeReason) and a few settings (offsets, seconds,
+  baseline, t0, control, order, parameters, ...): one `mda_timepoints` analysis per treatment in `<study>/analyses/`,
+  the pool with the exclusions in the study folder (default `<results>/studies/<name>/`), a copy of the design and
+  `<name>_methods.txt` (methods text: version, windows, t0, paced beats only, normalization, groups with slices and
+  samples, exclusions, statistics). `mda_study('template', file)` / `study_template(file)` writes an empty design table
+  with an example row.
+- **`mda_timepoints`: option `'t0'`** (Python `t0=`, `--t0`): `'given'` (default) or `'chamberIn'`: per channel the end
+  of the chamber-out period nearest to the given time (periods ending within ± `'t0Window'` minutes, default 90), i.e.
+  the time the chamber with the treatment was put back; comments are often written minutes before or up to an hour
+  after the treatment. Notes per window, columns `timeGiven` and `t0`. Option **`'outputFolder'`** (Python
+  `output_folder=`): files in `<outputFolder>/<experiment>/<label>_<time>/` instead of the results folder (used by
+  `mda_study`).
 - **Watcher: wildcard patterns** (options `'include'`, `'exclude'`; Python `--include`, `--exclude`): e.g. `'ABC00*'`
   (all folders starting with ABC00) or `'*schedule*'` (schedule files); a pattern without `/` is matched against every
   folder name and the file name, with `/` against the relative path. `'caseSensitive'` (`--case-sensitive`, default
@@ -178,6 +215,16 @@ MATLAB and Python versions have the same version number and give the same result
   later events (`slice`, `doc`, `protocolRun`, `scheduleRun`) and ISO times inside structured lines.
 
 ### Changed
+- **`mda_timepoints`: paced windows use the stimulated contractions only** (2026-10-18): when a window contains
+  stimulated or extra beats, spontaneous and extra beats are left out of the values; note **`arrhythmic: n extra beats
+  (x % of the contractions)`** from 5 % extra beats (column `qc` of the pool: arrhythmic). Before, extra beats of an
+  arrhythmic slice were averaged with the paced beats.
+- **`mda_timepoints` / `mda_poolTimepoints`: mean of the channels in the course images** as two lines: solid = only
+  where all channels have values, dashed = gaps of up to 3 h interpolated per channel; SEM bands lighter (alpha 0.12)
+  and interrupted at gaps.
+- **Stimulation above 10 Hz** (cycle length < 0.1 s with at least 20 pulses in a range; status channel misread, e.g.
+  pseudo-pulses at 30–100 Hz in 9 recordings): treated as a technical error, the contractions of the range are not
+  included (note *stimulation > 10 Hz (status channel misread): technical error, contractions not included*).
 - **Watcher: PDF report per experiment** `<experiment>/<experiment>_report.pdf` instead of one report per pass
   (`reports/mda_report_<date>_<time>.pdf`): all analysed recordings of the experiment with their flags (the
   recordings of the last pass in bold, the earlier ones from `mda_flags.csv`, so that red flags of earlier days stay
