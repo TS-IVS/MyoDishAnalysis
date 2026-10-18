@@ -41,7 +41,23 @@ function P = mda_protocols(src, regularMinutes)
 % opened', programInfo 'Version', 'Recording started:') or the connection was lost (without 'Connection
 % re-established' within 60 s) (2026-10-11).
 %
-% TS 2026-10-07 (schedule files 2026-10-07)
+% PROTOCOLRUN EVENTS (control software from 2026-10, release 2.2; 2026-10-18): if the log file has structured
+% protocolRun events (mda_logEntries(..., 'events')), these protocols are taken from them: start paired with end or
+% abort by run, from / to = their times in the file, type and name of the start (types of the software: FFR, RP, ST,
+% PRP, PD, rockerSpeed, doseResponse, substance, stretch, other; groupBy none for the last four), startComment
+% 'protocolRun start: <name> (<source> <schedule file> line <n>)', endComment 'protocolRun end|abort: <reason>', note
+% 'aborted: <reason>', 'started before this recording (<clock time>)' (start written before the log was opened),
+% 'started before this file' (end without start: from 0) or 'no end in the log: end of the file' / '...: software
+% restarted'. A protocol whose start and end were both written before the log was opened ran between two recordings
+% and is not listed. The automatic comments 'start <TYPE> protocol' / 'end <TYPE> protocol' next to these events are
+% not read again; comment protocols of the same type that overlap a protocolRun protocol are dropped; other comments
+% are read as before (older recordings: unchanged).
+% Names with 'dose response' (any spelling) or the word DRC: type doseResponse (tested first, as the control software;
+% 2026-10-18); without end comment it is treated like type unknown.
+%
+% Python: myodish_analysis.protocols.find_protocols, protocol_runs.
+%
+% TS 2026-10-07 (schedule files 2026-10-07; protocolRun events 2026-10-18)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -63,7 +79,10 @@ end
 E = mda_logEntries(logFile);
 tAll = sort(E.t_file(isfinite(E.t_file)));       %all log entries (gaps within a protocol)
 tStop = interruptions(E);                         %software restarted / connection lost: a protocol without end comment ends there
-E = E((E.isComment | strcmpi(E.code, 'schedule')) & isfinite(E.t_file), :);
+V = mda_logEntries(E, 'events');                  %protocolRun events of the control software (2026-10-18)
+runs = protocolRuns(V, T, tStop);
+auto = autoComments(E, V);                        %their automatic start / end comments: not read again
+E = E((E.isComment | strcmpi(E.code, 'schedule')) & isfinite(E.t_file) & ~auto, :);
 E = sortrows(E, 't_file');                        %stable
 
 st = struct('type', {}, 'name', {}, 'key', {}, 'from', {}, 'to', {}, 'startComment', {}, 'endComment', {}, 'note', {});
@@ -136,10 +155,12 @@ unknownMaxSeconds = 7200;                          %unknown type without end com
 dropU = false(1, numel(st));
 for i = 1:numel(st)
     if isnan(st(i).to)
-        later = find([st.from] > st(i).from);
+        %(a protocolRun protocol of the same type: no limit; it marks the same protocol, which is dropped below)
+        cand = [st, runs(~strcmp({runs.type}, st(i).type))];
+        later = find([cand.from] > st(i).from);
         if ~isempty(later)
-            [tLimit, j] = min([st(later).from]);
-            why = sprintf('start of the next protocol ''%s''', st(later(j)).name);
+            [tLimit, j] = min([cand(later).from]);
+            why = sprintf('start of the next protocol ''%s''', cand(later(j)).name);
         else
             tLimit = T; why = 'end of the file';
         end
@@ -155,7 +176,7 @@ for i = 1:numel(st)
             [r, w] = regularPacingStart(H, logE, st(i).from, tLimit, 60 * regularMinutes);
             if ~isnan(r), tEnd = r; why = w; end
         end
-        if strcmp(st(i).type, 'unknown') && (isnan(r) || tEnd - st(i).from > unknownMaxSeconds)
+        if any(strcmp(st(i).type, {'unknown', 'doseResponse'})) && (isnan(r) || tEnd - st(i).from > unknownMaxSeconds)
             dropU(i) = true;    %unknown type without end comment: a protocol only if regular pacing starts again
             continue;           %within 2 h (otherwise e.g. 'not sure if stim protocol started' without a change)
         end
@@ -175,6 +196,14 @@ for i = 1:numel(st)
     end
 end
 st = st(keep);
+if ~isempty(runs)    %protocolRun protocols (2026-10-18); comment protocols of the same type overlapping one: dropped
+    keep = true(1, numel(st));
+    for i = 1:numel(st)
+        keep(i) = ~any(strcmp({runs.type}, st(i).type) & [runs.from] < st(i).to & st(i).from < [runs.to]);
+    end
+    st = [st(keep), runs];
+    [~, o] = sort([st.from]); st = st(o);
+end
 % a gap of > 10 min between the log entries within a protocol (e.g. the schedule stalled and the remaining commands
 % were sent later at once): note
 for i = 1:numel(st)
@@ -309,7 +338,9 @@ end
 function typ = protocolType(name)
 key = normName(name);
 tok = lower(regexp(char(name), '[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+', 'match'));   %words: 'PD_Test' -> pd, test
-if ~isempty(regexp(key, 'postrest|prp|restpotentiation', 'once'))
+if contains(key, 'doseresponse') || ismember('drc', tok)   %first, as the control software (2026-10-18)
+    typ = 'doseResponse';
+elseif ~isempty(regexp(key, 'postrest|prp|restpotentiation', 'once'))
     typ = 'PRP';
 elseif ~isempty(regexp(key, 'refractory|^rp|s1s2|^s2', 'once')) || ismember('rp', tok)
     typ = 'RP';
@@ -366,4 +397,117 @@ switch typ
     case 'rockerSpeed', g = 'rockerSpeed';
     otherwise,          g = 'none';
 end
+end
+
+
+function st = protocolRuns(V, T, tStop)
+% protocols from the protocolRun events of the control software (2026-10-18): start paired with end or abort by run;
+% from / to = t_file of the events; type and name of the start; see the help. Same fields as the comment protocols.
+st = struct('type', {}, 'name', {}, 'key', {}, 'from', {}, 'to', {}, 'startComment', {}, 'endComment', {}, 'note', {});
+if ~istable(V) || height(V) == 0, return; end
+R = V(strcmpi(V.code, 'protocolRun'), :);
+if height(R) == 0, return; end
+runOf = cellfun(@(d) fieldOr(d, 'run', ''), R.data, 'UniformOutput', false);
+isEnd = ismember(R.event, {'end', 'abort'}) & ~cellfun(@isempty, runOf);
+seen = {};
+for k = find(strcmp(R.event, 'start'))'
+    d = R.data{k};
+    run = runOf{k};
+    if isempty(run), run = R.actionId{k}; end
+    if ismember(run, seen), continue; end
+    seen{end+1} = run; %#ok<AGROW>
+    e = find(isEnd & strcmp(runOf, run), 1);
+    if R.waiting(k) && ~isempty(e) && R.waiting(e), continue; end   %ran between two recordings
+    typ = softwareType(fieldOr(d, 'type', ''));
+    name = strtrim(fieldOr(d, 'name', ''));
+    if isempty(name), name = typ; end
+    frm = R.t_file(k);
+    note = {};
+    if R.waiting(k)
+        note{end+1} = sprintf('started before this recording (%s)', clockText(R.clockTime(k))); %#ok<AGROW>
+    end
+    src = fieldOr(d, 'source', '');
+    sf = fieldOr(d, 'scheduleFile', '');
+    if strcmp(src, 'schedule') && ~isempty(sf)
+        src = [src ' ' sf]; %#ok<AGROW>
+        ln = fieldOr(d, 'line', []);
+        if isnumeric(ln) && isscalar(ln), src = sprintf('%s line %d', src, ln); end
+    end
+    if isempty(e)
+        tEnd = T; why = 'end of the file';
+        q = find(tStop(:,1) > frm & tStop(:,2) == 1 & tStop(:,1) < T, 1);
+        if ~isempty(q), tEnd = tStop(q,1); why = 'software restarted'; end
+        note{end+1} = ['no end in the log: ' why]; %#ok<AGROW>
+        endc = '';
+    else
+        tEnd = R.t_file(e);
+        reason = fieldOr(R.data{e}, 'reason', '');
+        endc = sprintf('protocolRun %s: %s', R.event{e}, reason);
+        if strcmp(R.event{e}, 'abort'), note{end+1} = ['aborted: ' reason]; end %#ok<AGROW>
+    end
+    if isempty(src), sc = ['protocolRun start: ' name]; else, sc = sprintf('protocolRun start: %s (%s)', name, src); end
+    st(end+1) = struct('type', typ, 'name', name, 'key', normName(name), 'from', frm, 'to', min(tEnd, T), ...
+        'startComment', sc, 'endComment', endc, 'note', strjoin(note, '; ')); %#ok<AGROW>
+end
+for e = find(isEnd)'                            %ends without start in this log (first end of a run)
+    run = runOf{e};
+    if ismember(run, seen) || R.waiting(e) || find(isEnd & strcmp(runOf, run), 1) ~= e, continue; end
+    seen{end+1} = run; %#ok<AGROW>
+    typ = softwareType(fieldOr(R.data{e}, 'type', ''));
+    reason = fieldOr(R.data{e}, 'reason', '');
+    note = 'started before this file';
+    if strcmp(R.event{e}, 'abort'), note = [note '; aborted: ' reason]; end %#ok<AGROW>
+    st(end+1) = struct('type', typ, 'name', typ, 'key', normName(typ), 'from', 0, 'to', R.t_file(e), ...
+        'startComment', '', 'endComment', sprintf('protocolRun %s: %s', R.event{e}, reason), 'note', note); %#ok<AGROW>
+end
+if ~isempty(st), [~, o] = sort([st.from]); st = st(o); end
+end
+
+
+function skip = autoComments(E, V)
+% rows of E with the automatic comments 'start <TYPE> protocol' / 'end <TYPE> protocol' that the control software
+% writes next to each protocolRun start / end / abort (same type, within 1 s)
+skip = false(height(E), 1);
+if ~istable(V) || height(V) == 0, return; end
+R = V(strcmpi(V.code, 'protocolRun'), :);
+if height(R) == 0, return; end
+typ = lower(cellfun(@(d) fieldOr(d, 'type', ''), R.data, 'UniformOutput', false));
+for i = find(E.isComment)'
+    tok = regexp(strtrim(E.text{i}), '^(start|end)\s+(\S+)\s+protocol$', 'tokens', 'once', 'ignorecase');
+    if isempty(tok), continue; end
+    if strcmpi(tok{1}, 'start'), want = {'start'}; else, want = {'end', 'abort'}; end
+    skip(i) = any(ismember(R.event, want) & abs(R.t_file - E.t_file(i)) <= 1 & strcmp(typ, lower(tok{2})));
+end
+end
+
+
+function typ = softwareType(t)
+% type of a protocolRun event as protocol type (unknown types: other)
+switch lower(strtrim(char(t)))
+    case 'ffr',          typ = 'FFR';
+    case 'rp',           typ = 'RP';
+    case 'st',           typ = 'ST';
+    case 'prp',          typ = 'PRP';
+    case 'pd',           typ = 'PD';
+    case 'rockerspeed',  typ = 'rockerSpeed';
+    case 'doseresponse', typ = 'doseResponse';
+    case 'substance',    typ = 'substance';
+    case 'stretch',      typ = 'stretch';
+    otherwise,           typ = 'other';
+end
+end
+
+
+function v = fieldOr(d, f, default)
+% field f of a decoded event (default if absent or null)
+v = default;
+if isstruct(d) && isfield(d, f) && ~isempty(d.(f))
+    v = d.(f);
+    if isstring(v), v = char(v); end
+end
+end
+
+
+function s = clockText(t)
+if isnat(t), s = '?'; else, s = char(datetime(t, 'Format', 'yyyy-MM-dd HH:mm:ss')); end
 end

@@ -46,6 +46,18 @@ MATLAB and Python versions have the same version number and give the same result
   keeps the time of last change of the recording, shifted by the same number of days.
 
 ### Added
+- **Structured events of the MyoDish control software** (builds from 2026-10, release 2.2): `mda_logEntries(logFile,
+  'events')` (Python `log_events`) reads the log lines whose value is one JSON object (codes system, slice,
+  protocolRun, scheduleRun, doc): time in the file, channel, code, event, actionId, by, waiting (written before the log
+  was opened) and all fields by name; lines cut off by a crash are counted and left out. **`mda_protocols` /
+  `find_protocols` take the protocols from the `protocolRun` events** where a log has them (start paired with end or
+  abort by run, exact times, type and name of the start, also for protocols started by hand; notes for aborted
+  protocols, protocols started before the recording or the file, and protocols without end); the automatic comments
+  `start/end <TYPE> protocol` next to them are not read again, and comment protocols of the same type that overlap one
+  are dropped. New protocol types `doseResponse`, `substance`, `stretch`, `other` (groupBy none); names with dose
+  response or the word DRC are `doseResponse` (tested first, as the control software; without end comment treated like
+  `unknown`). Older recordings unchanged. Tested with a synthetic log in the format of the control software (dev build
+  2.1.9787.20360); no recording with these lines exists yet.
 - **`mda_timepoints`** (Python `timepoints`, `mda-timepoints`; new files `mda_timepoints.m`, `mda_testTimepoints.m`,
   `py/src/myodish_analysis/timepoints.py`, `py/tests/test_timepoints.py`): contraction parameters in windows before
   and after a treatment from the results of the watcher, e.g. `mda_timepoints(res, 'Mava100', 'Setup1_ABC000101',
@@ -215,6 +227,8 @@ MATLAB and Python versions have the same version number and give the same result
   later events (`slice`, `doc`, `protocolRun`, `scheduleRun`) and ISO times inside structured lines.
 
 ### Changed
+- **GUI, Protocols ...**: protocols are preselected if they have a stimulation quantity (groupBy not `none`; before:
+  type not `other` / `unknown`), so that the new types without grouping are not preselected.
 - **`mda_timepoints`: paced windows use the stimulated contractions only** (2026-10-18): when a window contains
   stimulated or extra beats, spontaneous and extra beats are left out of the values; note **`arrhythmic: n extra beats
   (x % of the contractions)`** from 5 % extra beats (column `qc` of the pool: arrhythmic). Before, extra beats of an

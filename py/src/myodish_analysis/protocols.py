@@ -30,6 +30,13 @@ Wash In'). A protocol of type 'unknown' without end comment needs regular pacing
 start (end estimate, below), otherwise it is dropped. A protocol without end comment ends at the latest when the
 software was restarted ('LogFile opened', programInfo 'Version', 'Recording started:') or the connection was lost
 (without 'Connection re-established' within 60 s) (2026-10-11).
+protocolRun events (control software from 2026-10, release 2.2; 2026-10-18): if the log file has them (log_events),
+these protocols are taken from them (protocol_runs: start paired with end or abort by run, exact times, type and name
+of the start, types of the software FFR, RP, ST, PRP, PD, rockerSpeed, doseResponse, substance, stretch, other; notes
+'aborted: <reason>', 'started before this recording (...)', 'started before this file', 'no end in the log: ...'); the
+automatic comments 'start/end <TYPE> protocol' next to them are not read again, comment protocols of the same type
+that overlap one are dropped; older recordings unchanged. Names with 'dose response' or the word DRC: doseResponse
+(tested first, as the control software); without end comment treated like unknown.
 
 group_beats: see the help of mda_groupBeats.m (same quantities, groups, columns; return_stimuli=True: also Z, the
 stimuli of the channel with role, value and capture, input of protocol_results):
@@ -57,7 +64,7 @@ import numpy as np
 import pandas as pd
 
 from ._matlab import Struct, mround
-from .log_entries import log_entries, sscanf_floats, str2double
+from .log_entries import log_entries, log_events, sscanf_floats, str2double
 from .summarize import summarize
 
 _START1 = re.compile(r"^(?:start(?:ing)?|begin(?:ning)?)\s+(?:of\s+)?(?:the\s+)?(.+?)\s*$", re.I)
@@ -104,9 +111,12 @@ def _norm_name(name):
 
 
 def protocol_type(name):
-    """protocol type from the name (keywords; FFR, RP, ST, PRP, PD also as words: 'PD_Test' -> PD)"""
+    """protocol type from the name (keywords; FFR, RP, ST, PRP, PD also as words: 'PD_Test' -> PD; dose response or the
+    word DRC first, as the control software: doseResponse, 2026-10-18)"""
     key = _norm_name(name)
     tok = [w.lower() for w in _WORDS.findall(str(name))]
+    if "doseresponse" in key or "drc" in tok:
+        return "doseResponse"
     if re.search(r"postrest|prp|restpotentiation", key):
         return "PRP"
     if re.search(r"refractory|^rp|s1s2|^s2", key) or "rp" in tok:
@@ -148,6 +158,108 @@ def generic_protocol(name):
     return bool(re.search(r"protocol|protokoll|program", str(name), re.I)) or "test" in tok
 
 
+SOFTWARE_TYPES = {"ffr": "FFR", "rp": "RP", "st": "ST", "prp": "PRP", "pd": "PD", "rockerspeed": "rockerSpeed",
+                  "doseresponse": "doseResponse", "substance": "substance", "stretch": "stretch", "other": "other"}
+_AUTO = re.compile(r"^(start|end)\s+(\S+)\s+protocol$", re.I)
+
+
+def _software_type(t):
+    """type of a protocolRun event as protocol type (unknown types: other)"""
+    return SOFTWARE_TYPES.get(str(t or "").strip().lower(), "other")
+
+
+def _clock_text(x):
+    try:
+        return pd.Timestamp(x).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return "?"
+
+
+def protocol_runs(V, T=math.inf, tStop=None):
+    """protocols from the protocolRun events of the control software (log_events; 2026-10-18): start paired with end or
+    abort by run; from / to = t_file of the events; type and name of the start; startComment / endComment describe the
+    events; note: 'aborted: <reason>', 'started before this recording' (start written before the log was opened: from =
+    position of the file at that moment), 'started before this file' (end without start: from = 0), 'no end in the log:
+    end of the file' or '...: software restarted'. A protocol whose start and end were both written before the log was
+    opened ran between two recordings and is not listed. Returns a list of dicts (keys as in find_protocols)."""
+    out = []
+    if V is None or not len(V):
+        return out
+    R = V[V["code"].astype(str).str.lower().eq("protocolrun")]
+    if not len(R):
+        return out
+    if tStop is None:
+        tStop = np.zeros((0, 2))
+    ends = {}
+    for _, r in R.iterrows():
+        if r["event"] in ("end", "abort") and r["data"].get("run"):
+            ends.setdefault(r["data"]["run"], r)
+    seen = set()
+    for _, r in R.iterrows():
+        d = r["data"]
+        if r["event"] != "start":
+            continue
+        run = d.get("run") or r["actionId"]
+        if run in seen:
+            continue
+        seen.add(run)
+        e = ends.get(run)
+        if bool(r["waiting"]) and e is not None and bool(e["waiting"]):
+            continue  # ran between two recordings
+        typ = _software_type(d.get("type"))
+        name = str(d.get("name") or "").strip() or typ
+        frm = float(r["t_file"])
+        note = [f"started before this recording ({_clock_text(r['clockTime'])})"] if bool(r["waiting"]) else []
+        src = str(d.get("source") or "")
+        if src == "schedule" and d.get("scheduleFile"):
+            src += f" {d['scheduleFile']}" + (f" line {d['line']}" if d.get("line") is not None else "")
+        if e is None:
+            tEnd, why = T, "end of the file"
+            k = np.flatnonzero((tStop[:, 0] > frm) & (tStop[:, 1] == 1) & (tStop[:, 0] < T)) if len(tStop) else []
+            if len(k):
+                tEnd, why = float(tStop[k[0], 0]), "software restarted"
+            note.append(f"no end in the log: {why}")
+            endc = ""
+        else:
+            tEnd = float(e["t_file"])
+            reason = str(e["data"].get("reason") or "")
+            endc = f"protocolRun {e['event']}: {reason}"
+            if e["event"] == "abort":
+                note.append(f"aborted: {reason}")
+        out.append(dict(type=typ, name=name, key=_norm_name(name), start=frm, to=min(tEnd, T),
+                        startComment=f"protocolRun start: {name} ({src})" if src else f"protocolRun start: {name}",
+                        endComment=endc, note="; ".join(note), run=run))
+    for run, e in ends.items():
+        if run in seen or bool(e["waiting"]):
+            continue  # paired, or ended before this recording
+        typ = _software_type(e["data"].get("type"))
+        reason = str(e["data"].get("reason") or "")
+        note = ["started before this file"] + ([f"aborted: {reason}"] if e["event"] == "abort" else [])
+        out.append(dict(type=typ, name=typ, key=_norm_name(typ), start=0.0, to=float(e["t_file"]), startComment="",
+                        endComment=f"protocolRun {e['event']}: {reason}", note="; ".join(note), run=run))
+    return sorted(out, key=lambda x: x["start"])
+
+
+def auto_comments(E, V):
+    """rows of E with the automatic comments 'start <TYPE> protocol' / 'end <TYPE> protocol' that the control software
+    writes next to each protocolRun start / end / abort (same type, within 1 s): boolean array"""
+    skip = np.zeros(len(E), bool)
+    if V is None or not len(V):
+        return skip
+    R = V[V["code"].astype(str).str.lower().eq("protocolrun")]
+    if not len(R):
+        return skip
+    tR = R["t_file"].to_numpy(float)
+    for i in np.flatnonzero(E["isComment"].to_numpy(bool)):
+        m = _AUTO.match(str(E["text"].iloc[i]).strip())
+        if not m:
+            continue
+        want = ("start",) if m.group(1).lower() == "start" else ("end", "abort")
+        k = np.flatnonzero(R["event"].isin(want).to_numpy(bool) & (np.abs(tR - float(E["t_file"].iloc[i])) <= 1.0))
+        skip[i] = any(str(R["data"].iloc[j].get("type", "")).lower() == m.group(2).lower() for j in k)
+    return skip
+
+
 def default_group_by(typ):
     return {"FFR": "pacingFrequency", "RP": "S2interval", "ST": "stimCurrent", "PRP": "pauseLength",
             "PD": "pulseDuration", "rockerSpeed": "rockerSpeed"}.get(typ, "none")
@@ -168,8 +280,11 @@ def find_protocols(src, regular_minutes=5.0):
     tAll = np.sort(E["t_file"].to_numpy(float)) if len(E) else np.zeros(0)
     tAll = tAll[np.isfinite(tAll)]  # all log entries (gaps within a protocol)
     tStop = interruptions(E)  # software restarted / connection lost: a protocol without end comment ends there
+    V = log_events(E)  # protocolRun events of the control software (2026-10-18)
+    runs = protocol_runs(V, T, tStop)
+    auto = auto_comments(E, V)  # their automatic start / end comments: not read again
     isSched = np.array([str(c).lower() == "schedule" for c in E["code"]], dtype=bool)
-    E = E[(E["isComment"].to_numpy(bool) | isSched) & np.isfinite(E["t_file"].to_numpy(float))]
+    E = E[(E["isComment"].to_numpy(bool) | isSched) & np.isfinite(E["t_file"].to_numpy(float)) & ~auto]
     E = E.sort_values("t_file", kind="stable")
     st = []
     open_ = []
@@ -235,7 +350,8 @@ def find_protocols(src, regular_minutes=5.0):
     # next protocol (any type) or the end of the file; note 'no end comment: end estimated ...'
     for i, s in enumerate(st):
         if math.isnan(s["to"]):
-            later = [x for x in st if x["start"] > s["start"]]
+            # (a protocolRun protocol of the same type: no limit; it marks the same protocol, which is dropped below)
+            later = [x for x in st + [r for r in runs if r["type"] != s["type"]] if x["start"] > s["start"]]
             nxt = min(later, key=lambda x: x["start"]) if later else None
             tLimit = nxt["start"] if nxt else T
             why = f"start of the next protocol '{nxt['name']}'" if nxt else "end of the file"
@@ -249,7 +365,7 @@ def find_protocols(src, regular_minutes=5.0):
                 r = regular_pacing_start(H, s["start"], tLimit, 60.0 * float(regular_minutes))
                 if r is not None:
                     tEnd, why = r
-            if s["type"] == "unknown" and (r is None or tEnd - s["start"] > UNKNOWN_MAX_S):
+            if s["type"] in ("unknown", "doseResponse") and (r is None or tEnd - s["start"] > UNKNOWN_MAX_S):
                 s["drop"] = True  # unknown type without end comment: a protocol only if regular pacing starts again
                 continue  # within 2 h (otherwise e.g. 'not sure if stim protocol started' without a change)
             s["to"] = tEnd
@@ -264,6 +380,10 @@ def find_protocols(src, regular_minutes=5.0):
                     (a["start"] > b["start"] or a["to"] < b["to"] or i > j):
                 keep[i] = False
     st = [s for s, k in zip(st, keep) if k]
+    if runs:  # protocols of protocolRun events (2026-10-18); comment protocols of the same type overlapping one: dropped
+        st = [s for s in st if not any(r["type"] == s["type"] and s["start"] < r["to"] and r["start"] < s["to"]
+                                       for r in runs)]
+        st = sorted(st + runs, key=lambda x: x["start"])
     # a gap of > 10 min between the log entries within a protocol (e.g. the schedule stalled and the remaining
     # commands were sent later at once): note
     for s in st:

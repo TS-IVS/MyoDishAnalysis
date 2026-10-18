@@ -22,7 +22,7 @@ __version__ = "1.0.0b5"
 from .options import options  # noqa: E402
 from .parameters import parameters, PARAMETERS, LABEL_NAMES  # noqa: E402
 from .read_mdd import read_mdd, read_header, read_data, read_overview  # noqa: E402
-from .log_entries import log_entries  # noqa: E402
+from .log_entries import log_entries, log_events  # noqa: E402
 from .calibration_factor import calibration_factor  # noqa: E402
 from .zero_force import zero_force  # noqa: E402
 from .analyze_channel import analyze_channel  # noqa: E402
@@ -44,7 +44,7 @@ from .timepoints import plot_timepoints, pool_timepoints, prism_tables, timepoin
 from .study import study, study_template  # noqa: E402
 
 __all__ = ["options", "parameters", "PARAMETERS", "LABEL_NAMES", "read_mdd", "read_header", "read_data",
-           "read_overview", "log_entries", "calibration_factor", "zero_force", "analyze_channel", "rocker_filter",
+           "read_overview", "log_entries", "log_events", "calibration_factor", "zero_force", "analyze_channel", "rocker_filter",
            "reference_beat", "read_ep_recording", "analyze_ap", "remove_artefacts", "AP_PARAMETERS", "summarize", "write_results", "read_results",
            "labels", "add_labels", "myodish_analysis", "find_protocols", "group_beats", "protocol_results", "selftest", "watch", "timepoints", "pool_timepoints",
            "plot_timepoints", "prism_tables", "study", "study_template", "__version__"]

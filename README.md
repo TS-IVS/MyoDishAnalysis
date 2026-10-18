@@ -842,6 +842,19 @@ P = mda_protocols(file)                                              % protocols
   protocols of the same type within each other (comment and schedule file) the outer one is listed. The table can be edited (`from`, `to`,
   `groupBy`) and passed as `'protocol', P`; the GUI shows it editable (`+ selected range` adds the range of the main
   window).
+* **Structured events of the control software** (builds from 2026-10, release 2.2; 2026-10-18): besides the old text
+  lines, the log file gets lines whose value is one JSON object (codes `system`, `slice`, `protocolRun`,
+  `scheduleRun`, later `doc`). `mda_logEntries(logFile, 'events')` (Python `log_events`) returns them as a table: time
+  in the file, channel, code, event, actionId, by, `waiting` (written before the log was opened: the event happened
+  while no main recording ran) and all fields (`data`, read by name). Lines cut off by a crash are counted and left out.
+  **Protocols from `protocolRun`**: where the log has these events, `mda_protocols` takes the protocols from them (start
+  paired with end or abort by `run`; exact times; type and name of the start, also for protocols started by hand;
+  notes `aborted: <reason>`, `started before this recording`, `started before this file`, `no end in the log: …`);
+  the automatic comments `start <TYPE> protocol` / `end <TYPE> protocol` written next to them are not read again, and
+  a comment protocol of the same type that overlaps one is dropped. New types of the software: `doseResponse`,
+  `substance`, `stretch`, `other` (groupBy `none`); names with dose response (any spelling) or the word `DRC` are
+  `doseResponse` (tested first, as the software). Older recordings are read as before. The watcher leaves all protocols
+  out of the regular summary (`'includeProtocols'`, default false), also those of the new types.
 * **Grouping** (`mda_groupBeats`): every stimulus of the channel gets a value; a stimulated contraction belongs to the
   group of its stimulus, an extra contraction to the group of the last stimulus before it.
 

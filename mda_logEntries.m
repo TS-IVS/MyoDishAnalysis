@@ -1,7 +1,8 @@
-function E = mda_logEntries(logFile)
+function E = mda_logEntries(logFile, mode)
 %MDA_LOGENTRIES  All entries of a MyoDish log file (comments, events, settings) as a table, in log order.
 %
 %   E = mda_logEntries(logFile)          logFile = <name>_log.log next to the .mdd file
+%   V = mda_logEntries(logFile, 'events')   or  V = mda_logEntries(E, 'events')   structured events (below)
 %
 %   E.clockTime   datetime: system time of the entry (real-world date and time; 12-hour time stamps of MyoDish
 %                 software 2.0.7717-2.0.7769 corrected, see mda_clockTime)
@@ -15,13 +16,30 @@ function E = mda_logEntries(logFile)
 % Lines (UTF-16 or UTF-8): systemTime;dataLogTime_ms;channel;code;value, e.g.
 %   2000 01 01 09:44:35:717;1025;0;comment;start rockerSpeedTest
 %
-% TS 2026-10-05 (12-hour time stamps 2026-10-08)
+% STRUCTURED EVENTS (2026-10-18): lines of the control software (builds from 2026-10, release 2.2) whose value is one
+% JSON object, code system, slice, protocolRun, scheduleRun or doc (the old text lines stay as they are):
+%   V   table, one row per structured line, in log order: row (row of E), clockTime, t_file, channel, code, event,
+%       actionId, by ('' if null), waiting, data (struct of all fields of the JSON object, jsondecode: read fields by
+%       name, absent fields are absent, null = [])
+%   waiting: the event happened while no main recording ran and was written before 'LogFile created/opened' of this
+%   log (its t_file is the position of the file at that moment, not the time of the event). A line is structured if
+%   its code is one of these and its value starts with '{' (old lines never do; comments are checked by the code).
+%   Lines that cannot be read (e.g. cut off by a crash) are counted in V.Properties.UserData.nUnreadable (rows of E:
+%   .unreadable) and left out; unknown events and fields are kept.
+%
+% Python: myodish_analysis.log_entries.log_entries, log_events.
+%
+% TS 2026-10-05 (12-hour time stamps 2026-10-08; structured events 2026-10-18)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
 % SPDX-License-Identifier: GPL-3.0-or-later
 % Additional terms (GPL-3.0 section 7): see the file NOTICE
 
+if nargin >= 2 && strcmpi(mode, 'events')
+    if istable(logFile), E = structuredEvents(logFile); else, E = structuredEvents(mda_logEntries(logFile)); end
+    return;
+end
 E = table(NaT(0,1), zeros(0,1), zeros(0,1), cell(0,1), cell(0,1), false(0,1), ...
     'VariableNames', {'clockTime','t_file','channel','code','text','isComment'});
 if isempty(logFile) || ~exist(logFile, 'file'), return; end
@@ -69,4 +87,50 @@ end
 E = table(clk, t, ch, code, txt, strcmpi(code, 'comment'), ...
     'VariableNames', {'clockTime','t_file','channel','code','text','isComment'});
 E.Properties.UserData = info;   %clock time: format ('24h' / '12h'), nCorrected, ambiguous, source, note
+end
+
+
+function V = structuredEvents(E)
+% structured events of the log entries E (see the help)
+V = table(zeros(0,1), NaT(0,1), zeros(0,1), zeros(0,1), cell(0,1), cell(0,1), cell(0,1), cell(0,1), false(0,1), ...
+    cell(0,1), 'VariableNames', {'row','clockTime','t_file','channel','code','event','actionId','by','waiting','data'});
+V.Properties.UserData = struct('nUnreadable', 0, 'unreadable', zeros(0,1));
+if ~istable(E) || height(E) == 0, return; end
+code = strtrim(cellstr(string(E.code)));
+txt = strtrim(cellstr(string(E.text)));
+low = lower(code);
+isS = ismember(low, {'system', 'slice', 'protocolrun', 'schedulerun', 'doc'}) & startsWith(txt, '{');
+opens = find(strcmp(low, 'event') & ~cellfun(@isempty, regexpi(txt, '^logfile (opened|created)', 'once')));
+stops = find(strcmp(low, 'recording') & contains(lower(txt), 'stopped') & ~contains(lower(txt), 'parallel'));
+idx = find(isS);
+bad = zeros(0, 1);
+R = cell(numel(idx), 10);
+n = 0;
+for k = idx(:)'
+    try
+        d = jsondecode(txt{k});
+    catch
+        d = [];
+    end
+    if ~isstruct(d) || ~isscalar(d), bad(end+1, 1) = k; continue; end %#ok<AGROW>
+    nxt = opens(opens > k); prv = opens(opens < k);
+    w = ~isempty(nxt) && (isempty(prv) || any(stops > prv(end) & stops < k));
+    n = n + 1;
+    R(n, :) = {k, E.clockTime(k), E.t_file(k), E.channel(k), code{k}, fieldText(d, 'event'), ...
+        fieldText(d, 'actionId'), fieldText(d, 'by'), w, d};
+end
+R = R(1:n, :);
+if n > 0
+    V = table(vertcat(R{:, 1}), vertcat(R{:, 2}), vertcat(R{:, 3}), vertcat(R{:, 4}), R(:, 5), R(:, 6), R(:, 7), ...
+        R(:, 8), vertcat(R{:, 9}), R(:, 10), 'VariableNames', ...
+        {'row','clockTime','t_file','channel','code','event','actionId','by','waiting','data'});
+end
+V.Properties.UserData = struct('nUnreadable', numel(bad), 'unreadable', bad);
+end
+
+
+function s = fieldText(d, f)
+% text of field f of a decoded event ('' if absent or null)
+s = '';
+if isfield(d, f) && (ischar(d.(f)) || isstring(d.(f))), s = char(d.(f)); end
 end

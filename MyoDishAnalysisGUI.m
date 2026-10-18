@@ -3368,7 +3368,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             hPr.tx.String = 'No protocol found (comments ''start ... protocol'' / ''end ... protocol''). Add a range with ''+ selected range''.';
             return;
         end
-        hPr.tProt.Data = [num2cell(~ismember(prP.type, {'other', 'unknown'})), prP.type, prP.name, num2cell(round(prP.from, 2)), ...
+        hPr.tProt.Data = [num2cell(~strcmp(prP.groupBy, 'none')), prP.type, prP.name, num2cell(round(prP.from, 2)), ...
             num2cell(round(prP.to, 2)), prP.groupBy, prP.note];
         hPr.tx.String = sprintf('%d protocol(s) found in the log file.', height(prP));
     end

@@ -159,7 +159,7 @@ class ProtocolWindow(QtWidgets.QWidget):
         self.tp.setRowCount(0)
         for _, r in P.iterrows():
             self._add_row(r["type"], r["name"], r["from"], r["to"], r["groupBy"], r["note"],
-                          r["type"] not in ("other", "unknown"))
+                          r["groupBy"] != "none")  # protocols with a stimulation quantity selected (2026-10-18)
         n = len(P)
         self.tx.setText(f"{n} protocol(s) found in the log file." if n else
                         "No protocol found (comments 'start ... protocol' / 'end ... protocol'). Add a range with "

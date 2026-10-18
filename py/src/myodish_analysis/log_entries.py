@@ -154,3 +154,57 @@ def log_entries(log_file):
     E["clockTime"] = pd.to_datetime(E["clockTime"])
     E.attrs["clock"] = info
     return E
+
+
+STRUCTURED_CODES = ("system", "slice", "protocolrun", "schedulerun", "doc")
+
+
+def log_events(src):
+    """Structured events of a MyoDish log file (2026-10-18): lines of the control software (builds from 2026-10, release
+    2.2) whose value is one JSON object, code system, slice, protocolRun, scheduleRun or doc. MATLAB:
+    mda_logEntries(logFile, 'events').
+
+        V = log_events(log_file)      or  V = log_events(E)  (E = log_entries(log_file), in log order)
+
+    V: DataFrame, one row per structured line, in log order: row (row of E, from 0; MATLAB from 1), clockTime, t_file
+    (s), channel, code, event, actionId, by ('' if null), waiting, data (dict of all fields of the JSON object, read by
+    name; absent fields are absent).
+    waiting: the event happened while no main recording ran and was written before 'LogFile created/opened' of this
+    log (its t_file is the position of the file at that moment, not the time of the event). The old text lines stay as
+    they are and are not in V. A line is structured if its code is one of these and its value starts with '{' (old
+    lines never do; comments are checked by the code); lines that cannot be read (e.g. cut off by a crash) are counted
+    in V.attrs['nUnreadable'] (rows of E in V.attrs['unreadable']) and left out. Unknown events and fields are kept."""
+    import json
+    E = src if isinstance(src, pd.DataFrame) else log_entries(src)
+    cols = ["row", "clockTime", "t_file", "channel", "code", "event", "actionId", "by", "waiting", "data"]
+    if len(E) == 0:
+        V = pd.DataFrame({c: [] for c in cols})
+        V.attrs.update(nUnreadable=0, unreadable=[])
+        return V
+    code = E["code"].astype(str).str.strip()
+    txt = E["text"].astype(str).str.strip()
+    low = code.str.lower()
+    isS = (low.isin(STRUCTURED_CODES) & txt.str.startswith("{")).to_numpy(bool)
+    opens = np.flatnonzero((low.eq("event") & txt.str.match(r"logfile (opened|created)", case=False)).to_numpy(bool))
+    stops = np.flatnonzero((low.eq("recording") & txt.str.lower().str.contains("stopped")
+                            & ~txt.str.lower().str.contains("parallel")).to_numpy(bool))
+    rows, bad = [], []
+    for i in np.flatnonzero(isS):
+        try:
+            d = json.loads(txt.iloc[i])
+        except ValueError:
+            d = None
+        if not isinstance(d, dict):
+            bad.append(int(i))
+            continue
+        nxt = opens[opens > i]
+        prv = opens[opens < i]
+        waiting = bool(nxt.size) and (not prv.size or bool(np.any((stops > prv[-1]) & (stops < i))))
+        rows.append([int(i), E["clockTime"].iloc[i], float(E["t_file"].iloc[i]), float(E["channel"].iloc[i]),
+                     code.iloc[i], str(d.get("event") or ""), str(d.get("actionId") or ""), str(d.get("by") or ""),
+                     waiting, d])
+    V = pd.DataFrame(rows, columns=cols)
+    if len(V):
+        V["clockTime"] = pd.to_datetime(V["clockTime"])
+    V.attrs.update(nUnreadable=len(bad), unreadable=bad)
+    return V
