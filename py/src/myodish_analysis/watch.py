@@ -21,11 +21,39 @@ reanalyze:  'new' (default)  new and changed recordings; recordings with an anal
                              code (e.g. after an update: all of them, can take hours)
             'all'            every recording again
 
-Per recording (results_folder/<subfolder of raw_folder>/):
-  <name>_summary.csv, _contractions.csv(.gz), _pulses.csv(.gz) (all stimulus pulses, option pulseTable; like the
-  contractions: not written with contractions='none', compressed with compress=True), _parameters.csv, _info.csv
-  (version, all options, watcher settings),
-  _thresholds.csv (analysis windows), _labels.csv (_rockerFilter.csv); mda-gui <name>_info.csv opens them
+Result folders (folders=..., 2026-10-15): a quick overview instead of hundreds of files in one folder
+  'series' (default)   results_folder/<experiment>/<series>/<nn>/ for recordings with a number in the name
+                       (ABC000101/Setup1_ABC000101_3.mdd -> ABC000101/Setup1_ABC000101/03/; also its parallel recordings,
+                       e.g. Setup1_ABC000101_3_scheduleFile_..._daily6am.mdd), results_folder/<experiment>/<name>/ for
+                       recordings without a number (experiment = folder of the recording in raw_folder, series = name
+                       up to its number, see slice_register)
+  'flat'               results_folder/<experiment>/ (all files of an experiment in one folder, as before)
+  Per experiment (with trends, register, report; see Slice register, Trend images, Reports):
+    <experiment>/<experiment>_overview.png     all setups x channels at a glance (amplitude since the start, status,
+                                               last 24 h, red flags)
+    <experiment>/<experiment>_report.pdf       analysis report of all recordings of the experiment
+    <experiment>/<experiment>_slices.csv       slice register
+    <experiment>/<series>/<series>_ch<c>.png   course of each channel: since the start and the last 24 h
+    <experiment>/<series>/<series>_trends.xlsx the data of these images
+    <experiment>/<series>/<nn>/                the results of each recording (below) and its trend images
+  The readers (GUI, results browser, flags, slice register, trends_again) take both layouts. Results of earlier passes
+  in the other layout are moved when a recording is analysed again; reorganize(results_folder) (mda-watch RESULTS
+  --reorganize) moves all of them at once (folders='flat' back).
+Per recording (result_format='xlsx', default since 2026-10-14):
+  <name>.xlsx               sheets summary, trends, trendComments, channels, gaps, events, parameters, info (version,
+                            all options, watcher settings), thresholds (analysis windows), labels (rockerFilter): the
+                            tables described below; mda-gui <name>.xlsx opens the analysis
+  <name>_contractions.csv.gz, <name>_pulses.csv.gz (all stimulus pulses, option pulseTable), <name>_overview.csv.gz:
+                            the large tables (gzip; much faster to write and read than sheets, no row limit)
+  <name>_protocols.xlsx, <name>_protocols_contractions.csv.gz, _protocols_pulses.csv.gz   stimulation protocols
+  <name>_ch<c>.png          trend image per channel (trends=True; see Trend images; flat layout: in trends/)
+  result_format='csv': one file per table as before: <name>_summary.csv, _contractions.csv(.gz), _pulses.csv(.gz),
+  _parameters.csv, _info.csv, _thresholds.csv, _labels.csv (_rockerFilter.csv), _overview.csv, _events.csv, _gaps.csv,
+  _channels.csv, _trends.csv, _trendComments.csv, _protocols_*.csv (compress=True: contractions and pulses as
+  .csv.gz). The readers (GUI, results
+  browser, flags, slice register) take both formats; recordings are not analysed again because of the format
+  (reanalyze='all' converts the results). Tables (sheets or files):
+      contractions: not written with contractions='none'
       summary = one row per channel and time range: time bins of bin_minutes (default 60 min) without the periods of
       the stimulation protocols (include_protocols=False, default; a bin with a protocol gives several ranges).
       range = clock time of the start of the range, bin = clock time of the start of the bin, nComments / comments =
@@ -34,21 +62,20 @@ Per recording (results_folder/<subfolder of raw_folder>/):
       of thin_factor contractions, thin_mode='median'; extra beats and, with include_protocols=True, the contractions in
       the protocols are always kept) or 'none'; columns bin, sampledEvery (number of contractions per row) and
       sampleMode ('singleBeat' / 'median'). compress=True: <name>_contractions.csv.gz (gzip level 6).
-  <name>_overview.csv (overview_seconds=60, default; 0 = none): medians of all contractions per window of 1 min (file
+  overview (overview_seconds=60, default; 0 = none): medians of all contractions per window of 1 min (file
       time, split at the ranges), channel, beat type, rocker state and inclusion: window (clock time of its start),
       t_from, t_to, nBeats, beatsPerMinute and the median of every parameter. About 1/30 (0.5 Hz) to 1/60 (1 Hz) of the
-      rows of all contractions; opens in Excel.
-  <name>_protocols_*.csv (if the log file contains stimulation protocols, protocols=True)
+      rows of all contractions.
+  protocols (if the log file contains stimulation protocols, protocols=True)
       myodish_analysis(file, protocol='all', ...): every contraction in the protocols, summary per protocol, channel
-      and group, protocolResults (FFR, ST thresholds, refractory periods, PRP). compress=True: _protocols_contractions
-      and _protocols_pulses as .csv.gz.
-  <name>_events.csv (events=True): all entries of the log file (comments, stimulation and rocker settings, recording,
+      and group, protocolResults (FFR, ST thresholds, refractory periods, PRP).
+  events (events=True): all entries of the log file (comments, stimulation and rocker settings, recording,
       calibration, schedule, warnings) with category, clock time and time in the file.
-  <name>_gaps.csv (gaps=True): periods without force signal (signal_gaps): chamber taken out ('chamber out'), sensor
+  gaps (gaps=True): periods without force signal (signal_gaps): chamber taken out ('chamber out'), sensor
       board group or controller failures (>= 2 channels within 1 s), saturation, channels without a chamber ('no
       signal'); with clock times and the comments of the log file within 5 min of the start or end. The summary gets
       the columns noSignal_s (s without signal in the range) and nChamberOut (chambers taken out in the range).
-  <name>_channels.csv (gaps=True): one row per channel: recording, recordingStart, fileLength_s, calibration ('Calibration'
+  channels (gaps=True): one row per channel: recording, recordingStart, fileLength_s, calibration ('Calibration'
       entries of the log file, AU per mN; several values separated by ';'), status at the end of
       the recording ('beating', 'not beating' = no contraction in the last 30 min with signal outside the stimulation
       protocols, 'protocols only' = no time outside the protocols (not analysed), 'removed' = chamber taken out and
@@ -60,39 +87,94 @@ Per recording (results_folder/<subfolder of raw_folder>/):
       beating, fixed, frozen, ...).
   Labels per channel (metadata): <name>_labels.csv next to the .mdd file (saved by the GUI), if present.
 Slice register (register=True, gaps=True; after each pass with analysed recordings, see slice_register):
-  results_folder/<experiment>/<experiment>_slices.csv and results_folder/mda_slices.csv (all experiments): one row per
+  <experiment>/<experiment>_slices.csv and results_folder/mda_slices.csv (all experiments): one row per
   slice (channel of a setup from putting the slice in until it was taken out, the signal was lost or the data end)
   with start, end, reason of the start, end status, last contraction and amplitude, days in culture, chamber-out
   periods.
   A chamber-out period >= new_slice_hours (default 2 h), a recording without signal, a comment such as 'new slice' or
   another sliceID label start a new slice.
+results_folder/mda_flags.csv (report=True, 2026-10-14)
+  flags of the analysis report per recording and channel (file, analyzed, channel, label, status, nDetected,
+  capture_percent, flags, level, red, yellow, from, to = window to open for the channels to check) of all analysed
+  recordings (also of earlier passes); read by the results browser of the GUI (flags_table), the experiment reports
+  and the overview images.
 results_folder/mda_index.csv
   one row per recording: file (path relative to raw_folder), bytes, modified (time of the .mdd file, UTC), logBytes,
-  status (ok / error / running / noLog), version, implementation (MATLAB / Python), code (fingerprint of the core
-  functions), options, analyzed, seconds, nContractions, outputs, message. The same file is used by the MATLAB and the
-  Python watcher.
+  status (ok / error / running / incomplete / parallel / noLog), version, implementation (MATLAB / Python), code
+  (fingerprint of the core functions), options, analyzed, seconds, nContractions, outputs, message. The same file is
+  used by the MATLAB and the Python watcher.
 results_folder/reports/mda_report_<date>_<time>.txt
   report of a pass with analysed recordings: per channel contractions, capture (% of the stimuli followed by a
   contraction), extra beats (% of the detected contractions), mean amplitude in the first and last range (>= 10
   included contractions) and flags (no contractions, capture < flag_capture % (not with arrhythmic pacing, summary
   column arrhythmicPacing: 'arrhythmic pacing'), extra beats > flag_extra_beats %, amplitude change >
-  flag_amplitude_change %).
-results_folder/reports/mda_report_<date>_<time>.pdf (report=True, 2026-10-11)
-  analysis report of the same pass (report.py): overview of the recordings x channels with flags, the channels whose
-  analysis should be checked (red: inverted signal; noise suspected = uncertain >= flag_uncertain % and extra +
-  missed beats >= flag_irregular %; large extra beats; delay pulse -> onset > flag_delay s; stimulus frequency >
-  flag_stim_frequency Hz) and those with slice-quality flags (yellow: capture < flag_capture %, extra beats >
-  flag_extra_beats %, amplitude < flag_amplitude uN, amplitude change > flag_amplitude_change %, amplitude CV >
-  flag_amplitude_cv %; arrhythmic pacing: no capture and amplitude CV flags); channels with fewer than
-  flag_min_beats detected contractions are not flagged. Pages with traces of the red channels
-  and the commands that open them in the GUI (MyoDishAnalysisGUI(<name>_info.csv, 'channel', c, 'window', [a b]) /
-  mda-gui <name>_info.csv --channel c --window a b).
+  flag_amplitude_change %). It lists the PDF reports of the experiments with analysed recordings.
+results_folder/<experiment>/<experiment>_report.pdf (report=True, 2026-10-11; one report per experiment instead of one
+  per pass since 2026-10-15; mda_report_root.pdf for recordings directly in raw_folder)
+  analysis report of all analysed recordings of the experiment (report.py), made again after every pass with analysed
+  recordings of the experiment: first page the overview image of the experiment, then the recordings x channels with
+  flags (recordings of the last pass bold, earlier ones with the flags of mda_flags.csv: flags of earlier days stay
+  visible), the list of the channels to check and those with slice-quality flags, and pages with traces of the red
+  channels of the last pass. Flags: the channels whose analysis should be checked (red: inverted signal; noise
+  suspected = uncertain >= flag_uncertain % and extra + missed beats >= flag_irregular %; large extra beats; delay
+  pulse -> onset > flag_delay s; stimulus frequency > flag_stim_frequency Hz) and those with slice-quality flags
+  (yellow: capture < flag_capture %, extra beats > flag_extra_beats %, amplitude < flag_amplitude uN, amplitude change
+  > flag_amplitude_change %, amplitude CV > flag_amplitude_cv %; arrhythmic pacing: no capture and amplitude CV flags);
+  channels with fewer than flag_min_beats detected contractions are not flagged. The commands that open the red
+  channels in the GUI (MyoDishAnalysisGUI(<name>.xlsx, 'channel', c, 'window', [a b]) / mda-gui <name>.xlsx --channel
+  c --window a b).
 
-Recordings are skipped while they are written: files modified less than min_file_age_minutes ago (default 10),
-names starting with '.' (rsync temporary files), and recordings whose log file has no 'Recording stopped' entry
-yet (status 'running') unless unchanged for incomplete_after_hours (default 30 h, e.g. aborted recordings).
-Recordings without log file get the status 'noLog'; they are checked again in every pass. Errors are retried when the
-file, the version, the options or the code change, or with retry_errors=True.
+Trend images (trends=True, default; needs the overview; 2026-10-14), a quick look every morning:
+  <experiment>/<experiment>_overview.png   (2026-10-15) one row per setup (numbered series), one column per channel:
+      amplitude over the whole time course, background = status at the end of the data of the last slice (green
+      beating, red not beating, grey removed, orange signal lost), last 24 h yellow, new slices dashed, texts: last
+      amplitude, change in the last 24 h, % of the maximum of the slice; red frame = recordings with red flags of the
+      analysis report (number; also flags of earlier passes: mda_flags.csv)
+  <series>/<series>_ch<c>.png   (2026-10-15; flat layout: trends/) per setup and channel: left the whole time course
+      since the start of the series (all slices, slice changes dashed, the last 24 h yellow, recordings with red flags
+      as red bars), right the last 24 h (10-min line, protocols, comments numbered with a list); data in
+      <series>/<series>_trends.xlsx (sheets course, last24h, comments, slices; see slice_register)
+  <nn>/<name>_ch<c>.png      per recording and channel (with at least 20 included contractions): one panel per
+      parameter of trend_parameters (default amplitude, diastolicForce, TTP90, TTR90; any parameter or
+      beatsPerMinute), dots = values of the overview (median per minute of the included contractions), line = their
+      median per 10 min (5 min up to 3 h, 30 min beyond 30 h), clock time; stimulation protocols as light blue bands
+      with their name, periods without signal grey, comments of the log file as numbered purple lines with a list
+      below (comments during a protocol only at its start or end); title with the labels of the channel; first / last
+      2 h and change in %.
+  PNG, 150 dpi, 11 inch wide. The data of the images per recording: sheet trends (channel, window = clock time of
+  its start, t_from (s), nBeats = included contractions, the trend parameters (median per window; units as in the
+  sheet parameters), bin_from (s): line = median of the rows with the same bin_from; up to 8 x 1440 rows per day) and
+  sheet trendComments (channel, number as in the image, t_file, clockTime, text).
+  trends_again(results_folder, include=..., trend_parameters=[...]) (mda-watch RESULTS --trends-only) makes the
+  images and these sheets again from the result files, and the images of the series and experiments of these
+  recordings.
+Recordings are skipped while they are written or copied (2026-10-13): files modified less than min_file_age_minutes
+ago (default 10), names starting with '.' (rsync temporary files),
+  - status 'running': no 'Recording stopped' entry in the log file yet; analysed when the end of the data (start of
+    the recording in the log file + duration of the file from its size) is incomplete_after_hours (default 30 h) ago,
+    e.g. aborted recordings (without clock time in the log file, or with the clock of the recording computer more
+    than 1 h ahead: incomplete_after_hours after the last change of the files),
+  - status 'incomplete': the file is shorter than the recording in the log file ('Recording started' -> 'stopped')
+    by more than 10 s and more than incomplete_tolerance % (default 2 %; relative because the sample clock of the
+    controllers deviates from the clock of the computer by up to about 0.6 %, in one setup by 2 %; 24-h recordings:
+    99 % within 90 s; the 10 s protect short recordings, whose start and stop entries can be 1-2 s off). Checked
+    again in every pass; analysed (with a note in the message) when unchanged for incomplete_after_hours (copies that
+    are never completed). Also 'incomplete', until the file changes: empty files (no data) and files dated before 1990
+    (robocopy dates files to 1980 until their copy is finished),
+  - status 'parallel' (parallel='skip', default): parallel recordings (e.g. schedule files, snapshots) whose main
+    recording is in the same folder of raw_folder (its log file lists the file as 'started parallel recording', with
+    the same duration) and selected in the same pass (include / exclude / from_date): the data are in the
+    main file and its stimulation protocols in the main file's _protocols_* results. The message names the main file
+    and the time window in it. Parallel recordings whose main file is not selected (e.g. include='*schedule*': the
+    schedule files only) or missing, and all of them with parallel='analyse', are analysed; the message starts with
+    'parallel recording of <main file> (...)'. The slice register ignores parallel recordings whose main file has
+    results: no contraction or stimulus is counted twice (2026-10-14),
+  - status 'noLog': no log file, or an empty one; analysed when the log file appears or changes.
+Errors are retried when the file, the version, the options or the code change, or with retry_errors=True. The index
+is written after every analysed recording and once at the end of the pass.
+Lock file (2026-10-14): results_folder/mda_watch.lock exists while a pass runs; a second watcher on the same results
+folder (Python, MATLAB, another computer) skips its pass. It is refreshed after every recording and during long steps;
+a lock file that was not refreshed for 1 h (watcher crashed) is ignored.
 
 Schedule (schedule='...', 2026-10-12; runs until Ctrl+C, in a terminal or as a background process):
     'daily 10:00'           every day at 10:00 (first pass at the next 10:00)
@@ -102,26 +184,34 @@ Schedule (schedule='...', 2026-10-12; runs until Ctrl+C, in a terminal or as a b
 Passes that are missed (computer asleep, a pass longer than the interval) are not repeated: the next one follows at
 the next scheduled time.
 
-Options (keywords): schedule (see above), interval (hours between passes, 0 = one pass, default; older form of
-schedule='every <h> h'), reanalyze ('new' | 'outdated' | 'all'), retry_errors, from_date (only files modified on/after
-this date: 'yyyy-mm-dd', 'dd.mm.yyyy' or 'yymmdd'), filter (regular expression on the relative path), max_files (per
-pass), dry_run (list only), min_file_age_minutes, incomplete_after_hours, bin_minutes (60), include_protocols (False),
+Options (keywords): schedule (see above), reanalyze ('new' | 'outdated' | 'all'), retry_errors, from_date (only files
+modified on/after this date: 'yyyy-mm-dd', 'dd.mm.yyyy' or 'yymmdd'), include / exclude (wildcard patterns, a string
+or a list: * any characters, ? one character; a pattern without '/' is matched against every folder name and the file
+name of the path relative to raw_folder, with '/' against the whole path; e.g. include='ABC00*' = all folders starting
+with ABC00, include='*schedule*' = schedule files; 2026-10-13), case_sensitive (False: include and exclude ignore
+case), parallel ('skip' | 'analyse'), max_files (per pass), dry_run (list only), min_file_age_minutes,
+incomplete_after_hours (30), incomplete_tolerance (2 %), bin_minutes (60), include_protocols (False),
 protocol_margin_seconds (0: excluded after the end of a protocol as well), protocols (True), contractions ('all'),
-thin_factor (10), thin_mode ('nth'), compress (False), overview_seconds (60), events (True), gaps (True:
-<name>_gaps.csv, <name>_channels.csv, summary columns noSignal_s, nChamberOut), register (True: slice register),
-new_slice_hours (2), workers (1; > 1: recordings analysed in parallel processes), flag_capture (90), flag_extra_beats
-(10), flag_amplitude_change (30), report (True: PDF report), flag_uncertain (25), flag_irregular (15), flag_amplitude
+thin_factor (10), thin_mode ('nth'), result_format ('xlsx' | 'csv'), folders ('series' | 'flat'), compress (False;
+format 'csv'), overview_seconds (60), trends (True), trend_parameters, events (True), gaps (True: gaps and channels
+tables, summary columns noSignal_s, nChamberOut), register (True: slice register), new_slice_hours (2), workers (1;
+> 1: recordings analysed in parallel processes), flag_capture (90), flag_extra_beats (10), flag_amplitude_change (30),
+report (True: PDF report per experiment and mda_flags.csv), flag_uncertain (25), flag_irregular (15), flag_amplitude
 (75 uN), flag_amplitude_cv (30), flag_delay (0.15 s), flag_min_beats (50), flag_stim_frequency (10 Hz), quiet. All
 other keywords are analysis options of myodish_analysis (e.g. rockerFilter=True, rocker='stopped', threshold=300),
 applied to all recordings; settings=file: analysis options from a settings file (settings.py) or earlier results (the
 index records their values: after a change of the file the earlier recordings count as analysed with other options).
+Advanced: filter (regular expression on the path relative to raw_folder, as re.search; include / exclude are simpler;
+case_sensitive applies to it as well).
 
 Keep it running with schedule='daily 07:00' (mda-watch ... --schedule "daily 07:00"), or start one pass a day by the
 scheduler of the operating system (cron / launchd / Windows task scheduler), e.g.
     0 7 * * *  /path/to/venv/bin/mda-watch /data/myodish/raw /data/myodish/results --quiet
 
 TS 2026-10-08 (watcher settings in the info table 2026-10-09; pulse table 2026-10-10; schedule and reanalyze 'new'
-2026-10-12; arrhythmic pacing, flag_stim_frequency 2026-10-13)
+2026-10-12; arrhythmic pacing, flag_stim_frequency, include / exclude, completeness check, parallel recordings
+2026-10-13; results as .xlsx, trend images 2026-10-14; result folders per series, course and overview images, PDF report
+per experiment 2026-10-15)
 """
 from __future__ import annotations
 
@@ -138,28 +228,35 @@ import zlib
 import numpy as np
 import pandas as pd
 
-from ._matlab import mround
+from ._matlab import datenum_to_datetime, datetime_to_datenum, mround
 from .analysis import myodish_analysis
-from .log_entries import log_entries
+from .log_entries import log_entries, read_log_text, split_lines, str2double
 from .options import options as make_options
 from .labels import labels as make_labels
 from .parameters import LABEL_NAMES
 from .protocols import find_protocols
 from .read_mdd import read_header
 from .signal_gaps import signal_gaps
-from .slice_register import ALL_NAME as SLICES_NAME, slice_register
+from .slice_register import ALL_NAME as SLICES_NAME, result_folder, series_of, slice_register
 from .write_results import mda_version, write_results
 
 INDEX_NAME = "mda_index.csv"
 INDEX_COLUMNS = ["file", "bytes", "modified", "logBytes", "status", "version", "implementation", "code", "options",
                  "analyzed", "seconds", "nContractions", "outputs", "message"]
 LOCK_NAME = "mda_watch.lock"
-LOCK_HOURS = 12.0  # an older lock file is ignored (watcher crashed)
+LOCK_HOURS = 1.0  # a lock file not refreshed for this time is ignored (watcher crashed; refreshed after every
+#                  recording, 2026-10-14; before: 12 h after its creation)
+_LOCK_TOUCHED = [0.0]  # time of the last heartbeat of the lock file (_touch_lock)
+ROBOCOPY_TIME = _dt.datetime(1990, 1, 1).timestamp()  # earlier file times: copy not finished (robocopy: 1980)
 WATCH_DEFAULTS = dict(interval=0.0, schedule=None, reanalyze="new", retry_errors=False, from_date=None, filter=None,
+                      include=None, exclude=None, case_sensitive=False, parallel="skip",
                       max_files=None, dry_run=False, min_file_age_minutes=10.0, incomplete_after_hours=30.0,
+                      incomplete_tolerance=2.0,
                       bin_minutes=60.0, include_protocols=False, protocol_margin_seconds=0.0, protocols=True,
                       contractions="all", thin_factor=10, thin_mode="nth", compress=False, overview_seconds=60.0,
                       events=True, gaps=True, register=True, new_slice_hours=2.0, workers=1,
+                      result_format="xlsx", folders="series", trends=True,
+                      trend_parameters=("amplitude", "diastolicForce", "TTP90", "TTR90"),
                       flag_capture=90.0, flag_extra_beats=10.0, flag_amplitude_change=30.0, report=True,
                       flag_uncertain=25.0, flag_irregular=15.0, flag_amplitude=75.0, flag_amplitude_cv=30.0,
                       flag_delay=0.15, flag_min_beats=50, flag_stim_frequency=10.0, quiet=False)
@@ -179,6 +276,9 @@ def watch(raw_folder, results_folder, **kw):
     o = dict(WATCH_DEFAULTS, **wopts)
     if str(o["reanalyze"]).lower() not in ("outdated", "new", "all"):
         raise ValueError("reanalyze: 'new', 'outdated' or 'all' expected")
+    o["parallel"] = str(o["parallel"]).lower().replace("analyze", "analyse")
+    if o["parallel"] not in ("skip", "analyse"):
+        raise ValueError("parallel: 'skip' or 'analyse' expected")
     spec = parse_schedule(o["schedule"]) if o["schedule"] else None
     if spec is not None and o["interval"] and o["interval"] > 0:
         raise ValueError("watch: schedule and interval cannot be combined (interval=h is schedule='every <h> h')")
@@ -192,6 +292,7 @@ def watch(raw_folder, results_folder, **kw):
         raise ValueError("thin_factor: integer >= 1 expected")
     if float(o["overview_seconds"]) < 0:
         raise ValueError("overview_seconds: number >= 0 expected (0 = no overview)")
+    _check_result_options(o)
     if not os.path.isdir(raw_folder):
         raise FileNotFoundError(f"watch: folder not found: {raw_folder}")
     bad = [k for k in kw if k.lower() in _SET_BY_WATCHER]
@@ -438,19 +539,32 @@ def event_category(code, text):
 
 
 # ------------------------------------------------------------------------------------------------ one pass
+def _touch_lock(lock, force=False):
+    """heartbeat of the lock file of a pass (2026-10-14): rewritten (time) at most once a minute (force: now) during the
+    scan, after every recording and before long steps; a lock file not refreshed for LOCK_HOURS is ignored by the next
+    watcher (crashed). None = no lock (dry run)"""
+    if not lock or (not force and time.time() - _LOCK_TOUCHED[0] < 60):
+        return
+    _LOCK_TOUCHED[0] = time.time()
+    try:
+        with open(lock, "w") as fh:
+            fh.write(f"{os.getpid()} {_dt.datetime.now():{_TIME_FMT}}\n")
+    except OSError:
+        pass
+
+
 def _one_pass(raw, res, o, aopts):
     os.makedirs(res, exist_ok=True)
     lock = os.path.join(res, LOCK_NAME)
     if os.path.isfile(lock) and time.time() - os.path.getmtime(lock) < LOCK_HOURS * 3600:
-        msg = f"another watcher is running (lock file {lock}, younger than {LOCK_HOURS:g} h): pass skipped"
+        msg = f"another watcher is running (lock file {lock}, refreshed within the last hour): pass skipped"
         if not o["quiet"]:
             print(msg)
         return read_index(res), msg
     if not o["dry_run"]:
-        with open(lock, "w") as fh:
-            fh.write(f"{os.getpid()} {_dt.datetime.now():{_TIME_FMT}}\n")
+        _touch_lock(lock, force=True)
     try:
-        return _scan_and_analyse(raw, res, o, aopts)
+        return _scan_and_analyse(raw, res, o, aopts, None if o["dry_run"] else lock)
     finally:
         if not o["dry_run"] and os.path.isfile(lock):
             try:
@@ -460,44 +574,80 @@ def _one_pass(raw, res, o, aopts):
                       f"passes are skipped for {LOCK_HOURS:g} h")
 
 
-def _scan_and_analyse(raw, res, o, aopts):
+def _scan_and_analyse(raw, res, o, aopts, lock=None):
     X = read_index(res)
     pos = {f: i for i, f in enumerate(X["file"])}
     version, code = mda_version(), code_fingerprint()
     otext = options_text(aopts, o)
     from_date = parse_date(o["from_date"])
-    rx = re.compile(o["filter"], re.I) if o["filter"] else None
-    now = time.time()
-    todo, stale = [], []
-    for rel, f in _find_recordings(raw):
+    cs = bool(o["case_sensitive"])
+    rx = re.compile(o["filter"], 0 if cs else re.I) if o["filter"] else None
+    inc, exc = patterns(o["include"]), patterns(o["exclude"])
+
+    def selected(rel):
         if rx and not rx.search(rel):
+            return False
+        return not ((inc and not wildcard_match(rel, inc, cs)) or (exc and wildcard_match(rel, exc, cs)))
+
+    now = time.time()
+    found = _find_recordings(raw)
+    chosen = set()  # recordings selected in this pass (filter, include / exclude, from_date)
+    for rel, f in found:
+        if selected(rel) and (from_date is None or os.path.getmtime(f) >= from_date.timestamp()):
+            chosen.add(rel)
+    todo, stale = [], []
+    for rel, f in found:
+        if rel not in chosen:
             continue
+        _touch_lock(lock)  # heartbeat (at most once a minute)
         st = os.stat(f)
         logf = f[:-4] + "_log.log"
         logBytes = os.path.getsize(logf) if os.path.isfile(logf) else -1
         lastChange = max(st.st_mtime, os.path.getmtime(logf) if logBytes >= 0 else 0)
-        if from_date is not None and st.st_mtime < from_date.timestamp():
-            continue
         if now - lastChange < 60 * float(o["min_file_age_minutes"]):
             continue  # still written / copied
         modified = _dt.datetime.fromtimestamp(st.st_mtime, _dt.timezone.utc).strftime(_TIME_FMT) + " UTC"
         r = X.iloc[pos[rel]] if rel in pos else None
-        why = _why(r, st.st_size, modified, logBytes, version, code, otext, o)
+        why = _why(r, st.st_size, modified, logBytes, version, code, otext, o, chosen)
         if why:
             todo.append(dict(rel=rel, f=f, bytes=st.st_size, modified=modified, logBytes=logBytes,
-                             lastChange=lastChange, why=why))
+                             lastChange=lastChange, mtime=st.st_mtime, why=why))
         elif r is not None and r["status"] == "ok" and _outdated(r, version, code, otext):
             stale.append((_outdated(r, version, code, otext), r["version"]))  # kept (reanalyze 'new')
+    # parallel recordings (2026-10-14): skipped (parallel='skip') if their main file is selected in this pass, too
+    # (its results contain the data); otherwise analysed and marked in the message (slice register: not counted twice)
+    parallel, keep, cache = [], [], {}
+    for t in todo:
+        _touch_lock(lock)
+        M = None
+        if t["logBytes"] > 0 and t["bytes"] > 0:
+            try:
+                D = log_recordings(t["f"][:-4] + "_log.log", t["f"])
+                M = main_recording(t["f"], D, cache) if D["parallel"] else None
+            except Exception:  # noqa: BLE001 - analysed as usual
+                M = None
+        if M is not None:
+            t["main"] = (os.path.relpath(M[0], raw).replace(os.sep, "/"), M[1], M[2])
+            if o["parallel"] == "skip" and t["main"][0] in chosen:
+                parallel.append(t)
+                continue
+        keep.append(t)
+    todo = keep
     if o["max_files"] is not None:
         todo = todo[:int(o["max_files"])]
     notice = update_notice(stale, version, raw, res)
     if not o["quiet"]:
-        print(f"{_dt.datetime.now():{_TIME_FMT}}  {raw}: {len(todo)} recording(s) to analyse")
+        nchk = sum(1 for t in todo if t["why"].startswith("check"))
+        print(f"{_dt.datetime.now():{_TIME_FMT}}  {raw}: {len(todo) - nchk} recording(s) to analyse"
+              + (f", {nchk} to check again (running / incomplete)" if nchk else "")
+              + (f", {len(parallel)} parallel recording(s) skipped (main file selected)" if parallel else ""))
         for ln in notice:
             print("NOTE: " + ln)
     if o["dry_run"]:
         for t in todo:
             print(f"  {t['rel']}  ({t['why']})")
+        for t in parallel:
+            print(f"  {t['rel']}  (parallel recording of {t['main'][0]}: skipped)")
         return X, "\n".join(notice)
     jobs = [(t, res, o, aopts, version, code, otext, now) for t in todo]
     blocks = []
@@ -518,8 +668,17 @@ def _scan_and_analyse(raw, res, o, aopts):
         else:
             pos[rel] = len(X)
             X = pd.DataFrame(X.to_dict("records") + [row], columns=INDEX_COLUMNS)
-        _write_index(res, X)
+        if row["status"] in ("ok", "error"):  # the other states are written once at the end of the pass
+            _write_index(res, X)
+        _touch_lock(lock)  # heartbeat after every recording (2026-10-14)
 
+    for t in parallel:  # index rows without analysis
+        m, a, b = t["main"]
+        row = _new_row(t, version, code, otext)
+        row.update(status="parallel", seconds=0.0,
+                   message=f"parallel recording of {m} ({_window_text(a, b)} of the main file): not analysed "
+                           f"(parallel='skip'), its data and stimulation protocols are in the results of the main file")
+        store(row, "")
     workers = int(o["workers"] or 1)
     if workers > 1 and len(jobs) > 1:
         import multiprocessing
@@ -532,14 +691,26 @@ def _scan_and_analyse(raw, res, o, aopts):
     else:
         for j in jobs:
             store(*_process(j))
-    if jobs:  # index in the order of the files (parallel processing finishes in any order)
+    if jobs or parallel:  # index in the order of the files (parallel processing finishes in any order)
         X = X.sort_values("file", kind="stable").reset_index(drop=True)
         _write_index(res, X)
-    reg = ""
-    if jobs and o["register"] and o["gaps"]:  # slice register of the experiments with analysed recordings
-        exps = sorted({t["rel"].rsplit("/", 1)[0] if "/" in t["rel"] else "" for t in todo})
+    fl = _report_flag_options(o)
+    recs, flag_msg = [], ""
+    if done and o["report"]:  # flags of the analysis report -> mda_flags.csv (2026-10-14), before the register (red
+        _touch_lock(lock)     # flags in its images; 2026-10-15)
         try:
-            R = slice_register(res, experiments=exps, new_slice_hours=float(o["new_slice_hours"]))
+            recs = _report_records(raw, res, sorted(done, key=lambda r: r["file"]), fl)
+            _update_flags(res, _record_flags(recs), done)
+        except Exception as ex:  # noqa: BLE001 - the report must not stop the watcher
+            recs, flag_msg = [], _clean(f"flags: {type(ex).__name__}: {ex}") + "\n"
+    exps = sorted({t["rel"].rsplit("/", 1)[0] if "/" in t["rel"] else "" for t in todo})
+    reg = ""
+    if jobs and o["register"] and o["gaps"]:  # slice register and images of the series of these experiments
+        _touch_lock(lock)
+        try:
+            R = slice_register(res, experiments=exps, new_slice_hours=float(o["new_slice_hours"]),
+                               trends=bool(o["trends"]) and float(o["overview_seconds"]) > 0,
+                               trend_parameters=o["trend_parameters"])
             reg = f"slice register: {len(R)} slices in {len(exps)} experiment(s), {SLICES_NAME}\n"
         except Exception as ex:  # noqa: BLE001
             reg = _clean(f"slice register: {type(ex).__name__}: {ex}") + "\n"
@@ -553,14 +724,22 @@ def _scan_and_analyse(raw, res, o, aopts):
         d = os.path.join(res, "reports")
         os.makedirs(d, exist_ok=True)
         pdf = ""
-        if o["report"]:  # analysis report (PDF, 2026-10-11)
-            pdf = os.path.join(d, f"mda_report_{now_:%Y-%m-%d_%H%M%S}.pdf")
-            try:
-                n = _pdf_report(pdf, raw, res, sorted(done, key=lambda r: r["file"]), o, version, otext, now_, notice)
-                pdf = f"PDF report: {pdf}" + (f" ({n} channel(s) to check)" if n else "") + "\n"
-            except Exception as ex:  # noqa: BLE001 - the report must not stop the watcher
-                pdf = _clean(f"PDF report: {type(ex).__name__}: {ex}") + "\n"
-        report = head + "\n".join(blocks) + ("\n" + reg if reg else "") + ("\n" + pdf if pdf else "")
+        if o["report"] and recs:  # PDF report per experiment (2026-10-15)
+            lines = []
+            for e in exps:
+                new = [r for r in recs if r["name"].rpartition("/")[0] == e]
+                if not new:
+                    continue
+                _touch_lock(lock)
+                try:
+                    f, n = _experiment_report(raw, res, e, new, fl, version, otext, now_, notice)
+                    if f:
+                        lines.append(f"PDF report: {f}" + (f" ({n} channel(s) to check)" if n else ""))
+                except Exception as ex:  # noqa: BLE001 - the report must not stop the watcher
+                    lines.append(_clean(f"PDF report {e}: {type(ex).__name__}: {ex}"))
+            pdf = "".join(ln + "\n" for ln in lines)
+        report = (head + "\n".join(blocks) + ("\n" + reg if reg else "") + ("\n" + flag_msg if flag_msg else "")
+                  + ("\n" + pdf if pdf else ""))
         with open(os.path.join(d, f"mda_report_{now_:%Y-%m-%d_%H%M%S}.txt"), "w", encoding="utf-8") as fh:
             fh.write(report)
         if not o["quiet"]:
@@ -570,44 +749,245 @@ def _scan_and_analyse(raw, res, o, aopts):
     return X, report
 
 
-def _pdf_report(out, raw, res, rows, o, version, otext, now_, notice=()):
-    """analysis report (report.py) of the recordings of this pass, from their result files; returns the number of
-    channels to check."""
-    from .report import report_flags, write_report
+def _report_flag_options(o):
+    return dict(uncertain=float(o["flag_uncertain"]), irregular=float(o["flag_irregular"]),
+                extra=float(o["flag_extra_beats"]), capture=float(o["flag_capture"]),
+                amplitude_change=float(o["flag_amplitude_change"]), amplitude=float(o["flag_amplitude"]),
+                amplitude_cv=float(o["flag_amplitude_cv"]), delay=float(o["flag_delay"]),
+                min_beats=float(o["flag_min_beats"]), stim_frequency=float(o["flag_stim_frequency"]))
+
+
+def _report_records(raw, res, rows, fl):
+    """recordings of this pass for the reports (2026-10-15): flags R per channel (report_flags, with the window of the
+    channels to check), contractions C only for recordings with channels to check (detail pages; memory of passes
+    with thousands of recordings), pulses read later (P_file)"""
+    from .report import report_flags, report_window
     ccols = {"channel", "t_peak", "beatType", "uncertain", "included", "amplitude", "stimToOnset"}
-    fl = dict(uncertain=float(o["flag_uncertain"]), irregular=float(o["flag_irregular"]),
-              extra=float(o["flag_extra_beats"]), capture=float(o["flag_capture"]),
-              amplitude_change=float(o["flag_amplitude_change"]), amplitude=float(o["flag_amplitude"]),
-              amplitude_cv=float(o["flag_amplitude_cv"]), delay=float(o["flag_delay"]),
-              min_beats=float(o["flag_min_beats"]), stim_frequency=float(o["flag_stim_frequency"]))
     recs = []
     for row in rows:
-        rel = row["file"]
+        rel = str(row["file"]).replace("\\", "/")
         n = os.path.splitext(os.path.basename(rel))[0]
-        d = os.path.join(res, os.path.dirname(rel))
+        d, _ = results_of(res, rel)
         rec = dict(name=rel, file=os.path.join(raw, rel), open=os.path.join(d, n + "_info.csv"), S=None, C=None,
-                   P=None, status=None, notes=[])
+                   P=None, status=None, notes=[], new=True, analyzed=row["analyzed"])
         if row["status"] != "ok":
             rec["notes"] = [_clean(f"error: {row['message']}")]
             recs.append(rec)
             continue
-        rec["S"] = _read_result(os.path.join(d, n + "_summary.csv"))
+        rec["S"] = result_table(d, n, "summary")
         C = _read_result(os.path.join(d, n + "_contractions.csv"), usecols=lambda c: c in ccols)
-        CH = _read_result(os.path.join(d, n + "_channels.csv"), usecols=lambda c: c in ("channel", "status"))
+        CH = result_table(d, n, "channels", usecols=lambda c: c in ("channel", "status"))
+        if os.path.isfile(os.path.join(d, n + ".xlsx")):  # results as .xlsx (2026-10-14)
+            rec["open"] = os.path.join(d, n + ".xlsx")
         if CH is not None:
             rec["status"] = {int(c): str(st) for c, st in zip(CH["channel"], CH["status"])}
         rec["notes"] = [m for m in str(row["message"]).split(" | ") if m.startswith("protocols:")]
-        # flags now; contractions kept and pulses read (detail pages) only for recordings with channels to check:
-        # memory of passes with thousands of recordings
-        rec["R"] = report_flags(rec["S"], C, rec["status"], **fl)
-        rec["C"] = C if (rec["R"]["level"] == "check").any() else None
+        R = report_flags(rec["S"], C, rec["status"], **fl)
+        R["window_from"], R["window_to"] = math.nan, math.nan
+        for i in np.flatnonzero((R["level"] == "check").to_numpy()):
+            R.at[i, "window_from"], R.at[i, "window_to"] = report_window(C, int(R.at[i, "channel"]), R.at[i, "flags"])
+        rec["R"] = R
+        rec["C"] = C if (R["level"] == "check").any() else None
         rec["P_file"] = os.path.join(d, n + "_pulses.csv")
         recs.append(rec)
+    return recs
+
+
+def _flags_frame(Fr):
+    """flags of one recording for write_report from rows of mda_flags.csv (windows of the channels to check)"""
+    D = pd.DataFrame({c: pd.to_numeric(Fr[c], errors="coerce").to_numpy(float)
+                      for c in ("channel", "nDetected", "capture_percent")})
+    for c in ("label", "status", "flags", "level", "red", "yellow"):
+        D[c] = Fr[c].fillna("").astype(str).to_numpy()
+    D["window_from"] = pd.to_numeric(Fr["from"], errors="coerce").to_numpy(float)
+    D["window_to"] = pd.to_numeric(Fr["to"], errors="coerce").to_numpy(float)
+    return D
+
+
+def _record_flags(recs):
+    """flags of the recordings (column recording) for mda_flags.csv"""
+    parts = []
+    for r in recs:
+        if r.get("R") is not None and len(r["R"]):
+            R = r["R"].copy()
+            R.insert(0, "recording", r["name"])
+            parts.append(R)
+    return pd.concat(parts, ignore_index=True) if parts else None
+
+
+def _experiment_report(raw, res, e, new, fl, version, otext, now_, notice=()):
+    """PDF report of an experiment (2026-10-15): <experiment>/<name>_report.pdf (mda_report_root.pdf for recordings
+    directly in the raw folder) with all analysed recordings of the experiment (index), the recordings of this pass
+    (new) marked new (bold) with detail pages; the others with the flags of mda_flags.csv (computed from their result
+    files where missing); first page: the overview image of the experiment (slice register). Returns (file, channels
+    to check in the recordings of this pass); file '' if the experiment has no analysed recordings."""
+    from .report import write_report
+    if e:
+        folder = _abs_folder(res, e)
+        pdf = os.path.join(folder, e.rsplit("/", 1)[-1] + "_report.pdf")
+        png = os.path.join(folder, e.rsplit("/", 1)[-1] + "_overview.png")
+        en = e
+    else:
+        pdf, png = os.path.join(res, "mda_report_root.pdf"), os.path.join(res, "mda_overview_root.png")
+        en = "recordings in the raw folder"
+    X = read_index(res)
+    files = [str(f).replace("\\", "/") for f in X["file"]]
+    sel = [i for i, f in enumerate(files) if f.rpartition("/")[0] == e and X["status"].iloc[i] in ("ok", "error")]
+    F = read_flags(res)
+    by_name = {r["name"]: r for r in new}
+    recs, add = [], []
+    for i in sel:
+        rel = files[i]
+        if rel in by_name:
+            recs.append(by_name[rel])
+            continue
+        x = X.iloc[i]
+        rec = dict(name=rel, file=os.path.join(raw, rel), open="", S=None, C=None, P=None, status=None, notes=[],
+                   new=False, analyzed=str(x["analyzed"]))
+        if x["status"] != "ok":
+            rec["notes"] = [_clean(f"error: {x['message']}")]
+            recs.append(rec)
+            continue
+        d, _ = results_of(res, rel)
+        n = os.path.splitext(os.path.basename(rel))[0]
+        rec["open"] = os.path.join(d, n + (".xlsx" if os.path.isfile(os.path.join(d, n + ".xlsx")) else "_info.csv"))
+        Fr = F[(F["file"] == x["file"]) & (F["analyzed"].astype(str) == str(x["analyzed"]))]
+        if not len(Fr):  # flags missing (older watcher versions): from the result files
+            try:
+                Fr = flags_of(res, x["file"], str(x["analyzed"]))
+                add.append(Fr)
+            except Exception:  # noqa: BLE001 - shown without flags
+                Fr = F.iloc[0:0]
+        rec["R"] = _flags_frame(Fr)
+        rec["notes"] = [m for m in str(x["message"]).split(" | ") if m.startswith("protocols:")]
+        recs.append(rec)
+    add = [a for a in add if len(a)]
+    if add:
+        A = pd.concat(add, ignore_index=True)
+        _write_flags(res, pd.concat([F[~F["file"].isin(set(A["file"]))], A], ignore_index=True))
+    if not recs:
+        return "", 0
+
+    def key(r):  # order: series, number, name
+        n = os.path.splitext(os.path.basename(r["name"]))[0]
+        sr, num = series_of(n)
+        return sr, math.inf if math.isnan(num) else num, n
+    recs.sort(key=key)
     sub = [f"raw folder: {raw}", f"results: {res}",
-           f"MyoDishAnalysis {version} (Python) watcher, {now_:{_TIME_FMT}}: {len(rows)} recording(s) analysed in "
-           f"this pass; options: {otext}"]
-    R = write_report(recs, out, title="MyoDishAnalysis watcher report", subtitle=sub, notice=notice, **fl)
-    return int((R["level"] == "check").sum()) if len(R) else 0
+           f"MyoDishAnalysis {version} (Python) watcher, {now_:{_TIME_FMT}}: {len(recs)} recording(s) of {en}, "
+           f"{sum(1 for r in recs if r['new'])} analysed in this pass (bold); options: {otext}"]
+    R = write_report(recs, pdf, title=f"MyoDishAnalysis report: {en}", subtitle=sub, notice=notice,
+                     image=png if os.path.isfile(png) else None, **fl)
+    n = int(((R["level"] == "check") & R["recording"].isin(set(by_name))).sum()) if len(R) else 0
+    return pdf, n
+
+
+# ------------------------------------------------------------------------------------------------ flags table
+FLAGS_NAME = "mda_flags.csv"
+FLAG_COLUMNS = ["file", "analyzed", "channel", "label", "status", "nDetected", "capture_percent", "flags", "level",
+                "red", "yellow", "from", "to"]
+_FLAG_TEXT = ("file", "analyzed", "label", "status", "flags", "level", "red", "yellow")
+
+
+def read_flags(results_folder):
+    """results_folder/mda_flags.csv (flags of the analysis report per recording and channel, written by the watcher;
+    2026-10-14); empty table with FLAG_COLUMNS if missing."""
+    f = os.path.join(results_folder, FLAGS_NAME)
+    if not os.path.isfile(f):
+        return pd.DataFrame(columns=FLAG_COLUMNS)
+    T = pd.read_csv(f, dtype={c: str for c in _FLAG_TEXT}, keep_default_na=False, na_values={"channel": [""],
+                    "nDetected": [""], "capture_percent": [""], "from": [""], "to": [""]})
+    for c in FLAG_COLUMNS:
+        if c not in T.columns:
+            T[c] = "" if c in _FLAG_TEXT else math.nan
+    return T[FLAG_COLUMNS]
+
+
+def _flag_rows(R, analyzed):
+    """rows of mda_flags.csv from flags of write_report (column recording = file); analyzed: {file: time}"""
+    if R is None or not len(R):
+        return pd.DataFrame(columns=FLAG_COLUMNS)
+    T = pd.DataFrame({"file": R["recording"].astype(str), "channel": R["channel"].astype(int)})
+    T["analyzed"] = T["file"].map(lambda f: str(analyzed.get(f, "")))
+    for c in ("label", "status", "flags", "level", "red", "yellow"):
+        T[c] = R[c].fillna("").astype(str).to_numpy()
+    T["nDetected"] = R["nDetected"].to_numpy()
+    T["capture_percent"] = np.round(R["capture_percent"].to_numpy(float), 1)
+    T["from"] = R["window_from"].to_numpy(float) if "window_from" in R.columns else math.nan
+    T["to"] = R["window_to"].to_numpy(float) if "window_to" in R.columns else math.nan
+    return T[FLAG_COLUMNS]
+
+
+def _write_flags(results_folder, T):
+    f = os.path.join(results_folder, FLAGS_NAME)
+    tmp = f + ".tmp"
+    T = T.sort_values(["file", "channel"], kind="stable")
+    T[FLAG_COLUMNS].to_csv(tmp, index=False)
+    os.replace(tmp, f)
+
+
+def _update_flags(res, R, rows):
+    """mda_flags.csv: rows of the recordings of this pass replaced (also removed: error now)"""
+    files = {r["file"] for r in rows}
+    old = read_flags(res)
+    old = old[~old["file"].isin(files)]
+    new = _flag_rows(R[R["recording"].isin(files)] if R is not None and len(R) else None,
+                     {r["file"]: r["analyzed"] for r in rows})
+    _write_flags(res, pd.concat([old, new], ignore_index=True) if len(old) else new)
+
+
+def flags_of(results_folder, rel, analyzed="", **flags):
+    """flags of one analysed recording (path relative to the raw folder) from its result files (summary, contractions,
+    channels): rows of mda_flags.csv, window (from, to) for the channels to check (report_window, 20 s)"""
+    from .report import report_flags, report_window
+    n = os.path.splitext(os.path.basename(rel))[0]
+    d, _ = results_of(results_folder, rel)
+    S = result_table(d, n, "summary")
+    if S is None:
+        return pd.DataFrame(columns=FLAG_COLUMNS)
+    C = _read_result(os.path.join(d, n + "_contractions.csv"), usecols=lambda c: c in {
+        "channel", "t_peak", "beatType", "uncertain", "included", "amplitude", "stimToOnset"})
+    CH = result_table(d, n, "channels", usecols=lambda c: c in ("channel", "status"))
+    st = {int(c): str(s) for c, s in zip(CH["channel"], CH["status"])} if CH is not None else None
+    R = report_flags(S, C, st, **flags)
+    R.insert(0, "recording", rel)
+    R["window_from"], R["window_to"] = math.nan, math.nan
+    for i in np.flatnonzero((R["level"] == "check").to_numpy()):
+        R.at[i, "window_from"], R.at[i, "window_to"] = report_window(C, int(R.at[i, "channel"]), R.at[i, "flags"])
+    return _flag_rows(R, {rel: analyzed})
+
+
+def flags_table(results_folder, compute=False, progress=None, **flags):
+    """flags of the analysis report per recording and channel for the results browser (2026-10-14): mda_flags.csv
+    (written by the watcher) and the index; recordings with the status ok whose flags are missing or older than their
+    analysis are computed from their result files if compute=True (and written to mda_flags.csv unless a watcher is
+    running). Returns (index, flags of the current analyses, missing = files without current flags). progress:
+    f(k, n)."""
+    X = read_index(results_folder)
+    T = read_flags(results_folder)
+    have = {(f, a) for f, a in zip(T["file"], T["analyzed"])}
+    ok = X[X["status"] == "ok"]
+    missing = [f for f, a in zip(ok["file"], ok["analyzed"]) if (f, str(a)) not in have]
+    if compute and missing:
+        parts = [T[~T["file"].isin(set(missing))]]
+        ana = dict(zip(ok["file"], ok["analyzed"]))
+        for k, f in enumerate(missing):
+            if progress is not None:
+                progress(k, len(missing))
+            try:
+                parts.append(flags_of(results_folder, f, str(ana[f]), **flags))
+            except Exception:  # noqa: BLE001 - shown without flags
+                pass
+        T = pd.concat([p for p in parts if len(p)], ignore_index=True) if any(len(p) for p in parts) else T.iloc[0:0]
+        lock = os.path.join(results_folder, LOCK_NAME)
+        if not (os.path.isfile(lock) and time.time() - os.path.getmtime(lock) < LOCK_HOURS * 3600):
+            _write_flags(results_folder, T)
+        have = {(f, a) for f, a in zip(T["file"], T["analyzed"])}
+        missing = [f for f, a in zip(ok["file"], ok["analyzed"]) if (f, str(a)) not in have]
+    cur = {(f, str(a)) for f, a in zip(ok["file"], ok["analyzed"])}  # only the flags of the current analyses
+    keep = np.array([(f, str(a)) in cur for f, a in zip(T["file"], T["analyzed"])], dtype=bool)
+    T = T[keep].reset_index(drop=True)  # (a list would select columns if empty)
+    return X, T, missing
 
 
 def _read_result(f, **kw):
@@ -618,29 +998,117 @@ def _read_result(f, **kw):
     return None
 
 
+def result_table(folder, name, table, usecols=None):
+    """table of the results of recording name in folder: sheet of <name>.xlsx (result_format 'xlsx', 2026-10-14) or
+    <name>_<table>.csv(.gz) (None if neither exists); usecols: as pandas (callable or list)"""
+    x = os.path.join(folder, name + ".xlsx")
+    if os.path.isfile(x):
+        try:
+            with pd.ExcelFile(x) as xl:
+                if table in xl.sheet_names:
+                    T = xl.parse(table)
+                    if usecols is not None:
+                        T = T[[c for c in T.columns if (usecols(c) if callable(usecols) else c in usecols)]]
+                    return T
+        except Exception:  # noqa: BLE001 - not readable: the csv files
+            pass
+    return _read_result(os.path.join(folder, f"{name}_{table}.csv"), usecols=usecols)
+
+
+def _new_row(t, version, code, otext):
+    return dict(file=t["rel"], bytes=t["bytes"], modified=t["modified"], logBytes=t["logBytes"], status="",
+                version=version, implementation="Python", code=code, options=otext,
+                analyzed=_dt.datetime.now().strftime(_TIME_FMT), seconds=math.nan, nContractions=math.nan, outputs="",
+                message="")
+
+
 def _process(job):
     """header check and analysis of one recording; returns (index row, report block). Runs in a worker process too."""
     t, res, o, aopts, version, code, otext, now = job
-    row = dict(file=t["rel"], bytes=t["bytes"], modified=t["modified"], logBytes=t["logBytes"], status="",
-               version=version, implementation="Python", code=code, options=otext,
-               analyzed=_dt.datetime.now().strftime(_TIME_FMT), seconds=math.nan, nContractions=math.nan, outputs="",
-               message="")
+    row = _new_row(t, version, code, otext)
     t0 = time.time()
     block = ""
-    if t["logBytes"] < 0:
-        row.update(status="noLog", message="no log file <name>_log.log")
+    status, note = precheck(t)
+    if status:
+        row.update(status=status, message=note)
     else:
         try:
             hopts = make_options(**{k: v for k, v in aopts.items() if k.lower() not in _NOT_IN_OPTIONS})
             H = read_header(t["f"], hopts)
-            if H.recordingStopped is False and now - t["lastChange"] < 3600 * float(o["incomplete_after_hours"]):
-                row.update(status="running", message="no 'Recording stopped' in the log file yet")
+            status, note = completeness(t, H, o, now)
+            if status:
+                row.update(status=status, message=note)
             else:
                 row, block = _analyse(t["f"], t["rel"], H, res, row, o, aopts)
+                if note:
+                    row["message"] = note + (" | " + row["message"] if row["message"] else "")
         except Exception as ex:  # noqa: BLE001 - one bad recording must not stop the pass
             row.update(status="error", message=_clean(f"{type(ex).__name__}: {ex}"))
+    if t.get("main") and row["status"] in ("ok", "error"):  # analysed parallel recording: marked (2026-10-14)
+        m, a, b = t["main"]
+        why = "parallel='analyse'" if o["parallel"] != "skip" else "main file not selected"
+        mark = f"parallel recording of {m} ({_window_text(a, b)} of the main file): analysed ({why})"
+        row["message"] = mark + (" | " + row["message"] if row["message"] else "")
     row["seconds"] = round(time.time() - t0, 1)
     return row, block
+
+
+def parallel_of(message):
+    """main file (path relative to the raw folder) of a parallel recording, from the message of its index row
+    ('parallel recording of <main> (...'), or None"""
+    m = re.match(r"parallel recording of (.+?\.mdd) \(", str(message), re.I)
+    return m.group(1) if m else None
+
+
+def precheck(t):
+    """checks without reading the file (2026-10-13): ('incomplete', message) for an empty file or a file dated before
+    1990 (robocopy marks unfinished copies with 1980), ('noLog', message) without log file or with an empty one;
+    ('', '') otherwise. These states end when the file or the log file changes (no time limit)."""
+    if t["bytes"] == 0:
+        return "incomplete", "empty file (0 bytes): copy not finished"
+    if t["mtime"] < ROBOCOPY_TIME:  # until the copy is finished (robocopy then sets the time of the source file)
+        return "incomplete", "file time before 1990: copy not finished (robocopy dates unfinished copies to 1980)"
+    if t["logBytes"] < 0:
+        return "noLog", "no log file <name>_log.log"
+    if t["logBytes"] == 0:
+        return "noLog", "log file <name>_log.log empty: copy not finished"
+    return "", ""
+
+
+def completeness(t, H, o, now):
+    """('running' | 'incomplete', message) while a recording is written or copied; ('', note) if it is analysed (note:
+    analysed although incomplete). t: rel, f, lastChange (s since 1970); H: read_header (2026-10-13).
+      no data (< 1 s):            'incomplete' until the file changes
+      no 'Recording stopped':     'running' until the end of the data (start in the log file + duration of the file)
+                                  is incomplete_after_hours ago (clock time unknown or > 1 h in the future: the last
+                                  change of the files instead)
+      file shorter than the log:  'incomplete' if more than max(10 s, incomplete_tolerance %) is missing; analysed
+                                  (with a note) when unchanged for incomplete_after_hours"""
+    hours = float(o["incomplete_after_hours"])
+    if H.totalSeconds < 1:
+        return "incomplete", "no data in the file (< 1 s): copy not finished"
+    if H.recordingStopped is False:
+        start = getattr(H, "recordingStart", math.nan)
+        nowDn = datetime_to_datenum(_dt.datetime.fromtimestamp(now))
+        end = start + H.totalSeconds / 86400.0 if isinstance(start, (int, float)) and math.isfinite(start) else math.nan
+        if math.isfinite(end) and end <= nowDn + 1 / 24.0:
+            age = (nowDn - end) * 24.0
+            msg = f"no 'Recording stopped' in the log file yet (data until {datenum_to_datetime(end):%Y-%m-%d %H:%M})"
+        else:  # no clock time, or the clock of the recording computer is ahead
+            age = (now - t["lastChange"]) / 3600.0
+            msg = "no 'Recording stopped' in the log file yet"
+        return ("running", msg) if age < hours else ("", "")
+    if H.recordingStopped is True:
+        d = log_recordings(t["f"][:-4] + "_log.log", t["f"])["seconds"]
+        if math.isfinite(d) and d > 0:
+            miss = d - H.totalSeconds
+            if miss > max(10.0, float(o["incomplete_tolerance"]) / 100.0 * d):
+                msg = (f"file {H.totalSeconds:.0f} s, recording in the log file {d:.0f} s ({100.0 * miss / d:.1f} % "
+                       f"missing): copy incomplete")
+                if now - t["lastChange"] >= 3600 * hours:
+                    return "", f"{msg}; analysed after {hours:g} h without change"
+                return "incomplete", msg
+    return "", ""
 
 
 def _outdated(r, version, code, otext):
@@ -654,8 +1122,8 @@ def _outdated(r, version, code, otext):
     return ""
 
 
-def _why(r, nbytes, modified, logBytes, version, code, otext, o):
-    """reason to analyse the recording ('' = nothing to do)."""
+def _why(r, nbytes, modified, logBytes, version, code, otext, o, present=None):
+    """reason to analyse the recording ('' = nothing to do). present: recordings selected in this pass."""
     if r is None:
         return "new"
     old = _parse_time(r["modified"])
@@ -663,8 +1131,13 @@ def _why(r, nbytes, modified, logBytes, version, code, otext, o):
             or abs((old - _parse_time(modified)).total_seconds()) > 2):
         return "changed"
     status = r["status"]
-    if status in ("running", "noLog"):
+    if status in ("running", "incomplete"):  # time limits; 'noLog': analysed when the log file appears (changed)
         return "check " + status
+    if status == "parallel":  # main file named in the message (2026-10-13)
+        if o["parallel"] != "skip":
+            return "parallel='analyse'"
+        m = parallel_of(r["message"])
+        return "" if (m and (present is None or m in present)) else "check parallel (main file not selected)"
     outdated = _outdated(r, version, code, otext)
     mode = str(o["reanalyze"]).lower()
     if status == "error":  # no results to keep: retried when the version, the options or the core code change
@@ -682,41 +1155,41 @@ def _why(r, nbytes, modified, logBytes, version, code, otext, o):
 def _analyse(f, rel, H, res, row, o, aopts):
     """the analyses of one recording (only calls of the MyoDishAnalysis functions)."""
     n = os.path.splitext(os.path.basename(f))[0]
-    outDir = os.path.join(res, os.path.dirname(rel))
-    os.makedirs(outDir, exist_ok=True)
+    outDir = _abs_folder(res, result_folder(rel, o["folders"]))  # series layout (2026-10-15) or flat
+    oldDir = _abs_folder(res, result_folder(rel, "flat" if o["folders"] == "series" else "series"))
+    if os.path.normpath(oldDir) != os.path.normpath(outDir) and os.path.isdir(oldDir):  # the other layout
+        # empty folders removed only if results of this recording were there: with several workers another worker
+        # may just have created the folder (fresh results folder; 2026-10-18)
+        if _delete_results(oldDir, n, os.path.normpath(oldDir) == os.path.normpath(os.path.dirname(f))):
+            _remove_empty_folders(oldDir, res)
+    _makedirs(outDir)
     meta = f[:-4] + "_labels.csv"
     meta = meta if os.path.isfile(meta) else None
+    xls = o["result_format"] == "xlsx"
     msgs, outputs = [], []
     P = None
-    if o["protocols"] or not o["include_protocols"]:
+    if o["protocols"] or not o["include_protocols"] or o["trends"]:
         try:
             P = find_protocols(H)
         except Exception as ex:  # noqa: BLE001
             msgs.append(f"protocols: {type(ex).__name__}: {ex}")
     W = _protocol_windows(P, float(o["protocol_margin_seconds"]))
     fr, to, labels, bins = _ranges(H, float(o["bin_minutes"]) * 60, None if o["include_protocols"] else W)
-    for suffix in ("_contractions.csv", "_contractions.csv.gz", "_overview.csv", "_pulses.csv", "_pulses.csv.gz",
-                   "_protocols_contractions.csv", "_protocols_contractions.csv.gz", "_protocols_pulses.csv",
-                   "_protocols_pulses.csv.gz"):
-        # results of earlier options
-        if os.path.isfile(os.path.join(outDir, n + suffix)):
-            os.remove(os.path.join(outDir, n + suffix))
-    E = None
-    if o["events"]:
+    _delete_results(outDir, n, os.path.normpath(outDir) == os.path.normpath(os.path.dirname(f)))
+    E = None  # entries of the log file (also for the trend images)
+    if o["events"] or o["trends"]:
         E = log_entries(H.logFile)
         E.insert(4, "category", [event_category(c, t) for c, t in zip(E["code"], E["text"])])
-        _for_csv(E).to_csv(os.path.join(outDir, n + "_events.csv"), index=False)
-        outputs.append(n + "_events.csv")
-    G = None
+    Ev = E if o["events"] else None  # events table and comments in the results (events=True)
+    G = Gw = None
     if o["gaps"]:
         try:
             G = signal_gaps(H)
-            _for_csv(_gaps_out(G, H, E)).to_csv(os.path.join(outDir, n + "_gaps.csv"), index=False)
-            outputs.append(n + "_gaps.csv")
+            Gw = _gaps_out(G, H, Ev)
         except Exception as ex:  # noqa: BLE001
-            G = None
+            G = Gw = None
             msgs.append(f"gaps: {type(ex).__name__}: {ex}")
-    S = None
+    S = C = info = Ov = None
     Call = None
     nC = 0
     if len(fr):
@@ -727,49 +1200,523 @@ def _analyse(f, rel, H, res, row, o, aopts):
         binOf = dict(zip(labels, bins))
         S.insert(int(S.columns.get_loc("range")) + 1, "bin", [binOf[r] for r in S["range"]])
         C.insert(int(C.columns.get_loc("range")) + 1, "bin", [binOf[r] for r in C["range"]])
-        _add_comments(S, E)
+        _add_comments(S, Ev)
         if o["gaps"]:
             _add_gaps(S, G)
         Call = C
         if float(o["overview_seconds"]) > 0 and nC:
-            _for_csv(_overview(C, labels, fr, to, H, float(o["overview_seconds"]))).to_csv(
-                os.path.join(outDir, n + "_overview.csv"), index=False)
-            outputs.append(n + "_overview.csv")
+            Ov = _overview(C, labels, fr, to, H, float(o["overview_seconds"]))
         C = _sample(C, labels, W if o["include_protocols"] else None, o)
-        write_results(os.path.join(outDir, n + ".csv"), C, S, info)
-        for cf in (os.path.join(outDir, n + "_contractions.csv"), os.path.join(outDir, n + "_pulses.csv")):
-            if not os.path.isfile(cf):  # pulses: option pulseTable
-                continue
-            if o["contractions"] == "none":
-                os.remove(cf)
-            elif o["compress"]:
-                _gzip(cf)
-        outputs.insert(0, n + ".csv")
         msgs = list(info.get("notes", [])) + msgs
     else:
         msgs.append("no time outside the stimulation protocols")
     CH = None
     if o["gaps"] and G is not None:
-        CH = _channel_status(H, Call, G, E, n, make_labels(meta, H.dataChannels),
+        CH = _channel_status(H, Call, G, Ev, n, make_labels(meta, H.dataChannels),
                              float(np.max(to)) if len(to) else math.nan)
-        _for_csv(CH).to_csv(os.path.join(outDir, n + "_channels.csv"), index=False)
-        outputs.append(n + "_channels.csv")
+    TR, Ttr, Tcm = [], None, None  # trend data per channel (2026-10-14)
+    if o["trends"] and Ov is not None:
+        try:
+            TR = _recording_trends(n, H.recordingStart, H.totalSeconds, Ov, E, P, G, make_labels(meta, H.dataChannels),
+                                   o)
+            Ttr, Tcm = _trend_tables(TR, _clock(H.recordingStart))
+        except Exception as ex:  # noqa: BLE001
+            TR, Ttr, Tcm = [], None, None
+            msgs.append(f"trends: {type(ex).__name__}: {ex}")
+    # result files: 'xlsx' (2026-10-14): <name>.xlsx (summary, trends, channels, gaps, events, parameters, info, ...;
+    # sheets) and the large tables as <name>_contractions.csv.gz, _pulses.csv.gz, _overview.csv.gz; 'csv': one file
+    # per table
+    if xls:
+        sheets = [(k, _for_csv(T) if k == "events" else T) for k, T in (
+            ("trends", Ttr), ("trendComments", Tcm), ("channels", CH), ("gaps", Gw), ("events", Ev)) if T is not None]
+        if S is not None:
+            Cw = None if o["contractions"] == "none" else C
+            if o["contractions"] == "none":
+                info.pop("pulses", None)
+            out = write_results(os.path.join(outDir, n + ".xlsx"), Cw, S, info, csv_tables=("contractions", "pulses"),
+                                compress=True, sheets=sheets)
+            outputs += [os.path.basename(x) for x in out]
+        elif sheets:
+            with pd.ExcelWriter(os.path.join(outDir, n + ".xlsx"), engine="openpyxl") as xw:
+                for k, T in sheets:
+                    _for_csv(T).to_excel(xw, sheet_name=k, index=False)
+            outputs.append(n + ".xlsx")
+        if Ov is not None:
+            _for_csv(Ov).to_csv(os.path.join(outDir, n + "_overview.csv"), index=False)
+            _gzip(os.path.join(outDir, n + "_overview.csv"))
+            outputs.append(n + "_overview.csv.gz")
+    else:
+        if Ev is not None:
+            _for_csv(Ev).to_csv(os.path.join(outDir, n + "_events.csv"), index=False)
+            outputs.append(n + "_events.csv")
+        if Gw is not None:
+            _for_csv(Gw).to_csv(os.path.join(outDir, n + "_gaps.csv"), index=False)
+            outputs.append(n + "_gaps.csv")
+        if S is not None:
+            Cw = None if o["contractions"] == "none" else C
+            if o["contractions"] == "none":
+                info.pop("pulses", None)
+            write_results(os.path.join(outDir, n + ".csv"), Cw, S, info, csv_tables=("contractions", "pulses"),
+                          compress=bool(o["compress"]))
+            outputs.insert(0, n + ".csv")
+        if Ov is not None:
+            _for_csv(Ov).to_csv(os.path.join(outDir, n + "_overview.csv"), index=False)
+            outputs.append(n + "_overview.csv")
+        if CH is not None:
+            _for_csv(CH).to_csv(os.path.join(outDir, n + "_channels.csv"), index=False)
+            outputs.append(n + "_channels.csv")
+        if Ttr is not None:
+            Ttr.to_csv(os.path.join(outDir, n + "_trends.csv"), index=False)
+            Tcm.to_csv(os.path.join(outDir, n + "_trendComments.csv"), index=False)
+            outputs += [n + "_trends.csv", n + "_trendComments.csv"]
     if o["protocols"] and P is not None and len(P):
         try:
-            _, _, pinfo = myodish_analysis(f, None, protocol="all", metadata=meta, quiet=True,
-                                           output=os.path.join(outDir, n + "_protocols.csv"), report=False, **aopts)
-            outputs.append(n + "_protocols.csv")
+            if xls:  # <name>_protocols.xlsx, contractions and pulses as .csv.gz
+                Cp, Sp, pinfo = myodish_analysis(f, None, protocol="all", metadata=meta, quiet=True, report=False,
+                                                 **aopts)
+                out = write_results(os.path.join(outDir, n + "_protocols.xlsx"), Cp, Sp, pinfo,
+                                    csv_tables=("contractions", "pulses"), compress=True)
+                outputs += [os.path.basename(x) for x in out]
+            else:
+                _, _, pinfo = myodish_analysis(f, None, protocol="all", metadata=meta, quiet=True,
+                                               output=os.path.join(outDir, n + "_protocols.csv"), report=False, **aopts)
+                outputs.append(n + "_protocols.csv")
+                if o["compress"]:  # protocol contractions and pulses as well (2026-10-11)
+                    for cf in (os.path.join(outDir, n + "_protocols_contractions.csv"),
+                               os.path.join(outDir, n + "_protocols_pulses.csv")):
+                        if os.path.isfile(cf):
+                            _gzip(cf)
             msgs += ["protocols: " + x for x in pinfo.get("notes", []) if "not analysed" in x]  # single protocols
-            if o["compress"]:  # protocol contractions and pulses as well (2026-10-11)
-                for cf in (os.path.join(outDir, n + "_protocols_contractions.csv"),
-                           os.path.join(outDir, n + "_protocols_pulses.csv")):
-                    if os.path.isfile(cf):
-                        _gzip(cf)
         except Exception as ex:  # noqa: BLE001
             msgs.append(f"protocols: {type(ex).__name__}: {ex}")
+    if TR:  # trend images per channel (2026-10-14)
+        try:
+            tf = _trend_images(_image_folder(outDir, o["folders"]), n, TR)
+            if tf:
+                outputs.append((f"trends/{n}" if o["folders"] == "flat" else n) + f"_ch*.png ({len(tf)})")
+        except Exception as ex:  # noqa: BLE001
+            msgs.append(f"trends: {type(ex).__name__}: {ex}")
     row.update(status="ok", nContractions=nC, outputs="; ".join(outputs), message=_clean(" | ".join(msgs)))
     return row, _report_block(rel, H, S, o, CH, G)
 
+
+def _check_result_options(o):
+    """result_format, trends, trend_parameters (2026-10-14), folders (2026-10-15)"""
+    from .parameters import PARAMETERS
+    o["result_format"] = str(o["result_format"]).lower()
+    if o["result_format"] not in ("xlsx", "csv"):
+        raise ValueError("result_format: 'xlsx' or 'csv' expected")
+    if "folders" in o:  # 2026-10-15
+        o["folders"] = str(o["folders"]).lower()
+        if o["folders"] not in ("series", "flat"):
+            raise ValueError("folders: 'series' or 'flat' expected")
+    o["trends"] = bool(o["trends"])
+    tp = o["trend_parameters"]
+    tp = [tp] if isinstance(tp, str) else list(tp)
+    known = {p[0] for p in PARAMETERS} | {"beatsPerMinute"}
+    bad = [x for x in tp if x not in known]
+    if bad or not tp:
+        raise ValueError(f"trend_parameters: parameters of parameters() or beatsPerMinute expected ({', '.join(bad)})")
+    o["trend_parameters"] = tuple(tp)
+    return o
+
+
+def _makedirs(d, tries=3):
+    """os.makedirs(d, exist_ok=True), again after a short pause if a parent folder disappeared meanwhile (an empty
+    folder removed by another process)"""
+    for k in range(tries):
+        try:
+            os.makedirs(d, exist_ok=True)
+            return
+        except FileNotFoundError:
+            if k == tries - 1:
+                raise
+            time.sleep(0.2)
+
+
+def _delete_results(outDir, n, beside_recording):
+    """result files of a recording written by earlier passes (other options, the other format); not the labels file
+    <name>_labels.csv if the results are written next to the recording. Returns the number of deleted files."""
+    names = [n + ".xlsx", n + "_protocols.xlsx"]
+    for t in ("summary", "contractions", "pulses", "parameters", "info", "thresholds", "labels", "rockerFilter",
+              "overview", "events", "gaps", "channels", "protocols", "protocolResults", "trends", "trendComments"):
+        for pre in ("", "protocols_"):
+            if t == "labels" and not pre and beside_recording:
+                continue
+            names += [f"{n}_{pre}{t}.csv", f"{n}_{pre}{t}.csv.gz"]
+    k = 0
+    for x in names:
+        if os.path.isfile(os.path.join(outDir, x)):
+            os.remove(os.path.join(outDir, x))
+            k += 1
+    return k + _delete_trends(outDir, n)
+
+
+def _delete_trends(outDir, n):
+    """trend images of recording n (<outDir>/<n>_ch<c>.png in the series layout, <outDir>/trends/<n>_ch<c>.png in the
+    flat layout). Returns the number of deleted files."""
+    rx = re.compile("^" + re.escape(n) + r"_ch\d+\.png$")
+    k = 0
+    for td in (outDir, os.path.join(outDir, "trends")):
+        if os.path.isdir(td):
+            for x in os.listdir(td):
+                if rx.match(x):
+                    os.remove(os.path.join(td, x))
+                    k += 1
+    td = os.path.join(outDir, "trends")
+    if os.path.isdir(td) and not os.listdir(td):
+        os.rmdir(td)
+    return k
+
+
+def _image_folder(outDir, folders):
+    """folder of the trend images of a recording: its results folder (series layout) or <folder>/trends (flat)"""
+    return os.path.join(outDir, "trends") if folders == "flat" else outDir
+
+
+def _abs_folder(res, rel):
+    """absolute folder of a folder relative to the results folder ('/' separated, '' = res)"""
+    return os.path.join(res, *rel.split("/")) if rel else res
+
+
+def _remove_empty_folders(d, res):
+    """d and its parents up to res (exclusive) deleted while they are empty (results moved to the other layout)"""
+    d, res = os.path.normpath(d), os.path.normpath(res)
+    while len(d) > len(res) and os.path.isdir(d) and not os.listdir(d):
+        os.rmdir(d)
+        d = os.path.dirname(d)
+
+
+def results_of(results_folder, rel):
+    """folder with the results of the recording rel (path relative to the raw folder): series layout (2026-10-15) or
+    flat layout (earlier results); the series layout if neither has results. Returns (folder, layout)."""
+    rel = str(rel).replace("\\", "/")
+    n = re.sub(r"\.mdd$", "", rel.rsplit("/", 1)[-1], flags=re.I)
+    d = _abs_folder(results_folder, result_folder(rel, "series"))
+    if _has_results(d, n):
+        return d, "series"
+    f = _abs_folder(results_folder, result_folder(rel, "flat"))
+    if _has_results(f, n):
+        return f, "flat"
+    return d, "series"
+
+
+def _has_results(d, n):
+    return any(os.path.isfile(os.path.join(d, n + x)) for x in (
+        ".xlsx", "_info.csv", "_summary.csv", "_channels.csv", "_overview.csv", "_overview.csv.gz", "_protocols.xlsx",
+        "_protocols_info.csv"))
+
+
+# ------------------------------------------------------------------------------------------------ trend images
+def _trend_values(Ov, names):
+    """columns names of the overview (missing: NaN) and their units (parameters; beatsPerMinute: 1/min)"""
+    from .parameters import PARAMETERS
+    units = {p[0]: p[1] for p in PARAMETERS}
+    V = np.full((len(Ov), len(names)), np.nan)
+    un = []
+    for k, nm in enumerate(names):
+        if nm in Ov.columns:
+            V[:, k] = pd.to_numeric(Ov[nm], errors="coerce").to_numpy(float)
+        un.append(units.get(nm, "1/min" if nm == "beatsPerMinute" else ""))
+    return V, un
+
+
+def _trend_comments(E):
+    """comments of the log file (categories comment and protocol) for the trend images"""
+    if E is None or not len(E) or "category" not in E.columns:
+        return []
+    k = E["category"].astype(str).isin(("comment", "protocol")).to_numpy()
+    return [dict(t=float(t), text=str(x), category=str(c), channel=float(ch))
+            for t, x, c, ch in zip(E["t_file"][k], E["text"][k], E["category"][k], E["channel"][k])]
+
+
+def _label_text(L, c):
+    """labels of channel c for the title: setupID, sliceID, species, tissue, sampleID, treatment (concentration unit)"""
+    if L is None or not len(L) or "channel" not in L.columns:
+        return ""
+    r = np.flatnonzero(pd.to_numeric(L["channel"], errors="coerce").to_numpy(float) == c)
+    if not len(r):
+        return ""
+    r = int(r[0])
+
+    def val(nm):
+        if nm not in L.columns:
+            return ""
+        x = L[nm].iloc[r]
+        if isinstance(x, (float, np.floating)) and math.isfinite(x) and float(x).is_integer():
+            x = int(x)  # 100, not 100.0 (as MATLAB)
+        x = "" if x is None or (isinstance(x, (float, np.floating)) and math.isnan(x)) else str(x).strip()
+        return "" if x.lower() in ("nan", "<missing>") else x
+    v = []
+    for nm in ("setupID", "sliceID", "species", "tissue", "sampleID", "treatment"):
+        x = val(nm)
+        if not x:
+            continue
+        if nm == "treatment" and val("concentration"):
+            x = f"{x} {val('concentration')} {val('concentrationUnit')}".strip()
+        v.append(x)
+    return ("  ·  " + "  ·  ".join(v)) if v else ""
+
+
+def _fmt_g(x):
+    return f"{x:g}"
+
+
+def _trend_subtitle(t0, a, b, nIn, w):
+    """start, duration, contractions and the legend of the trend image (t0: datetime of time 0 or None)"""
+    if t0 is not None:
+        st = (f"{t0 + _dt.timedelta(seconds=a):%Y-%m-%d %H:%M} to "
+              f"{t0 + _dt.timedelta(seconds=b):%Y-%m-%d %H:%M}")
+    else:
+        st = "clock time unknown"
+    return (f"{st} ({(b - a) / 3600:.1f} h), {int(round(nIn))} included contractions\nDots: median per "
+            f"{_fmt_g(w)} s; line: median of the dots per bin; light blue: stimulation protocol; grey: no signal; "
+            f"purple: comments (in protocols only at start / end)")
+
+
+def _clock(recordingStart):
+    """datenum --> datetime (None if unknown)"""
+    try:
+        return None if recordingStart is None or not math.isfinite(float(recordingStart)) else \
+            datenum_to_datetime(float(recordingStart))
+    except (TypeError, ValueError):
+        return None
+
+
+def _recording_trends(n, recordingStart, totalSeconds, Ov, E, P, G, L, o):
+    """trend data of the channels of one recording: list of (channel, D) for report.trend_image / trend_data; every
+    channel with at least 20 included contractions; values of the overview (overview_seconds)"""
+    TR = []
+    if Ov is None or not len(Ov):
+        return TR
+    names = list(o["trend_parameters"])
+    V, un = _trend_values(Ov, names)
+    com = _trend_comments(E)
+    t0 = _clock(recordingStart)
+    ch = pd.to_numeric(Ov["channel"], errors="coerce").to_numpy(float)
+    inc = pd.to_numeric(Ov["included"], errors="coerce").fillna(0).to_numpy(float) > 0
+    nb = pd.to_numeric(Ov["nBeats"], errors="coerce").fillna(0).to_numpy(float)
+    tf = pd.to_numeric(Ov["t_from"], errors="coerce").to_numpy(float)
+    for c in np.unique(ch[~np.isnan(ch)]):
+        r = ch == c
+        nIn = float(nb[r & inc].sum())
+        if nIn < 20:
+            continue
+        B, bl = [], []
+        if P is not None and len(P):
+            for a, b, nm in zip(P["from"], P["to"], P["name"]):
+                B.append([float(a), float(b), 1])
+                bl.append(str(nm))
+        if G is not None and len(G):
+            g = pd.to_numeric(G["channel"], errors="coerce").to_numpy(float) == c
+            for a, b in zip(np.asarray(G["from"], float)[g], np.asarray(G["to"], float)[g]):
+                B.append([a, b, 2])
+                bl.append("")
+        cc = [x for x in com if x["channel"] == 0 or x["channel"] == c]
+        D = dict(title=f"{n}  ·  channel {int(c)}{_label_text(L, int(c))}",
+                 subtitle=_trend_subtitle(t0, 0, float(totalSeconds), nIn, float(o["overview_seconds"])),
+                 t=tf[r], w=float(o["overview_seconds"]), nb=nb[r], inc=inc[r], V=V[r], names=names, units=un, t0=t0,
+                 xlim=[0, float(totalSeconds)], bands=np.array(B, float).reshape(-1, 3), band_labels=bl, com=cc)
+        TR.append((int(c), D))
+    return TR
+
+
+def _trend_images(d, n, TR):
+    """trend images <d>/<name>_ch<c>.png of the channels of TR (_recording_trends); d = _image_folder(...)"""
+    from .report import trend_image
+    files = []
+    for c, D in TR:
+        f = trend_image(os.path.join(d, f"{n}_ch{c}.png"), D)
+        if f:
+            files.append(f)
+    return files
+
+
+def _clock_labels(t0, t):
+    """clock times 'yyyy-mm-dd HH:MM:SS' of the times t (s in the file); '' if the clock time is unknown"""
+    if t0 is None:
+        return [""] * len(t)
+    half = _dt.timedelta(microseconds=500000)  # rounded to whole seconds (as MATLAB)
+    return [(t0 + _dt.timedelta(seconds=float(x)) + half).replace(microsecond=0).strftime(_TIME_FMT) for x in t]
+
+
+def _trend_tables(TR, t0):
+    """sheets trends and trendComments (2026-10-14): the data of the trend images of all channels. trends: channel,
+    window (clock time of its start), t_from (s in the file), nBeats (included contractions), the trend parameters
+    (median per window; units as in the sheet parameters), bin_from (s; line of the image = median of the rows with the
+    same bin_from); trendComments: channel, number (as in the image), t_file, clockTime, text. (None, None) without
+    channels."""
+    from .report import trend_data
+    T, C = [], []
+    for c, D in TR:
+        Tk, Ck = trend_data(D)
+        Tk.insert(0, "channel", float(c))
+        Tk.insert(1, "window", _clock_labels(t0, Tk["t_from"]))
+        Ck = Ck.rename(columns={"t": "t_file"})
+        Ck.insert(0, "channel", float(c))
+        Ck.insert(3, "clockTime", _clock_labels(t0, Ck["t_file"]))
+        T.append(Tk)
+        C.append(Ck)
+    if not T:
+        return None, None
+    return pd.concat(T, ignore_index=True), pd.concat(C, ignore_index=True)
+
+
+def _write_trend_tables(d, n, Ttr, Tcm):
+    """sheets trends / trendComments of <n>.xlsx (or <n>_trends.csv, _trendComments.csv for csv results) replaced"""
+    if Ttr is None:
+        return
+    x = os.path.join(d, n + ".xlsx")
+    if os.path.isfile(x):
+        with pd.ExcelWriter(x, engine="openpyxl", mode="a", if_sheet_exists="replace") as xw:
+            Ttr.to_excel(xw, sheet_name="trends", index=False)
+            Tcm.to_excel(xw, sheet_name="trendComments", index=False)
+    else:
+        Ttr.to_csv(os.path.join(d, n + "_trends.csv"), index=False)
+        Tcm.to_csv(os.path.join(d, n + "_trendComments.csv"), index=False)
+
+
+def trends_again(results_folder, include=None, exclude=None, case_sensitive=False,
+                 trend_parameters=("amplitude", "diastolicForce", "TTP90", "TTR90"), new_slice_hours=2.0,
+                 quiet=False):
+    """trend images of analysed recordings again from their result files (overview, events, protocols, gaps, labels,
+    channels) and of the slices of their experiments (include / exclude / case_sensitive select the recordings of the
+    index). Returns (files, report). MyoDishAnalysisWatch('trends', results, ...) in MATLAB."""
+    o = _check_result_options(dict(result_format="xlsx", trends=True, trend_parameters=trend_parameters,
+                                   overview_seconds=60.0))
+    X = read_index(results_folder)
+    X = X[X["status"] == "ok"]
+    inc, exc = patterns(include), patterns(exclude)
+    files, exps, n_rec = [], set(), 0
+    for rel in X["file"]:
+        rel = str(rel).replace("\\", "/")
+        if (inc and not wildcard_match(rel, inc, case_sensitive)) or (exc and wildcard_match(rel, exc, case_sensitive)):
+            continue
+        n_rec += 1
+        dr = os.path.dirname(rel)
+        n = os.path.splitext(os.path.basename(rel))[0]
+        d, layout = results_of(results_folder, rel)
+        exps.add(dr)
+        Ov = _read_result(os.path.join(d, n + "_overview.csv"))
+        if Ov is None or not len(Ov):
+            continue
+        E = result_table(d, n, "events")
+        P = result_table(d, n + "_protocols", "protocols")
+        G = result_table(d, n, "gaps")
+        L = result_table(d, n, "labels")
+        CH = result_table(d, n, "channels", usecols=["recordingStart", "fileLength_s"])
+        start, total = math.nan, float(pd.to_numeric(Ov["t_to"], errors="coerce").max())
+        if CH is not None and len(CH):
+            try:
+                st = str(CH["recordingStart"].iloc[0]).strip()
+                if st and st.lower() not in ("nan", "nat", "<missing>"):
+                    start = datetime_to_datenum(pd.Timestamp(st).to_pydatetime())
+            except (ValueError, TypeError, KeyError):
+                pass
+            L_ = pd.to_numeric(CH["fileLength_s"], errors="coerce").iloc[0]
+            if np.isfinite(L_):
+                total = float(L_)
+        _delete_trends(d, n)
+        f = []
+        try:
+            TR = _recording_trends(n, start, total, Ov, E, P, G, L, o)
+            Ttr, Tcm = _trend_tables(TR, _clock(start))
+            _write_trend_tables(d, n, Ttr, Tcm)
+            f = _trend_images(_image_folder(d, layout), n, TR)
+            files += f
+        except Exception as ex:  # noqa: BLE001
+            if not quiet:
+                print(f"  {rel}: trends: {type(ex).__name__}: {ex}")
+        if not quiet:
+            print(f"  {rel}: {len(f)} trend image(s)")
+    report = f"{len(files)} trend image(s) of {n_rec} recording(s)"
+    if exps:
+        R = slice_register(results_folder, experiments=sorted(exps), new_slice_hours=float(new_slice_hours),
+                           trends=True, trend_parameters=o["trend_parameters"])
+        report += (f"; slice register: {len(R)} slices in {len(exps)} experiment(s), images of the series and "
+                   "experiments")
+    if not quiet:
+        print(report)
+    return files, report
+
+
+def reorganize(results_folder, folders="series", new_slice_hours=2.0,
+               trend_parameters=("amplitude", "diastolicForce", "TTP90", "TTR90"), register=True, report=True,
+               quiet=False):
+    """result files of the analysed recordings (mda_index.csv) moved into the layout folders ('series', default, or
+    'flat'; 2026-10-15), then the slice register, the images of the series and experiments and the experiment reports
+    (PDF, flags of mda_flags.csv) made again for the experiments with moved results. Returns (number of recordings
+    moved, report). MyoDishAnalysisWatch('reorganize', results, ...) in MATLAB; mda-watch RESULTS --reorganize."""
+    from .report import FLAG_DEFAULTS
+    o = _check_result_options(dict(result_format="xlsx", folders=folders, trends=True,
+                                   trend_parameters=trend_parameters))
+    res = os.path.abspath(results_folder)
+    lock = os.path.join(res, LOCK_NAME)
+    if os.path.isfile(lock) and time.time() - os.path.getmtime(lock) < LOCK_HOURS * 3600:
+        raise RuntimeError(f"reorganize: a watcher is running on {res} (lock file)")
+    other = "flat" if o["folders"] == "series" else "series"
+    X = read_index(res)
+    moved, exps = 0, set()
+    for rel in X["file"]:
+        rel = str(rel).replace("\\", "/")
+        n = os.path.splitext(os.path.basename(rel))[0]
+        to = _abs_folder(res, result_folder(rel, o["folders"]))
+        frm = _abs_folder(res, result_folder(rel, other))
+        if os.path.normpath(frm) == os.path.normpath(to) or not os.path.isdir(frm):
+            continue
+        src, dst = _result_files(frm, n, other == "flat", o["folders"] == "flat")
+        if not src:
+            continue
+        for a, b in zip(src, dst):
+            t = os.path.join(to, *b.split("/"))
+            os.makedirs(os.path.dirname(t), exist_ok=True)
+            os.replace(os.path.join(frm, *a.split("/")), t)
+        _remove_empty_folders(os.path.join(frm, "trends"), res)
+        _remove_empty_folders(frm, res)
+        moved += 1
+        exps.add(rel.rpartition("/")[0])
+        if not quiet:
+            print(f"  {rel}: {len(src)} file(s) -> {to}")
+    rep = f"results of {moved} recording(s) moved to the layout '{o['folders']}'"
+    if exps and register:
+        R = slice_register(res, experiments=sorted(exps), new_slice_hours=float(new_slice_hours), trends=True,
+                           trend_parameters=o["trend_parameters"])
+        rep += f"; slice register: {len(R)} slices in {len(exps)} experiment(s), images of the series and experiments"
+    if exps and report:
+        fl = dict(FLAG_DEFAULTS)
+        for e in sorted(exps):
+            try:
+                _experiment_report("", res, e, [], fl, mda_version(), "", _dt.datetime.now())
+            except Exception as ex:  # noqa: BLE001
+                rep += f"; PDF report {e}: {type(ex).__name__}: {ex}"
+        rep += f"; PDF reports of {len(exps)} experiment(s)"
+    if not quiet:
+        print(rep)
+    return moved, rep
+
+
+def _result_files(d, n, from_flat, to_flat):
+    """result files of recording n in folder d (names relative to d, '/' separated) and their names in the other
+    layout (trend images: trends/<n>_ch<c>.png in the flat layout, <n>_ch<c>.png in the series layout); not
+    <n>_labels.csv next to the recording (results folder = raw folder)"""
+    names = [n + ".xlsx", n + "_protocols.xlsx"]
+    beside = os.path.isfile(os.path.join(d, n + ".mdd"))
+    for t in ("summary", "contractions", "pulses", "parameters", "info", "thresholds", "labels", "rockerFilter",
+              "overview", "events", "gaps", "channels", "protocols", "protocolResults", "trends", "trendComments"):
+        for pre in ("", "protocols_"):
+            if t == "labels" and not pre and beside:
+                continue
+            names += [f"{n}_{pre}{t}.csv", f"{n}_{pre}{t}.csv.gz"]
+    src = [x for x in names if os.path.isfile(os.path.join(d, x))]
+    dst = list(src)
+    img = os.path.join(d, "trends") if from_flat else d
+    rx = re.compile("^" + re.escape(n) + r"_ch\d+\.png$")
+    if os.path.isdir(img):
+        for x in sorted(os.listdir(img)):
+            if rx.match(x):
+                src.append(("trends/" if from_flat else "") + x)
+                dst.append(("trends/" if to_flat else "") + x)
+    return src, dst
 
 
 def _gzip(cf):
@@ -1204,6 +2151,132 @@ def _report_block(rel, H, S, o, CH=None, G=None):
 
 
 # ------------------------------------------------------------------------------------------------ helpers
+def patterns(x):
+    """wildcard patterns of the options include / exclude: None, a string (several separated by ',' or ';') or a list"""
+    if x is None:
+        return []
+    if isinstance(x, str):
+        x = re.split(r"[,;]", x)
+    return [str(p).strip().replace("\\", "/") for p in x if str(p).strip()]
+
+
+def wildcard_match(rel, pats, case_sensitive=False):
+    """True if the relative path rel ('folder/name.mdd') matches one of the wildcard patterns (* any characters, ? one
+    character): a pattern without '/' is matched against the whole path, every folder name and the file name, a
+    pattern with '/' against the whole path (2026-10-13; as MyoDishAnalysisWatch.m)"""
+    rel = rel.replace("\\", "/")
+    for p in pats:
+        rx = re.escape(p).replace("\\*", ".*").replace("\\?", ".")
+        parts = [rel] if "/" in p else [rel] + rel.split("/")
+        if any(re.fullmatch(rx, q, 0 if case_sensitive else re.I) for q in parts):
+            return True
+    return False
+
+
+def log_recordings(log_file, mdd_file):
+    """'Recording' entries of the log file of mdd_file (completeness check and parallel recordings, 2026-10-13):
+    seconds   recorded time of this file: sum of its intervals started -> stopped, at most last stop - first start
+              (s, dataLogTime of the log file; NaN without complete interval)
+    stopped   True if its last entry is 'stopped', False if 'started', None without entries
+    parallel  True if the file was recorded as a parallel recording (its entries are 'parallel recording' entries;
+              the software of 2020 wrote them for main recordings as well)
+    started   {file name (lower case): [(start, stop), ...]} of the parallel recordings started from this log
+              (s, dataLogTime of this log = time in this file; stop NaN if missing)
+    Entries of the recording of the file: 'started: <file>' / 'stopped: <file>' (any file name: renamed files), else
+    'started / stopped parallel recording: <this file>'."""
+    D = dict(seconds=math.nan, stopped=None, parallel=False, started={})
+    txt = read_log_text(log_file)
+    if txt is None:
+        return D
+    own = os.path.basename(mdd_file).lower()
+    ev = []  # (time, 1 started / 0 stopped, parallel, file name or None)
+    for line in split_lines(txt):
+        f = re.split(";+", line)
+        if len(f) < 5 or f[3].strip().lower() != "recording":
+            continue
+        t = str2double(f[1]) / 1000.0
+        v = ";".join(f[4:]).strip()
+        lv = v.lower()
+        k = 1 if "started" in lv else (0 if "stopped" in lv else None)
+        if math.isnan(t) or k is None:
+            continue
+        nm = re.split(r"[\\/]", v.split(":", 1)[1].strip())[-1].strip().lower() if ":" in v else ""
+        ev.append((t, k, "parallel" in lv, nm or None))
+    mine = [e for e in ev if not e[2]]
+    if not mine:
+        mine = [e for e in ev if e[2] and e[3] in (None, own)]
+        D["parallel"] = bool(mine)
+    for t, k, par, nm in ev:
+        if par and nm is not None and nm != own:
+            W = D["started"].setdefault(nm, [])
+            if k == 1:
+                W.append([t, math.nan])
+            elif W and math.isnan(W[-1][1]):
+                W[-1][1] = t
+    if mine:
+        D["stopped"] = mine[-1][1] == 0
+        tot, t0, n = 0.0, None, 0
+        for t, k, _, _ in mine:
+            if k == 1 and t0 is None:
+                t0 = t
+            elif k == 0 and t0 is not None:
+                tot += t - t0
+                t0 = None
+                n += 1
+        starts = [e[0] for e in mine if e[1] == 1]
+        stops = [e[0] for e in mine if e[1] == 0]
+        if n:
+            D["seconds"] = min(tot, stops[-1] - starts[0]) if stops[-1] > starts[0] else tot
+    D["started"] = {k: [tuple(w) for w in v] for k, v in D["started"].items()}
+    return D
+
+
+def main_recording(f, D, cache, prefix_only=False):
+    """main recording of the parallel recording f (D = log_recordings of f): a recording of the same folder whose log
+    lists f as parallel recording ('started parallel recording: <name of f>') with the same duration (+-max(5 s,
+    1 %), if both are known). Returns (path of the main file, start, stop in s of the main file) or None. cache: logs
+    of the folder read once per pass. prefix_only (GUI): only the recordings whose name is the beginning of the name
+    of f (fast; about 90 % of the parallel recordings)."""
+    folder = os.path.dirname(f)
+    if folder not in cache:
+        refs = {}
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            names = []
+        mdd = {os.path.splitext(n)[0].lower(): n for n in names if n.lower().endswith(".mdd") and not n.startswith(".")}
+        own = os.path.splitext(os.path.basename(f))[0].lower()
+        for n in names:
+            if prefix_only and not (len(n) - 8 < len(own) and own.startswith(n[:-8].lower())):
+                continue
+            if n.lower().endswith("_log.log") and not n.startswith(".") and n[:-8].lower() in mdd:
+                m = os.path.join(folder, mdd[n[:-8].lower()])
+                for nm, W in log_recordings(os.path.join(folder, n), m)["started"].items():
+                    refs.setdefault(nm, []).extend((m, a, b) for a, b in W)
+        cache[folder] = refs
+    d = D["seconds"]
+    for m, a, b in cache[folder].get(os.path.basename(f).lower(), []):
+        if os.path.normcase(m) == os.path.normcase(f):
+            continue
+        if math.isfinite(b) and math.isfinite(d) and abs((b - a) - d) > max(5.0, 0.01 * d):
+            continue  # another recording of the same name
+        return m, a, b
+    return None
+
+
+def parallel_main(mdd_file):
+    """main recording of a parallel recording (GUI: button Main file; 2026-10-14): (path of the main file, start, stop
+    in s of the main file) or None (not a parallel recording, or its main file not found). Only the recordings whose
+    name is the beginning of the name of mdd_file are searched (fast). As MyoDishAnalysisWatch('mainRecording', f)."""
+    f = str(mdd_file)
+    D = log_recordings(os.path.splitext(f)[0] + "_log.log", f)
+    return main_recording(f, D, {}, prefix_only=True) if D["parallel"] else None
+
+
+def _window_text(a, b):
+    return f"{a:.1f}-{b:.1f} s" if math.isfinite(b) else f"from {a:.1f} s"
+
+
 def _find_recordings(raw):
     out = []
     for p, dirs, files in os.walk(raw):

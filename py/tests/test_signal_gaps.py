@@ -95,12 +95,14 @@ def test_signal_gaps_and_watcher(tmp_path):
     assert len(r) == 1 and r["type"].iat[0] == "no signal" and r["fromStart"].iat[0] and r["untilEnd"].iat[0]
     assert len(G) == 16
 
-    # watcher: _gaps.csv, _channels.csv, summary columns
+    # watcher: sheets gaps, channels of <name>.xlsx (2026-10-14; before _gaps.csv, _channels.csv) in the folder of the
+    # recording (name without a number: <name>/, 2026-10-15), summary columns
     res = str(tmp_path / "res")
     X, report = watch(str(raw), res, quiet=True, min_file_age_minutes=0, protocols=False)
-    Gw = pd.read_csv(os.path.join(res, "gaps_ABC000101_gaps.csv"), keep_default_na=False)
-    CH = pd.read_csv(os.path.join(res, "gaps_ABC000101_channels.csv"), keep_default_na=False)
-    S = pd.read_csv(os.path.join(res, "gaps_ABC000101_summary.csv"))
+    xf = os.path.join(res, "gaps_ABC000101", "gaps_ABC000101.xlsx")
+    Gw = pd.read_excel(xf, sheet_name="gaps", keep_default_na=False)
+    CH = pd.read_excel(xf, sheet_name="channels", keep_default_na=False)
+    S = pd.read_excel(xf, sheet_name="summary")
     assert X["status"].iat[0] == "ok" and len(Gw) == 16
     assert {"clockFrom", "clockTo", "comments"} <= set(Gw.columns) and Gw["comments"].str.contains("chamber 1 out").any()
     st = dict(zip(CH["channel"], CH["status"]))

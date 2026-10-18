@@ -21,10 +21,10 @@ function ok = mda_test()
 % Uncertain contractions (option detection): small peaks between the contractions, not locked to the stimuli.
 %
 % Diastolic level (option diastolicLevel): median before the pulse vs minimum before the peak. FFR steady state and PRP
-% reference per pause (protocolSelectionTest).
+% reference per pause (protocolSelectionTest). Old 8-channel file without status channel (old8ChannelTest).
 %
 % TS 2026-10-05 (stimulation pause 2026-10-07, external trigger 2026-10-08, rocker peaks, uncertain 2026-10-09;
-% diastolic level, FFR steady state, PRP reference 2026-10-10)
+% diastolic level, FFR steady state, PRP reference 2026-10-10; old 8-channel files 2026-10-13)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -242,6 +242,15 @@ okU = height(B1) == 127 && nnz(B1.uncertain) == 32 && all(strcmp(B1.beatType(B1.
 fprintf(['uncertain contractions (option detection): sensitive %d (expected 127), uncertain %d extra beats (expected 32), ' ...
     'specific %d (expected 95), summary nUncertain %d   %s\n'], height(B1), nnz(B1.uncertain), height(B2), T1.nUncertain, passStr(okU));
 ok = ok && okU;
+% several analysed ranges (rows [from to], 2026-10-14): summary of the pooled contractions and stimuli of the ranges
+Ta = mda_summarize(B1, C1, [5 95]);
+Tb = mda_summarize(B1, C1, [105 195]);
+Tm = mda_summarize(B1, C1, [5 95; 105 195]);
+okR = Tm.nContractions == Ta.nContractions + Tb.nContractions && Tm.nStimuli == Ta.nStimuli + Tb.nStimuli && ...
+    Tm.from == 5 && Tm.to == 195 && Tm.nContractions < T1.nContractions;
+fprintf('several ranges: %d contractions (= %d + %d), %d stimuli (= %d + %d)   %s\n', Tm.nContractions, ...
+    Ta.nContractions, Tb.nContractions, Tm.nStimuli, Ta.nStimuli, Tb.nStimuli, passStr(okR));
+ok = ok && okR;
 
 % external trigger pulses (2026-10-08): status bit 14 without channel / current (external stimulator at the external
 % controller unit). Temporary .mdd (9 channels, 400 Hz, 30 s; contractions in channel 1 150 ms after each pulse, one
@@ -257,7 +266,53 @@ ok = ok && okG;
 % FFR steady state and PRP reference per pause (2026-10-10)
 okP = protocolSelectionTest();
 ok = ok && okP;
+% old 8-channel file (software 1.0.x, 2026-10-13): 500 Hz, no status channel, recording duration in the log file does
+% not fit the file size: recognized by nChannels 8 / 500 Hz in the log file; contractions only (unpaced)
+ok8 = old8ChannelTest();
+ok = ok && ok8;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
+end
+
+
+function ok8 = old8ChannelTest()
+% as test_old_8_channel_file in py/tests/test_mda.py
+fs = 500; T = 60; n = T * fs; tt = (0:n-1) / fs;
+F = 2000 + 3 * sin(2 * pi * 37.3 * tt);
+for a = 1:T-2
+    I = tt >= a & tt < a + 0.1; F(I) = F(I) + 1000 * (tt(I) - a) / 0.1;
+    I = tt >= a + 0.1 & tt < a + 0.4; F(I) = F(I) + 1000 - 1000 * (tt(I) - a - 0.1) / 0.3;
+end
+X = zeros(8, n);
+X(1,:) = F;
+X(8,:) = 1500 + 2 * sin(2 * pi * 11.1 * tt);       %channel 8 with a sensor signal: no status channel
+base = [tempname '_old8'];
+mdd = [base '.mdd']; lg = [base '_log.log'];
+fid = fopen(mdd, 'w'); fwrite(fid, int16(round(X)), 'int16'); fclose(fid);
+L = {'systemTime;dataLogTime;channel;code;value', '2020 01 01 06:00:00:000;0;0;nChannels;8', ...
+    '2020 01 01 06:00:00:000;0;0;samplingRate Recording;500', '2020 01 01 06:00:00:000;0;0;Recording;started: old8.mdd'};
+for c = 1:8
+    L{end+1} = sprintf('2020 01 01 06:00:00:000;0;%d;Calibration;1000', c); %#ok<AGROW>
+    L{end+1} = sprintf('2020 01 01 06:00:00:000;0;%d;Offset;0', c); %#ok<AGROW>
+end
+L{end+1} = '2020 01 01 06:01:30:000;90000;0;Recording;stopped: old8.mdd';   %90 s: does not fit the file
+fid = fopen(lg, 'w'); fprintf(fid, '%s\n', L{:}); fclose(fid);
+try
+    H = mda_readMdd(mdd);
+    [C, S] = MyoDishAnalysis(mdd, [1 8], 0, T, 'quiet', true);
+    c1 = C(C.channel == 1, :); s1 = S(S.channel == 1, :);
+    ok8 = H.nChannelsInFile == 8 && ~H.hasStimChannel && H.samplingRate == 500 && ...
+        any(contains(H.notes, 'old 8-channel file')) && height(c1) == T - 2 && all(strcmp(c1.beatType, 'unpaced')) && ...
+        all(isnan(c1.stimToPeak)) && median(c1.amplitude) > 900 && median(c1.amplitude) < 1000 && ...
+        abs(median(c1.peakToPeakFrequency, 'omitnan') - 1) < 0.01 && s1.nStimuli == 0 && s1.nExtraBeats == 0 && ...
+        s1.nMissedBeats == 0 && isnan(s1.stimFrequency) && ~any(S.arrhythmicPacing);
+    fprintf(['old 8-channel file (500 Hz, no status channel, log duration does not fit): %d channels, status channel %d, ' ...
+        '%d contractions (expected %d, unpaced), stimuli %d, extra %d, missed %d   %s\n'], H.nChannelsInFile, ...
+        H.hasStimChannel, height(c1), T - 2, s1.nStimuli, s1.nExtraBeats, s1.nMissedBeats, passStr(ok8));
+catch ME
+    ok8 = false;
+    fprintf('old 8-channel file: %s   FAILED\n', ME.message);
+end
+delete(mdd); delete(lg);
 end
 
 function okG = groupingTest()

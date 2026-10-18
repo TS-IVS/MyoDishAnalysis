@@ -9,7 +9,8 @@
 B       contraction table of one channel (analyze_channel); only rows with included = True and a peak within range
         are averaged
 C       channel info from analyze_channel (stimulus times, threshold)
-range_  [from, to] in s
+range_  [from, to] in s; several ranges (n x 2, 2026-10-14): one row over all of them (union; from / to = first start /
+        last end, stimFrequency from the intervals within the ranges)
 opts    options (arrhythmicWindow, arrhythmicMinVariability; None = defaults)
 exclude [from to] rows of the stimulation protocols (stim-to-stim variability: windows overlapping them are skipped)
 
@@ -27,7 +28,7 @@ included amplitudes, NaN with < 2; 2026-10-10);
 with a reference beat <parameter>_pctRef / _dRef _mean / _SD; with AP columns (analyze_ap) _mean / _SD / _n.
 
 TS 2026-10-06 (port of mda_summarize.m, TS 2026-10-04; uncertain contractions 2026-10-09; extra pulses 2026-10-10;
-stimulus variability 2026-10-13)
+stimulus variability 2026-10-13; several ranges 2026-10-14)
 """
 from __future__ import annotations
 
@@ -40,28 +41,42 @@ from ._matlab import nanmean, nanstd
 from .parameters import PARAMETERS
 
 
+def ranges_of(range_):
+    """[from, to] or several ranges -> array n x 2 (2026-10-14)"""
+    return np.asarray(range_, dtype=float).reshape(-1, 2)
+
+
+def in_ranges(t, R):
+    """t within one of the ranges R (rows [from, to], bounds included)"""
+    t = np.asarray(t, dtype=float)
+    out = np.zeros(t.shape, dtype=bool)
+    for a, b in ranges_of(R):
+        out |= (t >= a) & (t <= b)
+    return out
+
+
 def stim_variability(ST, range_, window=60.0, min_cv=0.1, exclude=None):
-    """stim-to-stim variability of the regular pulses ST in range_ (2026-10-13): windows of window s from the start of
-    the range (the last one shorter); paced windows: >= 6 pulses and no overlap with the [from to] rows of exclude
-    (stimulation protocols); CV = population SD / mean of their intervals.
+    """stim-to-stim variability of the regular pulses ST in range_ (one or several rows [from, to]; 2026-10-13):
+    windows of window s from the start of each range (the last one shorter); paced windows: >= 6 pulses and no overlap
+    with the [from to] rows of exclude (stimulation protocols); CV = population SD / mean of their intervals.
     Returns median CV (%), fraction of the paced time with CV > min_cv, paced time (s); NaN, NaN, 0 without paced
     windows."""
     ST = np.sort(np.asarray(ST, dtype=float))
     X = np.zeros((0, 2)) if exclude is None else np.asarray(exclude, dtype=float).reshape(-1, 2)
-    a, b = float(range_[0]), float(range_[1])
     cvs, dur, var = [], 0.0, 0.0
-    w = a
-    while w < b:
-        e = min(w + float(window), b)
-        x = ST[(ST >= w) & (ST < e)]
-        if x.size >= 6 and not np.any((X[:, 0] < e) & (X[:, 1] > w)):
-            iv = np.diff(x)
-            cv = float(np.std(iv) / np.mean(iv))
-            cvs.append(cv)
-            dur += e - w
-            if cv > min_cv:
-                var += e - w
-        w = e
+    for a, b in ranges_of(range_):
+        w = float(a)
+        while w < b:
+            e = min(w + float(window), float(b))
+            x = ST[(ST >= w) & (ST < e)]
+            if x.size >= 6 and not np.any((X[:, 0] < e) & (X[:, 1] > w)):
+                iv = np.diff(x)
+                cv = float(np.std(iv) / np.mean(iv))
+                cvs.append(cv)
+                dur += e - w
+                if cv > min_cv:
+                    var += e - w
+            w = e
     if not cvs:
         return math.nan, math.nan, 0.0
     return 100 * float(np.median(cvs)), var / dur, dur
@@ -73,17 +88,20 @@ def summarize(B, C, range_, opts=None, exclude=None):
         from .options import options
         opts = options()
     params = [p[0] for p in PARAMETERS]
+    R = ranges_of(range_)  # one or several ranges [from, to] (2026-10-14)
     tp = B["t_peak"].to_numpy(dtype=float)
-    inRange = (tp >= range_[0]) & (tp <= range_[1])
+    inRange = in_ranges(tp, R)
     I = inRange & B["included"].to_numpy(dtype=bool)
     ST = np.asarray(C.stimTimes, dtype=float)
-    J = (ST >= range_[0]) & (ST <= range_[1])
+    J = in_ranges(ST, R)
     fStim = math.nan
-    if np.sum(J) > 1:
-        fStim = 1 / float(np.median(np.diff(ST[J])))
+    iv = np.concatenate([np.diff(ST[(ST >= a) & (ST <= b)]) for a, b in R])  # intervals within the ranges
+    if iv.size:
+        fStim = 1 / float(np.median(iv))
     zeroF = C.get("zeroForce", math.nan)
     bt = B["beatType"].to_numpy()
-    row = dict(channel=C.channel, **{"from": range_[0]}, to=range_[1], nContractions=int(np.sum(I)),
+    row = dict(channel=C.channel, **{"from": float(R[:, 0].min())}, to=float(R[:, 1].max()),
+               nContractions=int(np.sum(I)),
                nDetected=int(np.sum(inRange)), nStimulated=int(np.sum(inRange & (bt == "stimulated"))),
                nExtraBeats=int(np.sum(inRange & (bt == "extra"))), nStimuli=int(np.sum(J)),
                nMissedBeats=int(np.sum(J & ~np.asarray(C.stimCaptured, bool))))
@@ -108,7 +126,7 @@ def summarize(B, C, range_, opts=None, exclude=None):
     xt = C.get("extraTimes")
     if xt is not None:
         xt = np.asarray(xt, float)
-        nXP = int(np.sum((xt >= range_[0]) & (xt <= range_[1])))
+        nXP = int(np.sum(in_ranges(xt, R)))
     if "elicitedByExtraPulse" in B.columns:
         nEl = int(np.sum(inRange & B["elicitedByExtraPulse"].to_numpy(dtype=bool)))
     if "stimAmbiguous" in B.columns:
@@ -119,7 +137,7 @@ def summarize(B, C, range_, opts=None, exclude=None):
     row["nAmbiguous"] = nAmb
     row["stimFrequency"] = fStim
     row["stimVariability_percent"], row["arrhythmicFraction"], row["pacedSeconds"] = stim_variability(
-        ST[J], range_, opts.get("arrhythmicWindow", 60.0), opts.get("arrhythmicMinVariability", 0.1), exclude)
+        ST[J], R, opts.get("arrhythmicWindow", 60.0), opts.get("arrhythmicMinVariability", 0.1), exclude)
     row["detectionThreshold"] = C.threshold
     row["zeroForce"] = zeroF
     for p in params:

@@ -6,12 +6,13 @@
 (images) and exporting the plotted data. Port of the corresponding parts of MyoDishAnalysisGUI.m.
 
 TS 2026-10-06 (info table in every export, open results, rocker artifact window 2026-10-09; advanced settings
-2026-10-10)
+2026-10-10; results browser, numbered comments 2026-10-14)
 """
 from __future__ import annotations
 
 import math
 import os
+import re
 
 import numpy as np
 import pandas as pd
@@ -25,7 +26,7 @@ from ..labels import labels as make_labels
 from ..parameters import PARAMETERS
 from ..zero_force import zero_force
 from .timeaxis import fmt_clock
-from .widgets import TwinPlot, runs, time_plot
+from .widgets import BLUE, UI_BLUE_DARK, ElidedLabel, TwinPlot, pref_set, primary, runs, time_plot
 
 IMAGE_FILTER = "PNG image (*.png);;JPEG image (*.jpg);;TIFF image (*.tif);;PDF vector graphic (*.pdf)"
 SHOT_FILTER = "PNG image (*.png);;JPEG image (*.jpg);;TIFF image (*.tif)"
@@ -349,13 +350,16 @@ def export_plot_data(win, which):
         return
     clk = (lambda t: datenum_to_timestamps(H.recordingStart + np.asarray(t, float) / 86400)) \
         if not math.isnan(H.recordingStart) else None
-    names, tabs = [], []
+    names, tabs = [], []  # times in the file (rocker stops side by side: mapped, win.w2f)
     if which == "force":
-        I = (C.t >= xl[0]) & (C.t <= xl[1])
-        t = C.t[I]
-        f = C.f[I]
+        sel = (C.t >= xl[0]) & (C.t <= xl[1])
+        gm = S.get("gapMask") if win.sbs is not None else None
+        if gm is not None and np.size(gm) == np.size(sel):
+            sel = sel & ~np.asarray(gm, bool)
+        t = C.t[sel]
+        f = C.f[sel]
         z, _, _, _ = zero_force(S, win.ch, win.zero_of(), t)
-        T = pd.DataFrame({"t_file_s": t})
+        T = pd.DataFrame({"t_file_s": win.w2f(t)})
         if win.rel_time:
             T["t_window_s"] = t - S.fromSeconds
         if not np.any(np.isnan(z)):
@@ -363,7 +367,7 @@ def export_plot_data(win, which):
         else:
             T["force_signal_uN"] = f
         if C.get("rockerArtifact") is not None:
-            T["rockerArtifactSubtracted_uN"] = C.rockerArtifact[I]
+            T["rockerArtifactSubtracted_uN"] = C.rockerArtifact[sel]
         if len(T) > 1048000 and file.lower().endswith(".xlsx"):
             win.status(f"{len(T)} rows: too many for Excel. Zoom in or export as .csv / .txt.")
             return
@@ -385,18 +389,20 @@ def export_plot_data(win, which):
             st[inR[J] & ~inc[J]] = "excluded by filter"
             st[inR[J] & man[J]] = "excluded by user"
             st[sel[J]] = "selected"
-            Tc = pd.DataFrame({"t_peak_s": tp[J], "peak_force_uN": y, "beatType": B["beatType"].to_numpy()[J],
-                               "status": st})
+            Tc = pd.DataFrame({"t_peak_s": win.w2f(tp[J]), "peak_force_uN": y,
+                               "beatType": B["beatType"].to_numpy()[J], "status": st})
             if clk is not None:
-                Tc["clockTime"] = clk(tp[J])
+                Tc["clockTime"] = clk(Tc["t_peak_s"].to_numpy())
             names.append("contractions")
             tabs.append(Tc)
         ts = C.stimTimes[(C.stimTimes >= xl[0]) & (C.stimTimes <= xl[1])]
         names.append("stimuli")
-        tabs.append(pd.DataFrame({"t_stim_s": ts}))
+        tabs.append(pd.DataFrame({"t_stim_s": win.w2f(ts)}))
         if win.LE is not None and len(win.LE):
             E = win.LE
-            cm = E["isComment"].to_numpy() & (E["t_file"].to_numpy() >= xl[0]) & (E["t_file"].to_numpy() <= xl[1])
+            tw = win.f2w(E["t_file"].to_numpy(float))
+            with np.errstate(invalid="ignore"):
+                cm = E["isComment"].to_numpy() & (tw >= xl[0]) & (tw <= xl[1])
             if cm.any():
                 names.append("comments")
                 tabs.append(pd.DataFrame({"t_file_s": E["t_file"].to_numpy()[cm], "clockTime": E["clockTime"][cm].to_numpy(),
@@ -406,8 +412,8 @@ def export_plot_data(win, which):
         I = (tS >= xl[0]) & (tS <= xl[1])
         if C.stimChannel == 0:  # external trigger pulses: no current
             cur = np.full(cur.size, np.nan)
-        T = pd.DataFrame({"t_file_s": tS[I], "current_mA": cur[I], "currentReached": ok[I], "extraPulse": ex[I],
-                          "intervalToPreviousPulse_ms": iv[I]})
+        T = pd.DataFrame({"t_file_s": win.w2f(tS[I]), "current_mA": cur[I], "currentReached": ok[I],
+                          "extraPulse": ex[I], "intervalToPreviousPulse_ms": iv[I]})
         if win.rel_time:
             T["t_window_s"] = T["t_file_s"] - S.fromSeconds
         if clk is not None:
@@ -427,7 +433,7 @@ def export_plot_data(win, which):
         tp = B["t_peak"].to_numpy()
         J = (tp >= xl[0]) & (tp <= xl[1])
         vn = f"{nm}_{unit.replace('/', '_per_').replace('*', 'x').replace('%', 'pct').replace(' ', '_').replace(',', '')}"
-        T = pd.DataFrame({"t_peak_s": tp[J], vn: v[J], "selected": sel[J]})
+        T = pd.DataFrame({"t_peak_s": win.w2f(tp[J]), vn: v[J], "selected": sel[J]})
         if win.rel_time:
             T["t_window_s"] = T["t_peak_s"] - S.fromSeconds
         if clk is not None:
@@ -460,18 +466,20 @@ class CommentsWindow(QtWidgets.QWidget):
         b = QtWidgets.QPushButton("Go to")
         b.clicked.connect(lambda: self.goto())
         g.addWidget(b, 0, 4)
-        self.ut = QtWidgets.QTableWidget(0, 6)
-        self.ut.setHorizontalHeaderLabels(["date / time", "time in file", "t (s)", "ch", "code", "text"])
+        self.ut = QtWidgets.QTableWidget(0, 7)
+        self.ut.setHorizontalHeaderLabels(["#", "date / time", "time in file", "t (s)", "ch", "code", "text"])
         self.ut.verticalHeader().setVisible(False)
         self.ut.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.ut.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.ut.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.ut.horizontalHeader().setStretchLastSection(True)
-        for k, w in enumerate((140, 80, 80, 35, 110)):
+        for k, w in enumerate((34, 140, 80, 80, 35, 110)):
             self.ut.setColumnWidth(k, w)
         self.ut.cellDoubleClicked.connect(lambda r, c: self.goto(r))
+        self.ut.itemSelectionChanged.connect(self._selected)
         g.addWidget(self.ut, 1, 0, 1, 5)
-        hint = QtWidgets.QLabel("Double-click a row (or select it and press Go to): loads the data around it (window "
-                                "length = loaded window, at least 30 s). Comments are marked purple in the plots.")
+        hint = QtWidgets.QLabel("# = number in the force plot. Select a row: marked in the force plot; double-click "
+                                "(or Go to): loads the data around it (window length = loaded window, at least 30 s).")
         hint.setStyleSheet("color: #4d4d4d")
         g.addWidget(hint, 2, 0, 1, 5)
         self.view = []
@@ -498,17 +506,45 @@ class CommentsWindow(QtWidgets.QWidget):
                 m &= np.array([w in h for h in hay])
         self.view = list(np.flatnonzero(m))
         hrs = self.win.H.totalSeconds >= 3600
+        num = np.cumsum(E["isComment"].to_numpy(bool))  # number of the comment (force plot)
+        isc = E["isComment"].to_numpy(bool)
+        self.ut.blockSignals(True)
         self.ut.setRowCount(len(self.view))
         for r, j in enumerate(self.view):
             ct = E["clockTime"].iloc[j]
-            vals = ["" if pd.isna(ct) else pd.Timestamp(ct).strftime("%Y-%m-%d %H:%M:%S"),
+            vals = [str(int(num[j])) if isc[j] else "",
+                    "" if pd.isna(ct) else pd.Timestamp(ct).strftime("%Y-%m-%d %H:%M:%S"),
                     fmt_clock(E["t_file"].iloc[j], hrs, True), f"{round(E['t_file'].iloc[j] * 10) / 10:g}",
                     f"{E['channel'].iloc[j]:g}", str(E["code"].iloc[j]), str(E["text"].iloc[j])]
             for c, v in enumerate(vals):
                 self.ut.setItem(r, c, QtWidgets.QTableWidgetItem(v))
+        self.ut.blockSignals(False)
         what = "entries" if self.cb.isChecked() else "comments"
         tot = len(E) if self.cb.isChecked() else int(E["isComment"].sum())
         self.lbl.setText(f"{len(self.view)} of {tot} {what}")
+
+    def _selected(self):
+        """a row selected: its comment is marked in the force plot (if it is in the loaded window)"""
+        r = self.ut.currentRow()
+        if 0 <= r < len(self.view) and self.win.LE is not None:
+            self.win.highlight_comment(float(self.win.LE["t_file"].iloc[self.view[r]]))
+
+    def select_entry(self, j):
+        """row j of the log entries selected (mark clicked in the force plot); the search is cleared if it hides it"""
+        if j not in self.view:
+            self.ef.blockSignals(True)
+            self.ef.setText("")
+            self.ef.blockSignals(False)
+            self.filter()
+        if j not in self.view:
+            return
+        r = self.view.index(j)
+        self.ut.blockSignals(True)
+        self.ut.selectRow(r)
+        self.ut.blockSignals(False)
+        it = self.ut.item(r, 0)
+        if it is not None:
+            self.ut.scrollToItem(it)
 
     def goto(self, r=None):
         if r is None:
@@ -521,6 +557,326 @@ class CommentsWindow(QtWidgets.QWidget):
         ct = E["clockTime"].iloc[j]
         self.win.goto_time(float(E["t_file"].iloc[j]), str(E["text"].iloc[j]),
                            "" if pd.isna(ct) else pd.Timestamp(ct).strftime("%Y-%m-%d %H:%M:%S"))
+
+
+# ----------------------------------------------------------------------------------------------- results browser
+_PARALLEL_RX = re.compile(r"^parallel recording of (.+?\.mdd) \((?:from )?([\d.]+)(?:-([\d.]+))? s of the main file\)",
+                          re.I)
+
+
+def results_rows(X, T):
+    """rows of the results browser (2026-10-14): one per analysed recording and channel with flags (mda_flags.csv), one
+    per recording without (not analysed: status and message of the index; flags not computed yet: '?'); sorted by
+    recording and channel. Columns main, a, b: main file of a parallel recording (index message 'parallel recording of
+    ...'). As browserRows in MyoDishAnalysisGUI.m."""
+    X = X.reset_index(drop=True)
+    pos = {f: i for i, f in enumerate(X["file"])}
+    msg = X["message"].fillna("").astype(str).tolist()
+    pm, pa, pb, ptxt = [""] * len(X), [math.nan] * len(X), [math.nan] * len(X), [""] * len(X)
+    for i, m in enumerate(msg):
+        r = _PARALLEL_RX.match(m)
+        if r:
+            pm[i], pa[i] = r.group(1), float(r.group(2))
+            pb[i] = float(r.group(3)) if r.group(3) else math.nan
+            ptxt[i] = "parallel recording of " + os.path.basename(r.group(1))
+    T = T[T["file"].isin(pos)].reset_index(drop=True)
+    rows = []
+    for f, c, lab, fl, cap, nd, st, red, yel, lev, a, b in zip(
+            T["file"], T["channel"], T["label"], T["flags"], T["capture_percent"], T["nDetected"], T["status"],
+            T["red"], T["yellow"], T["level"], T["from"], T["to"]):
+        i = pos[f]
+        note = "; ".join(x for x in (ptxt[i], str(red), str(yel)) if x)
+        if str(lev) == "few beats" and not note:
+            note = "too few contractions for the flags"
+        rows.append((f, float(c), str(lab), str(fl), float(cap), float(nd), str(st), note, str(lev), X["status"].iat[i],
+                     float(a), float(b), i))
+    have = set(T["file"])
+    for i, (f, st) in enumerate(zip(X["file"], X["status"])):
+        if f in have:
+            continue
+        ok = st == "ok"
+        note = msg[i]
+        if ok:
+            note = "; ".join(x for x in (ptxt[i], "flags not computed yet (Compute flags)") if x)
+        rows.append((f, math.nan, "", "?" if ok else "", math.nan, math.nan, st, note, "", st, math.nan, math.nan, i))
+    D = pd.DataFrame(rows, columns=["file", "channel", "label", "flags", "capture", "nDetected", "status", "note",
+                                    "level", "indexStatus", "from", "to", "row"])
+    D["main"] = [pm[i] for i in D["row"]]
+    D["a"] = [pa[i] for i in D["row"]]
+    D["b"] = [pb[i] for i in D["row"]]
+    D = D.sort_values(["file", "channel"], kind="stable", na_position="last").reset_index(drop=True)
+    D["hay"] = (D["file"] + " " + D["label"] + " " + D["flags"] + " " + D["status"] + " " + D["note"]).str.lower()
+    return D
+
+
+class _RowsModel(QtCore.QAbstractTableModel):
+    """table model of the results browser (many rows: texts, row colours)"""
+
+    def __init__(self, cols):
+        super().__init__()
+        self.cols = cols
+        self.rows, self.bg, self.fg = [], [], []
+
+    def set_rows(self, rows, bg, fg):
+        self.beginResetModel()
+        self.rows, self.bg, self.fg = rows, bg, fg
+        self.endResetModel()
+
+    def rowCount(self, parent=QtCore.QModelIndex()):  # noqa: N802 - Qt
+        return 0 if parent.isValid() else len(self.rows)
+
+    def columnCount(self, parent=QtCore.QModelIndex()):  # noqa: N802 - Qt
+        return 0 if parent.isValid() else len(self.cols)
+
+    def data(self, index, role=QtCore.Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        r, c = index.row(), index.column()
+        R = QtCore.Qt.ItemDataRole
+        if role in (R.DisplayRole, R.ToolTipRole):
+            return self.rows[r][c]
+        if role == R.BackgroundRole and self.bg[r] is not None:
+            return self.bg[r]
+        if role == R.ForegroundRole and self.fg[r] is not None:
+            return self.fg[r]
+        if role == R.TextAlignmentRole and c in (1, 4, 5):
+            return int(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        return None
+
+    def headerData(self, section, orientation, role=QtCore.Qt.ItemDataRole.DisplayRole):  # noqa: N802 - Qt
+        if role == QtCore.Qt.ItemDataRole.DisplayRole and orientation == QtCore.Qt.Orientation.Horizontal:
+            return self.cols[section]
+        return None
+
+
+class ResultsBrowser(QtWidgets.QWidget):
+    """results browser (2026-10-14): recordings and channels of a results folder of the watcher (mda_index.csv) with
+    the flags of the analysis report (mda_flags.csv). Double-click a row (or Open): the channel with the settings of
+    its analysis (red flags: the window of the flags, otherwise the first 120 s of its analysis); a parallel recording
+    that was not analysed: its main file at its window. As the results browser of MyoDishAnalysisGUI.m."""
+
+    COLS = ["recording", "ch", "label", "flags", "capture %", "contractions", "status", "note"]
+    VIEWS = ["all recordings", "with flags", "red flags (check the analysis)", "not analysed"]
+    HINT = ("Double-click a row (or Open): the channel with the settings of its analysis (red flags: the window of the "
+            "flags, otherwise the first 120 s of its analysis); a parallel recording that was not analysed: its main "
+            "file at that time. Flags (as in the watcher report): red = check the analysis (I inverted signal, N "
+            "noise, S large extra beats, D delay, F stimulus frequency), yellow = slice quality (C capture, X extra "
+            "beats, A amplitude, T amplitude change, V amplitude CV); ? = not computed yet.")
+
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self.res = ""
+        self.remember = True
+        self.D = None
+        self.view = np.zeros(0, int)
+        self.missing = []
+        self.setWindowFlag(QtCore.Qt.WindowType.Window)
+        self.setWindowTitle("Results")
+        self.resize(1180, 600)
+        g = QtWidgets.QGridLayout(self)
+        b = QtWidgets.QPushButton("Folder ...")
+        b.setToolTip("results folder of the watcher (with mda_index.csv)")
+        b.clicked.connect(self.choose_folder)
+        g.addWidget(b, 0, 0)
+        self.lf = ElidedLabel("")
+        self.lf.setStyleSheet(f"color: {UI_BLUE_DARK}")
+        g.addWidget(self.lf, 0, 1, 1, 4)
+        b = QtWidgets.QPushButton("Reload")
+        b.setToolTip("read the index and the flags again (e.g. after a pass of the watcher)")
+        b.clicked.connect(self.load)
+        g.addWidget(b, 0, 5)
+        g.addWidget(QtWidgets.QLabel("Search:"), 1, 0)
+        self.ef = QtWidgets.QLineEdit()
+        self.ef.setPlaceholderText("recording, label, status, flag text ... (several words: all must occur)")
+        self.ef.returnPressed.connect(self.filter)
+        self.ef.textChanged.connect(lambda *_: self.filter() if self.D is not None and len(self.D) <= 5000 else None)
+        g.addWidget(self.ef, 1, 1)
+        self.dd = QtWidgets.QComboBox()
+        self.dd.addItems(self.VIEWS)
+        self.dd.currentIndexChanged.connect(lambda *_: self.filter())
+        g.addWidget(self.dd, 1, 2)
+        self.lc = QtWidgets.QLabel("")
+        self.lc.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        g.addWidget(self.lc, 1, 3)
+        self.bc = QtWidgets.QPushButton("Compute flags")
+        self.bc.setEnabled(False)
+        self.bc.setToolTip("recordings analysed without flags (older watcher versions): flags computed from their "
+                           "result files and saved in mda_flags.csv")
+        self.bc.clicked.connect(self.compute)
+        g.addWidget(self.bc, 1, 4)
+        bo = primary(QtWidgets.QPushButton("Open"))
+        bo.clicked.connect(lambda: self.open_row())
+        g.addWidget(bo, 1, 5)
+        self.model = _RowsModel(self.COLS)
+        self.ut = QtWidgets.QTableView()
+        self.ut.setModel(self.model)
+        self.ut.verticalHeader().setVisible(False)
+        self.ut.verticalHeader().setDefaultSectionSize(20)
+        self.ut.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.ut.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self.ut.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.ut.horizontalHeader().setStretchLastSection(True)
+        for k, w in enumerate((330, 32, 110, 50, 70, 85, 95)):
+            self.ut.setColumnWidth(k, w)
+        self.ut.doubleClicked.connect(lambda ix: self.open_row(ix.row()))
+        g.addWidget(self.ut, 2, 0, 1, 6)
+        self.lm = QtWidgets.QLabel("")
+        self.lm.setWordWrap(True)
+        self.lm.setStyleSheet("color: #4d4d4d")
+        g.addWidget(self.lm, 3, 0, 1, 6)
+        g.setColumnStretch(1, 1)
+
+    def set_folder(self, res):
+        """results folder: res or the nearest parent folder with mda_index.csv (a subfolder was chosen)"""
+        q = os.path.abspath(str(res))
+        for _ in range(4):
+            if os.path.isfile(os.path.join(q, "mda_index.csv")):
+                res = q
+                break
+            up = os.path.dirname(q)
+            if up == q:
+                break
+            q = up
+        self.res = str(res)
+        self.load()
+
+    def choose_folder(self):
+        p = QtWidgets.QFileDialog.getExistingDirectory(self, "Results folder of the watcher (with mda_index.csv)",
+                                                       self.res)
+        if p:
+            self.set_folder(p)
+
+    def load(self):
+        """index and flags of the folder (flags of the current analyses only; missing ones: Compute flags)"""
+        from ..watch import flags_table
+        self.lf.setText(self.res)
+        self.lf.setToolTip(self.res)
+        self.D, self.missing = None, []
+        self.bc.setEnabled(False)
+        self.bc.setText("Compute flags")
+        if not os.path.isfile(os.path.join(self.res, "mda_index.csv")):
+            self.filter()
+            self.lm.setText("No mda_index.csv in this folder: choose the results folder of the watcher "
+                            "(MyoDishAnalysisWatch, mda-watch) with Folder ...")
+            return
+        if self.remember:
+            pref_set("lastResultsDir", self.res)
+        self.lm.setText("Reading the index and the flags ...")
+        QtWidgets.QApplication.processEvents()
+        try:
+            X, T, missing = flags_table(self.res, compute=False)
+        except Exception as e:  # noqa: BLE001
+            self.lm.setText(f"Error: {e}")
+            return
+        self.D = results_rows(X, T)
+        self.missing = missing
+        if missing:
+            self.bc.setEnabled(True)
+            self.bc.setText(f"Compute flags ({len(missing)})")
+        self.filter()
+        self.lm.setText(self.HINT)
+
+    def compute(self):
+        """flags of the recordings without current flags (from their result files; saved in mda_flags.csv)"""
+        from ..watch import flags_table
+        n = len(self.missing)
+        if not n:
+            return
+        dlg = QtWidgets.QProgressDialog(f"Flags of {n} recording(s) ...", "", 0, n, self)
+        dlg.setCancelButton(None)
+        dlg.setWindowTitle("Results")
+        dlg.setMinimumDuration(300)
+
+        def step(k, m):
+            dlg.setValue(k)
+            QtWidgets.QApplication.processEvents()
+        try:
+            flags_table(self.res, compute=True, progress=step)
+        except Exception as e:  # noqa: BLE001
+            self.lm.setText(f"Error: {e}")
+        dlg.close()
+        self.load()
+
+    def filter(self):
+        """rows shown: list (all / with flags / red flags / not analysed) and search text (all words,
+        case-insensitive)"""
+        D = self.D
+        if D is None or not len(D):
+            self.view = np.zeros(0, int)
+            self.model.set_rows([], [], [])
+            self.lc.setText("")
+            return
+        k = self.dd.currentIndex()
+        if k == 1:
+            m = D["level"].isin(["check", "quality"]).to_numpy()
+        elif k == 2:
+            m = (D["level"] == "check").to_numpy()
+        elif k == 3:
+            m = (D["indexStatus"] != "ok").to_numpy()
+        else:
+            m = np.ones(len(D), bool)
+        for w in self.ef.text().lower().split():
+            m &= D["hay"].str.contains(w, regex=False).to_numpy()
+        self.view = np.flatnonzero(m)
+        V = D.iloc[self.view]
+
+        def num(x, fmt):
+            return ["" if not math.isfinite(v) else format(v, fmt) for v in x]
+        rows = list(zip(V["file"], num(V["channel"], ".0f"), V["label"], V["flags"], num(V["capture"], ".0f"),
+                        num(V["nDetected"], ".0f"), V["status"], V["note"]))
+        red, yel, grey = QtGui.QColor("#f8c9c4"), QtGui.QColor("#fbe8a6"), QtGui.QColor("#737373")
+        bg = [red if lv == "check" else (yel if lv == "quality" else None) for lv in V["level"]]
+        fg = [None if st == "ok" else grey for st in V["indexStatus"]]
+        self.model.set_rows(rows, bg, fg)
+        self.lc.setText(f"{len(V)} row(s), {V['file'].nunique()} recording(s)")
+
+    def open_row(self, r=None):
+        """a row in the main window (results file <name>_info.csv of the recording)"""
+        if r is None:
+            ix = self.ut.currentIndex()
+            r = ix.row() if ix.isValid() else -1
+        if self.D is None or r is None or r < 0 or r >= self.view.size:
+            self.lm.setText("Select a row first.")
+            return False
+        d = self.D.iloc[int(self.view[r])]
+        file, c, win, pick = d["file"], d["channel"], None, None
+        if d["indexStatus"] == "parallel" and d["main"]:  # not analysed: the main file at its window
+            file, c = d["main"], math.nan
+            win = [d["a"], d["a"] + 120.0]
+            if math.isfinite(d["b"]):
+                win[1] = min(win[1], d["b"])
+        elif d["indexStatus"] != "ok":
+            self.lm.setText(f"{d['file']} was not analysed ({d['indexStatus']}): {d['note']}")
+            return False
+        elif math.isfinite(d["from"]) and math.isfinite(d["to"]):
+            win = [d["from"], d["to"]]
+        from ..watch import results_of
+        n = os.path.splitext(os.path.basename(file))[0]
+        folder, _ = results_of(self.res, file)  # folder of the series or flat (2026-10-15)
+        info = ""  # results: <name>.xlsx (2026-10-14) or <name>_info.csv; recordings with protocols only
+        for cand in (n + ".xlsx", n + "_info.csv", n + "_protocols.xlsx", n + "_protocols_info.csv"):
+            x = os.path.join(folder, cand)
+            if not os.path.isfile(x):
+                continue
+            if x.endswith(".xlsx"):
+                try:
+                    with pd.ExcelFile(x) as xl:
+                        if "info" not in xl.sheet_names:
+                            continue
+                except Exception:  # noqa: BLE001 - not readable
+                    continue
+            info = x
+            break
+        if not info:
+            self.lm.setText(f"No results of {file} in this folder ({n}.xlsx, {n}_info.csv).")
+            return False
+        if math.isnan(c) and win is None:
+            pick = 0
+        self.win.raise_()
+        self.win.activateWindow()
+        return self.win.open_results(info, pick=pick, channel=None if math.isnan(c) else int(c), window=win,
+                                     max_len=120.0)
 
 
 # ----------------------------------------------------------------------------------------------- labels
@@ -543,7 +899,7 @@ class LabelsDialog(QtWidgets.QWidget):
                          ("Save ...", self.save)):
             b = QtWidgets.QPushButton(text)
             b.clicked.connect(cb)
-            h.addWidget(b)
+            h.addWidget(primary(b) if text == "Apply and close" else b)
         t = QtWidgets.QLabel("cultureStart, e.g. 1999-12-24 14:30: daysInCulture is then calculated for every "
                              "contraction. analyst: your initials. Saved as <name>_labels.csv next to the .mdd file, the "
                              "file is loaded automatically next time.")
@@ -748,7 +1104,7 @@ class AdvancedSettings(QtWidgets.QWidget):
                                      "analyses the loaded window again (* = the window is read again). Settings are "
                                      "saved with every export and can be loaded from a settings file or from results.")
         self.lMsg.setWordWrap(True)
-        self.lMsg.setStyleSheet("color: #000099")
+        self.lMsg.setStyleSheet(f"color: {UI_BLUE_DARK}")
         v.addWidget(self.lMsg)
         h = QtWidgets.QHBoxLayout()
         for text, cb, tip in (
@@ -767,7 +1123,7 @@ class AdvancedSettings(QtWidgets.QWidget):
         for text, cb in (("Cancel", self.close), ("Apply", lambda: self.apply(False)), ("OK", lambda: self.apply(True))):
             b = QtWidgets.QPushButton(text)
             b.clicked.connect(cb)
-            h.addWidget(b)
+            h.addWidget(primary(b) if text == "OK" else b)
         v.addLayout(h)
         self.resize(820, 680)
         self.show_options(win.opts)
@@ -962,7 +1318,7 @@ class RockerArtifactWindow(QtWidgets.QMainWindow):
         self.p1.addLegend(offset=(-10, 10))
         c1 = self.p1.plot(self.tx, self.before, pen=pg.mkPen((179, 179, 179), width=1), name="before the rocker filter")
         c2 = self.p1.plot(self.tx, self.after, pen=pg.mkPen("k", width=1), name="after (analysed)")
-        c3 = self.p2.plot(self.tx, self.art, pen=pg.mkPen((0, 77, 255), width=1))
+        c3 = self.p2.plot(self.tx, self.art, pen=pg.mkPen(BLUE, width=1))
         for c in (c1, c2, c3):
             c.setDownsampling(auto=True, method="peak")
             c.setClipToView(True)
@@ -1016,27 +1372,45 @@ class RockerArtifactWindow(QtWidgets.QMainWindow):
 def help_text():
     P = PARAMETERS
     lines = [
-        "Comments ...: searchable list of the comments in the log file (date / time, time in the file, text; option: "
-        "all log entries). Double-click a row (or Go to) to load the data around it. Comments are marked purple in the "
-        "plots.", "",
-        "Overview: min/max of the selected channel over the whole recording (green = rocker at rest). Drag in it to "
-        "load a time window (or type From/To and press Load). Mouse wheel: zoom (shift + wheel: move), double-click: "
-        "whole file; the zoomed part is re-read in more detail.", "",
+        "Open ...: a recording (.mdd) or results of an analysis (.xlsx, <name>_info.csv, ...; see below). The folder "
+        "is remembered. A recording opens with its first 120 s loaded and analysed (From / To).",
+        "Results ...: results browser of a results folder of the watcher (mda_index.csv): one row per recording and "
+        "channel with the flags of the watcher report (red = check the analysis, yellow = slice quality; list: all / "
+        "with flags / red flags / not analysed; search). Double-click a row (or Open): the channel with the settings "
+        "of its analysis (red flags: the window of the flags, otherwise the first 120 s). Compute flags: for results "
+        "of older watcher versions. The last folder opens again directly (Folder ... = another one).",
+        "Main file (button next to the file name): the open file is a parallel recording (e.g. schedule file or "
+        "snapshot started from the main recording); opens the main file at the window shown, same channel.",
+        "Flags (grey line above the table): flags of the watcher report for the analysed range of the channel (red = "
+        "check the analysis: I inverted signal, N noise, S large extra beats, D delay, F stimulus frequency; orange = "
+        "slice quality: C capture, X extra beats, A amplitude, T amplitude change, V amplitude CV).", "",
+        "Comments ...: searchable list of the comments in the log file (# = number in the force plot, date / time, "
+        "time in the file, text; option: all log entries). Select a row: the comment is highlighted in the force plot; "
+        "double-click (or Go to): loads the data around it. Force plot: comments as numbered purple marks at the top "
+        "(pointer on a mark: its text; click: highlighted and selected in the list).", "",
+        "Overview: min/max of the selected channel over the whole recording (green = rocker at rest; the unit of the "
+        "time axis bottom left, e.g. (h:mm); from 2 days 'd h:mm'). Drag in it to load a time window (or type "
+        "From/To and press Load). Mouse wheel: zoom (shift + wheel: move), double-click: whole file; the zoomed part "
+        "is re-read in more detail. Right click: Select all (load the range shown, at most 4 h).", "",
         "Force plot: red = selected contractions, orange = uncertain contractions (high sensitivity: neither locked to "
         "the stimuli nor large compared with the other contractions; not counted with high specificity), grey = "
         "excluded by the filters (rocker / stimulated only), x = "
         "excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16: pre-pulses, CCM "
         "pulses, ...), green rings = contractions elicited by an extra pulse, black diamonds = ambiguous stimulus "
-        "assignment, grey background = rocker moving, yellow = analysed range.",
+        "assignment, bar at the top = rocker state (green = at rest, grey = moving), yellow = analysed range(s).",
         "Advanced ...: all parameters of the method that are based on assumptions or experience, one tab per part "
         "(stimulus assignment / onset gate, detection, noise and artifact rules, rocker rules, signal and spike removal, "
         "rocker filter, export). Hover over a name for its meaning; Guide = settings guide (PDF) with figures; Defaults "
         "= options(); Apply / OK analyse the window again (* = the window is read again). Save settings ... / Load "
         "settings ...: settings file (.csv; also results of an analysis); the settings are saved with every export "
-        "(info table).",
+        "(info table). Changed settings: the button shows their number in red (e.g. Advanced (3 changed), shortened if "
+        "it does not fit: Adv. (3 chgd)); its tool tip lists them with their defaults.",
         "Legend of the force plot: menu View or right click in the force plot (it can be dragged).",
-        "Cursor in the force plot: \"drag = select time range\" or \"click = exclude / include contraction\". Mouse "
-        "wheel: zoom the time axis (shift + wheel: move); double-click: whole loaded window. Right click: zero force, "
+        "Cursor in the force plot: \"drag = select time range\" (shift + drag: add a range; several ranges are pooled, "
+        "exports add one row per range) or \"click = exclude / include contraction\". Mouse wheel: zoom the time axis "
+        "(shift + wheel: move); double-click: whole loaded window. Right click: Zoom to the selection; Select all "
+        "rocker stops of the overview range (with 'only contractions with rocker at rest': every rocker stop of the "
+        "range shown in the overview side by side, dashed lines = time gaps; load a window to return); zero force, "
         "reference beat, save / export.",
         "Arrow keys and the buttons under the force plot change the loaded window (= blue selection in the overview and "
         "analysed range; read again): left / right = move it by half its length, shift + left / right (shift + click) "
@@ -1062,7 +1436,7 @@ def help_text():
         "Save / Export (menu or right click on a plot): plots as .png / .jpg / .tif (300 dpi) / .pdf, plotted data "
         "(visible time range) as .xlsx / .csv / .txt; overview: picture only. Every data export contains the table info "
         "(version, recording, all settings, threshold and zero force of the channel, window and range).", "",
-        "Open results ...: a results file of MyoDishAnalysis, the watcher or an export of the GUI (.xlsx, "
+        "Open ... with a results file of MyoDishAnalysis, the watcher or an export of the GUI (.xlsx, "
         "<name>_info.csv, _summary.csv, _contractions.csv): the recording (path in the file; otherwise next to the "
         "results file or asked for), the settings and the analysis window (channel, data window, analysed range; "
         "several: list) are restored, the contractions are detected again and compared with the file (status line; "

@@ -3,8 +3,9 @@ function varargout = mda_report(varargin)
 %GUI. Same flags and pages as the Python version (report.py).
 %
 %   R = mda_report(recs, pdfFile, 'title', t, 'subtitle', {...}, 'flags', fl, 'maxPages', 8, 'windowSeconds', 20,
-%                  'notice', {...})     notice: lines in red at the top of the first page (watcher: recordings analysed
-%                                       with another version or other options)
+%                  'notice', {...}, 'image', png)   notice: lines in red at the top of the first page (watcher:
+%                                       recordings analysed with another version or other options); image: PNG on the
+%                                       first page (overview image of an experiment)
 %   R = mda_report('analysis', pdfFile, mddFile, C, S, info, resultsFile, fl)   report of one analysis (MyoDishAnalysis,
 %                                       GUI); the GUI commands open resultsFile (or the recording if it is empty)
 %   R = mda_report('flags', S, C, status, fl)   flags per channel (table), no PDF
@@ -14,9 +15,21 @@ function varargout = mda_report(varargin)
 %   fl = mda_report('defaults')         default flags (struct)
 %   [from, to] = mda_report('window', C, channel, codes, width)
 %   [m, p] = mda_report('commands', file, channel, from, to)   MATLAB and Python commands that open the GUI there
+%   f = mda_report('trend', pngFile, D)  trend image of one channel (watcher, slice register; 2026-10-14): one panel
+%                                       per parameter, see trendImage below; '' if there is nothing to show
+%   [T, C] = mda_report('trendData', D)  its data: one row per window (t_from, nBeats, parameters, bin_from of the
+%                                       line) and the comments shown (number, t, text)
+%   f = mda_report('course', pngFile, D)  course image of one channel of a series (slice register, 2026-10-15): per
+%                                       parameter the whole time course (left) and the last 24 h (right), see
+%                                       courseImage below
+%   [Tc, Tl, Tm] = mda_report('courseData', D)  its data: bins of the whole course (per slice), windows of the last
+%                                       24 h, comments shown
+%   f = mda_report('experiment', pngFile, D)  overview image of an experiment (2026-10-15): series x channels with
+%                                       the amplitude over the whole time course, status, red flags
 %
-% Written by MyoDishAnalysisWatch after every pass with analysed recordings (resultsFolder/reports/
-% mda_report_<date>_<time>.pdf, option 'report'), by MyoDishAnalysis with an output file (<output>_report.pdf, option
+% Written by MyoDishAnalysisWatch per experiment after every pass with analysed recordings of the experiment
+% (<experiment>/<experiment>_report.pdf: all its recordings, the new ones (recs(i).new) in bold with detail pages, first
+% page 'image' = overview image; 2026-10-15; option 'report'), by MyoDishAnalysis with an output file (<output>_report.pdf, option
 % 'report') and by the GUI on request (menu Save / Export).
 %
 % recs: struct array, one element per recording: name (shown), file (.mdd), open (file for the GUI commands: results
@@ -65,7 +78,7 @@ function varargout = mda_report(varargin)
 % Needs MATLAB R2021b or newer (exportgraphics with 'Append').
 %
 % TS 2026-10-11 (noise index N, large extra beats S, extra beats as slice quality 2026-10-12; arrhythmic pacing, F
-% 2026-10-13)
+% 2026-10-13; trend images 2026-10-14; course and experiment images, reports per experiment 2026-10-15)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -89,6 +102,16 @@ if ischar(varargin{1}) || isstring(varargin{1})
         case 'analysis'
             a = [varargin(2:end), cell(1, 7)];
             varargout{1} = analysisReport(a{1:7});
+        case 'trend'
+            varargout{1} = trendImage(char(varargin{2}), varargin{3});
+        case 'trenddata'
+            [varargout{1}, varargout{2}] = trendData(varargin{2});
+        case 'course'
+            varargout{1} = courseImage(char(varargin{2}), varargin{3});
+        case 'coursedata'
+            [varargout{1}, varargout{2}, varargout{3}] = courseData(varargin{2});
+        case 'experiment'
+            varargout{1} = experimentImage(char(varargin{2}), varargin{3});
         otherwise
             error('mda_report: unknown mode ''%s''', char(varargin{1}));
     end
@@ -96,14 +119,14 @@ if ischar(varargin{1}) || isstring(varargin{1})
 end
 recs = varargin{1}; out = char(varargin{2});
 p = struct('title', 'MyoDishAnalysis report', 'subtitle', {{}}, 'flags', [], 'maxpages', 8, 'windowseconds', 20, ...
-    'notice', {{}});
+    'notice', {{}}, 'image', '');
 for i = 3:2:numel(varargin)
     k = lower(char(varargin{i}));
     if ~isfield(p, k), error('mda_report: unknown option ''%s''', varargin{i}); end
     p.(k) = varargin{i+1};
 end
 varargout{1} = writeReport(recs, out, p.title, cellstr(p.subtitle), flagsOf(p.flags), p.maxpages, p.windowseconds, ...
-    cellstr(p.notice));
+    cellstr(p.notice), char(p.image));
 end
 
 
@@ -445,30 +468,39 @@ ad = '';
 if isfield(info, 'analysisDate'), ad = info.analysisDate; end
 sub = {['recording: ' char(file)], rs, sprintf('MyoDishAnalysis %s (MATLAB), analysed %s; settings: %s', ...
     mda_version(), ad, o)};
-R = writeReport(rec, out, 'MyoDishAnalysis report', sub, flagsOf(fl), 8, 20, {});
+R = writeReport(rec, out, 'MyoDishAnalysis report', sub, flagsOf(fl), 8, 20, {}, '');
 end
 
 
 % ===================================================================================================== PDF
-function Rall = writeReport(recs, out, title, subtitle, fl, maxPages, winS, notice)
+function Rall = writeReport(recs, out, title, subtitle, fl, maxPages, winS, notice, png)
+% recs(i).new (optional, 2026-10-15; experiment reports of the watcher): recordings of the last pass, marked '(new)';
+% detail pages only for them (the others: flags R and windows of mda_flags.csv, no contractions). png: image shown on
+% the first page (experiment overview)
 nR = numel(recs);
 Rs = cell(nR, 1);
+hasNew = isfield(recs, 'new');
 for i = 1:nR
     rec = recs(i);
     st = []; if isfield(rec, 'status'), st = rec.status; end
     C = []; if isfield(rec, 'C'), C = rec.C; end
     if isfield(rec, 'R') && ~isempty(rec.R), R = rec.R;   %flags computed by the caller (watcher)
     else, R = reportFlags(rec.S, C, st, fl); end
+    if ~ismember('noiseIndex', R.Properties.VariableNames), R.noiseIndex = nan(height(R), 1); end
+    if ~ismember('arrhythmicPacing', R.Properties.VariableNames), R.arrhythmicPacing = false(height(R), 1); end
     R = addvars(R, repmat({rec.name}, height(R), 1), 'Before', 1, 'NewVariableNames', 'recording');
-    R.window_from = nan(height(R), 1); R.window_to = nan(height(R), 1);
+    if ~ismember('window_from', R.Properties.VariableNames)
+        R.window_from = nan(height(R), 1); R.window_to = nan(height(R), 1);
+    end
     R.matlab = repmat({''}, height(R), 1); R.python = repmat({''}, height(R), 1);
     opn = '';
     if isfield(rec, 'open'), opn = rec.open; end
     if isempty(opn), opn = rec.file; end
     for j = find(strcmp(R.level, 'check'))'
-        [a, b] = reportWindow(C, R.channel(j), R.flags{j}, winS);
-        R.window_from(j) = a; R.window_to(j) = b;
-        [R.matlab{j}, R.python{j}] = guiCommands(opn, R.channel(j), a, b);
+        if ~isfinite(R.window_from(j)) || ~isempty(C)  %windows of mda_flags.csv kept (no contractions)
+            [R.window_from(j), R.window_to(j)] = reportWindow(C, R.channel(j), R.flags{j}, winS);
+        end
+        [R.matlab{j}, R.python{j}] = guiCommands(opn, R.channel(j), R.window_from(j), R.window_to(j));
     end
     recs(i).open = opn;
     if ~isfield(rec, 'notes') || isempty(rec.notes), recs(i).notes = {}; else, recs(i).notes = cellstr(rec.notes); end
@@ -480,13 +512,16 @@ nRed = cellfun(@(R) sum(cellfun(@(x) sum(ismember(x, 'INSDF')), R.flags(strcmp(R
 maxNI = cellfun(@(R) max([0; R.noiseIndex(strcmp(R.level, 'check') & ~isnan(R.noiseIndex))]), Rs);
 check = find(isCheck | arrayfun(@(r) ~isempty(r.notes), recs(:)));
 det = find(isCheck);
+if hasNew, det = det(arrayfun(@(r) isequal(r.new, true), recs(det))); end
 [~, o] = sortrows([-nRed(det(:)), -maxNI(det(:))]);
 det = det(o);                                       %stable: the most red flags, the highest noise index first
 det = det(1:min(maxPages, numel(det)));
 d = fileparts(out);
 if ~isempty(d) && ~exist(d, 'dir'), mkdir(d); end
 if exist(out, 'file'), delete(out); end
-pg = overviewPages(out, recs, Rs, title, subtitle, fl, numel(det), notice);
+pg = 0;
+if ~isempty(png) && isfile(png), pg = imagePage(out, png, title, subtitle, notice); end
+pg = overviewPages(out, recs, Rs, title, subtitle, fl, numel(det), notice, pg);
 listPages(out, recs, Rs, check, det, pg);
 for k = 1:numel(det)
     detailPage(out, recs(det(k)), Rs{det(k)});
@@ -494,9 +529,11 @@ end
 end
 
 
-function [fig, ax] = newPage()
-fig = figure('Visible', 'off', 'Units', 'centimeters', 'Position', [1 1 21 29.7], 'Color', 'w', ...
-    'PaperUnits', 'centimeters', 'PaperSize', [21 29.7], 'PaperPosition', [0 0 21 29.7]);
+function [fig, ax] = newPage(P)
+% A4 page (P = [width height] in cm, default portrait)
+if nargin < 1, P = [21 29.7]; end
+fig = figure('Visible', 'off', 'Units', 'centimeters', 'Position', [1 1 P], 'Color', 'w', ...
+    'PaperUnits', 'centimeters', 'PaperSize', P, 'PaperPosition', [0 0 P]);
 ax = axes(fig, 'Position', [0 0 1 1], 'XLim', [0 1], 'YLim', [0 1], 'Visible', 'off');
 hold(ax, 'on');
 end
@@ -524,8 +561,43 @@ if numel(s) > n, s = [s(1:n-1) char(8230)]; end
 end
 
 
-function pg = overviewPages(out, recs, Rs, title, subtitle, fl, nDetail, notice)
+function pg = imagePage(out, png, title, subtitle, notice)
+% first page of an experiment report (2026-10-15): title, subtitle, notice and the overview image of the experiment
 RED = [0.776 0.157 0.157]; GREY = [0.33 0.33 0.33];
+I = imread(png);
+P = [21 29.7];                                         %page (cm): landscape for a wide image
+if size(I, 2) > 1.2 * size(I, 1), P = [29.7 21]; end
+[fig, ax] = newPage(P);
+dy = 29.7 / P(2);                                      %line spacing as on a portrait page
+txt(ax, 0.05, 1 - 0.035 * dy, title, 14, 'FontWeight', 'bold');
+y = 1 - 0.052 * dy;
+for i = 1:numel(subtitle)
+    w = wrapText(subtitle{i}, 150 * P(1) / 21);
+    for j = 1:min(2, numel(w)), txt(ax, 0.05, y, w{j}, 6.5, 'Color', GREY); y = y - 0.011 * dy; end
+end
+for i = 1:numel(notice)
+    w = wrapText(notice{i}, 135 * P(1) / 21);
+    if i == 1, fw = 'bold'; else, fw = 'normal'; end
+    for j = 1:min(3, numel(w)), txt(ax, 0.05, y, w{j}, 7, 'Color', RED, 'FontWeight', fw); y = y - 0.012 * dy; end
+end
+r = size(I, 1) / size(I, 2) * P(1) / P(2);              %height per width (page units)
+h = 0.9 * r;                                           %at 90 % of the width
+top = y - 0.01;
+if h > top - 0.04, h = top - 0.04; end
+wd = h / r;
+axI = axes(fig, 'Position', [(1 - wd) / 2, top - h, wd, h]);
+image(axI, I);
+axis(axI, 'off');
+savePage(fig, out);
+pg = 1;
+end
+
+
+function pg = overviewPages(out, recs, Rs, title, subtitle, fl, nDetail, notice, pg)
+RED = [0.776 0.157 0.157]; GREY = [0.33 0.33 0.33];
+pg0 = pg;
+isNew = false(1, numel(recs));
+if isfield(recs, 'new'), isNew = arrayfun(@(r) isequal(r.new, true), recs); end
 nRed = sum(cellfun(@(R) sum(strcmp(R.level, 'check')), Rs));
 nYel = sum(cellfun(@(R) sum(strcmp(R.level, 'quality')), Rs));
 nSl = sum(cellfun(@(R) sum(~strcmp(R.status, 'no slice')), Rs));
@@ -533,7 +605,6 @@ chans = unique(cell2mat(cellfun(@(R) double(R.channel(:)), Rs(:), 'UniformOutput
 if isempty(chans), chans = 1:8; end
 perPage = 48;
 nP = max(1, ceil(numel(recs) / perPage));
-pg = 0;
 for p = 1:nP
     [fig, ax] = newPage();
     t = title; if nP > 1, t = sprintf('%s (overview %d/%d)', title, p, nP); end
@@ -543,7 +614,7 @@ for p = 1:nP
         w = wrapText(subtitle{i}, 150);
         for j = 1:min(2, numel(w)), txt(ax, 0.05, y, w{j}, 6.5, 'Color', GREY); y = y - 0.011; end
     end
-    if p == 1 && ~isempty(notice)                      %e.g. recordings analysed with another version (watcher)
+    if p == 1 && pg0 == 0 && ~isempty(notice)         %e.g. recordings analysed with another version (watcher)
         y = y - 0.003;
         for i = 1:numel(notice)
             w = wrapText(notice{i}, 135);
@@ -552,6 +623,8 @@ for p = 1:nP
         end
     end
     s = sprintf('%d recording(s), %d channel(s) with a slice: %d to check (red', numel(recs), nSl, nRed);
+    if any(isNew), s = sprintf('%d recording(s) (%d new = bold), %d channel(s) with a slice: %d to check (red', ...
+            numel(recs), sum(isNew), nSl, nRed); end
     if nDetail, s = sprintf('%s, traces on %d page(s)', s, nDetail); end
     txt(ax, 0.05, y - 0.004, sprintf('%s), %d with slice-quality flags (yellow)', s, nYel), 8);
     top = y - 0.02;
@@ -567,8 +640,9 @@ for p = 1:nP
     for k = 1:numel(idx)
         rec = recs(idx(k)); R = Rs{idx(k)};
         yk = 1 - k * rh;
+        if isNew(idx(k)), fwt = 'bold'; else, fwt = 'normal'; end
         text(ax, X(0), Y(yk - rh * 0.2), shortName(rec.name, 62), 'FontSize', 6, 'Interpreter', 'none', ...
-            'VerticalAlignment', 'top');
+            'VerticalAlignment', 'top', 'FontWeight', fwt);
         if ~isempty(rec.notes)
             mk = 'P'; if any(startsWith(rec.notes, 'error')), mk = 'E'; end
             text(ax, X(x0 - 0.008), Y(yk - rh * 0.2), mk, 'FontSize', 6, 'VerticalAlignment', 'top', ...
@@ -644,7 +718,9 @@ ORANGE = hex('#e65100'); GREY = [0.33 0.33 0.33];
 L = {'Check the analysis (red)', 'h', 0};
 if isempty(check), L(end+1, :) = {'no channel to check', 'n', 0}; end
 for i = check(:)'
-    L(end+1, :) = {shortName(recs(i).name, 110), 'b', i}; %#ok<AGROW>
+    nm = shortName(recs(i).name, 110);
+    if isfield(recs, 'new') && isequal(recs(i).new, true), nm = [nm '  (new)']; end
+    L(end+1, :) = {nm, 'b', i}; %#ok<AGROW>
     R = Rs{i};
     for r = find(strcmp(R.level, 'check'))'
         s = sprintf('ch %d%s: %s', R.channel(r), labelOf(R, r), R.red{r});
@@ -820,4 +896,641 @@ while numel(s) > n
     s = strtrim(s(k:end));
 end
 if ~isempty(s), w{end+1} = s; end
+end
+
+
+% ===================================================================================================== trend images
+function out = trendImage(out, D)
+% trend image (PNG, 150 dpi; 2026-10-14) of one channel: one panel per parameter with the values per window of the
+% overview (dots: included contractions; several rows of a window, e.g. beat types or rocker states, weighted by their
+% number of contractions) and their median per bin (line: 5 min up to 3 h shown, 10 min up to 30 h, 30 min up to 7
+% days, 2 h beyond), stimulation protocols (light blue, name), periods without signal (grey), comments (purple,
+% numbered, list below; during a protocol only those at its start or end).
+% D: title, subtitle (char or cellstr: lines), t (window start, s after t0), w (window length, s), nb (contractions), inc (included),
+% V (values, one column per parameter), names, units (cellstr), t0 (datenum of t = 0; NaN: time in hours), xlim ([from
+% to] s; optional), bands (rows from, to (s), kind: 1 = protocol, 2 = no signal), bandLabels (cellstr), com (struct
+% with t (s), text, category; comments of this channel and of all channels)
+K = trendColors(); PURPLE = K.purple; INK = K.ink;
+p = numel(D.names);
+R = trendPrep(D);
+if isempty(R), out = ''; return; end
+Y = R.Y; th = R.th; xl = R.xl; span = R.span; bm = R.bm; clock = R.clock; B = R.B; bl = R.bl; cm = R.cm;
+nCm = numel(cm); nList = min(nCm, 60); listRows = ceil(nList / 3) + (nCm > nList);
+% layout (inches)
+fw = 11; hT = 0.78; hS = 0.26; hP = 1.3; hG = 0.1; hX = 0.5; hL = (listRows > 0) * (0.12 + 0.15 * listRows);
+fh = hT + hS + p * hP + (p - 1) * hG + hX + hL;
+fig = figure('Visible', 'off', 'Units', 'inches', 'Position', [0 0 fw fh], 'Color', 'w', 'PaperPositionMode', 'auto');
+cleanup = onCleanup(@() close(fig));
+L = 0.085; Wd = 0.885;
+annotation(fig, 'textbox', [0.01 1 - 0.36 / fh 0.98 0.3 / fh], 'String', D.title, 'Interpreter', 'none', ...
+    'FontSize', 11, 'FontWeight', 'bold', 'EdgeColor', 'none', 'Color', INK, 'VerticalAlignment', 'middle', ...
+    'Margin', 0);
+annotation(fig, 'textbox', [0.01 1 - 0.72 / fh 0.98 0.4 / fh], 'String', cellstr(D.subtitle), 'Interpreter', ...
+    'none', 'FontSize', 7.5, 'EdgeColor', 'none', 'Color', [0.35 0.35 0.35], 'VerticalAlignment', 'middle', ...
+    'Margin', 0);
+[tk, tkl] = trendTicks(xl, clock, D);
+yTop = fh - hT - hS;
+axS = axes(fig, 'Position', [L yTop / fh Wd hS / fh], 'XLim', xl, 'YLim', [0 1], 'Visible', 'off');
+hold(axS, 'on');
+ax = gobjects(p, 1);
+for i = 1:p
+    b = yTop - i * hP - (i - 1) * hG;
+    ax(i) = axes(fig, 'Position', [L b / fh Wd hP / fh], 'FontSize', 8, 'Box', 'on', 'TickDir', 'in', ...
+        'TickLength', [0.005 0.005], ...
+        'XLim', xl, 'XTick', tk, 'XTickLabel', {}, 'Layer', 'top', 'XGrid', 'on', 'YGrid', 'on', ...
+        'GridAlpha', 0.12, 'Color', 'w', 'XColor', [0.3 0.3 0.3], 'YColor', [0.3 0.3 0.3]);
+    hold(ax(i), 'on');
+    [y, nm, un] = trendUnits(Y(:, i), D.names{i}, D.units{i});
+    [xb, yb] = binLine(th, y, bm, []);                 %line: median per bin of bm minutes
+    yl = trendPanel(ax(i), th, y, xb, yb, B, bl, [cm.t], xl, span, 0.0048 * (i == 1), 7);
+    ylabel(ax(i), {nm, ['(' un ')']}, 'FontSize', 8, 'Interpreter', 'none');
+    text(ax(i), xl(2) - 0.004 * span, yl(2) - 0.02 * diff(yl), trendNote(th, y, un), 'FontSize', 7, 'Color', ...
+        [0.3 0.3 0.3], 'HorizontalAlignment', 'right', 'VerticalAlignment', 'top', 'Interpreter', 'none', ...
+        'BackgroundColor', [1 1 1], 'Margin', 1);
+end
+set(ax(end), 'XTickLabel', tkl);
+if clock
+    xlabel(ax(end), 'clock time', 'FontSize', 8);
+else
+    xlabel(ax(end), 'time in the recording (h)', 'FontSize', 8);
+end
+% comment numbers above the panels (two rows; moved to the right where they would overlap)
+last = -inf(1, 2);
+for k = 1:nCm
+    x = cm(k).t / 3600;
+    dmin = 0.006 * span * (numel(sprintf('%d', k)) + 1);
+    r = find(x - last >= dmin, 1);
+    if isempty(r), [~, r] = min(last); end
+    x = max(x, last(r) + dmin);
+    last(r) = x;
+    text(axS, x, 0.28 + 0.42 * (r - 1), sprintf('%d', k), 'FontSize', 7, 'Color', PURPLE, 'FontWeight', 'bold', ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'baseline', 'Clipping', 'off');
+end
+% list of the comments
+if listRows > 0
+    axL = axes(fig, 'Position', [0.02 0 0.96 hL / fh], 'XLim', [0 3], 'YLim', [0 1], 'Visible', 'off');
+    nr = ceil(nList / 3);
+    for k = 1:nList
+        col = floor((k - 1) / nr); row = mod(k - 1, nr);
+        y = 1 - (0.08 + row * 0.15) / hL;
+        s = cm(k).text; if numel(s) > 52, s = [s(1:51) char(8230)]; end
+        text(axL, col + 0.005, y, sprintf('%d', k), 'FontSize', 7, 'Color', PURPLE, 'FontWeight', 'bold', ...
+            'VerticalAlignment', 'top', 'Interpreter', 'none');
+        text(axL, col + 0.06, y, [trendTime(cm(k).t, clock, D, span) '  ' s], 'FontSize', 7, 'Color', INK, ...
+            'VerticalAlignment', 'top', 'Interpreter', 'none');
+    end
+    if nCm > nList
+        text(axL, 0.005, 1 - (0.08 + nr * 0.15) / hL, sprintf('%s and %d more comments (events of the recording)', ...
+            char(8230), nCm - nList), 'FontSize', 7, 'Color', [0.35 0.35 0.35], 'VerticalAlignment', 'top');
+    end
+end
+savePng(fig, out);
+end
+
+
+function K = trendColors()
+% colours of the trend, course and experiment images
+K = struct('blue', [0.114 0.447 0.725], 'dot', [0.64 0.72 0.84], 'purple', [0.55 0.24 0.66], 'ink', ...
+    [0.13 0.13 0.13], 'prot', [0.87 0.93 1], 'gap', [0.89 0.89 0.89], 'last24', [1 0.96 0.78], 'red', ...
+    [0.776 0.157 0.157], 'slice', [0.3 0.3 0.3], 'grey', [0.35 0.35 0.35]);
+end
+
+
+function [xb, yb] = binLine(th, y, bm, grp)
+% line of a trend panel: median of y per bin of bm minutes (th: hours), x = centre of the bin (h); NaN between bins
+% that are not adjacent and between the groups grp (e.g. slices; [] = one group)
+xb = zeros(0, 1); yb = zeros(0, 1);
+th = th(:); y = y(:);
+if isempty(grp), grp = ones(size(th)); end
+grp = grp(:);
+ok = ~isnan(y);
+for g = unique(grp(ok))'
+    s = ok & grp == g;
+    [ub, ~, gb] = unique(floor(th(s) * 60 / bm));
+    med = accumarray(gb, y(s), [], @median);
+    idx = (1:numel(ub))' + [0; cumsum(diff(ub(:)) > 1)];      %NaN between bins that are not adjacent
+    x = nan(idx(end), 1); v = x;
+    x(idx) = (ub + 0.5) * bm / 60; v(idx) = med;
+    if ~isempty(xb), xb(end+1, 1) = NaN; yb(end+1, 1) = NaN; end %#ok<AGROW>
+    xb = [xb; x]; yb = [yb; v]; %#ok<AGROW>
+end
+end
+
+
+function yl = trendPanel(ax, th, y, xb, yb, B, bl, tc, xl, span, nameWidth, ms)
+% one panel of a trend / course image: bands (B rows from, to (s), kind 1 = protocol (light blue; with its name bl if
+% nameWidth > 0 = width of a character as part of the span), 2 = no signal (grey)), comment lines at tc (s), dots
+% (median per window, size ms), line (xb, yb; a point for bins without neighbours); y limits from the 1st and 99th
+% percentile of the values; returns the y limits
+K = trendColors();
+v = [y(:); yb(:)]; v = sort(v(~isnan(v)));
+if isempty(v)
+    yl = [0 1];
+else
+    lo = v(max(1, round(0.01 * numel(v)))); hi = v(max(1, round(0.99 * numel(v))));
+    if hi <= lo, hi = lo + max(1, abs(lo)) * 0.1; lo = lo - max(1, abs(lo)) * 0.1; end
+    yl = [lo hi] + [-0.08 0.12] * (hi - lo);
+end
+for k = 1:size(B, 1)
+    if B(k, 3) == 1, col = K.prot; else, col = K.gap; end
+    patch(ax, B(k, [1 2 2 1]) / 3600, yl([1 1 2 2]), col, 'EdgeColor', 'none', 'HitTest', 'off');
+    if nameWidth > 0 && B(k, 3) == 1 && k <= numel(bl)   %name, shortened to the width of the band
+        nch = floor((min(B(k, 2) / 3600, xl(2)) - max(B(k, 1) / 3600, xl(1))) / span / nameWidth);
+        lb = bl{k}; if numel(lb) > nch, lb = [lb(1:max(0, nch - 1)) char(8230)]; end
+        if nch >= 4
+            text(ax, max(B(k, 1) / 3600, xl(1)), yl(2), [' ' lb], 'FontSize', 6.5, 'Color', ...
+                [0.2 0.38 0.62], 'VerticalAlignment', 'top', 'Clipping', 'on', 'Interpreter', 'none');
+        end
+    end
+end
+for k = 1:numel(tc)
+    plot(ax, tc(k) / 3600 * [1 1], yl, ':', 'Color', K.purple, 'LineWidth', 0.7);
+end
+plot(ax, th, y, '.', 'Color', K.dot, 'MarkerSize', ms);
+plot(ax, xb, yb, '-', 'Color', K.blue, 'LineWidth', 1.3);
+if ~isempty(yb)                                        %bins without neighbours: a point
+    pad = [nan; yb(:); nan];
+    iso = ~isnan(yb(:)) & isnan(pad(1:end-2)) & isnan(pad(3:end));
+    plot(ax, xb(iso), yb(iso), 'o', 'Color', K.blue, 'MarkerFaceColor', K.blue, 'MarkerSize', 2.5);
+end
+set(ax, 'YLim', yl);
+end
+
+
+function [R, R24] = coursePrep(D)
+% values of a course image (courseImage, courseData): R = the whole time course (trendPrep of all windows, D.xlim),
+% R24 = the last 24 h (trendPrep of the windows in D.last24, [] if none); both with the slice of every window
+% (D.slices: rows from, to (s), number)
+R = trendPrep(D);
+R24 = [];
+if isempty(R), return; end
+R.slice = sliceOfWindows(R.wins, D.slices);
+a = D.last24(1); b = D.last24(2);
+c = D.t(:) + D.w(1) / 2;                               %windows with their centre in the last 24 h
+k = c >= a & c <= b;
+if ~any(k), return; end
+D24 = D;
+D24.t = D.t(k); D24.nb = D.nb(k); D24.inc = D.inc(k); D24.V = D.V(k, :); D24.xlim = [a b];
+R24 = trendPrep(D24);
+if ~isempty(R24), R24.slice = sliceOfWindows(R24.wins, D.slices); end
+end
+
+
+function k = sliceOfWindows(t, S)
+% number of the slice (rows from, to, number of S, in the order of time) of the windows starting at t
+k = ones(numel(t), 1);
+if isempty(S), return; end
+i = sum(t(:) >= S(:, 1)' - 1e-6, 2);
+i(i < 1) = 1;
+k = reshape(S(i, 3), [], 1);
+end
+
+
+function [Tc, Tl, Tm] = courseData(D)
+% the data of a course image (2026-10-15): Tc one row per slice and bin of the whole course (slice, bin_from (s after
+% t0), nBeats = included contractions, the parameters = median of the windows of the bin, binMinutes), Tl the windows
+% of the last 24 h (slice, t_from, nBeats, the parameters: median per window), Tm the comments numbered in the image
+% (number, t, text). Units of D.units (as the sheet parameters).
+names = cellstr(D.names(:)');
+p = numel(names);
+cc = matlab.lang.makeUniqueStrings([{'slice', 'bin_from', 'nBeats'}, names, {'binMinutes'}]);
+cl = matlab.lang.makeUniqueStrings([{'slice', 't_from', 'nBeats'}, names]);
+Tc = cell2table(cell(0, numel(cc)), 'VariableNames', cc);
+Tl = cell2table(cell(0, numel(cl)), 'VariableNames', cl);
+Tm = table(zeros(0, 1), zeros(0, 1), cell(0, 1), 'VariableNames', {'number', 't', 'text'});
+[R, R24] = coursePrep(D);
+if isempty(R), return; end
+[G, ks, bs] = findgroups(R.slice, floor(R.th * 60 / R.bm));
+n = numel(ks);
+M = nan(n, p);
+G = G(:);
+for j = 1:p
+    ok = ~isnan(R.Y(:, j));
+    M(:, j) = accumarray(reshape(G(ok), [], 1), reshape(R.Y(ok, j), [], 1), [n 1], @median, NaN);
+end
+Tc = array2table([ks, bs * R.bm * 60, accumarray(G, R.nb, [n 1]), M, repmat(R.bm, n, 1)], 'VariableNames', cc);
+if isempty(R24), return; end
+Tl = array2table([R24.slice, R24.wins, R24.nb, R24.Y], 'VariableNames', cl);
+Tm = table((1:numel(R24.cm))', reshape([R24.cm.t], [], 1), reshape({R24.cm.text}, [], 1), ...
+    'VariableNames', {'number', 't', 'text'});
+end
+
+
+function [tk, lbl] = courseTicks(xl, D)
+% ticks of the whole time course: clock time / dates; at midnight with the day in culture (D.dayBase) below
+[tk, lbl] = trendTicks(xl, true, D);
+if ~isfield(D, 'dayBase') || isempty(D.dayBase) || ~isfinite(D.dayBase), return; end
+for k = 1:numel(tk)
+    d = D.t0 + tk(k) / 24;
+    if abs(d - round(d)) < 1e-6
+        lbl{k} = sprintf('%s\\newline day %d', datestr(round(d), 'dd mmm'), round(d) - floor(D.dayBase));   %two lines (tex)
+    end
+end
+end
+
+
+function out = courseImage(out, D)
+% course image (PNG, 150 dpi; 2026-10-15) of one channel of a series of recordings (slice register): one row per
+% parameter, left the whole time course of the series (dots = values per window of the overview, line = median per bin
+% of each slice: 30 min up to 7 days, 2 h beyond; slice changes dashed with 'slice k'; the last 24 h shaded yellow;
+% recordings with red flags as red bars at the bottom), right the last 24 h (as the trend image of a recording: 10-min
+% bins, protocols, periods without signal, numbered comments with a list below).
+% D: as for trendImage (title, subtitle, t, w, nb, inc, V, names, units, t0, xlim = [0 end of the series] (s), bands,
+% bandLabels, com) and slices (rows from, to (s), number), last24 ([from to] s), dayBase (datenum of day 0 of the
+% culture; NaN: no day numbers), red (rows from, to (s): recordings with red flags)
+K = trendColors();
+[R, R24] = coursePrep(D);
+if isempty(R), out = ''; return; end
+p = numel(D.names);
+cm = struct('t', {}, 'text', {});
+if ~isempty(R24), cm = R24.cm; end
+nCm = numel(cm); nList = min(nCm, 60); listRows = ceil(nList / 3) + (nCm > nList);
+fw = 11; hT = 0.78; hS = 0.42; hP = 1.3; hG = 0.1; hX = 0.62; hL = (listRows > 0) * (0.12 + 0.15 * listRows);
+fh = hT + hS + p * hP + (p - 1) * hG + hX + hL;
+fig = figure('Visible', 'off', 'Units', 'inches', 'Position', [0 0 fw fh], 'Color', 'w', 'PaperPositionMode', 'auto');
+cleanup = onCleanup(@() close(fig));
+L1 = 0.075; W1 = 0.565; L2 = 0.70; W2 = 0.285;
+annotation(fig, 'textbox', [0.01 1 - 0.36 / fh 0.98 0.3 / fh], 'String', D.title, 'Interpreter', 'none', ...
+    'FontSize', 11, 'FontWeight', 'bold', 'EdgeColor', 'none', 'Color', K.ink, 'VerticalAlignment', 'middle', ...
+    'Margin', 0);
+annotation(fig, 'textbox', [0.01 1 - 0.72 / fh 0.98 0.4 / fh], 'String', cellstr(D.subtitle), 'Interpreter', ...
+    'none', 'FontSize', 7.5, 'EdgeColor', 'none', 'Color', K.grey, 'VerticalAlignment', 'middle', 'Margin', 0);
+xl = R.xl; span = R.span;
+xl24 = D.last24(:)' / 3600;
+r = @(d) round(d * 86400) / 86400;
+yTop = fh - hT - hS;
+axH = axes(fig, 'Position', [L1 yTop / fh W1 hS / fh], 'XLim', [0 1], 'YLim', [0 1], 'Visible', 'off');
+text(axH, 0, 0.82, sprintf('whole time course: %s to %s (%.1f days)', datestr(r(D.t0 + xl(1) / 24), ...
+    'dd mmm HH:MM'), datestr(r(D.t0 + xl(2) / 24), 'dd mmm HH:MM'), span / 24), 'FontSize', 8, 'FontWeight', ...
+    'bold', 'Color', K.ink, 'Interpreter', 'none', 'VerticalAlignment', 'middle');
+axS = axes(fig, 'Position', [L2 yTop / fh W2 hS / fh], 'XLim', xl24, 'YLim', [0 1], 'Visible', 'off');
+hold(axS, 'on');
+text(axS, 0, 0.82, sprintf('last 24 h (to %s)', datestr(r(D.t0 + xl24(2) / 24), 'dd mmm HH:MM')), 'Units', ...
+    'normalized', 'FontSize', 8, 'FontWeight', 'bold', 'Color', K.ink, 'Interpreter', 'none', ...
+    'VerticalAlignment', 'middle');
+[tk, tkl] = courseTicks(xl, D);
+[tk2, tkl2] = trendTicks(xl24, true, D, 5);
+S = zeros(0, 3); if isfield(D, 'slices') && ~isempty(D.slices), S = D.slices; end
+Rd = zeros(0, 2); if isfield(D, 'red') && ~isempty(D.red), Rd = D.red; end
+props = {'FontSize', 8, 'Box', 'on', 'TickDir', 'in', 'TickLength', [0.005 0.005], 'Layer', 'top', 'XGrid', 'on', ...
+    'YGrid', 'on', 'GridAlpha', 0.12, 'Color', 'w', 'XColor', [0.3 0.3 0.3], 'YColor', [0.3 0.3 0.3]};
+a1 = gobjects(p, 1); a2 = gobjects(p, 1);
+for i = 1:p
+    b = yTop - i * hP - (i - 1) * hG;
+    [y, nm, un] = trendUnits(R.Y(:, i), D.names{i}, D.units{i});
+    a1(i) = axes(fig, 'Position', [L1 b / fh W1 hP / fh], props{:}, 'XLim', xl, 'XTick', tk, 'XTickLabel', {});
+    hold(a1(i), 'on');
+    [xb, yb] = binLine(R.th, y, R.bm, R.slice);
+    yl = trendPanel(a1(i), R.th, y, xb, yb, R.B, R.bl, [], xl, span, 0, 4);
+    h = patch(a1(i), xl24([1 2 2 1]), yl([1 1 2 2]), K.last24, 'EdgeColor', 'none', 'HitTest', 'off');
+    uistack(h, 'bottom');
+    courseMarks(a1(i), S, Rd, yl, i == 1, xl);
+    ylabel(a1(i), {nm, ['(' un ')']}, 'FontSize', 8, 'Interpreter', 'none');
+    text(a1(i), xl(2) - 0.004 * span, yl(2) - 0.02 * diff(yl), trendNote(R.th, y, un), 'FontSize', 7, 'Color', ...
+        [0.3 0.3 0.3], 'HorizontalAlignment', 'right', 'VerticalAlignment', 'top', 'Interpreter', 'none', ...
+        'BackgroundColor', [1 1 1], 'Margin', 1);
+    a2(i) = axes(fig, 'Position', [L2 b / fh W2 hP / fh], props{:}, 'XLim', xl24, 'XTick', tk2, 'XTickLabel', {});
+    hold(a2(i), 'on');
+    if isempty(R24)
+        set(a2(i), 'YTick', []);
+        text(a2(i), 0.5, 0.5, 'no contractions in the last 24 h', 'Units', 'normalized', 'FontSize', 7.5, 'Color', ...
+            K.grey, 'HorizontalAlignment', 'center');
+        continue;
+    end
+    y2 = trendUnits(R24.Y(:, i), D.names{i}, D.units{i});
+    [xb2, yb2] = binLine(R24.th, y2, R24.bm, R24.slice);
+    yl2 = trendPanel(a2(i), R24.th, y2, xb2, yb2, R24.B, R24.bl, [cm.t], xl24, diff(xl24), ...
+        0.0048 * W1 / W2 * (i == 1), 6);
+    courseMarks(a2(i), S, Rd, yl2, false, xl24);
+    text(a2(i), xl24(2) - 0.006 * diff(xl24), yl2(2) - 0.02 * diff(yl2), trendNote(R24.th, y2, un), 'FontSize', 6.5, ...
+        'Color', [0.3 0.3 0.3], 'HorizontalAlignment', 'right', 'VerticalAlignment', 'top', 'Interpreter', 'none', ...
+        'BackgroundColor', [1 1 1], 'Margin', 1);
+end
+set(a1(end), 'XTickLabel', tkl, 'FontSize', 7.5);
+set(a2(end), 'XTickLabel', tkl2, 'XTickLabelRotation', 0);
+set(a1(end), 'XTickLabelRotation', 0, 'TickLabelInterpreter', 'tex');
+if isfield(D, 'dayBase') && ~isempty(D.dayBase) && isfinite(D.dayBase)
+    xlabel(a1(end), 'date (day in culture)', 'FontSize', 8);
+else
+    xlabel(a1(end), 'date', 'FontSize', 8);
+end
+xlabel(a2(end), 'clock time', 'FontSize', 8);
+% comment numbers above the panels of the last 24 h (three rows; moved to the right where they would overlap)
+last = -inf(1, 3);
+s24 = diff(xl24);
+for k = 1:nCm
+    x = cm(k).t / 3600;
+    dmin = 0.006 * W1 / W2 * s24 * (numel(sprintf('%d', k)) + 1);
+    q = find(x - last >= dmin, 1);
+    if isempty(q), [~, q] = min(last); end
+    x = max(x, last(q) + dmin);
+    last(q) = x;
+    text(axS, x, 0.04 + 0.22 * (q - 1), sprintf('%d', k), 'FontSize', 7, 'Color', K.purple, 'FontWeight', 'bold', ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'baseline', 'Clipping', 'off');
+end
+if listRows > 0                                        %list of the comments of the last 24 h
+    axL = axes(fig, 'Position', [0.02 0 0.96 hL / fh], 'XLim', [0 3], 'YLim', [0 1], 'Visible', 'off');
+    nr = ceil(nList / 3);
+    for k = 1:nList
+        col = floor((k - 1) / nr); row = mod(k - 1, nr);
+        y = 1 - (0.08 + row * 0.15) / hL;
+        s = cm(k).text; if numel(s) > 52, s = [s(1:51) char(8230)]; end
+        text(axL, col + 0.005, y, sprintf('%d', k), 'FontSize', 7, 'Color', K.purple, 'FontWeight', 'bold', ...
+            'VerticalAlignment', 'top', 'Interpreter', 'none');
+        text(axL, col + 0.06, y, [trendTime(cm(k).t, true, D, 25) '  ' s], 'FontSize', 7, 'Color', K.ink, ...
+            'VerticalAlignment', 'top', 'Interpreter', 'none');
+    end
+    if nCm > nList
+        text(axL, 0.005, 1 - (0.08 + nr * 0.15) / hL, sprintf('%s and %d more comments in the last 24 h', ...
+            char(8230), nCm - nList), 'FontSize', 7, 'Color', K.grey, 'VerticalAlignment', 'top');
+    end
+end
+savePng(fig, out);
+end
+
+
+function courseMarks(ax, S, Rd, yl, labels, xl)
+% slice changes (dashed line, 'slice k' if labels) and recordings with red flags (red bar at the bottom)
+K = trendColors();
+for k = 2:size(S, 1)
+    x = S(k, 1) / 3600;
+    if x < xl(1) || x > xl(2), continue; end
+    plot(ax, [x x], yl, '--', 'Color', K.slice, 'LineWidth', 1);
+    if labels
+        text(ax, x, yl(1) + 0.08 * diff(yl), sprintf(' slice %d', S(k, 3)), 'FontSize', 7, 'Color', K.slice, ...
+            'FontWeight', 'bold', 'VerticalAlignment', 'bottom', 'Clipping', 'on');
+    end
+end
+for k = 1:size(Rd, 1)
+    a = max(Rd(k, 1) / 3600, xl(1)); b = min(Rd(k, 2) / 3600, xl(2));
+    if b <= a, continue; end
+    patch(ax, [a b b a], yl(1) + [0 0 0.05 0.05] * diff(yl), K.red, 'EdgeColor', 'none', 'HitTest', 'off');
+end
+end
+
+
+function savePng(fig, out)
+d = fileparts(out);
+if ~isempty(d) && ~isfolder(d), mkdir(d); end
+try                                                    %the whole figure (no cropping to the content)
+    exportgraphics(fig, out, 'Resolution', 150, 'BackgroundColor', 'white', 'Padding', 'figure');
+catch
+    print(fig, out, '-dpng', '-r150');
+end
+end
+
+
+function out = experimentImage(out, D)
+% overview image of an experiment (PNG, 150 dpi; 2026-10-15): one row per series (setup), one column per channel; per
+% cell the amplitude (median per bin of the included contractions) over the whole time course of the experiment, slice
+% changes (dashed), the last 24 h (yellow), background = status of the last slice at the end of its data (green
+% beating, red not beating, grey removed / replaced, orange signal lost, white no slice), texts: last amplitude, change
+% in the last 24 h, % of the maximum of the slice, number of the slice, recordings with red flags (red frame, number).
+% D: title, subtitle (cellstr), rows (labels of the series), cols (channels), t0 (datenum of x = 0), xl ([0 end] h),
+% last24 ([from to] h), report (name of the PDF report, legend), cells (struct array r, c, t (h), y (uN), sb (slice
+% changes, h), status, k (number of the last slice), amp (last amplitude, uN), pct (% of the maximum), d24 (change in the
+% last 24 h, %), nRed (recordings with red flags))
+K = trendColors();
+nr = numel(D.rows); nc = numel(D.cols);
+if nr == 0 || nc == 0, out = ''; return; end
+cwI = 1.3; chI = 0.88; lwI = 1.45; hT = 0.78; hH = 0.25; hB = 0.8;
+fw = max(9, lwI + nc * cwI + 0.15); fh = hT + hH + nr * chI + hB;
+fig = figure('Visible', 'off', 'Units', 'inches', 'Position', [0 0 fw fh], 'Color', 'w', 'PaperPositionMode', 'auto');
+cleanup = onCleanup(@() close(fig));
+annotation(fig, 'textbox', [0.01 1 - 0.36 / fh 0.98 0.3 / fh], 'String', D.title, 'Interpreter', 'none', ...
+    'FontSize', 11, 'FontWeight', 'bold', 'EdgeColor', 'none', 'Color', K.ink, 'VerticalAlignment', 'middle', ...
+    'Margin', 0);
+annotation(fig, 'textbox', [0.01 1 - 0.72 / fh 0.98 0.4 / fh], 'String', cellstr(D.subtitle), 'Interpreter', ...
+    'none', 'FontSize', 7.5, 'EdgeColor', 'none', 'Color', K.grey, 'VerticalAlignment', 'middle', 'Margin', 0);
+axT = axes(fig, 'Position', [0 0 1 1], 'XLim', [0 fw], 'YLim', [0 fh], 'Visible', 'off');
+for j = 1:nc
+    text(axT, lwI + (j - 0.5) * cwI, fh - hT - hH / 2, sprintf('ch %d', D.cols(j)), 'FontSize', 8, 'FontWeight', ...
+        'bold', 'HorizontalAlignment', 'center', 'Color', K.ink);
+end
+for i = 1:nr
+    text(axT, 0.12, fh - hT - hH - (i - 0.5) * chI, D.rows{i}, 'FontSize', 8, 'FontWeight', 'bold', 'Color', ...
+        K.ink, 'Interpreter', 'none');
+end
+mid = (ceil(D.t0 + D.xl(1) / 24):floor(D.t0 + D.xl(2) / 24))';    %midnights
+xm = (mid - D.t0) * 24;
+st = {'beating at end of data', 'not beating at end of data', 'removed', 'replaced (other sliceID)', 'signal lost'};
+cols = {[0.89 0.96 0.9], [0.99 0.88 0.86], [0.92 0.92 0.92], [0.92 0.92 0.92], [1 0.94 0.84]};
+short = {'beating', 'not beating', 'removed', 'replaced', 'signal lost'};
+for i = 1:nr
+    for j = 1:nc
+        pos = [(lwI + (j - 1) * cwI + 0.04) / fw, (fh - hT - hH - i * chI + 0.08) / fh, (cwI - 0.08) / fw, ...
+            (chI - 0.16) / fh];
+        ax = axes(fig, 'Position', pos, 'XLim', D.xl, 'YLim', [0 1], 'XTick', [], 'YTick', [], 'Box', 'on', ...
+            'XColor', [0.75 0.75 0.75], 'YColor', [0.75 0.75 0.75]);
+        hold(ax, 'on');
+        q = find([D.cells.r] == i & [D.cells.c] == j, 1);
+        if isempty(q)
+            text(ax, 0.5, 0.5, 'no slice', 'Units', 'normalized', 'FontSize', 6.5, 'Color', [0.6 0.6 0.6], ...
+                'HorizontalAlignment', 'center');
+            continue;
+        end
+        Cc = D.cells(q);
+        m = find(strcmp(st, Cc.status), 1);
+        if ~isempty(m), set(ax, 'Color', cols{m}); sl = short{m}; else, sl = Cc.status; end
+        y = Cc.y(:); v = sort(y(~isnan(y)));
+        top = 1;
+        if ~isempty(v), top = v(max(1, round(0.99 * numel(v)))); end
+        if ~(top > 0), top = 1; end
+        yl = [-0.4 1.6] * top;                         %line between the texts at the top and at the bottom
+        set(ax, 'YLim', yl);
+        patch(ax, D.last24([1 2 2 1]), yl([1 1 2 2]), K.last24, 'EdgeColor', 'none', 'FaceAlpha', 0.8);
+        for x = xm', plot(ax, [x x], yl, '-', 'Color', [0.82 0.82 0.82], 'LineWidth', 0.4); end
+        for x = Cc.sb(:)', plot(ax, [x x], yl, '--', 'Color', K.slice, 'LineWidth', 0.8); end
+        plot(ax, Cc.t, Cc.y, '-', 'Color', K.blue, 'LineWidth', 1);
+        pad = [nan; Cc.y(:); nan];                     %bins without neighbours: a point
+        iso = ~isnan(Cc.y(:)) & isnan(pad(1:end-2)) & isnan(pad(3:end));
+        plot(ax, Cc.t(iso), Cc.y(iso), '.', 'Color', K.blue, 'MarkerSize', 6);
+        if isfinite(Cc.amp)
+            text(ax, 0.03, 0.95, [fmtSig(Cc.amp) ' ' char(181) 'N'], 'Units', 'normalized', 'FontSize', 6.5, ...
+                'VerticalAlignment', 'top', 'Color', K.ink);
+        end
+        if isfinite(Cc.d24)
+            text(ax, 0.97, 0.95, sprintf('24 h %+.0f %%', Cc.d24), 'Units', 'normalized', 'FontSize', 6.5, ...
+                'VerticalAlignment', 'top', 'HorizontalAlignment', 'right', 'Color', K.ink);
+        end
+        text(ax, 0.03, 0.05, sl, 'Units', 'normalized', 'FontSize', 6.5, 'VerticalAlignment', 'bottom', ...
+            'Color', K.ink, 'Interpreter', 'none');
+        s = ''; if Cc.k > 1, s = sprintf('slice %d', Cc.k); end
+        if isfinite(Cc.pct), s = strtrim(sprintf('%s  %.0f %%', s, Cc.pct)); end
+        text(ax, 0.97, 0.05, s, 'Units', 'normalized', 'FontSize', 6, 'VerticalAlignment', 'bottom', ...
+            'HorizontalAlignment', 'right', 'Color', K.grey);
+        if Cc.nRed > 0                                 %red frame, number above it
+            set(ax, 'XColor', K.red, 'YColor', K.red, 'LineWidth', 1.6);
+            text(ax, 0.5, 1.03, sprintf('%d red', Cc.nRed), 'Units', 'normalized', 'FontSize', 6.5, 'FontWeight', ...
+                'bold', 'Color', K.red, 'VerticalAlignment', 'bottom', 'HorizontalAlignment', 'center', ...
+                'BackgroundColor', 'w', 'EdgeColor', K.red, 'Margin', 1, 'Clipping', 'off');
+        end
+    end
+end
+% legend: colours, lines, texts
+y0 = hB - 0.2;
+x = 0.12;
+for m = [1 2 3 5]
+    rectangle(axT, 'Position', [x, y0 - 0.06, 0.16, 0.12], 'FaceColor', cols{m}, 'EdgeColor', [0.7 0.7 0.7]);
+    text(axT, x + 0.21, y0, short{m}, 'FontSize', 7, 'Color', K.ink);
+    x = x + 0.32 + 0.065 * numel(short{m});
+end
+rectangle(axT, 'Position', [x, y0 - 0.06, 0.16, 0.12], 'FaceColor', K.last24, 'EdgeColor', 'none');
+text(axT, x + 0.21, y0, 'last 24 h', 'FontSize', 7, 'Color', K.ink);
+text(axT, 0.12, y0 - 0.2, ['blue: amplitude (median per bin);  dashed: new slice;  red frame: recordings with red ' ...
+    'flags (check the analysis' repmat([', ' D.report], 1, ~isempty(D.report)) ')'], 'FontSize', 7, 'Color', K.ink, ...
+    'Interpreter', 'none');
+text(axT, 0.12, y0 - 0.4, ['status = end of the data of the last slice; texts: last amplitude, change in the last ' ...
+    '24 h (first vs. last 2 h), number of the slice, last amplitude in % of the maximum of the slice'], 'FontSize', 7, ...
+    'Color', K.grey);
+savePng(fig, out);
+end
+
+
+function R = trendPrep(D)
+% values of a trend image (trendImage, trendData): per window of the overview the included contractions (rows of a
+% window weighted by their number of contractions), time axis, bin of the line, bands and the comments shown
+p = numel(D.names);
+R = [];
+use = logical(D.inc(:)) & D.nb(:) > 0;
+if ~any(use) || p == 0, return; end
+[wins, ~, g] = unique(D.t(use));
+X = D.V(use, :); nb = D.nb(use); nb = nb(:);
+Y = nan(numel(wins), p);
+g = g(:);
+for j = 1:p
+    x = X(:, j); ok = ~isnan(x);
+    gk = reshape(g(ok), [], 1);                        %column also for one window (g(false) of a scalar is 0x0)
+    Y(:, j) = accumarray(gk, reshape(x(ok) .* nb(ok), [], 1), [numel(wins) 1]) ./ ...
+        accumarray(gk, reshape(nb(ok), [], 1), [numel(wins) 1]);
+end
+w = D.w; if isempty(w) || isnan(w(1)), w = 60; end
+th = (wins(:) + w(1) / 2) / 3600;                      %hours after t0
+if isfield(D, 'xlim') && numel(D.xlim) == 2 && all(isfinite(D.xlim))
+    xl = sort(D.xlim(:))' / 3600;
+else
+    xl = [min(th) max(th)];
+end
+if diff(xl) <= 0, xl = xl + [-0.5 0.5]; end
+span = diff(xl);
+if span <= 3, bm = 5; elseif span <= 30, bm = 10; elseif span <= 24 * 7, bm = 30; else, bm = 120; end
+clock = isfield(D, 't0') && ~isempty(D.t0) && isfinite(D.t0);
+% bands, comments (during a protocol only the one nearest to its start and to its end, within 5 s)
+B = zeros(0, 3); bl = {};
+if isfield(D, 'bands') && ~isempty(D.bands), B = D.bands; bl = cellstr(D.bandLabels); end
+cm = struct('t', {}, 'text', {});
+if isfield(D, 'com') && ~isempty(D.com)
+    P = B(B(:, 3) == 1, 1:2);
+    C0 = D.com([D.com.t] >= xl(1) * 3600 - 1 & [D.com.t] <= xl(2) * 3600 + 1);
+    tcs = [C0.t];
+    keep = false(1, numel(C0));
+    for k = 1:numel(C0)                                %outside the protocols: the comments
+        keep(k) = strcmp(C0(k).category, 'comment') && ~any(P(:, 1) <= tcs(k) + 5 & P(:, 2) >= tcs(k) - 5);
+    end
+    for k = 1:size(P, 1)                               %a protocol: only the comment nearest to its start and its end
+        for edge = P(k, :)
+            [dm, j] = min(abs(tcs - edge));
+            if ~isempty(dm) && dm <= 5, keep(j) = true; end
+        end
+    end
+    for k = find(keep)
+        cm(end+1) = struct('t', tcs(k), 'text', strtrim(regexprep(char(C0(k).text), '\s+', ' '))); %#ok<AGROW>
+    end
+    if ~isempty(cm), [~, o] = sort([cm.t]); cm = cm(o); end
+end
+nbw = accumarray(g, nb, [numel(wins) 1]);              %included contractions per window
+R = struct('wins', wins(:), 'nb', nbw, 'Y', Y, 'th', th, 'xl', xl, 'span', span, 'bm', bm, 'clock', clock, ...
+    'B', B, 'bl', {bl}, 'cm', cm);
+end
+
+
+function [T, C] = trendData(D)
+% the data of a trend image (2026-10-14): T one row per window with included contractions: t_from (s after t0, as
+% D.t), nBeats (included contractions), the parameters (units of D.units), bin_from (start of the bin of the line, s;
+% line = median of the rows of a bin); C the comments shown (number, t (s), text). Empty tables if nothing is shown.
+R = trendPrep(D);
+names = matlab.lang.makeUniqueStrings([{'t_from', 'nBeats'}, cellstr(D.names(:)'), {'bin_from'}]);
+if isempty(R)
+    T = cell2table(cell(0, numel(names)), 'VariableNames', names);
+    C = table(zeros(0, 1), zeros(0, 1), cell(0, 1), 'VariableNames', {'number', 't', 'text'});
+    return;
+end
+binFrom = floor(R.th * 60 / R.bm) * R.bm * 60;          %s after t0
+T = array2table([R.wins, R.nb, R.Y, binFrom], 'VariableNames', names);
+C = table((1:numel(R.cm))', reshape([R.cm.t], [], 1), reshape({R.cm.text}, [], 1), ...
+    'VariableNames', {'number', 't', 'text'});
+end
+
+
+function [y, nm, un] = trendUnits(y, nm, un)
+% display units: uN -> µN, s -> ms
+switch char(un)
+    case 's', y = 1000 * y; un = 'ms';
+    case 'uN', un = [char(181) 'N'];
+    case 'uN/s', un = [char(181) 'N/s'];
+    case 'uN*s', un = [char(181) 'N' char(183) 's'];
+    case '', un = '-';
+end
+nm = char(nm);
+end
+
+
+function s = trendNote(th, y, un)
+% median of all values; first -> last 2 h (spans of at least 4 h)
+ok = ~isnan(y);
+s = '';
+if ~any(ok), return; end
+s = sprintf('median %s %s', fmtSig(median(y(ok))), un);
+t = th(ok); v = y(ok);
+if max(t) - min(t) >= 4
+    a = median(v(t <= min(t) + 2)); b = median(v(t >= max(t) - 2));
+    s = sprintf('%s   first / last 2 h: %s %s %s', s, fmtSig(a), char(8594), fmtSig(b));
+    if a ~= 0 && isfinite(a) && isfinite(b), s = sprintf('%s (%+.0f %%)', s, 100 * (b - a) / abs(a)); end
+end
+end
+
+
+function s = fmtSig(v)
+if ~isfinite(v), s = 'NaN'; return; end
+if abs(v) >= 100, s = sprintf('%.0f', v); elseif abs(v) >= 10, s = sprintf('%.1f', v); else, s = sprintf('%.3g', v); end
+end
+
+
+function [tk, lbl] = trendTicks(xl, clock, D, nMax)
+% ticks (hours after t0) and labels: clock time 'HH:MM', midnight / steps of days 'dd mmm'; otherwise hours; at most
+% about nMax intervals (default 9)
+if nargin < 4, nMax = 9; end
+steps = [1/60 2/60 5/60 10/60 0.25 0.5 1 2 3 6 12 24 48 96 168 336];
+span = diff(xl);
+st = steps(end);
+for k = 1:numel(steps)
+    if span / steps(k) <= nMax, st = steps(k); break; end
+end
+if clock
+    a = D.t0 + xl(1) / 24; b = D.t0 + xl(2) / 24;
+    d = (ceil(a * 24 / st - 1e-9) * st / 24 : st / 24 : b + 1e-9)';
+    tk = (d - D.t0) * 24;
+    d = round(d * 86400) / 86400;                      %labels of whole seconds
+    lbl = cell(numel(d), 1);
+    for k = 1:numel(d)
+        if st >= 24 || abs(d(k) - round(d(k))) < 1e-6
+            lbl{k} = datestr(d(k), 'dd mmm');
+        else
+            lbl{k} = datestr(d(k), 'HH:MM');
+        end
+    end
+else
+    tk = (ceil(xl(1) / st - 1e-9) * st : st : xl(2) + 1e-9)';
+    lbl = arrayfun(@(h) sprintf('%g', h), tk, 'UniformOutput', false);
+end
+end
+
+
+function s = trendTime(t, clock, D, span)
+if clock
+    d = round((D.t0 + t / 86400) * 86400) / 86400;   %whole seconds
+    if span > 24, s = datestr(d, 'dd mmm HH:MM'); else, s = datestr(d, 'HH:MM'); end
+else
+    s = sprintf('%d:%02d h', floor(t / 3600), floor(mod(t, 3600) / 60));
+end
 end

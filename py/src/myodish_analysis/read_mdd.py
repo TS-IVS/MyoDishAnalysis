@@ -15,7 +15,9 @@ FILE FORMAT (MyoDish software; facts from the Seidel lab's importMyoDishData)
   - int16, little endian, channels interleaved. Standard: 8 force channels + 1 stimulus/status channel at 400 Hz
     (7200 bytes per second). Since MyoDish software 2.0.9708 (07/2026) a file may contain only the recorded
     channel(s) + the status channel (single channel mode: 2 x int16 per sample).
-    Old files (2020/21, software 1.0.x): 8 force channels at 500 Hz, no status channel.
+    Old files (2020/21, software 1.0.x): 8 force channels at 500 Hz, no status channel. Recognized by the file size
+    and the recording duration in the log file or, if they do not fit, by nChannels 8 / 500 Hz in the log file and no
+    channel with the content of a status channel (2026-10-13); analysed as unpaced channels (contractions only).
   - sampling rate, recording duration (--> number of channels) and extended sensor mode are read from the log file
     <name>_log.log (UTF-16) next to the .mdd file.
   - the values in the file are arbitrary units (AU), converted to uN with the 'Calibration' entry of each channel in
@@ -50,7 +52,8 @@ OUTPUT (S, a Struct with the field names of the MATLAB version)
   controller unit): stim.channel = 0 (before 2026-10-08 channel 8); consecutive samples of such a pulse = one pulse;
   used as stimuli according to the option externalTrigger (analyze_channel).
 
-TS 2026-10-06 (port of mda_readMdd.m, TS 2026-10-05; rocker state from the log 2026-10-07)
+TS 2026-10-06 (port of mda_readMdd.m, TS 2026-10-05; rocker state from the log 2026-10-07; old 8-channel files
+2026-10-13)
 """
 from __future__ import annotations
 
@@ -156,12 +159,21 @@ def read_header(mdd_file, opts=None):
         if nCh is None:
             # no usable log information: the status channel (last channel) contains almost only 0 or the rocker
             # bit (16384); test 9 channels first, then single channel mode (2), then the others
-            nCh = 9
             for cand in (9, 2, 3, 4, 5, 6, 7, 8):
                 if _status_fraction(H.file, cand) > 0.95:
                     nCh = cand
                     break
-            H.notes.append(f"{nCh} channels in the file (from the content of the status channel).")
+            if nCh is not None:
+                H.notes.append(f"{nCh} channels in the file (from the content of the status channel).")
+            elif L.nChannelsController == 8 or fs == 500:
+                # no status channel in the file and the log file says 8 channels or 500 Hz: old MyoDish file
+                # (software 1.0.x; 2026-10-13, before: 9 channels assumed and the 9th column read as status channel)
+                nCh = 8
+                H.notes.append("No status channel in the file and 8 channels / 500 Hz in the log file: old 8-channel "
+                               "file, contractions only (no stimuli, extra or missed beats).")
+            else:
+                nCh = 9
+                H.notes.append("9 channels assumed (no status channel found in the file).")
     H.nChannelsInFile = nCh
 
     # status (stimulus) channel = last channel, except in legacy 8-channel files (500 Hz / nChannels;8 in the log)
@@ -410,8 +422,25 @@ def _rocker_bit_in_intervals(H):
 
 
 # =====================================================================================================
+def _rest_intervals(ivs, open_, rest, t0, fs):
+    """rocker-at-rest intervals of one chunk appended to the list ivs ([from, to] s; to = time of the first sample
+    with the rocker moving): rest = bool per sample, t0 = time of its first sample; open_ = start of an interval still
+    open at the end of the previous chunk (None if none). Returns the start of an interval open at the end (or None)."""
+    x = np.r_[open_ is not None, np.asarray(rest, bool)].astype(np.int8)
+    dx = np.diff(x)
+    tOn = list(t0 + np.flatnonzero(dx == 1) / fs)
+    tOff = list(t0 + np.flatnonzero(dx == -1) / fs)
+    if open_ is not None:
+        tOn = [open_] + tOn
+    n = len(tOff)
+    ivs.extend([[float(a), float(b)] for a, b in zip(tOn[:n], tOff)])
+    return tOn[-1] if len(tOn) > n else None
+
+
 def read_overview(H, bin_s, progress=None, t_range=None):
-    """min/max of every data channel per bin over the whole file or the part t_range = [from to] (s), chunk-wise."""
+    """min/max of every data channel per bin over the whole file or the part t_range = [from to] (s), chunk-wise;
+    rockerFraction (fraction of each bin with the rocker moving) and rockerRest ([from to] s with the rocker at rest,
+    sample resolution; 2026-10-14)."""
     fs = H.samplingRate
     nCh = H.nChannelsInFile
     binSamples = max(1, mround(bin_s * fs))
@@ -431,6 +460,8 @@ def read_overview(H, bin_s, progress=None, t_range=None):
     O.minForce = np.full((nData, nBins), np.nan)
     O.maxForce = np.full((nData, nBins), np.nan)
     O.rockerFraction = np.zeros(nBins)
+    rest, restOpen = [], None  # rocker at rest [from to] (s), sample resolution (2026-10-14)
+    hasRocker = H.get("rockerSource") == "log" or bool(H.hasStimChannel)
     b0 = 0
     with open(H.file, "rb") as fh:
         fh.seek(s0 * nCh * 2)
@@ -451,15 +482,22 @@ def read_overview(H, bin_s, progress=None, t_range=None):
                     O.maxForce[c, b0:b0 + nb] = np.nanmax(X, axis=1)
             if H.get("rockerSource") == "log":
                 r = rocker_state_from_log(H.rockerLogIntervals, (s0 + b0 * binSamples + np.arange(m)) / fs).astype(float)
+                restOpen = _rest_intervals(rest, restOpen, r == 0, (s0 + b0 * binSamples) / fs, fs)
                 r = np.r_[r, np.full(pad, np.nan)]
                 O.rockerFraction[b0:b0 + nb] = np.nanmean(r.reshape(nb, binSamples), axis=1)
             elif H.hasStimChannel:
                 r = ((raw[H.stimRow].view(np.uint16) & 16384) != 0).astype(float)
+                restOpen = _rest_intervals(rest, restOpen, r == 0, (s0 + b0 * binSamples) / fs, fs)
                 r = np.r_[r, np.full(pad, np.nan)]
                 O.rockerFraction[b0:b0 + nb] = np.nanmean(r.reshape(nb, binSamples), axis=1)
             b0 += nb
             if progress is not None:
                 progress(min(1.0, b0 / nBins))
+    if restOpen is not None:
+        rest.append([float(restOpen), (s0 + nSamples) / fs])
+    if not hasRocker and nSamples > 0:  # no rocker information: at rest
+        rest = [[s0 / fs, (s0 + nSamples) / fs]]
+    O.rockerRest = np.asarray(rest, dtype=float).reshape(-1, 2)
     for c in range(nData):  # AU --> uN
         kc = calibration_factor(H, H.dataChannels[c], O.tBin)
         O.minForce[c] *= kc

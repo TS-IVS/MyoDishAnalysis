@@ -4,6 +4,7 @@ function R = mda_readResults(resultsFile)
 %   R = mda_readResults('results.xlsx')
 %   R = mda_readResults('results_info.csv')      (or _summary.csv, _contractions.csv(.gz), _thresholds.csv: the
 %                                                  other files of the set are found by their names)
+%   Results of the watcher (<name>.xlsx without the sheet contractions): <name>_contractions.csv(.gz) next to it.
 %   R = mda_readResults('settings.csv')          a single table key, value (settings file of mda_settings): options
 %
 % Results of MyoDishAnalysis ('output'), MyoDishAnalysisWatch, MyoDishAnalysisGUI (Export this channel ..., All
@@ -95,15 +96,19 @@ if ~isempty(ch), R.channels = parseNumbers(ch); end
 R.summary = get('summary');
 R.labels = get('labels');
 R.rockerFilter = get('rockerFilter');
-cf = fullfile(p, [regexprep(n, '_(info|summary|contractions|thresholds|parameters|labels|rockerFilter|protocols|protocolResults|pulses)$', '') '_contractions.csv.gz']);
-if ~(strcmpi(e, '.xlsx') || strcmpi(e, '.xls')) && ~exist(regexprep(cf, '\.gz$', ''), 'file') && exist(cf, 'file')
-    tmp = tempname; mkdir(tmp);                     %readtable does not read .gz
-    gunzip(cf, tmp);
-    [~, cn] = fileparts(cf);
-    R.contractions = readCsv(fullfile(tmp, cn));
-    rmdir(tmp, 's');
-else
+if (strcmpi(e, '.xlsx') || strcmpi(e, '.xls')) && ismember('contractions', sheets)
     R.contractions = get('contractions');
+else    %<name>_contractions.csv(.gz); next to an .xlsx without this sheet: results of the watcher (2026-10-14)
+    cf = fullfile(p, [regexprep(n, '_(info|summary|contractions|thresholds|parameters|labels|rockerFilter|protocols|protocolResults|pulses)$', '') '_contractions.csv']);
+    if exist(cf, 'file')
+        R.contractions = readCsv(cf);
+    elseif exist([cf '.gz'], 'file')
+        tmp = tempname; mkdir(tmp);                 %readtable does not read .gz
+        gunzip([cf '.gz'], tmp);
+        [~, cn, ce] = fileparts(cf);
+        R.contractions = readCsv(fullfile(tmp, [cn ce]));
+        rmdir(tmp, 's');
+    end
 end
 % analysis windows
 W = get('thresholds');

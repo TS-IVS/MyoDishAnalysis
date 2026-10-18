@@ -225,9 +225,10 @@ class OverlayWindow(QtWidgets.QWidget):
         ... peak + 1.6 s) and the force of the analysed range (time course, t = 0 at its first stimulus)."""
         w = self.win
         S = w.S
-        rng = (float(w.range[0]), float(w.range[1]))
+        R = np.asarray(w.range, float).reshape(-1, 2)  # one or several ranges (2026-10-14)
+        rng = (float(R[:, 0].min()), float(R[:, 1].max()))
         tp = B["t_peak"].to_numpy()
-        key = f"{ch}|{rng[0]:.4f}|{rng[1]:.4f}|{sel.size}|{np.sum(tp[sel]):.6f}"
+        key = f"{ch}|{';'.join(f'{a:.4f} {b:.4f}' for a, b in R)}|{sel.size}|{np.sum(tp[sel]):.6f}"
         if any(g["key"] == key for g in self.groups):
             w.status("This selection is already in the overlay.")
             return True
@@ -243,7 +244,10 @@ class OverlayWindow(QtWidgets.QWidget):
             ia, ib = max(0, a), min(N - 1, b)
             seg[k, ia - a:ib - a + 1] = C.f[ia:ib + 1]
         hrs = w.H.totalSeconds >= 3600
-        lab = f"Ch {ch}, {fmt_clock(rng[0], hrs, True)} - {fmt_clock(rng[1], hrs, True)}, n = {sel.size}"
+        span = w.w2f(np.array(rng))  # time in the file (rocker stops side by side)
+        lab = f"Ch {ch}, {fmt_clock(span[0], hrs, True)} - {fmt_clock(span[1], hrs, True)}, n = {sel.size}"
+        if len(R) > 1:
+            lab += f" ({len(R)} ranges)"
         L = w.Lbl
         r = np.flatnonzero(L["channel"].to_numpy(float) == ch)
         if r.size:
@@ -251,17 +255,19 @@ class OverlayWindow(QtWidgets.QWidget):
                 if nm in L.columns and isinstance(L[nm].iloc[r[0]], str) and L[nm].iloc[r[0]]:
                     lab += ", " + L[nm].iloc[r[0]]
         st = np.asarray(C.stimTimes, float)
-        st = st[(st >= rng[0]) & (st <= rng[1])]
+        st = st[w.in_rng(st)]
         t0 = float(st[0]) if st.size else rng[0]
         t = np.asarray(C.t, float)
-        inR = (t >= rng[0]) & (t <= rng[1])
+        inR = (t >= rng[0]) & (t <= rng[1])  # time course: outside the range(s) NaN
+        trY = np.asarray(C.f, float)[inR].copy()
+        trY[~w.in_rng(t[inR])] = np.nan
         self.next_color += 1  # default colours in the order of adding (stay when groups are removed)
         G = dict(key=key, seg=seg, dt=S.dt, pre=pre,
                  stimRel=B["t_stim"].to_numpy(float)[sel] - np.asarray(C.peakTimes)[loc],
                  dia=B["diastolicSignal"].to_numpy(float)[sel], amp=B["amplitude"].to_numpy(float)[sel],
                  zero=C.zeroForce, pp=nanmedian(B["peakToPeakInterval"].to_numpy(float)[sel]),
-                 ch=int(ch), range=rng, noStim=st.size == 0, t0=t0, trT=t[inR] - t0,
-                 trY=np.asarray(C.f, float)[inR], label=lab,
+                 ch=int(ch), range=rng, ranges=R.copy(), span=(float(span[0]), float(span[1])), noStim=st.size == 0,
+                 t0=t0, trT=t[inR] - t0, trY=trY, label=lab,
                  color=COLORS[(self.next_color - 1) % len(COLORS)], width=2.0, style="-", band="none", name="")
         self.groups.append(G)
         w.status(f"Overlay: group {len(self.groups)} added ({lab}).")
@@ -269,9 +275,9 @@ class OverlayWindow(QtWidgets.QWidget):
 
     def groups_of(self, ch):
         """overlay groups of channel ch for the analysed range of the main window."""
-        rng = self.win.range
+        R = np.asarray(self.win.range, float).reshape(-1, 2)
         return [k for k, G in enumerate(self.groups)
-                if G["ch"] == ch and abs(G["range"][0] - rng[0]) < 1e-6 and abs(G["range"][1] - rng[1]) < 1e-6]
+                if G["ch"] == ch and G["ranges"].shape == R.shape and np.all(np.abs(G["ranges"] - R) < 1e-6)]
 
     def choose_channels(self):
         """checkboxes: channels with a group for the analysed range of the main window (ticked = added, unticked =
@@ -285,8 +291,9 @@ class OverlayWindow(QtWidgets.QWidget):
         d = QtWidgets.QDialog(self)
         d.setWindowTitle("Overlay: channels")
         lay = QtWidgets.QVBoxLayout(d)
-        lab = QtWidgets.QLabel(f"Channels for the analysed range {fmt_clock(w.range[0], hrs, True)} - "
-                               f"{fmt_clock(w.range[1], hrs, True)} (same settings; manual exclusions only in channel "
+        sp = w.w2f(np.array(w.rng_span()))
+        lab = QtWidgets.QLabel(f"Channels for the analysed range {fmt_clock(sp[0], hrs, True)} - "
+                               f"{fmt_clock(sp[1], hrs, True)} (same settings; manual exclusions only in channel "
                                f"{w.ch}):")
         lab.setWordWrap(True)
         lay.addWidget(lab)
@@ -334,7 +341,7 @@ class OverlayWindow(QtWidgets.QWidget):
                     notes.append(f"channel {c}: {e}")
                     continue
                 tp = Bx["t_peak"].to_numpy()
-                s = Bx["included"].to_numpy(bool) & (tp >= w.range[0]) & (tp <= w.range[1])
+                s = Bx["included"].to_numpy(bool) & w.in_rng(tp)
                 if w.ref_exclude:
                     s &= ~w.deviating_of(Bx, Cx)
                 sel = np.flatnonzero(s)
@@ -745,7 +752,7 @@ class OverlayWindow(QtWidgets.QWidget):
         tabs.append(pd.DataFrame({
             "group": np.arange(1, nG + 1), "label": [G["label"] for G in self.groups],
             "legend": [self.legend_name(g) for g in range(nG)], "channel": [G["ch"] for G in self.groups],
-            "from_s": [G["range"][0] for G in self.groups], "to_s": [G["range"][1] for G in self.groups],
+            "from_s": [G["span"][0] for G in self.groups], "to_s": [G["span"][1] for G in self.groups],
             "firstStimulus_s": [G["t0"] for G in self.groups], "nTraces": nTr, "alignment": [a] * nG,
             "baseline": [b] * nG, "unit": [u] * nG, "band": [G["band"] for G in self.groups]}))
         return names, tabs

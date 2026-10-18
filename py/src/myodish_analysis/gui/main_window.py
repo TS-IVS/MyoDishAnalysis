@@ -8,18 +8,32 @@
     mda-gui results.xlsx          results of myodish_analysis / watcher / GUI export (.xlsx, _info.csv): recording,
                                   settings and analysis window restored (read_results)
 
-0. Comments ...: searchable list of the comments of the log file; double-click (or Go to) loads the data around it.
-1. Overview: min/max envelope of the selected channel (green = rocker at rest). Drag = load a time window; mouse wheel
-   = zoom (shift + wheel: move), double-click = whole file; the zoomed part is re-read in more detail.
+0. Open ...: a recording (.mdd; its first 120 s are loaded and analysed right away) or results of an analysis (see 3.);
+   the folder is remembered (2026-10-14). Results ...: results browser of a results folder of the watcher
+   (mda_index.csv, mda_flags.csv): one row per recording and channel with the flags of the watcher report (list: all /
+   with flags / red flags / not analysed; search); double-click opens the channel with the settings of its analysis
+   (red flags: the window of the flags, otherwise the first 120 s); Compute flags for results of older watcher
+   versions (dialogs.ResultsBrowser). Main file (shown for a parallel recording, e.g. a schedule file): the main
+   recording at the window shown. Grey line above the table: flags of the watcher report for the analysed range.
+   Comments ...: searchable list of the comments of the log file (number, time, text); a selected row is highlighted
+   in the force plot, double-click (or Go to) loads the data around it. Comments are numbered purple marks in the
+   force plot (pointer: text; click: selected in the list).
+1. Overview: min/max envelope of the selected channel (green = rocker at rest; time unit bottom left, from 2 days
+   'd h:mm'). Drag = load a time window; mouse wheel = zoom (shift + wheel: move), double-click = whole file; the zoomed
+   part is re-read in more detail; right click: Select all (load the range shown, at most 4 h; 2026-10-14).
    Arrow keys: left / right = move the time axis by half its length, shift + left / right = extend it on that side,
    up / down = zoom in / out; mouse over the overview: its time axis, otherwise the force plot (beyond the loaded
    window the loaded window follows and is read again; the zoomed overview moves along).
 2. Force plot: force - zero force; red = selected contractions, orange = uncertain (high sensitivity), grey = excluded
    by the filters, x = excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16), green
-   rings = elicited by an extra pulse, black diamonds = ambiguous stimulus assignment, grey background = rocker moving,
-   yellow = analysed range, purple = comments.
-   Cursor mode 'drag = select time range' or 'click = exclude / include contraction'. Wheel = zoom the time axis,
-   shift + wheel = move, double-click = whole loaded window. Right click: zero force, reference beat, save / export.
+   rings = elicited by an extra pulse, black diamonds = ambiguous stimulus assignment, bar at the top = rocker state
+   (green = at rest, grey = moving; 2026-10-14, before: grey background), yellow = analysed range(s), purple = comments.
+   Cursor mode 'drag = select time range' (shift + drag adds a range: several ranges are pooled, exports add one
+   summary row per range) or 'click = exclude / include contraction'. Wheel = zoom the time axis, shift + wheel = move,
+   double-click = whole loaded window. Right click: Zoom to the selection; Select all rocker stops of the overview range
+   (with 'only contractions with rocker at rest': every rocker stop of the range shown in the overview read and shown
+   side by side, dashed lines = time gaps, times in the file; load a window to return); zero force, reference beat,
+   save / export.
 3. Stimulus plot (current per pulse, interval to the previous pulse), table (mean, SD, n of the selected contractions,
    extra / missed / uncertain beats) and lower plot (one parameter per contraction). Detection threshold per channel
    (auto or manual); 'high sensitivity' (default) counts all contractions and marks the uncertain ones (orange), 'high
@@ -28,12 +42,13 @@
    are based on assumptions or experience, one tab per part (stimulus assignment / onset gate and stimulus source,
    detection, noise / artifact and rocker rules, signal and spike removal, rocker filter, export); Guide = settings
    guide (PDF), Defaults = options(), Apply / OK analyse the window again, Save settings ... / Load settings ...:
-   settings file (settings.py). Legend of the force plot: menu View (right click in the force plot). Every data
-   export contains the table info (version, all settings); Open results ... restores recording, settings and analysis
-   window of a results file and compares the contractions. Overlay contractions: mean beat (stimulus / peak) or
-   time course of the range (t = 0 at the first stimulus), other channels of the same range by checkboxes, colour /
-   width / line style / SD-SEM-range band per group, editable title, axis labels and legend, editable matplotlib copy
-   (overlay.py).
+   settings file (settings.py); changed settings: the button shows their number in red ('Advanced (3 changed)',
+   shortened if the text does not fit, e.g. 'Adv. (3 chgd)'), its tool tip lists them with their defaults
+   (2026-10-14). Legend of the force plot: menu View (right click in the force plot). Every data export contains the
+   table info (version, all settings); Open ... with a results file restores recording, settings and analysis window
+   of a results file and compares the contractions. Overlay contractions: mean beat (stimulus / peak) or time course
+   of the range (t = 0 at the first stimulus), other channels of the same range by checkboxes, colour / width / line
+   style / SD-SEM-range band per group, editable title, axis labels and legend, editable matplotlib copy (overlay.py).
 4. + EP recording ...: LabChart .mat export aligned to the stimuli; AP parameters per contraction. EP plots: drag up /
    down = y limits, double-click = automatic, right click = type them / automatic (restore view); 'remove stimulus
    artefact' = pulses and artefact replaced by straight lines (grey; display only, remove_artefacts).
@@ -45,7 +60,8 @@
 See README.md of the MATLAB version for all details; results are the same as with MyoDishAnalysisGUI.
 
 Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-06 (port of MyoDishAnalysisGUI.m; detection mode,
-open results, rocker artifact window, EP y limits / artefact removal, mouse pointer values 2026-10-09)
+open results, rocker artifact window, EP y limits / artefact removal, mouse pointer values 2026-10-09; first window
+loaded, results browser, parallel recordings, numbered comments, flags 2026-10-14)
 """
 from __future__ import annotations
 
@@ -78,9 +94,9 @@ from ..rocker_filter import rocker_filter
 from ..summarize import summarize
 from ..write_results import write_results
 from ..zero_force import zero_force
-from .timeaxis import fmt_clock, fmt_duration, fmt_num, nav_step
-from .widgets import (BLUE, GREEN, GREY, MAGENTA, ORANGE, PURPLE, RED, ElidedLabel, PlotArea, TwinPlot, rects, rot_labels, runs, set_title, time_plot,
-                      vlines)
+from .timeaxis import fmt_clock, fmt_duration, fmt_num, nav_step, time_ticks
+from .widgets import (BLUE, GREEN, MAGENTA, ORANGE, PURPLE, RED, UI_BLUE_DARK, ElidedLabel, FitButton, PlotArea,
+                      TwinPlot, pref_get, pref_set, primary, rects, runs, set_title, time_plot, ui_style, vlines)
 
 MU = "µ"
 # options of the advanced settings window (dialogs.AdvancedSettings, advanced.py), 2026-10-10
@@ -89,13 +105,17 @@ REREAD_NAMES = tuple(r[0] for r in ADVANCED_ROWS if r[8])  # applied when the da
 
 
 def _same(a, b):
-    """option values equal (numbers, text, None, arrays)"""
+    """option values equal (numbers, text, None, arrays); numbers with a relative tolerance of 1e-9 (values typed in the
+    advanced settings window are divided by its scale, e.g. ms -> s)"""
     if isinstance(a, str) or isinstance(b, str) or a is None or b is None:
         return a == b
     try:
-        return bool(np.array_equal(np.asarray(a, float), np.asarray(b, float), equal_nan=True))
+        x, y = np.asarray(a, float), np.asarray(b, float)
     except (TypeError, ValueError):
         return a == b
+    if x.shape != y.shape:
+        return False
+    return bool(np.all((np.abs(x - y) <= 1e-9 * np.maximum(1.0, np.abs(y))) | (np.isnan(x) & np.isnan(y))))
 
 
 def _fmt_opt(v):
@@ -106,6 +126,133 @@ def _fmt_opt(v):
     if isinstance(v, (tuple, list, np.ndarray)):
         return " ".join(f"{float(x):g}" for x in np.asarray(v, float).ravel())
     return str(v)
+
+
+def adv_changes(o):
+    """advanced settings (ADVANCED_ROWS) that differ from the defaults: 'name = value (default x)' (2026-10-14)"""
+    from ..options import options as make_options
+    d0 = make_options()
+    return [f"{k} = {_fmt_opt(o[k])} (default {_fmt_opt(d0[k])})" for k in ADVANCED_NAMES
+            if k in o and k in d0 and not _same(o[k], d0[k])]
+
+
+def merge_ranges(R):
+    """rows [from, to] sorted, overlapping or touching ones merged (2026-10-14); no valid row: [[nan, nan]]"""
+    R = np.asarray(R, dtype=float).reshape(-1, 2)
+    R = R[np.all(np.isfinite(R), axis=1)]
+    if R.size == 0:
+        return np.array([[math.nan, math.nan]])
+    R = np.sort(R, axis=1)
+    R = R[np.argsort(R[:, 0], kind="stable")]
+    out = [list(R[0])]
+    for a, b in R[1:]:
+        if a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return np.array(out, dtype=float)
+
+
+def rows_text(R):
+    """rows [from, to] as text: 'a b' or 'a b; c d; ...' (info table)"""
+    return "; ".join(f"{a:.15g} {b:.15g}" for a, b in np.asarray(R, float).reshape(-1, 2))
+
+
+def parse_rows(txt):
+    """'a b; c d; ...' (info table) -> array n x 2"""
+    out = []
+    for part in str(txt or "").split(";"):
+        v = [float(x) for x in part.split()] if part.strip() else []
+        if len(v) == 2:
+            out.append(v)
+    return np.asarray(out, dtype=float).reshape(-1, 2)
+
+
+def _step_time(tf, V):
+    """times of log entries (file) -> window time of side_by_side: within a window shifted with it; between two
+    windows: the start of the next one; before the first: unchanged; after the last: same distance after its end"""
+    tw = np.array(tf, dtype=float)
+    seg = V["seg"]
+    for i, x in np.ndenumerate(tw):
+        if not np.isfinite(x):
+            continue
+        k = np.flatnonzero((x >= seg[:, 0]) & (x <= seg[:, 1]))
+        if k.size:
+            tw[i] = x + V["shift"][k[0]]
+            continue
+        k = np.flatnonzero(seg[:, 0] > x)
+        if k.size == 0:
+            tw[i] = seg[-1, 3] + (x - seg[-1, 1])
+        elif k[0] > 0:
+            tw[i] = seg[k[0], 2] - 1e-6
+    return tw
+
+
+def side_by_side(Ss, gap=1.0):
+    """windows Ss (read_mdd outputs, sorted, not overlapping) one after another with gap s between them: one window in
+    condensed time (2026-10-14, as sideBySide of MyoDishAnalysisGUI.m). Between two windows the force is a straight
+    line, the rocker counts as moving and S.gapMask is True. V: seg = [fileFrom, fileTo, winFrom, winTo] per window,
+    shift = window time - file time, breaks = window times of the dashed lines. Time-stamped log entries of the file
+    facts are moved to window time (an entry between two windows applies from the start of the next one)."""
+    S = Struct(Ss[0])
+    dt = float(S.dt)
+    nG = max(1, int(round(gap / dt)))
+    K = len(Ss)
+    V = dict(seg=np.zeros((K, 4)), shift=np.zeros(K), breaks=np.zeros(max(0, K - 1)))
+    t, F, R, G = [], [], [], []
+    stim = {k: [] for k in S.stim.keys()}
+    sp = []
+    tEnd = -math.inf
+    for k, Sk in enumerate(Ss):
+        tk = np.asarray(Sk.t, float)
+        sh = 0.0 if k == 0 else tEnd + dt * (nG + 1) - tk[0]
+        if k > 0:
+            w = np.arange(1, nG + 1) / (nG + 1)
+            f0 = F[-1][:, -1:]
+            f1 = np.asarray(Sk.force, float)[:, :1]
+            t.append(tEnd + dt * np.arange(1, nG + 1))
+            F.append(f0 + (f1 - f0) * w[None, :])
+            R.append(np.ones(nG, bool))
+            G.append(np.ones(nG, bool))
+            V["breaks"][k - 1] = tEnd + dt * (nG + 1) / 2
+        t.append(tk + sh)
+        F.append(np.asarray(Sk.force, float))
+        R.append(np.asarray(Sk.rockerOn, bool))
+        G.append(np.zeros(tk.size, bool))
+        V["seg"][k] = [Sk.fromSeconds, Sk.toSeconds, Sk.fromSeconds + sh, Sk.toSeconds + sh]
+        V["shift"][k] = sh
+        tEnd = tk[-1] + sh
+        for f in stim:
+            v = np.asarray(Sk.stim[f]).ravel()
+            stim[f].append(v + sh if f == "time" else v)
+        x = np.asarray(Sk.get("spikes", np.zeros((0, 4))), float).reshape(-1, 4)
+        if x.size:
+            x = x.copy()
+            x[:, 1:3] += sh
+            sp.append(x)
+    S.t = np.concatenate(t)
+    S.force = np.concatenate(F, axis=1)
+    S.rockerOn = np.concatenate(R)
+    S.gapMask = np.concatenate(G)
+    S.fromSeconds = float(V["seg"][0, 2])
+    S.toSeconds = float(V["seg"][-1, 3])
+    S.stim = Struct({f: np.concatenate(v) for f, v in stim.items()})
+    if "spikes" in S:
+        S.spikes = np.concatenate([np.zeros((0, 4))] + sp)
+    for nm in ("offsetLog", "calibrationLog", "pulseSettingsLog", "extraPulseLog", "rockerSpeedLog"):
+        x = S.get(nm)
+        if isinstance(x, np.ndarray) and x.ndim == 2 and x.size:
+            x = x.astype(float).copy()
+            x[:, 0] = _step_time(x[:, 0], V)
+            S[nm] = x
+    for nm in ("extendedSensorIntervals", "rockerLogIntervals"):
+        x = S.get(nm)
+        if isinstance(x, np.ndarray) and x.ndim == 2 and x.size and x.shape[1] >= 2:
+            x = x.astype(float).copy()
+            x[:, :2] = _step_time(x[:, :2], V)
+            S[nm] = x
+    S.sideBySide = V
+    return S, V
 
 
 def _remove_legend(p):
@@ -146,12 +293,15 @@ def _shift_held():
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, mdd_file=None, metadata=None, channel=None, window=None):
         super().__init__()
+        ui_style()  # accent colors of the user interface (2026-10-13)
         self.setWindowTitle("MyoDishAnalysis")
         self.resize(1450, 880)
         # ---------------------------------------------------------------- state
         self.H = self.S = self.O = self.B = self.C = None
         self.ch = 1
-        self.range = [math.nan, math.nan]
+        self.range = np.array([[math.nan, math.nan]])  # analysed range(s): rows [from, to] (several: shift + drag)
+        self.sbs = None                     # rocker stops side by side (2026-10-14): seg, shift, breaks (side_by_side)
+        self._drag_add = False              # drag in the force plot with shift: the range is added to the selection
         self.win_req = [math.nan, math.nan]  # loaded window as requested from read_mdd (exports: open the results again)
         self.res_only = []                  # opened results file: t_peak of its contractions not detected again
         self.res_info = ""                  # opened results file: comparison shown in the status line
@@ -191,6 +341,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_list = _plot_list()
         self.win_overlay = self.win_trend = self.win_ref = self.win_comments = self.win_labels = None
         self.win_protocols = None
+        self.win_results = None             # results browser (2026-10-14)
+        self.main_rec = None                # main recording of an open parallel recording: (file, a, b) (2026-10-14)
+        self._com = None                    # comments in the force plot: times, numbers (1..n of the file), rows of LE
+        self._com_nums = []                 # ... their numbers (text items; overlapping ones hidden)
         self._drag_item = None
         self._stim_txt = []
         self._ov_timer = QtCore.QTimer(self)
@@ -199,16 +353,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_ui()
         QtWidgets.QApplication.instance().installEventFilter(self)  # arrow keys: navigation on the time axis
         self.empty_plots()
+        self.adv_indicator()
         if mdd_file and not str(mdd_file).lower().endswith(".mdd"):  # results file (2026-10-09)
             self.open_results(str(mdd_file), channel=channel, window=window)
         elif mdd_file:
-            self.open_file(str(mdd_file))
+            self.open_file(str(mdd_file), autoload=False)
             if metadata is not None and self.H is not None:
                 try:
                     self.Lbl = make_labels(metadata, self.H.dataChannels)
                 except Exception as e:  # noqa: BLE001
                     self.status(f"Labels: {e}")
-            self.go_to(channel, window)
+            if window is None and self.H is not None:  # first window (2026-10-14)
+                self.go_to(channel, None)
+                self.first_window()
+            else:
+                self.go_to(channel, window)
 
     def go_to(self, channel=None, window=None):
         """show this channel and load this window [from, to] s (commands of the analysis report, 2026-10-11)"""
@@ -243,16 +402,20 @@ class MainWindow(QtWidgets.QMainWindow):
             if tip:
                 b.setToolTip(tip)
             return b
-        bar.addWidget(btn("Open .mdd ...", self.on_open))
+        bar.addWidget(btn("Open ...", self.on_open, "a recording (.mdd) or results of an analysis (.xlsx, _info.csv, "
+                          "...: recording, settings and analysis window are restored, the contractions detected again "
+                          "and compared with the file); the folder is remembered"))
         bar.addWidget(btn("+ EP recording ...", self.on_open_ep, "add an electrophysiological recording (LabChart .mat "
                           "export, e.g. sharp electrode: voltage + stimulation) aligned to the stimuli of the open .mdd "
                           "file"))
-        bar.addWidget(btn("Open results ...", self.on_open_results, "results file of MyoDishAnalysis, the watcher or an "
-                          "export (.xlsx, _info.csv, ...): recording, settings and analysis window are restored, the "
-                          "contractions detected again and compared with the file"))
+        bar.addWidget(btn("Results ...", self.on_browse, "results browser: the recordings and channels of a results "
+                          "folder of the watcher with the flags of the analysis report; double-click opens them"))
         self.lFile = ElidedLabel("no file")
         self.lFile.setMinimumWidth(120)
         bar.addWidget(self.lFile, 1)
+        self.bMain = btn("Main file", self.on_main_file)  # parallel recording: main file at this window (2026-10-14)
+        self.bMain.setVisible(False)
+        bar.addWidget(self.bMain)
         bar.addWidget(QtWidgets.QLabel("Channel"))
         self.cCh = QtWidgets.QComboBox()
         self.cCh.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents)
@@ -271,7 +434,7 @@ class MainWindow(QtWidgets.QMainWindow):
         bar.addWidget(self.eTo)
         self.eFrom.returnPressed.connect(self.on_load)
         self.eTo.returnPressed.connect(self.on_load)
-        bar.addWidget(btn("Load", self.on_load))
+        bar.addWidget(primary(btn("Load", self.on_load)))
         bar.addWidget(btn("Overview", self.on_overview, "overview of the whole file (min/max envelope)"))
         bar.addWidget(btn("Comments ...", self.on_comments, "searchable list of the comments in the log file; "
                           "double-click = go to"))
@@ -438,15 +601,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cbRel = QtWidgets.QCheckBox("time 0 = window start")
         self.cbRel.setToolTip("time axis: 0 = start of the loaded window (display only; From/To, tables and exports keep "
                               "the time in the file, s)")
-        self.bAdv = btn("Advanced ...", self.on_advanced, "advanced settings: stimulus assignment (onset gate), stimulus "
-                        "source (MyoDish / external trigger), detection and filter parameters, pulse table (for users "
-                        "who know the method; see options.py)")
+        self._adv_tip = ("advanced settings: stimulus assignment (onset gate), stimulus source (MyoDish / external "
+                         "trigger), detection and filter parameters, pulse table (for users who know the method; see "
+                         "options.py)")
+        self.bAdv = FitButton("Advanced ...")  # number of changed settings in red (adv_indicator, 2026-10-14)
+        self.bAdv.clicked.connect(self.on_advanced)
+        self.bAdv.setToolTip(self._adv_tip)
         self.cbRocker.toggled.connect(self.on_filter)
         pv.addWidget(self.cbRocker)
         self.cbStim.toggled.connect(self.on_filter)
         hs = QtWidgets.QHBoxLayout()
         hs.addWidget(self.cbStim)
-        hs.addWidget(self.bAdv)
+        hs.addWidget(self.bAdv, 1)  # (the button gets the rest of the line, its text is shortened to it)
         pv.addLayout(hs)
         self.cbRF.toggled.connect(self.on_rocker_filter)
         self.cDet = QtWidgets.QComboBox()
@@ -474,6 +640,10 @@ class MainWindow(QtWidgets.QMainWindow):
         f.setPointSize(f.pointSize() - 1)
         self.lCounts.setFont(f)
         pv.addWidget(self.lCounts)
+        self.lFlags = ElidedLabel("")  # flags of the analysis report for this range (2026-10-14)
+        self.lFlags.setFont(f)
+        self.lFlags.setStyleSheet("color: #737373")
+        pv.addWidget(self.lFlags)
         self.tbl = QtWidgets.QTableWidget(0, 5)
         self.tbl.setHorizontalHeaderLabels(["parameter", "mean", "SD", "n", "unit"])
         self.tbl.verticalHeader().setVisible(False)
@@ -497,7 +667,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lStatus.setWordWrap(True)
         self.lStatus.setMinimumHeight(54)
         self.lStatus.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
-        self.lStatus.setStyleSheet("color: #000099")
+        self.lStatus.setStyleSheet(f"color: {UI_BLUE_DARK}")
         f = self.lStatus.font()
         f.setPointSize(f.pointSize() - 1)
         self.lStatus.setFont(f)
@@ -554,11 +724,22 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # =================================================================================================== file
     def on_open(self):
-        fn, _ = QtWidgets.QFileDialog.getOpenFileName(self, "MyoDish data file", self.last_dir, "MyoDish (*.mdd)")
-        if fn:
+        """a recording (.mdd) or results of an analysis (.xlsx, _info.csv, ...); the folder is remembered
+        (2026-10-14)"""
+        res = "*.xlsx *_info.csv *_summary.csv *_contractions.csv *_contractions.csv.gz"
+        fn, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Open", pref_get("lastOpenDir") or self.last_dir,
+            f"recordings and results (*.mdd {res});;recordings (*.mdd);;results of MyoDishAnalysis ({res})")
+        if not fn:
+            return
+        pref_set("lastOpenDir", os.path.dirname(fn))
+        if fn.lower().endswith(".mdd"):
             self.open_file(fn)
+        else:
+            self.open_results(fn)
 
-    def open_file(self, file):
+    def open_file(self, file, autoload=True):
+        """autoload: the first window (From / To: 0 - 120 s) is loaded and analysed right away (2026-10-14)"""
         try:
             H = read_mdd(file, None, None, self.opts)
         except Exception as e:  # noqa: BLE001
@@ -566,6 +747,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.H = H
         self.S = self.O = self.B = self.C = None
+        self.sbs = None
+        self.range = np.array([[math.nan, math.nan]])
         self.manual_off = []
         self.res_only = []
         self.res_info = ""
@@ -622,9 +805,83 @@ class MainWindow(QtWidgets.QMainWindow):
                 msg += f" Labels loaded from {os.path.basename(lf)}."
             except Exception as e:  # noqa: BLE001
                 msg += f" Labels file not read: {e}"
+        # parallel recording (e.g. schedule file) of a main recording in the same folder: button Main file (2026-10-14)
+        self.main_rec = None
+        try:
+            from ..watch import parallel_main
+            self.main_rec = parallel_main(H.file)
+        except Exception:  # noqa: BLE001
+            self.main_rec = None
+        self.bMain.setVisible(self.main_rec is not None)
+        if self.main_rec is not None:
+            self.bMain.setToolTip(self.parallel_text() + ": opens the main file at the window shown here")
+            msg += f" This is a {self.parallel_text()} (button Main file)."
         self.status(msg)
         if H.bytes < 150e6:
             self.on_overview()  # small files: overview right away
+        if autoload:
+            self.first_window()
+
+    def first_window(self):
+        """first window of a newly opened file (From / To: 0 - 120 s) loaded and analysed (2026-10-14); the notes of the
+        file stay visible after the message of the analysis"""
+        self.on_load()
+        if self.S is None:
+            return
+        note = " ".join(self.H.notes)
+        if self.main_rec is not None:
+            note = f"{note} This is a {self.parallel_text()} (button Main file).".strip()
+        if note:
+            self.status(f"{self.lStatus.text()} Note: {note}")
+
+    def parallel_text(self):
+        """open parallel recording: 'parallel recording of <main file> (a-b s of the main file)'"""
+        if self.main_rec is None:
+            return ""
+        m, a, b = self.main_rec
+        w = f"{a:.1f}-{b:.1f} s" if math.isfinite(b) else f"from {a:.1f} s"
+        return f"parallel recording of {os.path.basename(m)} ({w} of the main file)"
+
+    def on_main_file(self):
+        """parallel recording: the main file at the window shown here (time in the main file = a + time here), same
+        channel"""
+        if self.main_rec is None:
+            return
+        m, a, b = self.main_rec
+        if self.S is None:
+            w = [0.0, min(120.0, b - a) if math.isfinite(b) else 120.0]
+        else:
+            w = [self.S.fromSeconds, self.S.toSeconds]
+        c = self.ch
+        self.open_file(m, autoload=False)
+        if self.H is None:
+            return
+        self.go_to(c, [a + w[0], a + w[1]])
+
+    def on_browse(self, res=None, remember=True):
+        """results browser (2026-10-14, dialogs.ResultsBrowser): recordings and channels of a results folder of the
+        watcher with the flags of the analysis report. The last folder is opened again directly. remember=False: the
+        folder is not remembered (tests)."""
+        from .dialogs import ResultsBrowser
+        is_open = self.win_results is not None and self.win_results.isVisible()
+        if not res and is_open:
+            self.win_results.raise_()
+            self.win_results.activateWindow()
+            return self.win_results
+        if not res:
+            res = pref_get("lastResultsDir")
+            if not res or not os.path.isfile(os.path.join(res, "mda_index.csv")):
+                res = QtWidgets.QFileDialog.getExistingDirectory(self, "Results folder of the watcher (with "
+                                                                 "mda_index.csv)", res or self.last_dir)
+                if not res:
+                    return None
+        if self.win_results is None:
+            self.win_results = ResultsBrowser(self)
+        self.win_results.remember = remember
+        self.win_results.set_folder(res)
+        self.win_results.show()
+        self.win_results.raise_()
+        return self.win_results
 
     def on_load(self, *_, window=None):
         """window (optional): [from, to] in s (results files: exactly the data window of the analysis)"""
@@ -662,16 +919,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rf_f0 = None
         self.res_only = []
         self.win_req = [fr, to]
+        self.sbs = None  # continuous window (not rocker stops side by side)
         self.eFrom.setText(f"{S.fromSeconds:.1f}")
         self.eTo.setText(f"{S.toSeconds:.1f}")
-        cur = self.cCh.currentIndex()
-        self.cCh.clear()
-        for k, c in enumerate(S.dataChannels):  # channel list with the signal range
-            x = np.sort(S.force[k])
-            r = (x[max(1, mround(0.995 * x.size)) - 1] - x[max(1, mround(0.005 * x.size)) - 1]) if x.size else 0
-            self.cCh.addItem(f"Ch {c}  ({r:.0f} {MU}N)")
-        self.cCh.setCurrentIndex(max(0, cur))
-        self.range = [S.fromSeconds, S.toSeconds]
+        self.channel_labels()
+        self.range = np.array([[S.fromSeconds, S.toSeconds]])
         self.manual_off = []
         self.analyze(True)
         self.plot_overview()
@@ -796,6 +1048,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cDet.blockSignals(True)
         self.cDet.setCurrentIndex(1 if o.detection == "specific" else 0)
         self.cDet.blockSignals(False)
+        self.adv_indicator()
         d0 = make_options()
         ch = [f"{k} = {_fmt_opt(o[k])}" for k in ADVANCED_NAMES if not _same(o[k], d0[k])]
         msg = "Advanced settings: " + ("changed: " + ", ".join(ch) if ch else "defaults") + "."
@@ -811,15 +1064,38 @@ class MainWindow(QtWidgets.QMainWindow):
             self.status(msg)
             return msg
         if reread:
-            r0 = list(self.range)
-            self.on_load(window=self.win_req)
-            if self.S is not None and r0[0] >= self.S.fromSeconds - 1e-9 and r0[1] <= self.S.toSeconds + 1e-9:
-                self.range = r0
-                self.analyze(False)
+            r0 = self.range.copy()
+            if self.sbs is not None:  # rocker stops side by side: the same stops read again
+                rf = self.w2f(r0)
+                if self.load_segments(self.sbs["seg"][:, :2].copy()):
+                    R = merge_ranges(self.f2w(rf))
+                    self.range = R if np.all(np.isfinite(R)) else np.array([[self.S.fromSeconds, self.S.toSeconds]])
+                    self.analyze(False)
+            else:
+                self.on_load(window=self.win_req)
+                if self.S is not None and r0[:, 0].min() >= self.S.fromSeconds - 1e-9 and \
+                        r0[:, 1].max() <= self.S.toSeconds + 1e-9:
+                    self.range = r0
+                    self.analyze(False)
         else:
             self.analyze(False)
         self.status(msg + " " + self.lStatus.text())
         return msg
+
+    def adv_indicator(self):
+        """'Advanced ...' button (2026-10-14): number of advanced settings that differ from the defaults, in red; the
+        longest text that fits the button ('Advanced (3 changed)', ... 'Adv. (3)'); tool tip: the changed settings"""
+        ch = adv_changes(self.opts)
+        n = len(ch)
+        if not n:
+            self.bAdv.set_texts(["Advanced ..."])
+            self.bAdv.set_changed(False)
+            self.bAdv.setToolTip(self._adv_tip + ". All advanced settings have their default values.")
+            return
+        self.bAdv.set_texts([f"Advanced ({n} changed)", f"Advanced ({n} chgd)", f"Adv. ({n} chgd)", f"Adv. ({n})"])
+        self.bAdv.set_changed(True)
+        self.bAdv.setToolTip(f"{n} advanced setting(s) differ from the defaults (values as in settings files):\n"
+                             + "\n".join(ch) + "\n\n" + self._adv_tip)
 
     def api_advanced(self, chg=None):
         """tests / scripts: the advanced settings chg (dict) as typed in the window, then Apply; returns the options.
@@ -886,7 +1162,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_whole_window(self):
         if self.S is None:
             return
-        self.range = [self.S.fromSeconds, self.S.toSeconds]
+        self.range = np.array([[self.S.fromSeconds, self.S.toSeconds]])
         self.refresh(False)
 
     def on_rel_time(self, *_):
@@ -902,9 +1178,12 @@ class MainWindow(QtWidgets.QMainWindow):
             optsC.zeroForce = self.zero_of()
             optsC.threshold = self.thr_of()
             Sa = self.S
-            if self.opts.rockerFilter:
+            if self.opts.rockerFilter and self.sbs is None:
                 Sa, rf_msg = self.rocker_filtered(optsC)
+            elif self.opts.rockerFilter:
+                rf_msg = "Rocker filter: not used for the rocker stops side by side (rocker at rest)."
             B, C = analyze_channel(Sa, self.ch, None, optsC)
+            B, C = self.cut_junctions(B, C)
             self.ep_marks = None
             if self.EP is not None and len(B) > 0:
                 try:
@@ -989,8 +1268,233 @@ class MainWindow(QtWidgets.QMainWindow):
         return Sa, re.sub(r"^Rocker filter, channel \d+: ", "Rocker filter: ", E["R"].message)
 
     def in_range(self):
-        tp = self.B["t_peak"].to_numpy()
-        return (tp >= self.range[0]) & (tp <= self.range[1])
+        return self.in_rng(self.B["t_peak"].to_numpy(float))
+
+    # ------------------------------------------------- several ranges, rocker stops side by side (2026-10-14)
+    def in_rng(self, t, R=None):
+        """t within one of the analysed ranges (rows [from, to] of self.range, or of R)"""
+        t = np.asarray(t, float)
+        out = np.zeros(t.shape, bool)
+        for a, b in np.asarray(self.range if R is None else R, float).reshape(-1, 2):
+            out |= (t >= a) & (t <= b)
+        return out
+
+    def range_of(self, t):
+        """number of the analysed range of each time t (0 = none)"""
+        t = np.asarray(t, float)
+        k = np.zeros(t.shape, int)
+        for r in range(len(self.range) - 1, -1, -1):
+            k[(t >= self.range[r, 0]) & (t <= self.range[r, 1])] = r + 1
+        return k
+
+    def rng_span(self):
+        """first start and last end of the analysed range(s)"""
+        return [float(np.min(self.range[:, 0])), float(np.max(self.range[:, 1]))]
+
+    def range_text(self):
+        """analysed range(s) as text (times in the file)"""
+        R = self.range
+        hrs = self.H is not None and self.H.totalSeconds >= 3600
+        if len(R) == 1 and self.sbs is None:
+            return f"Range {R[0, 0]:.2f} - {R[0, 1]:.2f} s ({R[0, 1] - R[0, 0]:.1f} s)"
+        f = self.w2f(R)
+        txt = (f"{len(R)} ranges, {float(np.sum(R[:, 1] - R[:, 0])):.1f} s in total ({fmt_clock(f[0, 0], hrs, True)} - "
+               f"{fmt_clock(f[-1, 1], hrs, True)})")
+        if self.sbs is not None:
+            txt += f"; {len(self.sbs['seg'])} rocker stops side by side"
+        return txt
+
+    def w2f(self, t):
+        """time in the loaded window -> time in the file (rocker stops side by side: NaN in the gaps)"""
+        t = np.asarray(t, float)
+        if self.sbs is None:
+            return t
+        out = np.full(t.shape, np.nan)
+        for (a, b, c, d), sh in zip(self.sbs["seg"], self.sbs["shift"]):
+            m = (t >= c - 1e-9) & (t <= d + 1e-9)
+            out[m] = t[m] - sh
+        return out
+
+    def f2w(self, t):
+        """time in the file -> time in the loaded window (rocker stops side by side: NaN outside the loaded stops)"""
+        t = np.asarray(t, float)
+        if self.sbs is None:
+            return t
+        out = np.full(t.shape, np.nan)
+        for (a, b, c, d), sh in zip(self.sbs["seg"], self.sbs["shift"]):
+            m = (t >= a - 1e-9) & (t <= b + 1e-9)
+            out[m] = t[m] + sh
+        return out
+
+    def seg_of(self, t):
+        """rocker stop (segment, 1..n) of window times t (NaN in the gaps)"""
+        t = np.asarray(t, float)
+        k = np.full(t.shape, np.nan)
+        if self.sbs is None:
+            k[:] = 1
+            return k
+        for j, (a, b, c, d) in enumerate(self.sbs["seg"]):
+            k[(t >= c - 1e-9) & (t <= d + 1e-9)] = j + 1
+        return k
+
+    def file_times(self, T):
+        """rocker stops side by side: time columns of a contraction, pulse or summary table -> time in the file"""
+        if self.sbs is None or T is None or len(T) == 0:
+            return T
+        T = T.copy()
+        for nm in ("t_peak", "t_stim", "t_onset", "t_rise50", "t", "from", "to"):
+            if nm in T.columns and pd.api.types.is_numeric_dtype(T[nm]):
+                T[nm] = self.w2f(T[nm].to_numpy(float))
+        if "pulse" in T.columns and "t" in T.columns:
+            T["pulse"] = np.round(T["t"].to_numpy(float) * self.H.samplingRate)
+        return T
+
+    def cut_junctions(self, B, C):
+        """rocker stops side by side: intervals to the previous contraction / stimulus across a gap are not intervals"""
+        if self.sbs is None or B is None:
+            return B, C
+        with np.errstate(invalid="ignore"):
+            tp = B["t_peak"].to_numpy(float)
+            if "peakToPeakInterval" in B.columns:
+                bad = self.seg_of(tp - B["peakToPeakInterval"].to_numpy(float)) != self.seg_of(tp)
+                B.loc[bad, "peakToPeakInterval"] = np.nan
+                B.loc[bad, "peakToPeakFrequency"] = np.nan
+            if "stimInterval" in B.columns:
+                ts = B["t_stim"].to_numpy(float)
+                bad = self.seg_of(ts - B["stimInterval"].to_numpy(float)) != self.seg_of(ts)
+                B.loc[bad, "stimInterval"] = np.nan
+                if "stimFrequency" in B.columns:
+                    B.loc[bad, "stimFrequency"] = np.nan
+            si = C.get("stimInterval")
+            if si is not None and np.size(si) == np.size(C.stimTimes):
+                st = np.asarray(C.stimTimes, float).ravel()
+                iv = np.asarray(si, float).ravel().copy()
+                iv[self.seg_of(st - iv) != self.seg_of(st)] = np.nan
+                C.stimInterval = iv
+            P = C.get("pulses")
+            if isinstance(P, pd.DataFrame) and len(P):
+                P = P.copy()
+                for nm in ("couplingInterval_s", "sinceOnset_s"):
+                    if nm in P.columns:
+                        tt = P["t"].to_numpy(float)
+                        bad = self.seg_of(tt - P[nm].to_numpy(float)) != self.seg_of(tt)
+                        P.loc[bad, nm] = np.nan
+                C.pulses = P
+        return B, C
+
+    def zoom_to_selection(self):
+        """context menu of the force plot: time axis = the analysed range(s)"""
+        if self.S is None or not np.all(np.isfinite(self.range)):
+            self.status("Select a range first.")
+            return
+        a, b = self.rng_span()
+        m = max(0.02 * (b - a), 0.2)
+        self.pMain.vb.setXRange(max(self.S.fromSeconds, a - m), min(self.S.toSeconds, b + m), padding=0)
+
+    def select_all(self):
+        """context menu of the overview: load the range shown (whole file or the zoomed part), at most 4 h"""
+        if self.H is None:
+            return
+        w = [0.0, float(self.H.totalSeconds)] if self.O is None or self.ovXL is None else [float(x) for x in self.ovXL]
+        if w[1] - w[0] > 4 * 3600:
+            self.status(f"The range shown is {fmt_duration(w[1] - w[0])} long: at most 4 h can be loaded. Zoom the "
+                        "overview (mouse wheel) or use Trend ... / the command line version for long ranges.")
+            return
+        self.eFrom.setText(f"{w[0]:.3f}")
+        self.eTo.setText(f"{w[1]:.3f}")
+        self.on_load()
+
+    def select_rocker_stops(self):
+        """context menu of the force plot ('only contractions with rocker at rest'): all rocker stops of the range shown
+        in the overview are read (each +-2 s) and shown side by side, separated by dashed lines; analysed ranges = the
+        stops (2026-10-14)"""
+        if self.H is None:
+            return
+        if not self.cbRocker.isChecked():
+            self.status("Tick 'only contractions with rocker at rest' first.")
+            return
+        if self.O is None:
+            self.on_overview()
+            if self.O is None:
+                return
+        if self.O.get("rockerRest") is None:
+            self.status("Overview without rocker intervals: press Overview again.")
+            return
+        xr = [0.0, float(self.H.totalSeconds)] if self.ovXL is None else [float(x) for x in self.ovXL]
+        stops = np.asarray(self.O.rockerRest, float).reshape(-1, 2)
+        stops = stops[(stops[:, 1] > xr[0]) & (stops[:, 0] < xr[1])]
+        stops = np.c_[np.maximum(stops[:, 0], xr[0]), np.minimum(stops[:, 1], xr[1])]
+        stops = stops[stops[:, 1] - stops[:, 0] >= 1]  # stops of at least 1 s
+        if len(stops) == 0:
+            self.status("No rocker stop (>= 1 s) in the range shown in the overview.")
+            return
+        if len(stops) == 1 and stops[0, 1] - stops[0, 0] > 0.98 * (xr[1] - xr[0]):
+            self.status("The rocker does not move in the range shown in the overview: load it as a window instead.")
+            return
+        segs = merge_ranges(np.c_[np.maximum(0, stops[:, 0] - 2), np.minimum(self.H.totalSeconds, stops[:, 1] + 2)])
+        if float(np.sum(segs[:, 1] - segs[:, 0])) > 4 * 3600:
+            self.status("The rocker stops of this range take more than 4 h: zoom the overview.")
+            return
+        if len(segs) > 2000:
+            self.status(f"{len(segs)} rocker stops: zoom the overview (at most 2000).")
+            return
+        if self.load_segments(segs):
+            R = merge_ranges(self.f2w(stops))
+            self.range = R[np.all(np.isfinite(R), axis=1)]
+            self.analyze(True)
+            self.plot_overview()
+
+    def load_segments(self, segs):
+        """read the windows segs (rows [from, to] s in the file) and show them side by side (self.sbs)"""
+        if self.EP is not None:
+            self.on_close_ep()
+        dlg = None
+        if len(segs) > 20:
+            dlg = QtWidgets.QProgressDialog(f"Reading {len(segs)} rocker stops ...", None, 0, len(segs), self)
+            dlg.setWindowTitle("Rocker stops")
+            dlg.setMinimumDuration(300)
+        Ss = []
+        try:
+            for k, (a, b) in enumerate(segs):
+                Ss.append(read_mdd(self.H, float(a), float(b), self.opts))
+                if dlg is not None and k % 10 == 0:
+                    dlg.setValue(k)
+                    QtWidgets.QApplication.processEvents()
+        except Exception as e:  # noqa: BLE001
+            if dlg is not None:
+                dlg.close()
+            self._err("Error: ", e)
+            return False
+        if dlg is not None:
+            dlg.close()
+        self.S, self.sbs = side_by_side(Ss, 1.0)
+        self.rf_ctx = None
+        self.rf_cache = {}
+        self.rf_f0 = None
+        self.res_only = []
+        self.manual_off = []
+        self.win_req = [float(segs[0, 0]), float(segs[-1, 1])]
+        self.eFrom.setText(f"{self.win_req[0]:.1f}")
+        self.eTo.setText(f"{self.win_req[1]:.1f}")
+        self.channel_labels()
+        return True
+
+    def channel_labels(self):
+        """channel list with the signal range of the loaded window (helps to find the channels with a slice)"""
+        S = self.S
+        cur = self.cCh.currentIndex()
+        self.cCh.blockSignals(True)
+        self.cCh.clear()
+        gm = S.get("gapMask")
+        for k, c in enumerate(S.dataChannels):
+            x = np.asarray(S.force[k], float)
+            if gm is not None and np.size(gm) == x.size:
+                x = x[~np.asarray(gm, bool)]
+            x = np.sort(x)
+            r = (x[max(1, mround(0.995 * x.size)) - 1] - x[max(1, mround(0.005 * x.size)) - 1]) if x.size else 0
+            self.cCh.addItem(f"Ch {c}  ({r:.0f} {MU}N)")
+        self.cCh.setCurrentIndex(max(0, cur))
+        self.cCh.blockSignals(False)
 
     def is_manual(self):
         tp = self.B["t_peak"].to_numpy()
@@ -1018,13 +1522,20 @@ class MainWindow(QtWidgets.QMainWindow):
             sel &= ~self.deviating()
         return sel
 
-    def range_table(self):
+    def range_table(self, for_export=False):
+        """contractions of the analysed range(s); for_export: times in the file (rocker stops side by side) and with
+        several ranges the column 'range' (number of the range, 2026-10-14)"""
         inR = self.in_range()
         man = self.is_manual()
         T = self.B[inR].copy().reset_index(drop=True)
         T["included"] = T["included"].to_numpy(bool) & ~man[inR]
         T["manuallyExcluded"] = man[inR]
         T["contraction"] = np.arange(1, len(T) + 1, dtype=float)
+        if for_export:
+            rk = self.range_of(self.B["t_peak"].to_numpy(float)[inR])
+            T = self.file_times(T)
+            if len(self.range) > 1:
+                T.insert(list(T.columns).index("channel") + 1, "range", rk.astype(float))
         H = self.H
         when = None
         if not math.isnan(H.recordingStart) and len(T):
@@ -1034,15 +1545,27 @@ class MainWindow(QtWidgets.QMainWindow):
         T.insert(0, "file", os.path.basename(H.file))
         return add_labels(T, self.Lbl, when)
 
-    def summary_row(self):
+    def summary_row(self, R=None):
+        """summary of the selected contractions over the analysed range(s) (all together), or over the ranges R"""
         Bs = self.B.copy()
         Bs["included"] = self.selected()
-        Sm = arrhythmic_pacing(summarize(Bs, self.C, self.range, self.opts), self.opts)  # 2026-10-13
+        Sm = arrhythmic_pacing(summarize(Bs, self.C, self.range if R is None else R, self.opts), self.opts)
         Sm.insert(0, "file", os.path.basename(self.H.file))
         when = None
         if not math.isnan(self.H.recordingStart):
-            when = list(datenum_to_timestamps(np.array([self.H.recordingStart + np.mean(self.range) / 86400])))
+            mid = float(np.nanmean(self.w2f(np.array([Sm["from"].iloc[0], Sm["to"].iloc[0]]))))
+            when = list(datenum_to_timestamps(np.array([self.H.recordingStart + mid / 86400])))
         return add_labels(Sm, self.Lbl, when)
+
+    def summary_all(self):
+        """summary for exports: one row; several ranges: 'all ranges' and one row per range (column range); times in
+        the file (2026-10-14)"""
+        Sm = self.summary_row()
+        if len(self.range) > 1:
+            parts = [Sm] + [self.summary_row(self.range[r:r + 1]) for r in range(len(self.range))]
+            Sm = pd.concat(parts, ignore_index=True)
+            Sm.insert(1, "range", ["all ranges"] + [f"range{r + 1}" for r in range(len(self.range))])
+        return self.file_times(Sm)
 
     # =================================================================================================== display
     def refresh(self, reset_x):
@@ -1051,6 +1574,37 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_param()
         self.update_summary()
         self.draw_ep()
+        self.fit_left_axes()
+
+    def fit_left_axes(self):
+        """width of the left axes of the stacked plots: room for the tick labels and the label of every plot (wide tick
+        labels or the long label 'zero force unknown' were cut off with the fixed width), the same for all plots so
+        that their time axes stay aligned (2026-10-14)"""
+        plots = [self.pOv, self.pMain, self.stim.p, self.pPar]
+        if self.epBox.isVisible():
+            plots += [self.pEPv, self.pEPs]
+        need = 62.0
+        for p in plots:
+            ax = p.getAxis("left")
+            try:
+                vr = p.vb.viewRange()[1]
+                strs = []
+                for spacing, vals in ax.tickValues(vr[0], vr[1], max(50.0, float(p.vb.height()))):
+                    strs += ax.tickStrings(vals, ax.scale, spacing)
+                font = ax.style.get("tickFont") or QtGui.QFont()
+                fm = QtGui.QFontMetrics(font)
+                w = max([fm.horizontalAdvance(str(x)) for x in strs] or [0])
+                w += ax.style["tickTextOffset"][0] + max(0, ax.style["tickLength"]) + 6
+                if ax.label.isVisible() and ax.labelText:
+                    w += ax.label.boundingRect().height() * 0.8
+                need = max(need, w)
+            except Exception:  # noqa: BLE001
+                continue
+        need = float(min(need, 160.0))
+        for p in plots:
+            ax = p.getAxis("left")
+            if abs((ax.fixedWidth or 0) - need) > 0.5:
+                ax.setWidth(need)
 
     def empty_plots(self):
         for p in (self.pMain, self.pPar):
@@ -1061,6 +1615,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.pEPs.clear()
         self.tbl.setRowCount(0)
         self.lCounts.setText("")
+        self.lFlags.setText("")
         self.plot_overview()
         self.pMain.setLabel("left", f"force ({MU}N)")
         self.pPar.setLabel("bottom", "time in file (s)")
@@ -1075,6 +1630,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ax = p.getAxis("bottom")
             ax.t0 = t0
             ax.tmax = tmax
+            ax.map = self.w2f if self.sbs is not None else None  # rocker stops side by side: time in the file
             ax.picture = None
             ax.update()
 
@@ -1103,6 +1659,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _after_x_change(self):
         self._x_label()
         self.stim_labels()
+        self._com_numbers()
         if self.epBox.isVisible():
             self.draw_ep()
 
@@ -1111,6 +1668,53 @@ class MainWindow(QtWidgets.QMainWindow):
         ax = p.getAxis("bottom")
         ax.t0 = self.S.fromSeconds if self.rel_time else 0.0
         ax.tmax = self.S.toSeconds - ax.t0 if self.rel_time else self.H.totalSeconds
+        ax.map = self.w2f if self.sbs is not None else None
+
+    def _com_numbers(self):
+        """numbers of the comments in the force plot: overlapping ones hidden (the highlighted one stays visible)"""
+        if self._com is None or not self._com_nums:
+            return
+        xl = self.pMain.vb.viewRange()[0]
+        wpx = max(1.0, self.pMain.vb.width())
+        last = -math.inf
+        for x, xf, k, tx in zip(self._com["t"], self._com["tf"], self._com["k"], self._com_nums):
+            px = (x - xl[0]) / max(xl[1] - xl[0], 1e-12) * wpx
+            sel = abs(xf - self.hiT) < 1e-6
+            vis = 0 <= px <= wpx and (px - last >= 6 * len(str(int(k))) + 4 or sel)
+            if vis:
+                last = px
+            try:
+                tx.setVisible(bool(vis))
+            except RuntimeError:  # deleted
+                return
+
+    def comment_click(self, k):
+        """comment number k (1..n of the file; mark in the force plot): highlighted and selected in the comment window
+        (opened if needed) (2026-10-14)"""
+        E = self.LE
+        if E is None or not len(E):
+            return
+        rows = np.flatnonzero(E["isComment"].to_numpy(bool))
+        if k < 1 or k > rows.size:
+            return
+        j = int(rows[k - 1])
+        self.hiT = float(E["t_file"].iloc[j])
+        self.on_comments()
+        if self.win_comments is not None:
+            self.win_comments.select_entry(j)
+        if self.C is not None:
+            self.plot_main(False)
+        ct = E["clockTime"].iloc[j]
+        clock = "" if pd.isna(ct) else pd.Timestamp(ct).strftime("%Y-%m-%d %H:%M:%S")
+        self.status(f"Comment {k} ({clock}, {self.hiT:.1f} s in the file): {E['text'].iloc[j]}")
+
+    def highlight_comment(self, t):
+        """a comment selected in the comment window: highlighted in the force plot (if it is in the loaded window)"""
+        tw = float(self.f2w(np.array([t]))[0]) if self.S is not None else math.nan
+        if self.S is None or self.C is None or not (self.S.fromSeconds <= tw <= self.S.toSeconds):
+            return
+        self.hiT = float(t)
+        self.plot_main(False)
 
     def on_legend(self, on=None):
         """legend of the markers in the force plot on / off (menu View; 2026-10-10)"""
@@ -1140,7 +1744,10 @@ class MainWindow(QtWidgets.QMainWindow):
               has["res"]),
              ("line", pg.mkPen(BLUE, width=1), "stimulus pulse", True),
              ("line", pg.mkPen(GREEN, width=1.2), "extra pulse (status bit 16)", has["x"]),
-             ("scatter", dict(symbol="s", size=10, pen=None, brush=(140, 140, 140, 64)), "rocker moving", True),
+             ("scatter", dict(symbol="s", size=10, pen=None, brush=(89, 184, 89)), "rocker at rest (bar at the top)",
+              True),
+             ("scatter", dict(symbol="s", size=10, pen=None, brush=(158, 158, 158)), "rocker moving (bar at the top)",
+              True),
              ("scatter", dict(symbol="s", size=10, pen=pg.mkPen((217, 179, 51)), brush=(255, 245, 191)),
               "analysed range", True),
              ("line", pg.mkPen(PURPLE, width=1, style=QtCore.Qt.PenStyle.DotLine), "comment of the log file",
@@ -1173,25 +1780,36 @@ class MainWindow(QtWidgets.QMainWindow):
         z0, _, _, _ = zero_force(S, self.ch, self.zero_of(), C.t)
         has_zero = not np.any(np.isnan(z0))
         fy = C.f - z0 if has_zero else C.f
+        gm = S.get("gapMask") if self.sbs is not None else None
+        if gm is not None and np.size(gm) == np.size(fy):  # between the rocker stops side by side
+            fy = np.where(np.asarray(gm, bool), np.nan, fy)
         if target is None:
             self.hv_f = (np.asarray(C.t, float).ravel(), np.asarray(fy, float).ravel())  # values at the mouse pointer
         art = C.get("rockerArtifact")
         show_raw = art is not None and np.any(art != 0)
         f_raw = fy + art if show_raw else fy
         yl = [float(np.nanmin(np.r_[fy, f_raw])), float(np.nanmax(np.r_[fy, f_raw]))]
+        if not all(np.isfinite(yl)):
+            yl = [0.0, 1.0]
         d = max(1.0, yl[1] - yl[0])
         yl = [yl[0] - 0.08 * d, yl[1] + 0.08 * d]
-        rects(p, [self.range[0]], [self.range[1]], yl[0], yl[1], (255, 245, 191), pen=(217, 179, 51), z=-20)
-        s1, s2 = runs(S.rockerOn)
-        if s1.size:
-            rects(p, S.t[s1], S.t[s2], yl[0], yl[1], (140, 140, 140, 64), z=-15)
+        tcw, kcw, rcw = self.comments_in_window()
+        if tcw.size:  # room for the numbered comment marks above the data (2026-10-14)
+            yl[1] += 0.08 * (yl[1] - yl[0])
+        yl[1] += 0.035 * (yl[1] - yl[0])  # room for the rocker bar at the top (2026-10-14)
+        bar_h = 0.025 * (yl[1] - yl[0])
+        R = self.range[np.all(np.isfinite(self.range), axis=1)]
+        if len(R):
+            rects(p, R[:, 0], R[:, 1], yl[0], yl[1], (255, 245, 191), pen=(217, 179, 51), z=-20)
+        self.rocker_bar(p, S.t, S.rockerOn, yl[1] - bar_h, yl[1])  # green = at rest, grey = moving (2026-10-14)
         if show_raw:
             c = p.plot(C.t, f_raw, pen=pg.mkPen((184, 184, 184), width=1))
             c.setDownsampling(auto=True, method="peak")
             c.setClipToView(True)
-        c = p.plot(C.t, fy, pen=pg.mkPen("k", width=1))
+        c = p.plot(C.t, fy, pen=pg.mkPen("k", width=1), connect="finite")
         c.setDownsampling(auto=True, method="peak")
         c.setClipToView(True)
+        self.break_lines(p, yl[0], yl[1])  # rocker stops side by side: dashed lines between them
         st = C.stimTimes[(C.stimTimes >= S.fromSeconds) & (C.stimTimes <= S.toSeconds)]
         vlines(p, st, yl[0], yl[0] + 0.04 * (yl[1] - yl[0]), BLUE)
         xt = np.asarray(C.get("extraTimes", np.zeros(0)), float).ravel()  # extra pulses (bit 16; 2026-10-10): green
@@ -1239,19 +1857,42 @@ class MainWindow(QtWidgets.QMainWindow):
             if ro.size:
                 p.addItem(pg.ScatterPlotItem(ro, np.interp(ro, C.t, fy), symbol="o", size=13,
                                              pen=pg.mkPen("k", width=1.3), brush=None))
+        if target is None:
+            self._com, self._com_nums = None, []
         if self.LE is not None and len(self.LE):
+            # comments of the log file (purple dotted lines, the one selected / jumped to: solid): numbered marks at the
+            # top, numbers as in the comment window; pointer on a mark: its text; click: selected in the comment window
+            # (2026-10-14); rocker stops side by side: window time (condensed)
             E = self.LE
-            cm = E["isComment"].to_numpy() & (E["t_file"].to_numpy() >= S.fromSeconds) & \
-                (E["t_file"].to_numpy() <= S.toSeconds)
-            has_com = bool(cm.any())
-            if cm.any():
-                tc = E["t_file"].to_numpy()[cm]
-                vlines(p, tc, yl[0], yl[1], PURPLE, style=QtCore.Qt.PenStyle.DotLine)
-                lab = [(t[:45] + ("..." if len(t) > 45 else "")) + "  " for t in E["text"].to_numpy()[cm]]
-                rot_labels(p, tc, yl[1], lab, PURPLE)
-                hi = np.abs(tc - self.hiT) < 1e-6
+            has_com = bool(tcw.size)
+            if tcw.size:
+                tc, ks, rows = tcw, kcw, rcw
+                tcf = E["t_file"].to_numpy(float)[rows]  # time in the file
+                yT = yl[1] - bar_h  # below the rocker bar
+                vlines(p, tc, yl[0], yT, PURPLE, style=QtCore.Qt.PenStyle.DotLine)
+                hi = np.abs(tcf - self.hiT) < 1e-6
                 if hi.any():
-                    vlines(p, tc[hi], yl[0], yl[1], PURPLE, width=2)
+                    vlines(p, tc[hi], yl[0], yT, PURPLE, width=2)
+                tips = {int(k): str(E["text"].iloc[j]) for k, j in zip(ks, rows)}
+                sc = pg.ScatterPlotItem(tc, np.full(tc.size, yT - 0.012 * (yl[1] - yl[0])), symbol="t", size=9,
+                                        pen=None, brush=[pg.mkBrush(RED if h else PURPLE) for h in hi],
+                                        hoverable=target is None, data=[int(k) for k in ks],
+                                        tip=lambda x, y, data: f"comment {data}: {tips.get(int(data), '')}")
+                if target is None:
+                    sc.sigClicked.connect(lambda _sc, pts, *_: self.comment_click(int(pts[0].data()))
+                                          if len(pts) else None)
+                p.addItem(sc, ignoreBounds=True)
+                f8 = QtGui.QFont()
+                f8.setPointSize(8)
+                nums = []
+                for x, k, h in zip(tc, ks, hi):
+                    tx = pg.TextItem(str(int(k)), color=RED if h else PURPLE, anchor=(0.5, 0))
+                    tx.setFont(f8)
+                    tx.setPos(float(x), yT - 0.03 * (yl[1] - yl[0]))
+                    p.addItem(tx, ignoreBounds=True)
+                    nums.append(tx)
+                if target is None:
+                    self._com, self._com_nums = dict(t=tc, tf=tcf, k=ks, rows=rows), nums
         p.vb.setYRange(yl[0], yl[1], padding=0)
         if target is not None:
             p.vb.setXRange(old[0], old[1], padding=0)
@@ -1262,17 +1903,54 @@ class MainWindow(QtWidgets.QMainWindow):
             p.vb.setXRange(old[0], old[1], padding=0)
         p.setLabel("left", f"force - zero force ({MU}N)" if has_zero else f"force ({MU}N, sensor signal; zero "
                    "unknown)")
+        if target is None:
+            self._com_numbers()
+        sb = f"   -   {len(self.sbs['seg'])} rocker stops side by side (dashed lines: time gaps)" if self.sbs else ""
         if getattr(self, "aLegend", None) is None or self.aLegend.isChecked():  # legend of the markers (2026-10-10)
             self._force_legend(p, dict(dev=has_dv, ex=has_ex, amb=has_amb, res=has_res, x=has_x, com=has_com,
                                        raw=bool(show_raw)))
-            set_title(p, f"Channel {self.ch}")
+            set_title(p, f"Channel {self.ch}{sb}")
             return
-        ttl = (f"Channel {self.ch}   (red = selected, orange = uncertain, grey = excluded by filter, x = excluded by "
-               "you, blue = stimuli, grey background = rocker moving, purple = comments")
+        ttl = (f"Channel {self.ch}{sb}   (red = selected, orange = uncertain, grey = excluded by filter, x = excluded "
+               "by you, blue = stimuli, bar at the top: green = rocker at rest, grey = moving, purple = comments")
         ttl += ", light grey = before rocker filter" if show_raw else ""
         ttl += ", green = extra pulses / elicited by one" if has_x else ""
         ttl += ", diamond = ambiguous stimulus" if has_amb else ""
         set_title(p, ttl + ")")
+
+    def comments_in_window(self):
+        """comments of the log file in the loaded window: window time (side by side: condensed), number (1..n of the
+        file), row of LE"""
+        E = self.LE
+        if E is None or not len(E) or self.S is None:
+            return np.zeros(0), np.zeros(0, int), np.zeros(0, int)
+        isc = E["isComment"].to_numpy(bool)
+        t = self.f2w(E["t_file"].to_numpy(float))
+        with np.errstate(invalid="ignore"):
+            cm = isc & (t >= self.S.fromSeconds) & (t <= self.S.toSeconds)
+        return t[cm], np.cumsum(isc)[cm].astype(int), np.flatnonzero(cm)
+
+    def rocker_bar(self, p, t, on, y0, y1):
+        """rocker state as a thin bar from y0 to y1: green = at rest, grey = moving; gaps between rocker stops side
+        by side left empty (2026-10-14)"""
+        t = np.asarray(t, float)
+        if t.size == 0:
+            return
+        st = np.asarray(on, bool).astype(float)
+        gm = self.S.get("gapMask") if self.sbs is not None else None
+        if gm is not None and np.size(gm) == st.size:
+            st[np.asarray(gm, bool)] = np.nan
+        h = (t[1] - t[0]) / 2 if t.size > 1 else 0.0
+        for v, col in ((0, (89, 184, 89)), (1, (158, 158, 158))):
+            a, b = runs(st == v)
+            if a.size:
+                rects(p, t[a] - h, t[b] + h, y0, y1, col, z=-12)
+
+    def break_lines(self, p, y0, y1):
+        """rocker stops side by side: dashed vertical lines between them (x-axis breaks)"""
+        if self.sbs is None or not len(self.sbs["breaks"]):
+            return
+        vlines(p, self.sbs["breaks"], y0, y1, (77, 77, 77), width=1.2, style=QtCore.Qt.PenStyle.DashLine, z=8)
 
     def plot_param(self, target=None):
         p = self.pPar if target is None else target
@@ -1301,7 +1979,8 @@ class MainWindow(QtWidgets.QMainWindow):
         p.addItem(pg.ScatterPlotItem(tp[sel & u], v[sel & u], symbol="o", size=6, pen=None, brush=ORANGE))
         if sel.any():
             m = nanmean(v[sel])
-            p.plot(self.range, [m, m], pen=pg.mkPen(RED, width=1, style=QtCore.Qt.PenStyle.DashLine))
+            for a, b in self.range:  # one line per range
+                p.plot([a, b], [m, m], pen=pg.mkPen(RED, width=1, style=QtCore.Qt.PenStyle.DashLine))
         if nm.endswith("_pctRef"):
             p.addItem(pg.InfiniteLine(100, angle=0, pen=pg.mkPen("k", style=QtCore.Qt.PenStyle.DotLine)))
         if nm.endswith("_dRef"):
@@ -1314,6 +1993,7 @@ class MainWindow(QtWidgets.QMainWindow):
             lo, hi = float(fin.min()), float(fin.max())
             d = max(hi - lo, 1e-12 if hi == lo == 0 else abs(hi) * 0.05 + 1e-12)
             p.vb.setYRange(lo - 0.08 * d, hi + 0.08 * d, padding=0)
+            self.break_lines(p, lo - 0.08 * d, hi + 0.08 * d)
         if target is None:
             self._x_label()
 
@@ -1322,6 +2002,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if B is None:
             self.tbl.setRowCount(0)
             self.lCounts.setText("")
+            self.lFlags.setText("")
             return
         Sm = self.summary_row().iloc[0]
         rows = []
@@ -1376,7 +2057,7 @@ class MainWindow(QtWidgets.QMainWindow):
         hh.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
         for j in range(1, len(cols)):
             hh.setSectionResizeMode(j, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        txt = (f"Range {self.range[0]:.2f} - {self.range[1]:.2f} s ({self.range[1] - self.range[0]:.1f} s)\n"
+        txt = (f"{self.range_text()}\n"
                f"{int(Sm.nContractions)} of {int(Sm.nDetected)} contractions selected ({int(Sm.nStimulated)} "
                f"stimulated, {int(Sm.nExtraBeats)} extra)\n{int(Sm.nStimuli)} stimuli"
                f"{' (ext. trigger)' if self.C.stimChannel == 0 else ''} ({Sm.stimFrequency:.2f} Hz), "
@@ -1394,6 +2075,42 @@ class MainWindow(QtWidgets.QMainWindow):
             txt += (f"\nreference ({R.n}, {R.align}): deviating > {self.ref_thr:g} SD ({w})"
                     + (", excl." if self.ref_exclude else ""))
         self.lCounts.setText(txt)
+        self.show_flags()
+
+    def show_flags(self):
+        """flags of the analysis report for the analysed range of this channel (as in the watcher report; 2026-10-14):
+        red = check the analysis, orange = slice quality, grey = none / too few contractions; descriptions as tool
+        tip"""
+        self.lFlags.setText("")
+        self.lFlags.setToolTip("")
+        try:
+            from ..report import FLAG_DEFAULTS, report_flags
+            Sm = self.summary_row()
+            Tc = self.range_table()
+            if "channel" not in Sm.columns:
+                Sm["channel"] = self.ch
+            if "channel" not in Tc.columns:
+                Tc["channel"] = self.ch
+            R = report_flags(Sm, Tc)
+            R = R[R["channel"] == self.ch]
+            if not len(R):
+                return
+            r = R.iloc[0]
+            col = {"check": "#bf0000", "quality": "#bf6b00"}.get(str(r["level"]), "#737373")
+            if not r["flags"]:
+                txt = (f"Flags: - (fewer than {FLAG_DEFAULTS['min_beats']} contractions)"
+                       if r["nDetected"] < FLAG_DEFAULTS["min_beats"] else "Flags: none")
+            else:
+                txt = f"Flags {r['flags']}: " + "; ".join(x for x in (str(r["red"]), str(r["yellow"])) if x)
+            self.lFlags.setText(txt)
+            self.lFlags.setStyleSheet(f"color: {col}")
+            self.lFlags.setToolTip("flags of the analysis report for this range (watcher report, report.py):\n"
+                                   "red: check the analysis (I inverted signal, N noise, S large extra beats, D delay, "
+                                   "F stimulus frequency)\norange: slice quality (C capture, X extra beats, A "
+                                   f"amplitude, T amplitude change, V amplitude CV)\n{txt}")
+        except Exception:  # noqa: BLE001 - the flags line is optional
+            if os.environ.get("MDA_DEBUG"):
+                traceback.print_exc()
 
     @staticmethod
     def rel_cell(Sm, p):
@@ -1440,6 +2157,9 @@ class MainWindow(QtWidgets.QMainWindow):
         ok = np.asarray(S.stim.currentReached, bool)[J]
         ex = np.asarray(S.stim.isExtraPulse, bool)[J]
         iv = np.r_[np.nan, np.diff(tS)] * 1000
+        if self.sbs is not None and tS.size > 1:  # no interval across a gap between rocker stops
+            sg = self.seg_of(tS)
+            iv[1:][(np.diff(sg) != 0) | np.isnan(sg[1:])] = np.nan
         return tS, cur, ok, ex, iv
 
     def plot_stim(self, target=None):
@@ -1479,6 +2199,7 @@ class MainWindow(QtWidgets.QMainWindow):
             p.addItem(pg.ScatterPlotItem(tS[~ok], cur[~ok], symbol="x", size=7, pen=pg.mkPen((204, 0, 204)),
                                          brush=(204, 0, 204)))
         p.vb.setYRange(0, max(1.0, float(cur.max())) * 1.35, padding=0)
+        self.break_lines(p, 0, max(1.0, float(cur.max())) * 1.35)
         tw.vb2.addItem(pg.ScatterPlotItem(tS, iv, symbol="o", size=5, pen=None, brush=BLUE))
         fin = iv[np.isfinite(iv)]
         if fin.size:
@@ -1581,8 +2302,11 @@ class MainWindow(QtWidgets.QMainWindow):
         p.addItem(c1)
         p.addItem(c2)
         p.addItem(pg.FillBetweenItem(c1, c2, brush=pg.mkBrush(51, 51, 51)))
-        if self.S is not None:
-            rects(p, [self.S.fromSeconds], [self.S.toSeconds], yl[0], yl[1], (51, 128, 255, 77), pen=(0, 77, 255), z=5)
+        if self.S is not None and self.sbs is not None:  # rocker stops side by side: each loaded stop
+            q = self.sbs["seg"]
+            rects(p, q[:, 0], q[:, 1], yl[0], yl[1], BLUE + (90,), pen=BLUE, z=5)
+        elif self.S is not None:
+            rects(p, [self.S.fromSeconds], [self.S.toSeconds], yl[0], yl[1], BLUE + (70,), pen=BLUE, z=5)
         if self.LE is not None and len(self.LE):
             E = self.LE
             tf = E["t_file"].to_numpy()
@@ -1594,6 +2318,8 @@ class MainWindow(QtWidgets.QMainWindow):
         p.vb.setRange(xRange=xlv, yRange=yl, padding=0)
         self._ov_title = (has_zero, xlv)
         self._ov_label(p)
+        if target is None:
+            self.fit_left_axes()
 
     def _ov_label(self, p=None):
         p = self.pOv if p is None else p
@@ -1602,7 +2328,12 @@ class MainWindow(QtWidgets.QMainWindow):
         has_zero, xlv = self._ov_title
         O = self.O
         hrs = O.totalSeconds >= 3600
-        unit = p.getAxis("bottom").unit
+        unit = time_ticks(p.vb.viewRange()[0], O.totalSeconds)[2]
+        if p is self.pOv:  # time unit left of the time axis (bottom left corner; 2026-10-14)
+            if getattr(self, "_ov_unit", None) is None:
+                self._ov_unit = pg.LabelItem("", size="8pt", color=(90, 90, 90), justify="right")
+                self.pOv.layout.addItem(self._ov_unit, 3, 0)
+            self._ov_unit.setText(f"({unit})")
         if self.ovXL is None:
             ws = f"whole file ({fmt_clock(O.totalSeconds, hrs, True)})"
         else:
@@ -1687,6 +2418,10 @@ class MainWindow(QtWidgets.QMainWindow):
         = zoom in / out (half / twice its length around the centre, at least 1 s); the window is read again"""
         if self.H is None or self.S is None:
             self.status("Load a time window first.")
+            return
+        if self.sbs is not None:
+            self.status("Rocker stops side by side: load a window (From / To and Load, or drag in the overview) to "
+                        "return to the continuous view.")
             return
         self.load_window(nav_step((float(self.S.fromSeconds), float(self.S.toSeconds)), key, ext,
                                   (0.0, float(self.H.totalSeconds)), 1.0))
@@ -1800,7 +2535,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._drag_item.getViewBox().removeItem(self._drag_item)
             except Exception:  # noqa: BLE001
                 pass
-        self._drag_item = rects(plot, [min(x0, x)], [max(x0, x)], yl[0], yl[1], (51, 128, 255, 64), pen=(51, 128, 255),
+        self._drag_item = rects(plot, [min(x0, x)], [max(x0, x)], yl[0], yl[1], BLUE + (56,), pen=BLUE,
                                 z=50)
 
     def _end_drag(self):
@@ -1820,6 +2555,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _drag_main(self, phase, x0, x, button):
         if self.S is None or not self.rbRange.isChecked():
             return
+        if phase == "start":  # shift + drag: the range is added to the selection (2026-10-14)
+            mods = QtWidgets.QApplication.keyboardModifiers()
+            self._drag_add = bool(mods & QtCore.Qt.KeyboardModifier.ShiftModifier)
         x0 = self._clamp(self.pMain.vb, x0)
         x = self._clamp(self.pMain.vb, x)
         if phase in ("start", "move"):
@@ -1829,7 +2567,12 @@ class MainWindow(QtWidgets.QMainWindow):
         xl = self.pMain.vb.viewRange()[0]
         if abs(x - x0) < 0.003 * (xl[1] - xl[0]):
             return
-        self.range = sorted([x0, x])
+        r = sorted([x0, x])
+        if self._drag_add and np.all(np.isfinite(self.range)):
+            self.range = merge_ranges(np.r_[self.range, [r]])
+        else:
+            self.range = np.array([r])
+        self._drag_add = False
         self.refresh(False)
 
     def _drag_ov(self, phase, x0, x, button):
@@ -1884,7 +2627,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _context_menu(self, name, screen_pos):
         m = QtWidgets.QMenu(self)
+        if name == "overview":  # load the range shown (2026-10-14)
+            m.addAction("Select all (load the range shown, at most 4 h)", self.select_all)
+            m.addSeparator()
         if name == "force":
+            m.addAction("Zoom to the selection (analysed range)", self.zoom_to_selection)
+            a = m.addAction("Select all rocker stops of the overview range (side by side)", self.select_rocker_stops)
+            a.setEnabled(self.cbRocker.isChecked())  # only with 'only contractions with rocker at rest'
+            m.addAction("Shift + drag: add a range to the selection").setEnabled(False)
+            m.addSeparator()
             if any(math.isnan(v) for v in self.alt_pt):
                 t = "Set as zero force (y at the mouse pointer)"
             else:
@@ -2010,9 +2761,9 @@ class MainWindow(QtWidgets.QMainWindow):
         optsC.zeroForce = self.zero_of(c)
         optsC.threshold = self.thr_of(c)
         Sa = self.S
-        if self.opts.rockerFilter:
+        if self.opts.rockerFilter and self.sbs is None:
             Sa, _ = self.rocker_filtered(optsC, c)
-        return analyze_channel(Sa, c, None, optsC)
+        return self.cut_junctions(*analyze_channel(Sa, c, None, optsC))
 
     def on_trend(self):
         if self.H is None:
@@ -2087,13 +2838,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         from .dialogs import TableWindow
         T = self.range_table()
-        w = TableWindow(T, f"Channel {self.ch}: contractions {self.range[0]:.1f} - {self.range[1]:.1f} s", self)
+        w = TableWindow(T, f"Channel {self.ch}: contractions, {self.range_text()}", self)
         self._tables = [t for t in getattr(self, "_tables", []) if t.isVisible()] + [w]  # keep a reference
         w.show()
 
     def closeEvent(self, ev):
         """closing the main window closes its other windows (overlay, trend, reference, comments, labels, tables)."""
-        for nm in ("win_overlay", "win_trend", "win_ref", "win_comments", "win_labels", "win_protocols"):
+        for nm in ("win_overlay", "win_trend", "win_ref", "win_comments", "win_labels", "win_protocols", "win_results"):
             x = getattr(self, nm, None)
             if x is not None:
                 try:
@@ -2124,18 +2875,13 @@ class MainWindow(QtWidgets.QMainWindow):
         d.show()
 
     # =================================================================================================== results files
-    def on_open_results(self):
-        fn, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open results", self.last_dir,
-                                                      "results of MyoDishAnalysis (*.xlsx *_info.csv *_summary.csv "
-                                                      "*_contractions.csv *_contractions.csv.gz)")
-        if fn:
-            self.open_results(fn)
-
-    def open_results(self, file, pick=None, channel=None, window=None):
+    def open_results(self, file, pick=None, channel=None, window=None, max_len=None):
         """results file of MyoDishAnalysis / watcher / GUI export (2026-10-09): recording, settings and analysis window
         of the results; the contractions are detected again and compared with the file (black o = only in the file).
         channel, window (2026-10-11, analysis report): the analysis window of this channel that contains the start of
-        window (otherwise its first one); window [from, to] s is loaded instead of the data window of the analysis."""
+        window (otherwise its first one); window [from, to] s is loaded instead of the data window of the analysis;
+        window without channel: the first channel. max_len (s; results browser, 2026-10-14): only the beginning of the
+        analysis window is loaded."""
         from ..read_results import read_results, value_of_channel
         try:
             R = read_results(file)
@@ -2168,6 +2914,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 pick = r[0]
             else:
                 self.status(f"Results: no analysis window of channel {int(channel)}.")
+        elif pick is None and window is not None:  # window without channel (results browser): first channel
+            c0 = int(W["channel"].iloc[0])
+            r = [i for i in range(len(W)) if int(W["channel"].iloc[i]) == c0]
+            r2 = [i for i in r if float(W["from"].iloc[i]) <= float(window[0]) + 1e-9
+                  and float(W["to"].iloc[i]) >= float(window[0]) - 1e-9]
+            pick = (r2 or r)[0]
+        gui_multi = R["createdBy"] == "MyoDishAnalysisGUI" and W["channel"].nunique() == 1 and len(W) > 1
+        if pick is None and gui_multi:  # export of the GUI with several ranges: all of them (2026-10-14)
+            pick = 0
         if pick is None:  # analysis window: channel, range, chunk
             pick = 0
             if len(W) > 1:
@@ -2180,7 +2935,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     return False
                 pick = items.index(it)
         w = W.iloc[int(pick)]
-        self.open_file(mdd)
+        self.open_file(mdd, autoload=False)
         if self.H is None:
             return False
         ch = int(w["channel"])
@@ -2210,6 +2965,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cDet.setCurrentIndex(1 if self.opts.detection == "specific" else 0)
         if getattr(self, "adv_win", None) is not None:  # advanced settings of the results (shown when opened again)
             self.adv_win.close()
+        self.adv_indicator()
         self.ch = ch
         self.cCh.setCurrentIndex(dc.index(ch))
         self.show_threshold()
@@ -2220,21 +2976,38 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.status("Results: labels not read.")
         # data window of the analysis, analysed range, contractions excluded by the user (GUI exports)
         self.res_info = ""
-        win = [float(w["windowFrom"]), float(w["windowTo"])] if window is None else [float(window[0]), float(window[1])]
-        self.on_load(window=win)
+        segF = parse_rows(R["extra"].get("segments_s", ""))  # rocker stops side by side (GUI export, 2026-10-14)
+        rgF = np.array([[float(w["from"]), float(w["to"])]])  # analysed range(s), time in the file
+        if gui_multi:
+            rgF = W[["from", "to"]].to_numpy(float)
+        if window is None and len(segF) > 1 and max_len is None:
+            if not self.load_segments(segF):
+                return False
+        else:
+            win = [float(w["windowFrom"]), float(w["windowTo"])] if window is None else \
+                [float(window[0]), float(window[1])]
+            if window is None and max_len is not None:
+                win[1] = min(win[1], max(float(w["from"]), win[0]) + float(max_len))
+            if window is not None:
+                rgF = np.array([[float(window[0]), float(window[1])]])
+            self.on_load(window=win)
         if self.S is None:
             return False
         if self.opts.rockerFilter and R["createdBy"] != "MyoDishAnalysisGUI":
             self.rf_ctx = self.S  # as myodish_analysis: estimated from the data window itself
             self.rf_cache = {}
-        rg = [float(w["from"]), float(w["to"])] if window is None else [float(window[0]), float(window[1])]
-        self.range = [max(rg[0], self.S.fromSeconds), min(rg[1], self.S.toSeconds)]
+        rg = self.f2w(rgF)  # time in the loaded window
+        rg = np.c_[np.maximum(rg[:, 0], self.S.fromSeconds), np.minimum(rg[:, 1], self.S.toSeconds)]
+        with np.errstate(invalid="ignore"):
+            rg = rg[np.all(np.isfinite(rg), axis=1) & (rg[:, 1] > rg[:, 0])]
+        self.range = merge_ranges(rg) if len(rg) else np.array([[self.S.fromSeconds, self.S.toSeconds]])
         Tc = None
         T = R["contractions"]
         if isinstance(T, pd.DataFrame) and {"channel", "t_peak"} <= set(T.columns):
-            tp = T["t_peak"].to_numpy(float)
-            Tc = T[(T["channel"].to_numpy() == ch) & (tp >= self.range[0] - 1e-9)
-                   & (tp <= self.range[1] + 1e-9)].reset_index(drop=True)
+            T = T[T["channel"].to_numpy() == ch].copy()
+            T["t_peak"] = self.f2w(T["t_peak"].to_numpy(float))  # (rocker stops side by side: window time)
+            Rg = np.c_[self.range[:, 0] - 1e-9, self.range[:, 1] + 1e-9]
+            Tc = T[self.in_rng(T["t_peak"].to_numpy(float), Rg)].reset_index(drop=True)
             if "manuallyExcluded" in Tc.columns:
                 self.manual_off = [float(t) for t, m in zip(Tc["t_peak"], Tc["manuallyExcluded"]) if bool(m)]
         self.analyze(False)
@@ -2262,7 +3035,7 @@ class MainWindow(QtWidgets.QMainWindow):
             inR = np.zeros(0, bool)
             tH = np.zeros(0)
         else:
-            inR = (B["t_peak"].to_numpy() >= self.range[0]) & (B["t_peak"].to_numpy() <= self.range[1])
+            inR = self.in_range()
             tH = B["t_peak"].to_numpy()[inR]
         tf = Tc["t_peak"].to_numpy(float)
         if tH.size:
@@ -2304,7 +3077,9 @@ class MainWindow(QtWidgets.QMainWindow):
         ep = self.EP.file if self.EP is not None else ""
         info["extra"] = [("createdBy", "MyoDishAnalysisGUI"), ("channels", str(self.ch)),
                          ("loadedWindow_s", " ".join(f"{v:.15g}" for v in self.win_req)),
-                         ("analysedRange_s", " ".join(f"{v:.15g}" for v in self.range)), ("epRecording", ep)]
+                         ("analysedRange_s", rows_text(self.w2f(self.range))), ("epRecording", ep)]
+        if self.sbs is not None:  # rocker stops side by side: the windows read (2026-10-14)
+            info["extra"].append(("segments_s", rows_text(self.sbs["seg"][:, :2])))
         info.setdefault("notes", [])
         return info
 
@@ -2314,6 +3089,9 @@ class MainWindow(QtWidgets.QMainWindow):
         from .dialogs import RockerArtifactWindow
         if self.S is None or self.C is None:
             self.status("Load a time window first.")
+            return None
+        if self.sbs is not None:
+            self.status("Rocker artifact: not available for the rocker stops side by side (rocker at rest).")
             return None
         if not np.any(self.S.rockerOn):
             self.status("Rocker artifact: the rocker does not move in this window.")
@@ -2342,32 +3120,39 @@ class MainWindow(QtWidgets.QMainWindow):
             self.status("Nothing to export.")
             return
         n = os.path.splitext(os.path.basename(self.H.file))[0]
-        d = os.path.join(self.last_dir, f"{n}_ch{self.ch}_{self.range[0]:.0f}-{self.range[1]:.0f}s.xlsx")
+        a, b = self.w2f(np.array(self.rng_span()))
+        d = os.path.join(self.last_dir, f"{n}_ch{self.ch}_{a:.0f}-{b:.0f}s.xlsx")
+        if len(self.range) > 1:
+            d = os.path.join(self.last_dir, f"{n}_ch{self.ch}_{len(self.range)}ranges_{a:.0f}-{b:.0f}s.xlsx")
         if self.next_file:
             fn, self.next_file = self.next_file, ""
         else:
             fn, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export contractions", d, "Excel (*.xlsx);;text (*.csv)")
         if not fn:
             return
-        T = self.range_table()
-        Sm = self.summary_row()
+        Tw = self.range_table()  # (window time: pulses below)
+        T = self.range_table(True)  # times in the file; several ranges: column range
+        Sm = self.summary_all()
         info = self.gui_info()
-        C = self.C  # analysis window (open the results again: same data window, range and threshold)
-        info["thresholds"] = pd.DataFrame([[1, self.ch, self.range[0], self.range[1], C.threshold, C.maxStimToPeak,
-                                            self.win_req[0], self.win_req[1]]],
+        C = self.C  # analysis window (open the results again: same data window, range(s) and threshold)
+        Rf = self.w2f(self.range)
+        info["thresholds"] = pd.DataFrame([[r + 1, self.ch, Rf[r, 0], Rf[r, 1], C.threshold, C.maxStimToPeak,
+                                            self.win_req[0], self.win_req[1]] for r in range(len(Rf))],
                                           columns=["range", "channel", "from", "to", "threshold_uN", "maxStimToPeak_s",
                                                    "windowFrom", "windowTo"])
         P = C.get("pulses")
-        if self.opts.pulseTable and isinstance(P, pd.DataFrame) and len(P):  # pulses of the range (2026-10-10)
-            P = P[(P["t"] >= self.range[0]) & (P["t"] <= self.range[1])].copy()
-            pos = pd.Series(T["contraction"].to_numpy(float), index=T["t_peak"].to_numpy(float))
+        if self.opts.pulseTable and isinstance(P, pd.DataFrame) and len(P):  # pulses of the range(s) (2026-10-10)
+            P = P[self.in_rng(P["t"].to_numpy(float))].copy()
+            pos = pd.Series(Tw["contraction"].to_numpy(float), index=Tw["t_peak"].to_numpy(float))
             pos = pos[~pos.index.duplicated()]
             P["contraction"] = P["t_peak"].map(pos).to_numpy(float)
-            P.insert(0, "range", "range1")
+            rk = np.maximum(1, self.range_of(P["t"].to_numpy(float)))
+            P = self.file_times(P)
+            P.insert(0, "range", [f"range{k}" for k in rk])
             info["pulses"] = P.reset_index(drop=True)
         RF = C.get("rockerFilter")
         if RF is not None:  # result of the rocker filter (as myodish_analysis)
-            info["rockerFilter"] = pd.DataFrame([["range1", self.ch, self.S.fromSeconds, self.S.toSeconds, RF.status,
+            info["rockerFilter"] = pd.DataFrame([["range1", self.ch, self.win_req[0], self.win_req[1], RF.status,
                                                   RF.f0, RF.artifactPP, RF.r2, 100 * RF.correctedFraction,
                                                   RF.message]],
                                                 columns=["range", "channel", "from_s", "to_s", "status",
@@ -2384,7 +3169,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.status("Load a time window first.")
             return
         n = os.path.splitext(os.path.basename(self.H.file))[0]
-        d = os.path.join(self.last_dir, f"{n}_allChannels_{self.range[0]:.0f}-{self.range[1]:.0f}s.xlsx")
+        Rf = self.w2f(self.range)
+        d = os.path.join(self.last_dir, f"{n}_allChannels_{Rf[0, 0]:.0f}-{Rf[-1, 1]:.0f}s.xlsx")
         fn, _ = QtWidgets.QFileDialog.getSaveFileName(self, "All channels", d, "Excel (*.xlsx);;text (*.csv)")
         if not fn:
             return
@@ -2394,10 +3180,11 @@ class MainWindow(QtWidgets.QMainWindow):
             o["zeroForce"] = [self.zero_of(int(c)) for c in self.H.dataChannels]  # NaN = Offset of the log file
             o["threshold"] = self.thr_of([int(c) for c in self.H.dataChannels])  # NaN = auto
             rep = self.aReport.isChecked()
-            myodish_analysis(self.H.file, None, self.range[0], self.range[1], output=fn, quiet=True,
-                             report=None if rep else False, metadata=self.Lbl, **o)
+            myodish_analysis(self.H.file, None, list(Rf[:, 0]), list(Rf[:, 1]), output=fn, quiet=True,
+                             report=None if rep else False, metadata=self.Lbl, pooled=len(Rf) > 1, **o)
+            more = f", {len(Rf)} ranges each in its own data window + 'all ranges'" if len(Rf) > 1 else ""
             self.status(f"All channels written to {os.path.basename(fn)}" + (" and the report (_report.pdf)" if rep
-                        else "") + " (same settings, manual exclusions not applied).")
+                        else "") + f" (same settings, manual exclusions not applied{more}).")
         except Exception as e:  # noqa: BLE001
             self._err("Error: ", e)
 
@@ -2405,8 +3192,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.B is None:
             return
         Sm = self.summary_row().iloc[0]
+        Rf = self.w2f(self.range)
+        if len(Rf) == 1:
+            rl = f"range (s)\t{Rf[0, 0]:.2f}\t{Rf[0, 1]:.2f}"
+        else:
+            rl = f"ranges (s)\t{len(Rf)}\t" + "; ".join(f"{a:.2f}-{b:.2f}" for a, b in Rf)
         lines = [f"file\t{os.path.basename(self.H.file)}", f"channel\t{self.ch}",
-                 f"range (s)\t{self.range[0]:.2f}\t{self.range[1]:.2f}", f"n contractions\t{int(Sm.nContractions)}",
+                 rl, f"n contractions\t{int(Sm.nContractions)}",
                  f"extra beats\t{int(Sm.nExtraBeats)}\tof {int(Sm.nDetected)} contractions\t{Sm.extraBeats_percent:.3g} %",
                  f"missed beats\t{int(Sm.nMissedBeats)}\tof {int(Sm.nStimuli)} stimuli\t{Sm.missedBeats_percent:.3g} %",
                  f"uncertain\t{int(Sm.nUncertain)}\tstimulated {int(Sm.nStimulatedUncertain)}\textra "
@@ -2451,6 +3243,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.open_ep(fn)
 
     def open_ep(self, ep_file):
+        if ep_file and self.sbs is not None:
+            self.status("EP recording: load a continuous window first (not with rocker stops side by side).")
+            return
         if not ep_file:
             self.on_close_ep()
             return
@@ -2665,8 +3460,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._drag_item.getViewBox().removeItem(self._drag_item)
                 except Exception:  # noqa: BLE001
                     pass
-            self._drag_item = rects(p, [xl[0]], [xl[1]], min(y0, y), max(y0, y), (51, 128, 255, 64),
-                                    pen=(51, 128, 255), z=50)
+            self._drag_item = rects(p, [xl[0]], [xl[1]], min(y0, y), max(y0, y), BLUE + (56,),
+                                    pen=BLUE, z=50)
             p.vb.setRange(xRange=xl, yRange=yl, padding=0)
             return
         self._end_drag()
@@ -2704,6 +3499,13 @@ class MainWindow(QtWidgets.QMainWindow):
             t, y = self.hv_f
             k = _nearest_sample(t, x)
             Hv[0].update(x=float(t[k]), y=float(y[k]), text=f"{fmt_num(float(y[k]), 4)} {MU}N")
+        if self._com is not None and len(self._com["t"]):  # comment line under the pointer (2026-10-14)
+            xl = self.pMain.vb.viewRange()[0]
+            d = np.abs(self._com["t"] - x)
+            q = int(np.argmin(d))
+            if d[q] <= 0.006 * (xl[1] - xl[0]):
+                Hv[0]["text"] = (f"{Hv[0]['text']}     comment {int(self._com['k'][q])}: "
+                                 f"{self.LE['text'].iloc[int(self._com['rows'][q])]}").strip()
         if self.hv_s is not None and self.hv_s[0].size:
             tS, cur, iv, ok = self.hv_s
             j = int(np.argmin(np.abs(tS - x)))
@@ -2740,7 +3542,11 @@ class MainWindow(QtWidgets.QMainWindow):
         tmax = self.S.toSeconds - tz if self.rel_time else self.H.totalSeconds
         xl = self.pMain.vb.viewRange()[0]
         dec = 4 if xl[1] - xl[0] < 1 else 3
-        time = f"t = {fmt_clock(x - tz, tmax >= 3600, True, dec)} ({x - tz:.{dec}f} s)"
+        xf = float(self.w2f(np.array([x]))[0])  # rocker stops side by side: time in the file
+        if math.isnan(xf):
+            time = "t = (gap between rocker stops)"
+        else:
+            time = f"t = {fmt_clock(xf - tz, tmax >= 3600, True, dec)} ({xf - tz:.{dec}f} s)"
         st = np.asarray(self.C.stimTimes, float).ravel()  # EP plots: stimuli of the EP recording (its time base)
         if EP is not None and (p_hover is self.pEPv or p_hover is self.pEPs) and np.size(EP.stimTimes):
             st = np.asarray(EP.stimTimes, float).ravel()
@@ -2855,8 +3661,10 @@ class MainWindow(QtWidgets.QMainWindow):
         return True
 
     # =================================================================================================== API (tests)
-    def api_set_range(self, r):
-        self.range = sorted([float(r[0]), float(r[1])])
+    def api_set_range(self, r, add=False):
+        """r = [from, to] or several rows (s in the loaded window); add = True: added to the selection (shift + drag)"""
+        r = np.sort(np.asarray(r, float).reshape(-1, 2), axis=1)
+        self.range = merge_ranges(np.r_[self.range, r] if add else r)
         self.refresh(False)
 
     def api_results(self):

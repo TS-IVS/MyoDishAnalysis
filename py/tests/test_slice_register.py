@@ -163,3 +163,96 @@ def test_slice_register(tmp_path):
     r = get("rigB_sampleY", 1)
     assert len(r) == 1 and r["daySource"][0] == "cultureStart" and abs(r["dayStart"][0] - 28 / 24) < 1e-9
     assert list(A["slice"].astype(int)) == list(R["slice"].astype(int))
+
+
+def _as_xlsx(folder):
+    """results of write() as the watcher writes them since 2026-10-14: sheets of <name>.xlsx, <name>_overview.csv.gz"""
+    import gzip
+    import shutil
+    names = sorted({f[:-len("_channels.csv")] for f in os.listdir(folder) if f.endswith("_channels.csv")})
+    for n in names:
+        with pd.ExcelWriter(os.path.join(folder, n + ".xlsx")) as xw:
+            for t in ("channels", "gaps"):
+                pd.read_csv(os.path.join(folder, f"{n}_{t}.csv")).to_excel(xw, sheet_name=t, index=False)
+                os.remove(os.path.join(folder, f"{n}_{t}.csv"))
+        f = os.path.join(folder, n + "_overview.csv")
+        with open(f, "rb") as src, gzip.open(f + ".gz", "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        os.remove(f)
+    return names
+
+
+def test_slice_register_xlsx_and_trends(tmp_path, monkeypatch):
+    """inputs as sheets of <name>.xlsx and <name>_overview.csv.gz (results of the watcher, 2026-10-14) in the flat and
+    in the series layout (2026-10-15): the same register; course image per series and channel (recordings with red
+    flags of mda_flags.csv marked), workbook <series>_trends.xlsx, overview image of the experiment"""
+    import myodish_analysis.report as rp
+    res = str(tmp_path / "csv")
+    write(res, scenario())
+    R0 = slice_register(res, write=False)
+    # flat layout: images of the series in expA/trends/
+    res2 = str(tmp_path / "xlsx")
+    write(res2, scenario())
+    folder = os.path.join(res2, "expA")
+    _as_xlsx(folder)
+    pd.DataFrame(dict(file=["expA/rigA_sampleX_1.mdd"], analyzed=["x"], channel=[3], level=["check"])).to_csv(
+        os.path.join(res2, "mda_flags.csv"), index=False)
+    seen = {}
+    orig = rp.course_image
+
+    def spy(out, D):
+        seen[os.path.basename(out)] = D
+        return orig(out, D)
+    monkeypatch.setattr(rp, "course_image", spy)
+    R = slice_register(res2, trends=True, trend_parameters=["amplitude", "beatsPerMinute"])
+    pd.testing.assert_frame_equal(R.reset_index(drop=True), R0.reset_index(drop=True), check_dtype=False)
+    want = [f"rigA_sampleX_ch{c}.png" for c in (1, 2, 3, 4, 5, 7, 8)] + ["rigA_sampleX_trends.xlsx"] + \
+        [f"rigB_sampleY_ch{c}.png" for c in (1, 2)] + ["rigB_sampleY_trends.xlsx"]
+    assert sorted(os.listdir(os.path.join(folder, "trends"))) == sorted(want)
+    assert os.path.getsize(os.path.join(folder, "expA_overview.png")) > 10000
+    D = seen["rigA_sampleX_ch3.png"]
+    np.testing.assert_allclose(D["red"], [[30 * H, 54 * H]])  # recording _1: (start, end) - midnight of the first day
+    assert len(seen["rigA_sampleX_ch1.png"]["red"]) == 0 and len(D["slices"]) == 2
+    assert D["day_base"] == pd.Timestamp("2000-01-01").to_pydatetime()
+    x = pd.ExcelFile(os.path.join(folder, "trends", "rigA_sampleX_trends.xlsx"))
+    assert x.sheet_names == ["course", "last24h", "comments", "slices"]
+    Tc = x.parse("course")
+    assert list(Tc.columns) == ["channel", "slice", "bin", "dayInCulture", "nBeats", "amplitude", "beatsPerMinute",
+                                "binMinutes"]
+    c1 = Tc[Tc["channel"] == 1]
+    assert c1["bin"].iat[0] == "2000-01-01 16:00:00" and abs(c1["dayInCulture"].iat[0] - 16 / 24) < 1e-3
+    assert (c1["binMinutes"] == 30).all() and (c1["amplitude"] == 100).all() and c1["nBeats"].sum() > 0
+    assert set(Tc.loc[Tc["channel"] == 3, "slice"]) == {1, 2}
+    Tl = x.parse("last24h")
+    assert list(Tl.columns) == ["channel", "slice", "window", "nBeats", "amplitude", "beatsPerMinute"]
+    assert Tl["window"].min() >= "2000-01-04 06:00:00" and len(x.parse("slices")) == (R["series"] == "rigA_sampleX").sum()
+    # series layout: expA/<series>/<nn>/ per recording, images in expA/<series>/; the same register
+    res3 = str(tmp_path / "series")
+    write(res3, scenario())
+    folder = os.path.join(res3, "expA")
+    for n in _as_xlsx(folder):
+        s_, k = n.rsplit("_", 1)
+        d = os.path.join(folder, s_, f"{int(k):02d}")
+        os.makedirs(d)
+        for f in (n + ".xlsx", n + "_overview.csv.gz"):
+            os.replace(os.path.join(folder, f), os.path.join(d, f))
+    R3 = slice_register(res3, trends=True, trend_parameters=["amplitude", "beatsPerMinute"])
+    pd.testing.assert_frame_equal(R3.reset_index(drop=True), R0.reset_index(drop=True), check_dtype=False)
+    assert sorted(os.listdir(folder)) == ["expA_overview.png", "expA_slices.csv", "rigA_sampleX", "rigB_sampleY"]
+    assert sorted(os.listdir(os.path.join(folder, "rigA_sampleX"))) == ["00", "01", "02", "03"] + sorted(
+        f for f in want if f.startswith("rigA"))
+
+
+def test_course_data_single_window():
+    """course data with a single window in the last 24 h whose second parameter is NaN (2026-10-15; MATLAB: no
+    error)"""
+    import datetime as dt
+    from myodish_analysis.report import course_data
+    t = np.r_[np.arange(30) * 60.0, 3 * DAY]
+    D = dict(t=t, w=60.0, nb=np.full(31, 60.0), inc=np.ones(31, bool), V=np.c_[np.full(31, 100.0), np.r_[np.ones(30),
+             np.nan]], names=["amplitude", "TTP90"], units=["uN", "s"], t0=dt.datetime(2000, 1, 1),
+             xlim=[0, 3 * DAY + 60], bands=np.zeros((0, 3)), band_labels=[], com=[],
+             slices=np.array([[0, 1800, 1], [3 * DAY, 3 * DAY + 60, 2]], float), last24=[2 * DAY + 60, 3 * DAY + 60],
+             day_base=None, red=np.zeros((0, 2)))
+    Tc, Tl, Tm = course_data(D)
+    assert len(Tl) == 1 and np.isnan(Tl["TTP90"].iat[0]) and sorted(set(Tc["slice"])) == [1, 2]

@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Additional terms (GPL-3.0 section 7): see the file NOTICE
 """pytest tests of the Python port without recordings: the self test (pendant of mda_test.m), the MATLAB-compatible
-helpers, options, reference beat (.mat round trip), result files, command line and GUI start.
+helpers, options, reference beat (.mat round trip), result files, command line, GUI start and the anonymization of
+recordings (py/tools/anonymize_recording.py).
 
     pytest tests            (in the folder py; recordings / MATLAB results: test_matlab_reference.py)
 
@@ -11,10 +12,14 @@ TS 2026-10-06
 """
 from __future__ import annotations
 
+import importlib.util
+import json
 import math
 import os
+import shutil
 import tempfile
 import sys
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -170,6 +175,49 @@ def test_write_results_xlsx_and_csv(tmp_path, synthetic_beats):
     assert "contractions" in x and len(x["contractions"]) == len(B)
     np.testing.assert_allclose(x["contractions"]["amplitude"].to_numpy(), B["amplitude"].to_numpy(), rtol=1e-12)
     assert any(p.name.startswith("res") and p.suffix == ".csv" for p in tmp_path.iterdir())
+
+
+def test_summarize_several_ranges(synthetic_beats):
+    """summary of several analysed ranges (rows [from to]) = pooled contractions and stimuli of the ranges
+    (2026-10-14)"""
+    _, B, C = synthetic_beats
+    R = np.array([[0.5, 10.5], [15.5, 29.5]])
+    Sm = mda.summarize(B, C, R)
+    t = B["t_peak"].to_numpy(float)
+    inR = ((t >= R[0, 0]) & (t <= R[0, 1])) | ((t >= R[1, 0]) & (t <= R[1, 1]))
+    assert Sm["from"].iloc[0] == 0.5 and Sm["to"].iloc[0] == 29.5
+    assert Sm["nContractions"].iloc[0] == int(np.sum(inR & B["included"].to_numpy(bool)))
+    assert Sm["nContractions"].iloc[0] < mda.summarize(B, C, [0.5, 29.5])["nContractions"].iloc[0]
+    S1 = mda.summarize(B, C, [0.5, 10.5])
+    S2 = mda.summarize(B, C, [15.5, 29.5])
+    assert Sm["nContractions"].iloc[0] == S1["nContractions"].iloc[0] + S2["nContractions"].iloc[0]
+    assert Sm["nStimuli"].iloc[0] == S1["nStimuli"].iloc[0] + S2["nStimuli"].iloc[0]
+
+
+def test_rocker_rest_intervals_chunkwise():
+    """rocker-at-rest intervals with sample resolution over chunk borders (O.rockerRest of the overview, 2026-10-14)"""
+    from myodish_analysis.read_mdd import _rest_intervals
+    ivs = []
+    op = _rest_intervals(ivs, None, np.array([0, 1, 1, 0, 0, 1, 1], bool), 0.0, 1.0)
+    assert ivs == [[1.0, 3.0]] and op == 5.0
+    op = _rest_intervals(ivs, op, np.array([1, 1, 0, 1], bool), 7.0, 1.0)
+    assert ivs == [[1.0, 3.0], [5.0, 9.0]] and op == 10.0
+    op = _rest_intervals(ivs, op, np.array([0, 0], bool), 11.0, 1.0)
+    assert ivs[-1] == [10.0, 11.0] and op is None
+
+
+def test_time_axis_days():
+    """time axis labels: m:ss, h:mm, from 2 days 'd h:mm' and whole days (2026-10-14)"""
+    pytest.importorskip("pyqtgraph")
+    from myodish_analysis.gui.timeaxis import time_ticks
+    _, lab, unit = time_ticks([0, 300], 300)
+    assert unit == "m:ss" and lab[1] == "0:30"
+    _, lab, unit = time_ticks([0, 6 * 3600], 6 * 3600)
+    assert unit == "h:mm" and "1:00" in lab
+    tk, lab, unit = time_ticks([0, 3 * 86400], 3 * 86400)
+    assert unit == "d h:mm" and lab[tk.tolist().index(86400.0)] == "1 d 0:00"
+    tk, lab, unit = time_ticks([0, 20 * 86400], 20 * 86400)
+    assert unit == "days" and lab[1] == f"{int(tk[1] / 86400)} d"
 
 
 # ------------------------------------------------------------------------------------------------ rocker state from the log
@@ -355,6 +403,43 @@ def test_grouping_tolerances(tmp_path):
     assert "1.03 Hz" in set(Sf2["group"])  # 0.97 s: a group of its own at 0.01 Hz
 
 
+def test_old_8_channel_file(tmp_path):
+    """old MyoDish file (software 1.0.x, 2026-10-13): 8 force channels at 500 Hz without status channel; the recording
+    duration in the log file does not fit the file size: recognized by nChannels 8 / 500 Hz in the log file and no
+    channel with the content of a status channel; analysed as unpaced (contractions only, as mda_test.m)"""
+    fs, T = 500, 60
+    n = T * fs
+    tt = np.arange(n) / fs
+    F = 2000 + 3 * np.sin(2 * np.pi * 37.3 * tt)
+    for a in np.arange(1.0, T - 1):
+        m = (tt >= a) & (tt < a + 0.1)
+        F[m] += 1000 * (tt[m] - a) / 0.1
+        m = (tt >= a + 0.1) & (tt < a + 0.4)
+        F[m] += 1000 - 1000 * (tt[m] - a - 0.1) / 0.3
+    X = np.zeros((8, n))
+    X[0] = F
+    X[7] = 1500 + 2 * np.sin(2 * np.pi * 11.1 * tt)  # channel 8 with a sensor signal: no status channel
+    mdd = str(tmp_path / "old8.mdd")
+    np.round(X).astype("<i2").T.tofile(mdd)
+    L = ["systemTime;dataLogTime;channel;code;value", "2020 01 01 06:00:00:000;0;0;nChannels;8",
+         "2020 01 01 06:00:00:000;0;0;samplingRate Recording;500",
+         "2020 01 01 06:00:00:000;0;0;Recording;started: old8.mdd"]
+    for c in range(1, 9):
+        L += [f"2020 01 01 06:00:00:000;0;{c};Calibration;1000", f"2020 01 01 06:00:00:000;0;{c};Offset;0"]
+    L.append("2020 01 01 06:01:30:000;90000;0;Recording;stopped: old8.mdd")  # 90 s: does not fit the file
+    (tmp_path / "old8_log.log").write_text("\n".join(L) + "\n")
+    H = mda.read_mdd(mdd)
+    assert H.nChannelsInFile == 8 and not H.hasStimChannel and H.samplingRate == 500
+    assert any("old 8-channel file" in x for x in H.notes)
+    C, S, _ = mda.myodish_analysis(mdd, [1, 8], 0, T, quiet=True)
+    c1 = C[C["channel"] == 1]
+    assert len(c1) == T - 2 and (c1["beatType"] == "unpaced").all() and c1["stimToPeak"].isna().all()
+    assert 900 < c1["amplitude"].median() < 1000 and abs(c1["peakToPeakFrequency"].median() - 1) < 0.01  # filtered peak
+    s1 = S[S["channel"] == 1].iloc[0]
+    assert s1["nStimuli"] == 0 and s1["nExtraBeats"] == 0 and s1["nMissedBeats"] == 0 and np.isnan(s1["stimFrequency"])
+    assert not S["arrhythmicPacing"].any()
+
+
 def test_protocol_selection(tmp_path):
     # 2026-10-10 (as protocolSelectionTest of mda_test.m): FFR steady state (last 10 contractions of the longest run;
     # 2 Hz with 2:1 capture: none), PRP reference per pause ('preceding': median of the last 6; 'firstTrain': mean of
@@ -493,7 +578,7 @@ def test_gui_nav_buttons_trend_channels(monkeypatch):
         w.bNav["right"].click()
         assert (w.S.fromSeconds, w.S.toSeconds) == (30, 120)
         w.bNav["up"].click()  # zoom the loaded window (selection in the overview); shift does not matter
-        assert (w.S.fromSeconds, w.S.toSeconds) == (52.5, 97.5) and list(w.range) == [52.5, 97.5]
+        assert (w.S.fromSeconds, w.S.toSeconds) == (52.5, 97.5) and np.asarray(w.range).tolist() == [[52.5, 97.5]]
         monkeypatch.setattr(mw, "_shift_held", lambda: False)
         w.bNav["down"].click()
         assert (w.S.fromSeconds, w.S.toSeconds) == (30, 120) and list(w.pMain.vb.viewRange()[0]) == [30, 120]
@@ -557,11 +642,25 @@ def test_gui_threshold_keys_overlay():
         w.api_advanced({"externalTrigger": "auto", "gateMax": 0.2})
         assert w.opts.externalTrigger == "auto" and w.C.stimChannel == 1 and w.C.stimTimes.size > 0
         assert w.opts.gateMax == 0.2 and "gateMax = 0.2" in w.lStatus.text()
+        # 'Advanced' button (2026-10-14): number of changed settings (shortened to the width), red, tool tip lists them
+        assert w.bAdv.text() in ("Advanced (1 changed)", "Advanced (1 chgd)", "Adv. (1 chgd)", "Adv. (1)")
+        assert w.bAdv.property("changed") and "gateMax = 0.2 (default 0.15)" in w.bAdv.toolTip()
+        fm = w.bAdv.fontMetrics()
+        w.bAdv.resize(60, w.bAdv.height())
+        w.adv_indicator()
+        t = w.bAdv.text()
+        assert t == "Adv. (1)" or fm.horizontalAdvance(t) <= 44
+        assert t != "Advanced (1 changed)" or fm.horizontalAdvance(t) <= 44
+        w.bAdv.resize(400, w.bAdv.height())
+        w.adv_indicator()
+        assert w.bAdv.text() == "Advanced (1 changed)"
         adv = w.adv_win
         adv.ctl["gateCore"].setText("x")
         assert not adv.apply(False) and "enter a number" in adv.lMsg.text()
         adv.defaults()
         assert adv.apply(True) and w.opts.gateMax == 0.15 and not w.adv_win.isVisible()
+        assert w.bAdv.text() == "Advanced ..." and not w.bAdv.property("changed")
+        assert "default values" in w.bAdv.toolTip()
         # all advanced settings in tabs, settings file save / load, legend of the force plot (2026-10-10)
         from myodish_analysis.advanced import ROWS
         assert adv.tabs.count() == 8 and set(adv.ctl) == {r[0] for r in ROWS}
@@ -643,7 +742,8 @@ def test_results_reopened_in_gui_and_rocker_window(tmp_path):
         w = MainWindow()
         ws.append(w)
         assert w.open_results(rx, pick=1)
-        assert w.ch == 5 and w.thr_user == {5: 150.0} and w.cDet.currentIndex() == 1 and w.range == [60.0, 120.0]
+        assert w.ch == 5 and w.thr_user == {5: 150.0} and w.cDet.currentIndex() == 1
+        assert np.asarray(w.range).tolist() == [[60.0, 120.0]]
         assert "the same as here" in w.lStatus.text()
         # GUI export with a contraction excluded by the user and a zero force, opened again
         w2 = MainWindow(f)
@@ -667,7 +767,7 @@ def test_results_reopened_in_gui_and_rocker_window(tmp_path):
         # opened at a channel and window (commands of the analysis report, 2026-10-11)
         w4 = MainWindow(rx, channel=5, window=[70, 90])
         ws.append(w4)
-        assert w4.ch == 5 and w4.thr_user == {5: 150.0} and w4.range == [70.0, 90.0]
+        assert w4.ch == 5 and w4.thr_user == {5: 150.0} and np.asarray(w4.range).tolist() == [[70.0, 90.0]]
         w5 = MainWindow(f, channel=5, window=[70, 90])
         ws.append(w5)
         assert w5.ch == 5 and w5.cCh.currentIndex() == 4 and abs(w5.S.fromSeconds - 70) < 1 and w5.B is not None
@@ -758,3 +858,410 @@ def test_gui_ep_ylim_artefacts_mouse_pointer(tmp_path):
         w.deleteLater()
         app.processEvents()
         QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+
+
+@pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
+def test_gui_first_window_comments_flags():
+    """a recording opens with its first 120 s analysed; comments as numbered marks (pointer: text, click: selected in
+    the comment window, row selected there: highlighted in the force plot); flags line of the report (2026-10-14)"""
+    pytest.importorskip("PySide6")
+    pytest.importorskip("pyqtgraph")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtCore, QtWidgets
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    from myodish_analysis.gui.main_window import MainWindow
+    w = MainWindow(os.path.join(EX, "example4_humanAtrium.mdd"))
+    try:
+        assert (w.S.fromSeconds, w.S.toSeconds) == (0, 120) and w.B is not None and len(w.B)
+        assert w.lFlags.full_text().startswith("Flags") and w.main_rec is None and not w.bMain.isVisibleTo(w)
+        assert [int(k) for k in w._com["k"]] == [1, 2, 3] and len(w._com_nums) == 3
+        t2 = float(w._com["t"][1])
+        Hv, _ = w.hover(t2, "force")
+        assert "comment 2: addition of 100nM Iso" in Hv[0]["text"]
+        Hv, _ = w.hover(t2 + 10, "force")
+        assert "comment" not in Hv[0]["text"]
+        w.comment_click(2)
+        cw = w.win_comments
+        assert cw is not None and cw.ut.currentRow() == 1 and cw.ut.item(1, 0).text() == "2"
+        assert w.hiT == t2 and w.lStatus.text().startswith("Comment 2 (")
+        cw.ut.selectRow(2)  # row of the comment window: highlighted in the force plot
+        assert w.hiT == float(w._com["t"][2])
+        cw.ef.setText("nothing like this")
+        w.comment_click(1)  # hidden by the search: the search is cleared
+        assert cw.ef.text() == "" and cw.ut.currentRow() == 0
+        cw.close()
+    finally:
+        w.close()
+        w.deleteLater()
+        app.processEvents()
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+
+
+@pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
+def test_batch_pooled_ranges():
+    """several ranges with pooled=True: one row per range and channel plus one 'all ranges' row (2026-10-14)"""
+    _, S, _ = mda.myodish_analysis(os.path.join(EX, "example6_ratVentricle.mdd"), [1, 2], [10, 70], [40, 110],
+                                   quiet=True, pooled=True)
+    assert list(S["range"]) == ["range1", "range1", "range2", "range2", "all ranges", "all ranges"]
+    P = S[S["range"] == "all ranges"].set_index("channel")
+    for ch in (1, 2):
+        Sc = S[(S["channel"] == ch) & (S["range"] != "all ranges")]
+        assert P.loc[ch, "nContractions"] == Sc["nContractions"].sum()
+        assert (P.loc[ch, "from"], P.loc[ch, "to"]) == (10, 110)
+
+
+@pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")
+def test_gui_several_ranges_rocker_stops(tmp_path):
+    """several analysed ranges (shift + drag): pooled summary, export with one row per range, opened again; zoom to
+    the selection; select all of the overview; every rocker stop of the overview side by side: exported in file time
+    and opened again (2026-10-14)"""
+    pytest.importorskip("PySide6")
+    pytest.importorskip("pyqtgraph")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtCore, QtWidgets
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    from myodish_analysis.gui.main_window import MainWindow
+    f = os.path.join(EX, "example6_ratVentricle.mdd")
+    ws = []
+    try:
+        w = MainWindow(f, channel=1, window=[0, 300])
+        ws.append(w)
+        w.api_set_range([10, 40])
+        n1 = int(w.api_results()[1]["nContractions"].iloc[0])
+        w.api_set_range([70, 110])
+        n2 = int(w.api_results()[1]["nContractions"].iloc[0])
+        w.api_set_range([10, 40])
+        w.api_set_range([70, 110], True)
+        assert int(w.api_results()[1]["nContractions"].iloc[0]) == n1 + n2
+        w.api_set_range([30, 50], True)  # overlapping ranges are merged
+        assert np.asarray(w.range).tolist() == [[10.0, 50.0], [70.0, 110.0]]
+        w.zoom_to_selection()
+        assert w.pMain.vb.viewRange()[0] == pytest.approx([8.0, 112.0])
+        xf = str(tmp_path / "multi.xlsx")
+        w.next_file = xf
+        w.on_export()
+        Ts = pd.read_excel(xf, sheet_name="summary")
+        Tc = pd.read_excel(xf, sheet_name="contractions")
+        assert list(Ts["range"]) == ["all ranges", "range1", "range2"] and "range" in Tc.columns
+        assert Ts["nContractions"].iloc[0] == Ts["nContractions"].iloc[1] + Ts["nContractions"].iloc[2]
+        w2 = MainWindow(xf)
+        ws.append(w2)
+        assert np.asarray(w2.range).tolist() == [[10.0, 50.0], [70.0, 110.0]]
+        assert "the same as here" in w2.lStatus.text()
+        w.select_all()
+        assert w.S.fromSeconds == 0 and w.S.toSeconds == pytest.approx(w.H.totalSeconds, abs=0.1)
+        w.cbRocker.setChecked(True)
+        app.processEvents()
+        w.select_rocker_stops()
+        Ov = mda.read_mdd(f, "overview")
+        stops = Ov.rockerRest[(Ov.rockerRest[:, 1] - Ov.rockerRest[:, 0]) >= 1]
+        assert w.sbs is not None and len(w.sbs["seg"]) == len(stops) == len(w.range) > 10
+        np.testing.assert_allclose(w.w2f(np.asarray(w.range)), stops, atol=1e-6)
+        xf2 = str(tmp_path / "stops.xlsx")
+        w.next_file = xf2
+        w.on_export()
+        Tc = pd.read_excel(xf2, sheet_name="contractions")
+        ins = np.zeros(len(Tc), bool)
+        for a, b in stops:
+            ins |= (Tc["t_peak"] >= a - 1e-6) & (Tc["t_peak"] <= b + 1e-6)
+        assert len(Tc) > 100 and ins.all()
+        w3 = MainWindow(xf2)
+        ws.append(w3)
+        assert w3.sbs is not None and len(w3.sbs["seg"]) == len(stops) and "the same as here" in w3.lStatus.text()
+    finally:
+        for w in ws:
+            w.close()
+            w.deleteLater()
+        app.processEvents()
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+
+
+# ------------------------------------------------------------------------------------------------ anonymization
+# py/tools/anonymize_recording.py with a log file of the format of software 2.1 (structured JSON lines between the old
+# text lines) and a _labels.csv: example recording 9 with a synthetic original name, date, version, PC, user, controller
+# serial number, initials and sample ID (all values invented). TS 2026-10-17
+AN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+AN_EX = os.path.join(AN_ROOT, "examples", "example9_ratVentricle")
+_an_spec = importlib.util.spec_from_file_location("anonymize_recording",
+                                                  os.path.join(AN_ROOT, "py", "tools", "anonymize_recording.py"))
+an = importlib.util.module_from_spec(_an_spec)
+_an_spec.loader.exec_module(an)
+
+AN_NAME = "MD7_010203_01"   # original name of the synthetic recording (date 2001-02-03)
+AN_DAYS = -399              # 2001-02-03 -> 2000-01-01
+AN_J_OPEN = ('{"v":1,"event":"logOpen","actionId":"QWERTZUIOP-1","by":null,"format":2,"file":"' + AN_NAME + '.mdd",'
+             '"role":"main","appended":false,"session":"QWERTZUIOP","software":"2.1.1234.5678","pc":"LAB-PC-07",'
+             '"winUser":"jdoe","tz":"W. Europe Standard Time","utcOffset":"+01:00","controllerId":"FT0TEST1A",'
+             '"myoDishId":"7"}')
+AN_J_ID = ('{"v":1,"event":"identity","actionId":"QWERTZUIOP-2","by":"AB","controllerId":"FT0TEST1A",'
+           '"ftdiSerial":"FT0TEST1","kind":"ftdi","myoDishId":"7","port":"COM3",'
+           '"pnp":"FTDIBUS\\\\VID_0403+PID_6015+FT0TEST1A\\\\0000"}')
+AN_J_DETACH = '{"v":1,"event":"detach","actionId":"QWERTZUIOP-3","by":null,"port":"COM3","reason":"close"}'
+AN_J_EXIT = '{"v":1,"event":"exit","actionId":"QWERTZUIOP-4","by":null}'
+AN_J_CUT = '{"v":1,"event":"exit","actionId":"QWERTZUIOP-5","by":nu'
+AN_SECRETS = ("LAB-PC-07", "jdoe", "FT0TEST1", "FTDIBUS", "1234.5678", AN_NAME, "HX-0042", "2001 02 03", "AB:")
+AN_LABELS = ("channel,setupID,sliceID,species,sampleID,sampleGroup,sliceGroup,tissue,treatment,concentration,"
+             "concentrationUnit,daysInCulture,cultureStart,comment,analyst,owner,medium\n"
+             "1,7,HX-0042_S7C1,rat,HX-0042,,,ventricle,lidocaine,100,uM,5,2001-01-29 09:30,"
+             "AB: lidocaine 0 -> 100 uM,AB,CD,M199\n")
+
+
+def _an_old_log():
+    txt = an.read_text(AN_EX + "_log.log")[0]
+    return (txt.replace("example9_ratVentricle", AN_NAME).replace("2000 01 01 ", "2001 02 03 ")
+            .replace("Version 2.0", "Version 2.1.1234.5678"))
+
+
+def _an_v2_log(cut=False):
+    """the log of example 9 with the structured lines of software 2.1 (logOpen, identity, detach, exit)"""
+    out = []
+    for ln in _an_old_log().split("\r\n"):
+        if ln.endswith("Recording;stopped: " + AN_NAME + ".mdd"):
+            out.append("2001 02 03 15:59:52:470;666670;0;system;" + AN_J_DETACH)
+        out.append(ln)
+        if ln.endswith("LogFile opened: " + AN_NAME + "_log.log"):
+            out.append("2001 02 03 15:48:45:732;0;0;system;" + AN_J_OPEN)
+        elif ln.endswith("Recording;started: " + AN_NAME + ".mdd"):
+            out.append("2001 02 03 15:48:47:733;2000;0;system;" + AN_J_ID)
+            out.append("2001 02 03 15:50:00:000;74267;0;Comment;AB: lidocaine 100 uM added at 15:50, 03.02.2001")
+        elif ln.endswith("LogFile closed: " + AN_NAME + "_log.log"):
+            out.append("2001 02 03 15:59:52:490;666690;0;system;" + AN_J_EXIT)
+    if cut:
+        out.append("2001 02 03 15:59:52:495;666695;0;system;" + AN_J_CUT)
+    return "\r\n".join(out)
+
+
+@pytest.fixture
+def an_rec(tmp_path):
+    """the synthetic original recording (.mdd of example 9, v2 log, labels)"""
+    d = tmp_path / "orig"
+    d.mkdir()
+    shutil.copyfile(AN_EX + ".mdd", d / (AN_NAME + ".mdd"))
+    an.write_text(str(d / (AN_NAME + "_log.log")), _an_v2_log(cut=True), "utf-16-le", True)
+    (d / (AN_NAME + "_labels.csv")).write_bytes(AN_LABELS.encode("utf-8"))
+    return d
+
+
+def _an_json_lines(txt):
+    return [(ln.split(";", 4), json.loads(ln.split(";", 4)[4])) for ln in txt.split("\r\n")
+            if ln.count(";") >= 4 and ln.split(";", 4)[4].startswith("{") and ln.endswith("}")]
+
+
+def test_anonymize_v2_log_lines():
+    src = _an_v2_log()
+    names = an.Pseudonyms()
+    txt, comments = an.anonymize_log_text(src, AN_NAME, "rec1", AN_DAYS, ["AB"], names)
+    for s in AN_SECRETS:
+        assert s not in txt, s
+    assert txt.isascii()
+    a, b = src.split("\r\n"), txt.split("\r\n")
+    assert len(a) == len(b)
+    for x, y in zip(a, b):   # codes, channels, dataLogTime unchanged; no ';' inside the value
+        fx, fy = x.split(";", 4), y.split(";", 4)
+        assert fx[1:4] == fy[1:4] and len(fy) == len(fx) and y.count(";") == x.count(";")
+    J = _an_json_lines(txt)
+    assert [j["event"] for _, j in J] == ["logOpen", "identity", "detach", "exit"]
+    o, i = J[0][1], J[1][1]
+    assert list(o) == list(json.loads(AN_J_OPEN))              # order of the fields kept
+    assert (o["pc"], o["winUser"], o["software"], o["file"], o["controllerId"], o["by"]) == \
+        ("PC", "user", "2.1", "rec1.mdd", "controller1", None)
+    assert (i["controllerId"], i["ftdiSerial"], i["pnp"], i["by"]) == \
+        ("controller1", "controller2", "USB serial device", "P1")
+    assert (o["session"], o["actionId"], o["tz"], o["utcOffset"], o["myoDishId"], o["format"]) == \
+        ("QWERTZUIOP", "QWERTZUIOP-1", "W. Europe Standard Time", "+01:00", "7", 2)
+    assert J[2][1] == json.loads(AN_J_DETACH) and J[3][1] == json.loads(AN_J_EXIT)
+    assert J[0][0][0] == "2000 01 01 15:48:45:732"
+    assert comments == ["P1: lidocaine 100 uM added at 15:50, 01.01.2000"]
+    assert names.unreadable == []
+    # the old text lines exactly as without the structured lines
+    old = an.anonymize_log_text(_an_old_log(), AN_NAME, "rec1", AN_DAYS, ["AB"])[0]
+    kept = [ln for ln in b if ";system;" not in ln and "Comment;" not in ln]
+    assert kept == old.split("\r\n")
+
+
+def test_anonymize_initials_pseudonyms():
+    """--initials: 'AB: comment' -> 'P1: comment', '_AB' in protocol names -> '_P1', the same pseudonyms as 'by'"""
+    src = "\r\n".join(["systemTime;dataLogTime;channel;code;value",
+                       "2001 02 03 10:00:00:000;0;0;Comment;AB: medium changed",
+                       "2001 02 03 10:00:01:000;1;0;Sequence;Started: FFR_CD.xml",
+                       '2001 02 03 10:00:02:000;2;0;system;{"v":1,"event":"x","actionId":"Q-1","by":"CD"}',
+                       "2001 02 03 10:00:03:000;3;0;Comment;  CD : AB_test_AB.xml"])
+    names = an.Pseudonyms()
+    L = an.anonymize_log_text(src, AN_NAME, "rec1", AN_DAYS, ["AB", "CD"], names)[0].split("\r\n")
+    assert L[1] == "2000 01 01 10:00:00:000;0;0;Comment;P1: medium changed"
+    assert L[2].endswith(";Sequence;Started: FFR_P2.xml")
+    assert json.loads(L[3].split(";", 4)[4])["by"] == "P2"
+    assert L[4].endswith(";Comment;  P2 : AB_test_P1.xml")
+    assert names.map["person"] == {"AB": "P1", "CD": "P2"}
+
+
+def test_anonymize_umlaut_semicolon_numbers():
+    v = ('{"v":1,"event":"note","actionId":"QWERTZUIOP-6","by":"M\\u00fcstermann","text":"M\\u00fcstermann\\u003b Probe 1",'
+         '"x":1.50,"y":-0,"z":1e-05,"list":[{"by":"CD"},null,true]}')
+    names = an.Pseudonyms()
+    txt = an.anonymize_log_text("2001 02 03 10:00:00:000;5;0;doc;" + v, AN_NAME, "rec1", AN_DAYS, (), names)[0]
+    f = txt.split(";")
+    assert len(f) == 5 and txt.isascii() and "\\u003b" in f[4]
+    j = json.loads(f[4])
+    assert (j["by"], j["text"], j["list"][0]["by"]) == ("P1", "Müstermann; Probe 1", "P2")
+    assert '"x":1.50,"y":-0,"z":1e-05' in f[4]           # numbers exactly as written
+    assert names.originals == {"Müstermann": "person", "CD": "person"}
+
+
+def test_anonymize_unreadable_line_kept():
+    names = an.Pseudonyms()
+    src = _an_v2_log(cut=True)
+    txt = an.anonymize_log_text(src, AN_NAME, "rec1", AN_DAYS, (), names)[0]
+    n = len(src.split("\r\n"))
+    assert names.unreadable == [n]
+    assert txt.split("\r\n")[-1] == "2000 01 01 15:59:52:495;666695;0;system;" + AN_J_CUT
+
+
+def test_anonymize_labels_and_results(an_rec, tmp_path, capsys):
+    out = tmp_path / "anon"
+    days = an.anonymize(str(an_rec / (AN_NAME + ".mdd")), "rec1", str(out), initials=["AB"], show=True)
+    assert days == AN_DAYS
+    assert "1 structured log line(s) could not be read" in capsys.readouterr().out
+    log = an.read_text(str(out / "rec1_log.log"))[0]
+    lbl = (out / "rec1_labels.csv").read_text(encoding="utf-8")
+    for s in AN_SECRETS:
+        assert s not in log and s not in lbl, s
+    by = [j["by"] for _, j in _an_json_lines(log) if j["by"]]
+    L = pd.read_csv(out / "rec1_labels.csv", dtype=str, keep_default_na=False)
+    assert list(L.columns) == AN_LABELS.split("\n")[0].split(",")
+    r = L.iloc[0]
+    assert (r.sampleID, r.sliceID, r.analyst, r.owner, r.cultureStart, r.comment, r.medium) == \
+        ("S1", "S1_S7C1", by[0], "P2", "1999-12-27 09:30", "P1: lidocaine 0 -> 100 uM", "M199")
+    # MyoDishAnalysis: the same results on the original and on the anonymized recording (clock times shifted)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from myodish_analysis import myodish_analysis
+        c0, s0, i0 = myodish_analysis(str(an_rec / (AN_NAME + ".mdd")), quiet=True)
+        c1, s1, i1 = myodish_analysis(str(out / "rec1.mdd"), quiet=True)
+    assert len(c0) > 300 and list(c0.columns) == list(c1.columns) and list(s0.columns) == list(s1.columns)
+    shift = pd.Timedelta(days=AN_DAYS)
+    assert (pd.to_datetime(c1["clockTime"]) - pd.to_datetime(c0["clockTime"]) == shift).all()
+    for A, B in ((c0, c1), (s0, s1)):
+        for col in A.columns:
+            if col in ("clockTime", "file"):
+                continue
+            x, y = A[col].to_numpy(), B[col].to_numpy()
+            if x.dtype.kind in "fiub":
+                assert np.array_equal(x, y, equal_nan=True), col
+            else:
+                assert [str(v) for v in x] == [str(v) for v in y], col
+    assert i1["recordingStart"] - i0["recordingStart"] == AN_DAYS
+    # time of the last change of the copy: shifted by the same number of days (local time)
+    t0, t1 = (an.dt.datetime.fromtimestamp(os.path.getmtime(x))
+              for x in (an_rec / (AN_NAME + ".mdd"), out / "rec1.mdd"))
+    assert abs((t1 - t0 - an.dt.timedelta(days=AN_DAYS)).total_seconds()) < 1e-3
+
+
+def test_anonymize_map_file(an_rec, tmp_path):
+    mp = str(tmp_path / "study_map.json")
+    an.anonymize(str(an_rec / (AN_NAME + ".mdd")), "rec1", str(tmp_path / "a"), initials=["AB"], map_file=mp)
+    M = json.load(open(mp, encoding="utf-8"))
+    assert M["controller"] == {"FT0TEST1A": "controller1", "FT0TEST1": "controller2"}
+    assert M["person"] == {"AB": "P1", "CD": "P2"} and M["sample"] == {"HX-0042": "S1"}
+    # second recording of the study: the same pseudonyms, new values continue the numbering
+    log = an_rec / (AN_NAME + "_log.log")
+    an.write_text(str(log), _an_v2_log().replace('"by":"AB"', '"by":"EF"'), "utf-16-le", True)
+    (an_rec / (AN_NAME + "_labels.csv")).write_bytes(AN_LABELS.replace("HX-0042", "HX-0043").encode("utf-8"))
+    an.anonymize(str(an_rec / (AN_NAME + ".mdd")), "rec2", str(tmp_path / "b"), initials=["AB"], map_file=mp)
+    M = json.load(open(mp, encoding="utf-8"))
+    assert M["person"] == {"AB": "P1", "CD": "P2", "EF": "P3"} and M["sample"] == {"HX-0042": "S1", "HX-0043": "S2"}
+    L = pd.read_csv(tmp_path / "b" / "rec2_labels.csv", dtype=str, keep_default_na=False)
+    assert (L.sampleID[0], L.analyst[0], L.owner[0]) == ("S2", "P1", "P2")
+    txt = an.read_text(str(tmp_path / "b" / "rec2_log.log"))[0]
+    assert [j["controllerId"] for _, j in _an_json_lines(txt) if "controllerId" in j] == ["controller1"] * 2
+
+
+def test_anonymize_final_check(an_rec, tmp_path):
+    out = tmp_path / "anon"
+    with pytest.raises(an.AnonymizationError, match="person 'AB'"):   # initials in a comment, --initials missing
+        an.anonymize(str(an_rec / (AN_NAME + ".mdd")), "rec1", str(out))
+    assert not os.listdir(out)
+    # a structured line that cannot be read and still contains the PC name
+    log = an_rec / (AN_NAME + "_log.log")
+    an.write_text(str(log), _an_v2_log() + "\r\n2001 02 03 16:00:00:000;700000;0;system;" + AN_J_OPEN[:-40],
+                  "utf-16-le", True)
+    with pytest.raises(an.AnonymizationError, match="pc 'LAB-PC-07'"):
+        an.anonymize(str(an_rec / (AN_NAME + ".mdd")), "rec1", str(out), initials=["AB"])
+    # a date of the recording in a form that is not shifted (ISO in a comment)
+    an.write_text(str(log), _an_v2_log() + "\r\n2001 02 03 16:00:00:000;700000;0;Comment;protocol of 2001-02-03",
+                  "utf-16-le", True)
+    with pytest.raises(an.AnonymizationError, match="line 37: date '2001-02-03'"):
+        an.anonymize(str(an_rec / (AN_NAME + ".mdd")), "rec1", str(out), initials=["AB"])
+    assert not os.listdir(out)
+    with pytest.raises(ValueError, match="replace the recording"):
+        an.anonymize(str(an_rec / (AN_NAME + ".mdd")), AN_NAME, str(an_rec), initials=["AB"])
+
+
+def test_anonymize_old_time_stamps_and_versions():
+    """time stamps without leading zeros (software before 2.0.7717) are shifted too; versions without build number,
+    builds that wrote 12-hour time stamps -> 2.0.7717"""
+    src = "\r\n".join(["systemTime;dataLogTime;channel;code;value",
+                       "2001 2 3 9:05:00:000;0;0;programInfo;Version 2.0.7745.28699",
+                       "2001 02 03 09:05:00:100;0;0;ProgramVersion;2.0.7769.26061",
+                       "2001 2 4 0:00:01:000;0;0;programInfo;Version 2.0.9708.42745",
+                       "2001 02 04 00:00:02:000;0;0;ProgramVersion;2.0.9708.42745"])
+    assert an.first_date(src.splitlines()) == an.dt.date(2001, 2, 3)
+    assert an.anonymize_log_text(src, AN_NAME, "rec1", AN_DAYS)[0].split("\r\n")[1:] == [
+        "2000 1 1 9:05:00:000;0;0;programInfo;Version 2.0.7717",
+        "2000 01 01 09:05:00:100;0;0;ProgramVersion;2.0.7717",
+        "2000 1 2 0:00:01:000;0;0;programInfo;Version 2.0",
+        "2000 01 02 00:00:02:000;0;0;ProgramVersion;2.0"]
+
+
+def test_anonymize_broken_lines():
+    """lines broken by an interrupted write: rests of paths, own file name, dates and glued time stamps are anonymized
+    too; a rest before a glued time stamp becomes '(cut)' (MyoDishAnalysis does not read its time either way)"""
+    src = "\r\n".join(["systemTime;dataLogTime;channel;code;value",
+                       "2001 02 03 09:52:44:990;100;0;Event;Data log file selected: C:\\Users\\User\\My",
+                       "Dish\\data\\XY010203\\" + AN_NAME + ".mdd",
+                       "MyoD2001 02 03 09:52:44:998;108;3;chargeDuration;4000",
+                       "t C:\\Users\\jdoe\\Box (Jane Doe)2001 02 03 10:20:08:329;200;3;pauseDuration;1000",
+                       "2001 02 03 10:20:09:000;210;1;pauseDuration;1000\r"
+                       "2001 02 03 10:20:09:001;211;1;chargeDuration;4000",
+                       "heduled for 04/02/2001 05:59:57 by AB_AB.xml",
+                       "Parametername: index"])
+    L = an.anonymize_log_text(src, AN_NAME, "rec1", AN_DAYS, ["AB"])[0].split("\r\n")
+    assert L[1:] == ["2000 01 01 09:52:44:990;100;0;Event;Data log file selected: My",
+                     "rec1.mdd",
+                     "(cut) 2000 01 01 09:52:44:998;108;3;chargeDuration;4000",
+                     "(cut) 2000 01 01 10:20:08:329;200;3;pauseDuration;1000",
+                     "2000 01 01 10:20:09:000;210;1;pauseDuration;1000\r"
+                     "2000 01 01 10:20:09:001;211;1;chargeDuration;4000",
+                     "heduled for 02/01/2000 05:59:57 by AB_P1.xml",
+                     "Parametername: index"]
+
+
+def test_anonymize_12_hour_log(tmp_path):
+    """software 2.0.7745 (12-hour time stamps): a recording from 13:00 to 13:20 written as 01:00-01:20; the log cannot
+    tell AM from PM, the time of the last change of the .mdd file decides. The same on the anonymized copy."""
+    from myodish_analysis.read_mdd import read_log
+    d = tmp_path / "orig"
+    d.mkdir()
+    shutil.copyfile(AN_EX + ".mdd", d / (AN_NAME + ".mdd"))
+    t = an.dt.datetime(2001, 2, 3, 13, 20, 30).timestamp()
+    os.utime(d / (AN_NAME + ".mdd"), (t, t))
+    an.write_text(str(d / (AN_NAME + "_log.log")), "\r\n".join([
+        "systemTime;dataLogTime;channel;code;value",
+        "2001 02 03 01:00:00:000;0;0;programInfo;Version 2.0.7745.28699",
+        "2001 02 03 01:00:00:000;0;0;Recording;started: " + AN_NAME + ".mdd",
+        "2001 02 03 01:10:00:000;600000;0;Comment;x",
+        "2001 02 03 01:20:00:000;1200000;0;Recording;stopped: " + AN_NAME + ".mdd"]), "utf-16-le", True)
+    an.anonymize(str(d / (AN_NAME + ".mdd")), "rec1", str(tmp_path / "anon"))
+    start = []
+    for f in (d / AN_NAME, tmp_path / "anon" / "rec1"):
+        L = read_log(str(f) + "_log.log", an.dt.datetime.fromtimestamp(os.path.getmtime(str(f) + ".mdd")))
+        start.append(L.startDatenum)
+    assert abs((start[0] % 1) * 24 - 13) < 1e-6 and abs(start[1] - start[0] - AN_DAYS) < 1e-9
+
+
+def test_anonymize_cli(an_rec, tmp_path, capsys):
+    mdd = str(an_rec / (AN_NAME + ".mdd"))
+    assert an.main([mdd, "rec1", "--outdir", str(tmp_path / "x"), "--initials", "AB"]) is None
+    assert "dates shifted by -399 days" in capsys.readouterr().out
+    assert an.main([mdd, "rec1", "--outdir", str(tmp_path / "y")]) == 1
+    assert "original values are still in the output" in capsys.readouterr().err

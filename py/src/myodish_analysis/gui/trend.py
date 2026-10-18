@@ -6,7 +6,10 @@
 daily files _0, _1, _2 ... of a culture). Sampling: all contractions, short windows (W s every T min) or rocker stops
 only. Port of the trend part of MyoDishAnalysisGUI.m.
 
-TS 2026-10-06 (several channels overlaid 2026-10-09)
+Comments of the log files (2026-10-13): numbered markers in a strip above the plot (independent of the y zoom) and a
+list below it; click a marker or a line of the list (or point at a marker) to highlight the comment.
+
+TS 2026-10-06 (several channels overlaid 2026-10-09; comment strip and list 2026-10-13)
 """
 from __future__ import annotations
 
@@ -20,14 +23,14 @@ import re
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from .._matlab import Struct, colon, mround
 from ..analysis import datenum_to_timestamps, myodish_analysis
 from ..log_entries import log_entries
 from ..read_mdd import read_mdd
 from .timeaxis import fmt_clock
-from .widgets import PURPLE, rects, rot_labels, time_plot, vlines
+from .widgets import PURPLE, primary, rects, time_plot
 
 MU = "µ"
 # colours of the channels when several channels are overlaid (MATLAB default line colours + grey; trendColors in
@@ -73,20 +76,48 @@ class TrendWindow(QtWidgets.QWidget):
             win.tr_chans = [int(win.ch)]
         win.tr_multi = [c for c in win.tr_multi if c in chs]
         self._yl0 = [0.0, 1.0]
-        self._cmt = []
-        self._cmt_items = []
+        self._cmt = []  # comments: (time since start, text), sorted
+        self._cmt_lines, self._cmt_nums, self._cmt_sc, self._cmt_sel = [], [], None, -1
         self.setWindowFlag(QtCore.Qt.WindowType.Window)
         self.setWindowTitle("MyoDishAnalysis: trend")
         self.resize(1300, 660)
         h = QtWidgets.QHBoxLayout(self)
+        left = QtWidgets.QVBoxLayout()
         self.gl = pg.GraphicsLayoutWidget()
+        # comment strip above the plot: numbered markers, x linked to the plot, not zoomed in y (2026-10-13)
+        self.pK = pg.PlotItem()
+        self.pK.hideButtons()
+        self.pK.setMenuEnabled(False)
+        self.pK.setMouseEnabled(x=False, y=False)
+        self.pK.hideAxis("bottom")
+        for a, wd in (("left", 62), ("right", 10)):
+            self.pK.showAxis(a)
+            self.pK.getAxis(a).setWidth(wd)
+            self.pK.getAxis(a).setStyle(showValues=False, tickLength=0)
+            self.pK.getAxis(a).setPen(pg.mkPen((190, 190, 190)))
+        self.pK.vb.setBackgroundColor((247, 245, 252))
+        self.pK.setYRange(0, 1, padding=0)
+        self.gl.addItem(self.pK, row=0, col=0)
         self.p = time_plot()
-        self.gl.addItem(self.p)
+        self.gl.addItem(self.p, row=1, col=0)
+        self.gl.ci.layout.setRowFixedHeight(0, 46)
+        self.pK.setXLink(self.p)
         self.p.addLegend(offset=(-10, 10), labelTextSize="8pt")
         self.p.vb.on_wheel = self._wheel
         self.p.vb.on_click = self._click
         self.p.vb.sigXRangeChanged.connect(lambda *_: self._ticks())
-        h.addWidget(self.gl, 2)
+        left.addWidget(self.gl, 3)
+        lab = QtWidgets.QLabel("Comments of the log files (number = marker above the plot; click a marker or a line to "
+                               "highlight it)")
+        fo = lab.font()
+        fo.setPointSize(fo.pointSize() - 2)
+        lab.setFont(fo)
+        left.addWidget(lab)
+        self.lbC = QtWidgets.QListWidget()
+        self.lbC.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.SystemFont.FixedFont))
+        self.lbC.currentRowChanged.connect(lambda r: self._cmt_mark(r, True))
+        left.addWidget(self.lbC, 1)
+        h.addLayout(left, 2)
         v = QtWidgets.QVBoxLayout()
         h.addLayout(v, 1)
         v.addWidget(QtWidgets.QLabel("Files in a row (time 0 = start of the first file; order: start time in the log):"))
@@ -165,10 +196,7 @@ class TrendWindow(QtWidgets.QWidget):
         self.cT.toggled.connect(lambda *_: self.draw())
         v.addWidget(self.cT)
         v.addWidget(self.cA)
-        b = QtWidgets.QPushButton("Calculate")
-        f = b.font()
-        f.setBold(True)
-        b.setFont(f)
+        b = primary(QtWidgets.QPushButton("Calculate"))
         b.setToolTip("detects the contractions in the files (threshold, filters, zero force and rocker filter as in the "
                      "main window); results are kept, so changing parameter / window only redraws")
         b.clicked.connect(lambda: self.calc(False))
@@ -399,8 +427,9 @@ class TrendWindow(QtWidgets.QWidget):
         jobs = []
         for k, Fk in enumerate(self.files):
             if self.pR.currentIndex() == 1:
-                if Fk.file == w.H.file and not any(math.isnan(x) for x in w.range):
-                    jobs.append((k, w.range[0], w.range[1]))
+                sp = w.w2f(np.array(w.rng_span())) if w.range is not None else np.array([np.nan, np.nan])
+                if Fk.file == w.H.file and np.all(np.isfinite(sp)):  # several ranges: first start to last end
+                    jobs.append((k, float(sp[0]), float(sp[1])))
             else:
                 jobs.append((k, 0.0, Fk.dur))
         if not jobs:
@@ -519,11 +548,16 @@ class TrendWindow(QtWidgets.QWidget):
     def draw(self, *_):
         p = self.p
         p.clear()
+        self.pK.clear()
         if p.legend is not None:
             p.legend.clear()
         self._cmt = []
+        self._cmt_lines, self._cmt_nums, self._cmt_sc, self._cmt_sel = [], [], None, -1
+        self.lbC.blockSignals(True)
+        self.lbC.clear()
+        self.lbC.blockSignals(False)
         if not self.files:
-            p.setTitle("no file", size="9pt")
+            self.pK.setTitle("no file", size="9pt")
             return
         w = self.win
         nm, unit = w.plot_list[self.pP.currentIndex()]
@@ -600,32 +634,53 @@ class TrendWindow(QtWidgets.QWidget):
                     rows.append(np.c_[np.full(len(T2), c, float), T2, R2])
             if rows:
                 self.roll = np.vstack(rows)
-        if self.cK.isChecked():
+        if self.cK.isChecked():  # comments: numbered markers above the plot, list below (2026-10-13)
             for Fk in self.files:
                 cm = Fk.comments
                 if cm is None or len(cm) == 0:
                     continue
                 tf = cm["t_file"].to_numpy(float)
                 ok = (tf >= 0) & (tf <= Fk.dur)
-                tc = tf[ok] + Fk.offset
-                if tc.size == 0:
-                    continue
-                vlines(p, tc, yl0[0], yl0[1], PURPLE, style=QtCore.Qt.PenStyle.DotLine)
-                lab = [s[:35] + "  " for s in cm["text"].to_numpy()[ok]]
-                self._cmt += [(x, lb) for x, lb in zip(tc, lab)]
+                self._cmt += [(x, str(lb)) for x, lb in zip(tf[ok] + Fk.offset, cm["text"].to_numpy()[ok])]
+            self._cmt.sort(key=lambda c: c[0])
+            f8 = QtGui.QFont()
+            f8.setPointSize(8)
+            for k, (x, _) in enumerate(self._cmt):
+                ln = pg.InfiniteLine(pos=x, angle=90, movable=False,
+                                     pen=pg.mkPen(PURPLE, style=QtCore.Qt.PenStyle.DotLine))
+                p.addItem(ln, ignoreBounds=True)
+                self._cmt_lines.append(ln)
+                tx = pg.TextItem(str(k + 1), color=PURPLE, anchor=(0.5, 0.5))
+                tx.setFont(f8)
+                tx.setPos(x, 0.64)
+                self.pK.addItem(tx)
+                self._cmt_nums.append(tx)
+            if self._cmt:
+                self._cmt_sc = pg.ScatterPlotItem([c[0] for c in self._cmt], [0.2] * len(self._cmt), symbol="t", size=8,
+                                                  pen=None, brush=pg.mkBrush(PURPLE), hoverable=True,
+                                                  data=list(range(len(self._cmt))),
+                                                  tip=lambda x, y, data: self._cmt[data][1])
+                self._cmt_sc.sigClicked.connect(lambda sc, pts, *_: self._cmt_mark(int(pts[0].data()), False)
+                                                if len(pts) else None)
+                self._cmt_sc.sigHovered.connect(lambda sc, pts, *_: self._cmt_mark(int(pts[0].data()), False)
+                                                if len(pts) and int(pts[0].data()) != self._cmt_sel else None)
+                self.pK.addItem(self._cmt_sc)
+            self._cmt_list()
+        self.pK.setYRange(0, 1, padding=0)
         last = self.files[-1]
         self._yl0 = yl0
-        self._cmt_items = []
         p.vb.setRange(xRange=(0, max(1, last.offset + last.dur)), yRange=yl0, padding=0)
         p.setLabel("left", f"{nm} ({unit})")
         if have and multi:
-            p.setTitle(f"Channels {', '.join(str(c) for c in w.tr_chans)} ({roll_name}), {len(D)} contractions "
-                       f"({int(I.sum())} shown), {len(self.files)} file(s), sampling: {self.sampling}", size="9pt")
+            self.pK.setTitle(f"Channels {', '.join(str(c) for c in w.tr_chans)} ({roll_name}), {len(D)} contractions "
+                             f"({int(I.sum())} shown), {len(self.files)} file(s), sampling: {self.sampling}",
+                             size="9pt")
         elif have:
-            p.setTitle(f"Channel {w.tr_chans[0]}, {len(D)} contractions "
-                       f"({int(I.sum())} shown), {len(self.files)} file(s), sampling: {self.sampling}", size="9pt")
+            self.pK.setTitle(f"Channel {w.tr_chans[0]}, {len(D)} contractions "
+                             f"({int(I.sum())} shown), {len(self.files)} file(s), sampling: {self.sampling}",
+                             size="9pt")
         else:
-            p.setTitle("press Calculate (detects the contractions in the listed files)", size="9pt")
+            self.pK.setTitle("press Calculate (detects the contractions in the listed files)", size="9pt")
         p.showGrid(x=True, y=True, alpha=0.25)
         self._ticks()
         info = [f"{len(self.files)} file(s), total {fmt_clock(last.offset + last.dur, True, True)}"]
@@ -657,23 +712,60 @@ class TrendWindow(QtWidgets.QWidget):
             self.p.setLabel("bottom", f"time since the start of the first file ({ax.unit})")
         ax.picture = None
         ax.update()
-        # comment labels: only labels that do not overlap (about one text line apart)
-        for it in self._cmt_items:
-            if it.scene() is not None:
-                self.p.removeItem(it)
-        self._cmt_items = []
-        if not getattr(self, "_cmt", None):
+        # numbers of the comment markers: no overlapping numbers (the highlighted one always)
+        if not self._cmt_nums:
             return
         wpx = max(1.0, self.p.vb.width())
-        min_dx = 11 * (xl[1] - xl[0]) / wpx
         last = -math.inf
-        xs, labs = [], []
-        for x, lb in sorted(self._cmt):
-            if xl[0] <= x <= xl[1] and x - last >= min_dx:
-                xs.append(x)
-                labs.append(lb)
+        for k, ((x, _), tx) in enumerate(zip(self._cmt, self._cmt_nums)):
+            min_dx = (6 * len(str(k + 1)) + 4) * (xl[1] - xl[0]) / wpx
+            show = bool(xl[0] <= x <= xl[1] and x - last >= min_dx)
+            if show:
                 last = x
-        self._cmt_items = rot_labels(self.p, xs, self._yl0[1], labs, PURPLE, max_n=200)
+            tx.setVisible(bool(show or k == self._cmt_sel))
+
+    def _cmt_time(self, x):
+        """time of a comment as on the x axis: clock time or time since the start of the first file"""
+        if self.cT.isChecked() and self.files and self.files[0].startKnown:
+            return datenum_to_timestamps(self.files[0].start + x / 86400).strftime("%d.%m. %H:%M:%S")
+        return fmt_clock(x, True, True)
+
+    def _cmt_list(self):
+        """lines of the comment list (number, time, text)"""
+        self.lbC.blockSignals(True)
+        self.lbC.clear()
+        if self._cmt:
+            self.lbC.addItems([f"{k + 1:3d}  {self._cmt_time(x)}  {lb}" for k, (x, lb) in enumerate(self._cmt)])
+            if self._cmt_sel >= 0:
+                self.lbC.setCurrentRow(self._cmt_sel)
+        else:
+            self.lbC.addItem("(no comments)")
+        self.lbC.blockSignals(False)
+
+    def _cmt_mark(self, k, center=False):
+        """highlight comment k (-1 = none): line in the plot, marker number, line of the list; center: move the view to
+        it if it is outside"""
+        if not self._cmt or k is None or k >= len(self._cmt):
+            return
+        j = self._cmt_sel
+        if 0 <= j < len(self._cmt_lines):
+            self._cmt_lines[j].setPen(pg.mkPen(PURPLE, style=QtCore.Qt.PenStyle.DotLine))
+            self._cmt_nums[j].setColor(PURPLE)
+        self._cmt_sel = k
+        if k >= 0:
+            self._cmt_lines[k].setPen(pg.mkPen((217, 0, 0), width=2))
+            self._cmt_nums[k].setColor((217, 0, 0))
+            self._cmt_nums[k].setVisible(True)
+            if self.lbC.currentRow() != k:
+                self.lbC.blockSignals(True)
+                self.lbC.setCurrentRow(k)
+                self.lbC.blockSignals(False)
+            xl = self.p.vb.viewRange()[0]
+            x = self._cmt[k][0]
+            if center and not (xl[0] <= x <= xl[1]):
+                w = xl[1] - xl[0]
+                self.p.vb.setXRange(x - w / 2, x + w / 2, padding=0)
+        self._ticks()
 
     def _wheel(self, x0, n, mods):
         if not self.files:
@@ -702,7 +794,7 @@ class TrendWindow(QtWidgets.QWidget):
         if not file:
             return
         try:
-            save_items([self.p], file, 3600)
+            save_items([self.pK, self.p], file, 3600)
             self.win.status("Saved: " + file)
         except Exception as e:  # noqa: BLE001
             self.win.status(f"Save: {e}")

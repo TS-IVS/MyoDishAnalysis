@@ -30,6 +30,9 @@ OPTIONS (keywords)
                           them in the GUI): default with output: <output without extension>_report.pdf; False: none;
                           a file name: this file (also without output) (2026-10-11)
   labels=['baseline', 'drug']   names of the time ranges
+  pooled=True             several ranges: also one summary row per channel over all of them (range 'all ranges';
+                          stimulus frequency from the intervals within the ranges; 2026-10-14, used by the GUI for
+                          several selected ranges / rocker stops)
   metadata=m              labels per channel (dict, DataFrame or .csv/.xlsx file), see labels.py
   showFigures=True        plot the signal with the detected contractions (matplotlib; ranges <= 30 min, <= 16)
   quiet=True              no messages
@@ -88,7 +91,7 @@ def datenum_to_timestamps(dn):
 
 def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output=None, report=None, labels=None,
                          metadata=None, showFigures=False, quiet=False, chunkSeconds=1800, protocol=None, groupBy=None,
-                         **opt_kw):
+                         pooled=False, **opt_kw):
     rockerGiven = any(k.lower() == "rocker" for k in opt_kw)
     beatsGiven = any(k.lower() == "beats" for k in opt_kw)
     opts = make_options(**opt_kw)
@@ -212,6 +215,8 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
     parts, sumParts, thrInfo, rfRows, resRows, pulseParts = [], [], [], [], [], []
     spikes = []  # spike artifacts removed (option spikeRemoval) in the analysed chunks: channel, from, to, size
     nFig = 0
+    poolB = {}  # option pooled: contractions and stimuli of all ranges per channel (2026-10-14)
+    poolC = {}
     f0cache = np.zeros((0, 2))
     for r in range(nR):
         n0 = [len(x) for x in (parts, sumParts, thrInfo, rfRows, resRows, pulseParts, spikes)]
@@ -311,6 +316,9 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
                                             protocolNote=pNote))
                 else:
                     T = summarize(B, Cm, ranges[r], opts, protW)
+                    if pooled:
+                        poolB.setdefault(c, []).append(B.copy())
+                        poolC.setdefault(c, []).append(Cm)
                     if grouping:  # same columns as the grouped ranges
                         B, T = add_empty_group_columns(B, T)
                 T["invertedSignal"] = bool(Cm.invertedSignal)  # signal inverted in (a chunk of) the range
@@ -348,6 +356,22 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
             _add_note(protocolsAll, protRow[r], why)
     if not parts:
         raise ValueError("No range analysed: " + " | ".join(H.notes[-nR:]))
+    if pooled and nR > 1 and not grouping:  # one row per channel over all ranges (2026-10-14)
+        for c in sorted(poolB):
+            if len(poolB[c]) < 2:
+                continue
+            Bp = pd.concat(poolB[c], ignore_index=True)
+            Cp = Struct(poolC[c][0])
+            for f, dt in (("stimTimes", float), ("stimCaptured", bool), ("stimCapturedCertain", bool),
+                          ("stimDuringContraction", bool), ("extraTimes", float), ("extraElicited", bool)):
+                if f in Cp:
+                    Cp[f] = np.concatenate([np.asarray(x[f]).ravel() for x in poolC[c]]).astype(dt)
+            Cp.threshold = float(np.median([x.threshold for x in poolC[c]]))
+            Cp.invertedSignal = any(bool(x.get("invertedSignal", False)) for x in poolC[c])
+            T = summarize(Bp, Cp, ranges, opts, protW)
+            T["invertedSignal"] = bool(Cp.invertedSignal)
+            T.insert(0, "range", "all ranges")
+            sumParts.append(T)
     thrInfo = sorted(thrInfo, key=lambda x: (x[0], x[1], x[2]))  # order: range, channel, time
     units = dict(parts[0].attrs.get("units", {})) if parts else {}
     contractions = pd.concat(parts, ignore_index=True)

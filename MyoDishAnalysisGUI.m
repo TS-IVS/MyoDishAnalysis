@@ -15,10 +15,19 @@ function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 % concentrationUnit, daysInCulture, cultureStart, comment, analyst): button 'Labels ...' (editable table, load / save as .csv). A file
 % <name>_labels.csv next to the .mdd file is loaded automatically. The labels become columns of the exported tables.
 %
-% 0. 'Comments ...': searchable list of the comments of the log file (date and time, time in the file, text); double-click
-%    (or Go to) loads the data around the comment. Comments are marked in the plots (purple).
+% 0. 'Open ...': a recording (.mdd; its first 120 s are loaded and analysed right away) or results of an analysis
+%    (see 3.); the folder is remembered (2026-10-14). 'Results ...': results browser of a results folder of the watcher
+%    (mda_index.csv, mda_flags.csv): one row per recording and channel with the flags of the watcher report (list:
+%    all / with flags / red flags / not analysed; search); double-click opens the channel with the settings of its
+%    analysis (red flags: the window of the flags, otherwise the first 120 s); 'Compute flags' for results of older
+%    watcher versions. 'Main file' (shown for a parallel recording, e.g. a schedule file): the main recording at the
+%    window shown. Grey line above the table: flags of the watcher report for the analysed range (mda_report).
+%    'Comments ...': searchable list of the comments of the log file (number, date and time, time in the file, text);
+%    a selected row is highlighted in the force plot, double-click (or Go to) loads the data around the comment.
+%    Comments are numbered purple marks in the force plot (pointer: text; click: selected in the list).
 % 1. 'Overview' shows the complete recording of the selected channel (min/max envelope, green =
-%    rocker at rest). Drag in the overview (or type From/To and press Load) to load a time window.
+%    rocker at rest; the unit of the time axis left of it, e.g. (h:mm); from 2 days 'd h:mm'). Drag in the overview (or
+%    type From/To and press Load) to load a time window; right click: 'Select all' loads the range shown (at most 4 h).
 %    Mouse wheel over the overview or the force plot: zoom the time axis (shift + wheel: move); double-click:
 %    whole file / whole loaded window. The zoomed overview is re-read in more detail.
 %    Arrow keys (click into a plot first) and the buttons under the force plot change the loaded window (= the blue
@@ -28,15 +37,21 @@ function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 %    overview moves along when the window leaves its visible part. The mouse wheel zooms only the display.
 % 2. The force plot shows the loaded window (force - zero force, if the zero force is known): detected contractions
 %    (red = selected, orange = uncertain (high sensitivity), grey = excluded by the filters, black x = excluded by
-%    you), stimuli (blue ticks), rocker moving (grey background). The stimulus plot below shows the current of every
+%    you), stimuli (blue ticks), rocker state (thin bar at the top: green = at rest, grey = moving; 2026-10-14, before:
+%    grey background). The stimulus plot below shows the current of every
 %    stimulus pulse (mA; green = extra pulse, x = current not reached) and the interval to the previous pulse of the
 %    channel (ms); numbers are written when 40 pulses or fewer are visible (zoom in).
-%    Cursor mode 'drag = select time range': drag in the force plot to choose the analysed range.
+%    Cursor mode 'drag = select time range': drag in the force plot to choose the analysed range; shift + drag adds
+%    another range (several ranges: the table and exports pool them, exports add one summary row per range;
+%    2026-10-14). Right click in the force plot: 'Zoom to the selection'; with 'only contractions with rocker at
+%    rest': 'Select all rocker stops of the overview range' reads every rocker stop (+-2 s) of the range shown in the
+%    overview (also days with hourly stops) and shows them side by side, separated by dashed lines (time axis: time in
+%    the file; exports: time in the file). Load a window to return to the continuous view.
 %    Cursor mode 'click = exclude / include contraction': click on a contraction to exclude it (or include it again).
 %    Zoom / pan with the figure toolbar (switch the zoom / pan tool off again to use the mouse modes).
 % 3. The table shows mean and SD of the selected contractions; the lower plot shows one parameter (list 'Lower plot') per
 %    contraction over time. 'Export this channel' writes all contractions of the range (column 'included')
-%    (every export also contains the table info: version, recording, all settings, window and range; 'Open results ...'
+%    (every export also contains the table info: version, recording, all settings, window and range; 'Open ...'
 %    or MyoDishAnalysisGUI(resultsFile) restores recording, settings and analysis window of a results file of
 %    MyoDishAnalysis, the watcher or the GUI and compares the contractions detected again with the file)
 %    and the summary to .xlsx or .csv. 'All channels -> file' analyses the range in all channels with the
@@ -51,11 +66,15 @@ function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 %    removal), rocker filter, export. Guide: settings guide docs/MyoDishAnalysis_settings_guide.pdf (figures for every
 %    parameter and the markers of the force plot). Defaults restores mda_options(); Apply / OK analyse the window
 %    again. Save settings ... / Load settings ...: settings file (mda_settings; results of an analysis can be loaded,
-%    too). Force plot: legend of the markers (menu View; right click in the force plot): extra pulses (status
-%    channel bit 16: pre-pulses, CCM pulses, ...) green ticks, contractions elicited by an extra pulse green rings,
-%    ambiguous stimulus assignments black diamonds.
+%    too). Changed settings (2026-10-14): the button shows their number in red ('Advanced (3 changed)', shortened if
+%    the text does not fit, e.g. 'Adv. (3 chgd)'); its tooltip lists them with their defaults. Force plot: legend of
+%    the markers (menu View; right click in the force plot): extra pulses (status channel bit 16: pre-pulses, CCM
+%    pulses, ...) green ticks, contractions elicited by an extra pulse green rings, ambiguous stimulus assignments
+%    black diamonds.
 %    'Trend ...': rolling mean / median of a parameter over long periods, also over several files in a row; one
-%    channel or several channels overlaid (channel list: 'several channels ...').
+%    channel or several channels overlaid (channel list: 'several channels ...'). Comments of the log files: numbered
+%    markers above the plot and a list below it (click a marker or a line of the list, or point at a marker, to
+%    highlight the comment; 2026-10-13).
 %    'Overlay contractions': mean beat of the selected contractions (aligned at the stimulus or the peak) or the time
 %    course of the range (t = 0 at the first stimulus); other channels of the same range by checkboxes; colour, line
 %    width, line style and SD / SEM / range band per group; editable title, axis labels and legend; 'Edit figure ...'
@@ -73,7 +92,8 @@ function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 %    Mouse pointer over the force, stimulus, parameter or EP plots: a marker on the curve in every plot and the value at
 %    that time small in its top left corner (force, nearest stimulus pulse, parameter of the nearest contraction, EP
 %    signal and stimulation); the plot under the pointer also shows the time and the time since the last stimulus.
-%    The windows always use light colors (also with a dark theme of MATLAB / the operating system).
+%    The windows always use light colors (also with a dark theme of MATLAB / the operating system); accent color blue
+%    for the main buttons, the panel titles, the stimulus pulses and the loaded window (2026-10-13).
 % 5. 'Protocols ...': stimulation protocols found in the log file (comments 'start ... protocol' / 'end ... protocol',
 %    mda_protocols; editable, '+ selected range' adds the range of the main window): the contractions of the ticked
 %    protocols and channels are grouped by pacing frequency, S2 interval, stimulus current, rest interval, pulse
@@ -85,7 +105,8 @@ function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 % Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05 (EP recordings 2026-10-06, protocols 2026-10-07;
 % threshold per channel, arrow keys, overlay of channels / styles / bands 2026-10-07; navigation buttons, trend of several
 % channels, detection mode, open results, rocker artifact window, EP y limits / artefact removal, mouse pointer values
-% 2026-10-09; advanced settings, settings files, legend of the force plot 2026-10-10; report, channel / window 2026-10-11)
+% 2026-10-09; advanced settings, settings files, legend of the force plot 2026-10-10; report, channel / window 2026-10-11;
+% colours 2026-10-13; first window loaded, results browser, parallel recordings, numbered comments, flags 2026-10-14)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -109,7 +130,9 @@ end
 H = []; S = []; O = []; B = []; C = [];
 reportAll = false;                                 %analysis report with 'All channels -> file' (menu Save / Export)
 ch = 1;
-range = [nan nan];
+range = [nan nan];                 %analysed range(s): rows [from to] in s (several: shift + drag, 2026-10-14)
+sbs = [];                          %side-by-side rocker stops (2026-10-14): seg [fileFrom fileTo winFrom winTo], shift,
+                                   %  breaks (window times of the dashed lines); [] = continuous window
 winReq = [nan nan];                %loaded window as requested from mda_readMdd (s; exports: open the results again)
 resOnly = [];                      %opened results file: t_peak of its contractions not detected again (black o)
 hRA = [];                          %rocker artifact window
@@ -125,6 +148,12 @@ LE = [];                           %entries of the log file (mda_logEntries): co
 hCom = [];                         %comment window (uifigure) and its controls
 comView = []; comRow = [];         %rows of LE shown in the comment window, selected row
 hiT = nan;                         %time of the comment last jumped to (highlighted)
+comT = []; comK = []; comIdx = []; %comments in the force plot: time, number (1..n of the file), row of LE (2026-10-14)
+comTF = [];                        %  ... their times in the file (side-by-side rocker stops: comT is condensed)
+comNumH = gobjects(0);             %  ... their numbers (text objects; overlapping ones hidden)
+mainRec = [];                      %main recording of an open parallel recording (main, a, b; 2026-10-14)
+hBrw = [];                         %results browser (uifigure and its controls; 2026-10-14)
+statusText = '';                   %last message of the status line
 ovG = [];                          %overlay: one group per added selection (segments around the contractions)
 hOv = [];                          %overlay window and its controls
 ovNextColor = 0;                   %overlay: number of groups added (default colour of the next group)
@@ -173,6 +202,7 @@ APP = mda_analyzeAP('parameters');                                %2026-10-06: A
 plotList = [plotList; APP(:, 1:2)];
 mu = char(181);                    %micro sign
 dragX0 = []; hDrag = [];
+dragAdd = false;                   %drag in the force plot with shift: the range is added to the selection (2026-10-14)
 Od = [];                           %detailed overview of a zoomed part of the file
 ovXL = [];                         %time axis of the overview ([] = whole file)
 tmr = [];                          %timer: reads the detailed overview after zooming
@@ -181,6 +211,11 @@ hAdv = [];                         %advanced settings window (2026-10-10)
 advD = {}; advCtl = gobjects(0); advMsg = [];   %  ... its definitions, controls, message line
 advPending = struct();              %  ... settings of the main window loaded from a settings file (applied at Apply / OK)
 showLegend = true;                 %legend of the markers in the force plot (menu View; 2026-10-10)
+uiBlue = [29 114 185] / 255;       %accent colors of the user interface (2026-10-13; as widgets.py): main buttons,
+uiBlueDark = [21 90 148] / 255;    %  panel titles, stimulus pulses and the loaded window; status texts;
+uiBlueLight = [187 212 234] / 255; %  panel borders
+pnlStyle = {'ForegroundColor', uiBlue, 'HighlightColor', uiBlueLight};
+mainBtn = {'BackgroundColor', uiBlue, 'ForegroundColor', 'w', 'FontWeight', 'bold'};   %main action of a window
 
 % ------------------------------------------------------------------ figure and controls
 fig = figure('Name', 'MyoDishAnalysis', 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
@@ -191,20 +226,24 @@ lightTheme(fig);
 movegui(fig, 'onscreen');
 dflt = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
 
-uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Open .mdd ...', 'Position', [0.005 0.955 0.065 0.035], 'Callback', @onOpen);
-uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Open results ...', 'Position', [0.156 0.955 0.07 0.035], 'Callback', @onOpenResults, ...
-    'TooltipString', ['results file of MyoDishAnalysis, the watcher or an export (.xlsx, _info.csv, ...): recording, settings ' ...
-    'and analysis window are restored, the contractions detected again and compared with the file']);
+uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Open ...', 'Position', [0.005 0.955 0.065 0.035], 'Callback', @onOpen, ...
+    'TooltipString', ['a recording (.mdd) or results of an analysis (.xlsx, _info.csv, ...: recording, settings and ' ...
+    'analysis window are restored, the contractions detected again and compared with the file); the folder is remembered']);
+uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Results ...', 'Position', [0.156 0.955 0.07 0.035], 'Callback', @(~,~) onBrowse(), ...
+    'TooltipString', ['results browser: the recordings and channels of a results folder of the watcher with the flags of ' ...
+    'the analysis report; double-click opens them']);
 uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', '+ EP recording ...', 'Position', [0.072 0.955 0.08 0.035], 'Callback', @onOpenEP, ...
     'TooltipString', 'add an electrophysiological recording (LabChart .mat export, e.g. sharp electrode: voltage + stimulation) aligned to the stimuli of the open .mdd file');
 hFile = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'no file', 'HorizontalAlignment', 'left', 'Position', [0.229 0.952 0.131 0.03]);
+hMain = uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Main file', 'Position', [0.318 0.955 0.042 0.035], ...
+    'Visible', 'off', 'Callback', @(~,~) onMainFile());   %parallel recording: opens the main file at this window
 uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'Channel', 'HorizontalAlignment', 'right', 'Position', [0.36 0.952 0.04 0.03]);
 hCh = uicontrol(fig, dflt{:}, 'Style', 'popupmenu', 'String', {'-'}, 'Position', [0.405 0.957 0.1 0.033], 'Callback', @onChannel);
 uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'From (s)', 'HorizontalAlignment', 'right', 'Position', [0.505 0.952 0.04 0.03]);
 hFrom = uicontrol(fig, dflt{:}, 'Style', 'edit', 'String', '0', 'Position', [0.548 0.957 0.055 0.033]);
 uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'To (s)', 'HorizontalAlignment', 'right', 'Position', [0.603 0.952 0.03 0.03]);
 hTo = uicontrol(fig, dflt{:}, 'Style', 'edit', 'String', '60', 'Position', [0.636 0.957 0.055 0.033]);
-uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Load', 'Position', [0.695 0.955 0.045 0.035], 'Callback', @onLoad);
+uicontrol(fig, dflt{:}, mainBtn{:}, 'Style', 'pushbutton', 'String', 'Load', 'Position', [0.695 0.955 0.045 0.035], 'Callback', @onLoad);
 uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Overview', 'Position', [0.744 0.955 0.05 0.035], 'Callback', @onOverview, ...
     'TooltipString', 'overview of the whole file (min/max envelope)');
 uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Comments ...', 'Position', [0.797 0.955 0.05 0.035], 'Callback', @onComments, ...
@@ -221,7 +260,7 @@ axStim = axes(fig, 'Position', [0.05 0.315 0.70 0.105], 'FontSize', 9, 'XTickLab
 axPar = axes(fig, 'Position', [0.05 0.07 0.70 0.2], 'FontSize', 10);
 % buttons under the force plot (as the arrow keys): loaded window (selection) left / right (shift + click: extend), zoom in / out
 nb = {'Style', 'pushbutton', 'Units', 'normalized', 'FontSize', 9, 'BackgroundColor', 'w'};
-uicontrol(fig, nb{:}, 'String', char(9664), 'Position', [0.05 0.4485 0.022 0.026], 'Callback', @(~,~) onNavButton('leftarrow'), ...
+hNavL = uicontrol(fig, nb{:}, 'String', char(9664), 'Position', [0.05 0.4485 0.022 0.026], 'Callback', @(~,~) onNavButton('leftarrow'), ...
     'TooltipString', 'loaded window (selection): move it to the left by half its length (shift + click: extend it to the left; key: left arrow)');
 uicontrol(fig, nb{:}, 'String', char([8594 8592]), 'Position', [0.373 0.4485 0.026 0.026], 'Callback', @(~,~) onNavButton('uparrow'), ...
     'TooltipString', 'loaded window (selection): zoom in to half its length around the centre (key: up arrow)');
@@ -263,8 +302,16 @@ axNames = {'overview', 'force', 'stimuli', 'parameter'};
 axList = [axOv axMain axStim axPar];
 for iAxMenu = 1:4                                    %(unique names: variables of the main function are shared with the nested functions)
     cmAxMenu = uicontextmenu(fig);
+    if iAxMenu == 1                                  %overview: load the range shown (2026-10-14)
+        uimenu(cmAxMenu, 'Text', 'Select all (load the range shown, at most 4 h)', 'MenuSelectedFcn', @(~,~) selectAll());
+    end
     if iAxMenu == 2                                  %force plot: zero force = y value of the right click
-        uimenu(cmAxMenu, 'Text', 'Set as zero force (y at the mouse pointer)', 'Tag', 'zeroHere', 'MenuSelectedFcn', @(~,~) setZeroAtClick());
+        uimenu(cmAxMenu, 'Text', 'Zoom to the selection (analysed range)', 'MenuSelectedFcn', @(~,~) zoomToSelection());
+        uimenu(cmAxMenu, 'Text', 'Select all rocker stops of the overview range (side by side)', 'Tag', 'rockerStops', ...
+            'MenuSelectedFcn', @(~,~) selectRockerStops());
+        uimenu(cmAxMenu, 'Text', 'Shift + drag: add a range to the selection', 'Enable', 'off');
+        uimenu(cmAxMenu, 'Text', 'Set as zero force (y at the mouse pointer)', 'Tag', 'zeroHere', 'Separator', 'on', ...
+            'MenuSelectedFcn', @(~,~) setZeroAtClick());
         uimenu(cmAxMenu, 'Text', 'Zero force from the log file (Offset)', 'MenuSelectedFcn', @(~,~) resetZero());
         uimenu(cmAxMenu, 'Text', 'Set mean beat shape of the selected contractions as reference', 'Separator', 'on', ...
             'MenuSelectedFcn', @(~,~) setReference());
@@ -281,8 +328,8 @@ for iAxMenu = 1:4                                    %(unique names: variables o
     axList(iAxMenu).UIContextMenu = cmAxMenu;
 end
 
-pnl = uipanel(fig, 'Position', [0.765 0.01 0.232 0.925], 'Title', 'Analysis', 'BackgroundColor', 'w', 'FontSize', 10);
-bg = uibuttongroup(pnl, 'Position', [0.03 0.885 0.94 0.105], 'Title', 'Cursor in the force plot', 'BackgroundColor', 'w', 'FontSize', 9);
+pnl = uipanel(fig, 'Position', [0.765 0.01 0.232 0.925], 'Title', 'Analysis', 'BackgroundColor', 'w', 'FontSize', 10, pnlStyle{:});
+bg = uibuttongroup(pnl, 'Position', [0.03 0.885 0.94 0.105], 'Title', 'Cursor in the force plot', 'BackgroundColor', 'w', 'FontSize', 9, pnlStyle{:});
 rbRange = uicontrol(bg, dflt{:}, 'Style', 'radiobutton', 'String', 'drag = select time range', 'Position', [0.03 0.52 0.94 0.42]);
 uicontrol(bg, dflt{:}, 'Style', 'radiobutton', 'String', 'click = exclude / include contraction', 'Position', [0.03 0.06 0.94 0.42]);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Labels ...', 'Position', [0.03 0.835 0.46 0.04], 'Callback', @onLabels, ...
@@ -303,10 +350,10 @@ hZero = uicontrol(pnl, dflt{:}, 'Style', 'edit', 'String', '', 'Position', [0.52
 hZeroSrc = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.76 0.75 0.23 0.03], 'FontSize', 8);
 hRocker = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'only contractions with rocker at rest', 'Position', [0.03 0.715 0.94 0.035], 'Callback', @onFilter);
 hStim = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'only stimulated contractions', 'Position', [0.03 0.68 0.585 0.035], 'Callback', @onFilter);
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Advanced ...', 'Position', [0.615 0.68 0.355 0.037], ...
-    'Callback', @onAdvanced, 'TooltipString', ['advanced settings: stimulus assignment (onset gate), stimulus source ' ...
-    '(MyoDish / external trigger), detection and filter parameters, pulse table (for users who know the method; ' ...
-    'see mda_options)']);
+advTip0 = ['advanced settings: stimulus assignment (onset gate), stimulus source (MyoDish / external trigger), ' ...
+    'detection and filter parameters, pulse table (for users who know the method; see mda_options)'];
+hAdvBtn = uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Advanced ...', 'Position', [0.615 0.68 0.355 0.037], ...
+    'Callback', @onAdvanced, 'TooltipString', advTip0);   %number of changed settings in red (advIndicator, 2026-10-14)
 hRF = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'remove rocker artifact', 'Position', [0.03 0.645 0.585 0.033], ...
     'Callback', @onRockerFilter, 'TooltipString', ['subtracts the periodic signal of the rocker movement (estimated per channel ' ...
     'between the contractions, +-60 s around the window); light grey in the force plot = signal before. See mda_rockerFilter']);
@@ -320,7 +367,9 @@ uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Rocker artifact ...', 
     'Callback', @(~,~) onRockerWindow(), 'TooltipString', ['periodic signal of the rocker movement that the rocker filter ' ...
     'removes (estimated for this channel and window, also if the filter is off): extra window, save as figure, export data']);
 hCounts = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.03 0.49 0.94 0.118], 'FontSize', 9);
-hTable = uitable(pnl, 'Units', 'normalized', 'Position', [0.03 0.215 0.94 0.27], 'RowName', [], ...
+hFlags = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.03 0.462 0.94 0.026], ...
+    'FontSize', 9, 'ForegroundColor', [0.45 0.45 0.45]);   %flags of the analysis report for this range (2026-10-14)
+hTable = uitable(pnl, 'Units', 'normalized', 'Position', [0.03 0.215 0.94 0.245], 'RowName', [], ...
     'ColumnName', {'parameter','mean','SD','n','unit'}, 'ColumnWidth', {108, 66, 60, 38, 42}, 'FontSize', 9);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Overlay contractions', 'Position', [0.03 0.165 0.46 0.04], 'Callback', @onOverlay, ...
     'TooltipString', ['overlay of the selected contractions (mean beat or time course); press again (or Add in the overlay window) to add ' ...
@@ -330,7 +379,7 @@ uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Export this channel ..
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'All channels -> file ...', 'Position', [0.51 0.12 0.46 0.04], 'Callback', @onAllChannels);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Copy summary', 'Position', [0.03 0.075 0.46 0.04], 'Callback', @onCopy);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Help', 'Position', [0.51 0.075 0.46 0.04], 'Callback', @(~,~) lightTheme(helpdlg(helpText(), 'MyoDishAnalysis')));
-hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.', 'HorizontalAlignment', 'left', 'Position', [0.03 0.003 0.94 0.068], 'FontSize', 9, 'ForegroundColor', [0 0 0.6]);
+hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.', 'HorizontalAlignment', 'left', 'Position', [0.03 0.003 0.94 0.068], 'FontSize', 9, 'ForegroundColor', uiBlueDark);
 
 % functions for scripts / tests: api = fig.UserData; api.setRange([t1 t2]); api.toggleAt(t);
 % [contractions, summary] = api.results();  api.epRecording(matFile) (show; '' = remove);  EP = api.epRecordingData();
@@ -345,19 +394,29 @@ hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.
 % [o, h] = api.advanced(struct('gateMax', 0.2, ...)) (advanced settings as typed in the window and Apply; no input:
 % current options; h = the window); api.nextFile(file), then api.advanced('save') / api.advanced('load'): Save
 % settings ... / Load settings ... of the window; api.legend(tf) (legend of the force plot on / off)
+% Bw = api.browse(resultsFolder, k) (results browser of this folder, not remembered; k: open row k of the table as a
+% double-click; Bw: handles and rows of the browser); st = api.state() (file, channel, loaded window, analysed range,
+% comment numbers in the force plot, highlighted comment, flags line, status line, main recording); api.commentClick(k)
+% (comment mark k clicked); api.mainFile() (button Main file); api.setRange(r, true) (r added to the selection, as
+% shift + drag; r: one or several rows [from to]); api.rockerStops() / api.zoomToSelection() / api.selectAll() (context
+% menus of the force plot and the overview; 2026-10-14)
 fig.UserData = struct('setRange', @apiSetRange, 'toggleAt', @toggleContraction, 'results', @apiResults, ...
     'setLabels', @apiSetLabels, 'labels', @apiLabels, 'zeroAt', @apiZeroAt, ...
     'epRecording', @openEP, 'epRecordingData', @apiEP, 'epYLim', @epSetYLim, 'epRemoveArtefacts', @epSetClean, ...
     'hover', @apiHover, ...
     'overlayChannels', @setOverlayChannels, 'overlay', @apiOverlay, 'key', @apiKey, 'navButton', @navButton, ...
     'trend', @apiTrend, 'openResults', @openResults, 'rockerWindow', @onRockerWindow, 'nextFile', @apiNextFile, ...
-    'exportChannel', @onExport, 'exportPlotData', @exportPlotData, 'advanced', @apiAdvanced, 'legend', @apiLegend);
+    'exportChannel', @onExport, 'exportPlotData', @exportPlotData, 'advanced', @apiAdvanced, 'legend', @apiLegend, ...
+    'browse', @apiBrowse, 'state', @apiState, 'commentClick', @comMarkerClick, 'mainFile', @onMainFile, ...
+    'rockerStops', @selectRockerStops, 'zoomToSelection', @zoomToSelection, 'selectAll', @selectAll);
 
 emptyPlots();
+advIndicator();
+fig.SizeChangedFcn = @(~,~) onSizeChanged();     %shortened text of the 'Advanced' button, margins of the plots
 if ~isempty(mddFile) && ~endsWith(lower(char(mddFile)), '.mdd')   %results file (2026-10-09)
     openResults(char(mddFile));
 elseif ~isempty(mddFile)
-    openFile(char(mddFile));
+    openFile(char(mddFile), false);
     if ~isempty(metadata) && ~isempty(H)
         try
             Lbl = mda_labels(metadata, H.dataChannels);
@@ -365,7 +424,7 @@ elseif ~isempty(mddFile)
             status(['Labels: ' ME.message]);
         end
     end
-    goTo(goCh, goWin);
+    if isempty(goWin) && ~isempty(H), goTo(goCh, []); firstWindow(); else, goTo(goCh, goWin); end   %first window
 end
 addlistener(axStim, 'XLim', 'PostSet', @(~,~) stimLabels());
 addlistener(axOv, 'XLim', 'PostSet', @(~,~) ovTicks());   %time labels h:mm:ss of the overview (also toolbar zoom)
@@ -377,22 +436,22 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 % callbacks
 % =====================================================================================================
     function onOpen(~, ~)
-        [fn, pn] = uigetfile('*.mdd', 'MyoDish data file');
+        % a recording (.mdd) or results of an analysis (.xlsx, _info.csv, ...); the folder is remembered (2026-10-14)
+        res = '*.xlsx;*_info.csv;*_summary.csv;*_contractions.csv;*_contractions.csv.gz';
+        [fn, pn] = uigetfile({['*.mdd;' res], 'recordings and results (*.mdd, *.xlsx, *_info.csv, ...)'; ...
+            '*.mdd', 'recordings (*.mdd)'; res, 'results of MyoDishAnalysis (*.xlsx, *_info.csv, ...)'}, 'Open', ...
+            prefGet('lastOpenDir'));
         if isequal(fn, 0), return; end
-        openFile(fullfile(pn, fn));
+        prefSet('lastOpenDir', pn);
+        if endsWith(lower(fn), '.mdd'), openFile(fullfile(pn, fn)); else, openResults(fullfile(pn, fn)); end
     end
 
-    function onOpenResults(~, ~)
-        [fn, pn] = uigetfile({'*.xlsx;*_info.csv;*_summary.csv;*_contractions.csv;*_contractions.csv.gz', ...
-            'results of MyoDishAnalysis (*.xlsx, *_info.csv, ...)'}, 'Open results');
-        if isequal(fn, 0), return; end
-        openResults(fullfile(pn, fn));
-    end
-
-    function ok = openResults(file, pick)
+    function ok = openResults(file, pick, maxLen)
         % results file of MyoDishAnalysis / Watch / GUI export (2026-10-09): recording, settings and analysis window
-        % of the results; the contractions are detected again and compared with the file (black o = only in the file)
+        % of the results; the contractions are detected again and compared with the file (black o = only in the file).
+        % maxLen (s, optional; results browser): only the beginning of the analysis window is loaded
         ok = false;
+        if nargin < 3, maxLen = []; end
         try
             R = mda_readResults(file);
         catch ME
@@ -421,8 +480,15 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 if ~isempty(r2), r = r2; end
             end
             if ~isempty(r), pick = r(1); else, status(sprintf('Results: no analysis window of channel %d.', goCh)); end
+        elseif isempty(pick) && ~isempty(win)            %window without channel (results browser): first channel
+            r = find(W.channel == W.channel(1));
+            r2 = r(W.from(r) <= win(1) + 1e-9 & W.to(r) >= win(1) - 1e-9);
+            if ~isempty(r2), r = r2; end
+            pick = r(1);
         end
         goCh = [];
+        guiMulti = strcmp(R.createdBy, 'MyoDishAnalysisGUI') && isscalar(unique(W.channel)) && height(W) > 1;
+        if isempty(pick) && guiMulti, pick = 1; end      %export of the GUI with several ranges: all of them (2026-10-14)
         if isempty(pick)                                %analysis window: channel, range, chunk
             pick = 1;
             if height(W) > 1
@@ -434,7 +500,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             end
         end
         w = W(pick, :);
-        openFile(mdd);
+        openFile(mdd, false);
         if isempty(H), return; end
         if ~ismember(w.channel, H.dataChannels), status(sprintf('Results: channel %d is not in %s.', w.channel, H.file)); return; end
         % settings of the results
@@ -451,6 +517,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         zeroUser(ch) = valueOfChannel(opts.zeroForce, R.channels, ch);
         opts.threshold = 'auto'; opts.zeroForce = [];   %the GUI keeps them per channel
         showThreshold();
+        advIndicator();
         if ~isempty(R.labels)
             try
                 Lbl = mda_labels(R.labels, H.dataChannels);
@@ -460,17 +527,33 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         % data window of the analysis, analysed range, contractions excluded by the user (GUI exports)
         resInfo = '';
-        if isempty(win), onLoad([], [], [w.windowFrom w.windowTo]); else, onLoad([], [], win(1:2)); end
+        segF = [];                                      %rocker stops side by side (GUI export, 2026-10-14)
+        if isfield(R.extra, 'segments_s'), segF = parseRows(R.extra.segments_s); end
+        rgF = [w.from w.to];                            %analysed range(s), time in the file
+        if guiMulti, rgF = [W.from W.to]; end
+        if isempty(win) && size(segF, 1) > 1 && isempty(maxLen)
+            if ~loadSegments(segF), return; end
+        elseif isempty(win)
+            wl = [w.windowFrom w.windowTo];
+            if ~isempty(maxLen), wl(2) = min(wl(2), max(w.from, wl(1)) + maxLen); end
+            onLoad([], [], wl);
+        else
+            onLoad([], [], win(1:2)); rgF = win(1:2);
+        end
         if isempty(S), return; end
         if opts.rockerFilter && ~strcmp(R.createdBy, 'MyoDishAnalysisGUI')
             rfCtx = S; rfCache = {};                    %as MyoDishAnalysis: estimated from the data window itself
         end
-        if isempty(win), rg = [w.from w.to]; else, rg = win(1:2); end
-        range = [max(rg(1), S.fromSeconds) min(rg(2), S.toSeconds)];
+        rg = f2w(rgF);                                  %time in the loaded window
+        rg = [max(rg(:,1), S.fromSeconds), min(rg(:,2), S.toSeconds)];
+        rg = rg(all(isfinite(rg), 2) & rg(:,2) > rg(:,1), :);
+        if isempty(rg), rg = [S.fromSeconds S.toSeconds]; end
+        range = mergeRanges(rg);
         Tc = [];
         if ~isempty(R.contractions) && all(ismember({'channel', 't_peak'}, R.contractions.Properties.VariableNames))
-            Tc = R.contractions(R.contractions.channel == ch & R.contractions.t_peak >= range(1) - 1e-9 & ...
-                R.contractions.t_peak <= range(2) + 1e-9, :);
+            Tc = R.contractions(R.contractions.channel == ch, :);
+            Tc.t_peak = f2w(Tc.t_peak);                 %(rocker stops side by side: window time)
+            Tc = Tc(inRng(Tc.t_peak, [range(:,1) - 1e-9, range(:,2) + 1e-9]), :);
             if ismember('manuallyExcluded', Tc.Properties.VariableNames)
                 manualOff = Tc.t_peak(Tc.manuallyExcluded == 1);
             end
@@ -506,7 +589,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             txt = sprintf('%s settings and window applied (contractions thinned to block medians: not compared).', src);
             return;
         end
-        if isempty(B), inR = false(0, 1); else, inR = B.t_peak >= range(1) & B.t_peak <= range(2); end
+        if isempty(B), inR = false(0, 1); else, inR = inRng(B.t_peak); end
         tH = []; if ~isempty(B), tH = B.t_peak(inR); end
         tol = S.dt / 2;
         if isempty(tH)
@@ -538,7 +621,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
     end
 
-    function openFile(file)
+    function openFile(file, autoLoad)
+        % autoLoad (default true): the first window (From / To: 0 - 120 s) is loaded and analysed right away (2026-10-14)
+        if nargin < 2, autoLoad = true; end
         try
             H = mda_readMdd(file, [], [], opts);
         catch ME
@@ -547,6 +632,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             return;
         end
         S = []; O = []; B = []; C = []; manualOff = zeros(0,1); zeroUser = nan(1, 8); thrUser = nan(1, 8); Od = []; ovXL = [];
+        sbs = []; range = [nan nan];
         resOnly = []; resInfo = ''; winReq = [nan nan];
         hThrMode.Value = 1; hThr.String = '';
         rfCtx = []; rfCache = {}; rfF0 = [];
@@ -587,8 +673,280 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 msg = [msg ' Labels file not read: ' ME.message];
             end
         end
+        % parallel recording (e.g. schedule file) of a main recording in the same folder: button Main file (2026-10-14)
+        mainRec = [];
+        try
+            mainRec = MyoDishAnalysisWatch('mainRecording', H.file);
+        catch
+        end
+        if isempty(mainRec)
+            hMain.Visible = 'off'; hFile.Position(3) = 0.131;
+        else
+            hMain.TooltipString = [parallelText() ': opens the main file at the window shown here'];
+            hMain.Visible = 'on'; hFile.Position(3) = 0.088;
+            msg = sprintf('%s This is a %s (button Main file).', msg, parallelText());
+        end
         status(msg);
         if H.bytes < 150e6, onOverview(); end      %small files: overview right away
+        if autoLoad, firstWindow(); end
+    end
+
+    function firstWindow()
+        % first window of a newly opened file (From / To: 0 - 120 s) loaded and analysed (2026-10-14); the notes of the
+        % file stay visible after the message of the analysis
+        onLoad();
+        if isempty(S), return; end
+        note = strjoin(H.notes, ' ');
+        if ~isempty(mainRec), note = strtrim(sprintf('%s This is a %s (button Main file).', note, parallelText())); end
+        if ~isempty(note), status(sprintf('%s Note: %s', statusText, note)); end
+    end
+
+    function txt = parallelText()
+        % open parallel recording: 'parallel recording of <main file> (a-b s of the main file)'
+        txt = '';
+        if isempty(mainRec), return; end
+        [~, mn, me] = fileparts(mainRec.main);
+        if isfinite(mainRec.b), w = sprintf('%.1f-%.1f s', mainRec.a, mainRec.b); else, w = sprintf('from %.1f s', mainRec.a); end
+        txt = sprintf('parallel recording of %s (%s of the main file)', [mn me], w);
+    end
+
+    function onMainFile()
+        % parallel recording: the main file at the window shown here (time in the main file = a + time here), same
+        % channel
+        if isempty(mainRec), return; end
+        if isempty(S), w = [0 min(120, mainRec.b - mainRec.a)]; else, w = [S.fromSeconds S.toSeconds]; end
+        c = ch; f = mainRec.main; a = mainRec.a;
+        openFile(f, false);
+        if isempty(H), return; end
+        goTo(c, a + w);
+    end
+
+    % ---------------------------------------------------------------- results browser (2026-10-14)
+    function onBrowse(res, remember)
+        % recordings and channels of a results folder of the watcher (mda_index.csv) with the flags of the analysis
+        % report (mda_flags.csv). Double-click a row (or Open): the channel with the settings of its analysis (red
+        % flags: the window of the flags, otherwise the first 120 s of its analysis); a parallel recording that was not
+        % analysed: its main file at its window. The last folder is opened again directly (Folder ... = another one).
+        % remember (default true): the folder is remembered (MATLAB preferences; false: tests)
+        if nargin < 1, res = ''; end
+        if nargin < 2, remember = true; end
+        isOpen = ~isempty(hBrw) && isvalid(hBrw.fig);
+        if isempty(res) && isOpen, figure(hBrw.fig); return; end
+        if isempty(res)
+            res = prefGet('lastResultsDir');
+            if isempty(res) || ~isfile(fullfile(res, 'mda_index.csv'))
+                res = uigetdir(res, 'Results folder of the watcher (with mda_index.csv)');
+                if isequal(res, 0), return; end
+            end
+        end
+        if ~isOpen, browserWindow(); end
+        hBrw.res = resultsRoot(char(res));
+        hBrw.remember = remember;
+        browserLoad();
+        figure(hBrw.fig);
+    end
+
+    function browserWindow()
+        f2 = uifigure('Name', 'Results', 'Position', [90 90 1180 600]);
+        lightTheme(f2);
+        g = uigridlayout(f2, [4 6]);
+        g.RowHeight = {26, 26, '1x', 50};
+        g.ColumnWidth = {80, '1x', 220, 170, 150, 80};
+        b = uibutton(g, 'Text', 'Folder ...', 'ButtonPushedFcn', @(~,~) browserFolder());
+        setTip(b, 'results folder of the watcher (with mda_index.csv)');
+        lf = uilabel(g, 'Text', '', 'FontColor', uiBlueDark);
+        lf.Layout.Column = [2 5];
+        b = uibutton(g, 'Text', 'Reload', 'ButtonPushedFcn', @(~,~) browserLoad());
+        setTip(b, 'read the index and the flags again (e.g. after a pass of the watcher)');
+        uilabel(g, 'Text', 'Search:');
+        ef = uieditfield(g, 'text', 'ValueChangedFcn', @(~,~) browserFilter());
+        try ef.Placeholder = 'recording, label, status, flag text ... (several words: all must occur)'; catch, end
+        dd = uidropdown(g, 'Items', {'all recordings', 'with flags', 'red flags (check the analysis)', 'not analysed'}, ...
+            'ValueChangedFcn', @(~,~) browserFilter());
+        lc = uilabel(g, 'Text', '', 'HorizontalAlignment', 'right');
+        bc = uibutton(g, 'Text', 'Compute flags', 'Enable', 'off', 'ButtonPushedFcn', @(~,~) browserCompute());
+        setTip(bc, ['recordings analysed without flags (older watcher versions): flags computed from their result ' ...
+            'files and saved in mda_flags.csv']);
+        bo = uibutton(g, 'Text', 'Open', 'ButtonPushedFcn', @(~,~) browserOpen(), 'BackgroundColor', uiBlue, ...
+            'FontColor', [1 1 1], 'FontWeight', 'bold');
+        ut = uitable(g, 'RowName', {}, 'ColumnName', {'recording', 'ch', 'label', 'flags', 'capture %', ...
+            'contractions', 'status', 'note'}, 'ColumnWidth', {300, 32, 140, 50, 85, 100, 95, 'auto'}, ...
+            'CellSelectionCallback', @(~,evt) browserSelect(evt));
+        ut.Layout.Row = 3; ut.Layout.Column = [1 6];
+        try ut.SelectionType = 'row'; catch, end           %R2021b+
+        if isprop(ut, 'DoubleClickedFcn'), ut.DoubleClickedFcn = @(~,evt) browserDouble(evt); end   %R2021a+
+        lm = uilabel(g, 'Text', '', 'FontColor', [0.3 0.3 0.3], 'VerticalAlignment', 'top');
+        try lm.WordWrap = 'on'; catch, end
+        lm.Layout.Row = 4; lm.Layout.Column = [1 6];
+        hBrw = struct('fig', f2, 'res', '', 'remember', true, 'lf', lf, 'ef', ef, 'dd', dd, 'lc', lc, 'bc', bc, ...
+            'bo', bo, 'ut', ut, 'lm', lm, 'D', [], 'view', [], 'row', [], 'missing', {{}});
+    end
+
+    function browserFolder()
+        p = uigetdir(hBrw.res, 'Results folder of the watcher (with mda_index.csv)');
+        figure(hBrw.fig);
+        if isequal(p, 0), return; end
+        hBrw.res = resultsRoot(p);
+        browserLoad();
+    end
+
+    function browserLoad()
+        % index and flags of the folder (flags only of the current analyses; missing ones: Compute flags)
+        if isempty(hBrw) || ~isvalid(hBrw.fig), return; end
+        res = hBrw.res;
+        hBrw.lf.Text = res;
+        hBrw.D = []; hBrw.missing = {}; hBrw.row = [];
+        hBrw.bc.Enable = 'off'; hBrw.bc.Text = 'Compute flags';
+        if ~isfile(fullfile(res, 'mda_index.csv'))
+            browserFilter();
+            hBrw.lm.Text = ['No mda_index.csv in this folder: choose the results folder of the watcher ' ...
+                '(MyoDishAnalysisWatch, mda-watch) with Folder ...'];
+            return;
+        end
+        if hBrw.remember, prefSet('lastResultsDir', res); end
+        hBrw.lm.Text = 'Reading the index and the flags ...'; drawnow;
+        try
+            X = MyoDishAnalysisWatch('index', res);
+            [T, missing] = MyoDishAnalysisWatch('flags', res, false);
+        catch ME
+            hBrw.lm.Text = ['Error: ' ME.message]; return;
+        end
+        hBrw.D = browserRows(X, T);
+        hBrw.missing = missing;
+        if ~isempty(missing), hBrw.bc.Enable = 'on'; hBrw.bc.Text = sprintf('Compute flags (%d)', numel(missing)); end
+        browserFilter();
+        hBrw.lm.Text = ['Double-click a row (or Open): the channel with the settings of its analysis (red flags: the ' ...
+            'window of the flags, otherwise the first 120 s of its analysis); a parallel recording that was not ' ...
+            'analysed: its main file at that time. Flags (as in the watcher report): red = check the analysis (I ' ...
+            'inverted signal, N noise, S large extra beats, D delay, F stimulus frequency), yellow = slice quality (C ' ...
+            'capture, X extra beats, A amplitude, T amplitude change, V amplitude CV); ? = not computed yet.'];
+    end
+
+    function browserCompute()
+        % flags of the recordings without current flags (from their result files; saved in mda_flags.csv)
+        n = numel(hBrw.missing);
+        if n == 0, return; end
+        wb = waitbar(0, sprintf('Flags of %d recording(s) ...', n), 'Name', 'Results');
+        try
+            MyoDishAnalysisWatch('flags', hBrw.res, true, @(k, m) waitbar(k / max(m, 1), wb));
+        catch ME
+            hBrw.lm.Text = ['Error: ' ME.message];
+        end
+        if ishandle(wb), close(wb); end
+        browserLoad();
+        figure(hBrw.fig);
+    end
+
+    function browserFilter()
+        % rows shown: list (all / with flags / red flags / not analysed) and search text (all words, case-insensitive)
+        if isempty(hBrw) || ~isvalid(hBrw.fig), return; end
+        D = hBrw.D;
+        if isempty(D)
+            hBrw.view = []; hBrw.ut.Data = cell(0, 8); hBrw.lc.Text = ''; return;
+        end
+        switch find(strcmp(hBrw.dd.Items, hBrw.dd.Value))
+            case 2, m = ismember(D.level, {'check', 'quality'});
+            case 3, m = strcmp(D.level, 'check');
+            case 4, m = ~strcmp(D.indexStatus, 'ok');
+            otherwise, m = true(height(D), 1);
+        end
+        words = strsplit(lower(strtrim(char(hBrw.ef.Value))));
+        words = words(~cellfun(@isempty, words));
+        for k = 1:numel(words), m = m & contains(D.hay, words{k}); end
+        hBrw.view = find(m);
+        hBrw.row = [];
+        V = D(hBrw.view, :);
+        hBrw.ut.Data = [V.file, numText(V.channel, '%d'), V.label, V.flags, numText(V.capture, '%.0f'), ...
+            numText(V.nDetected, '%d'), V.status, V.note];
+        try                                                %colours of the watcher report (R2019b+)
+            removeStyle(hBrw.ut);
+            r = find(strcmp(V.level, 'check'));
+            if ~isempty(r), addStyle(hBrw.ut, uistyle('BackgroundColor', [0.973 0.788 0.769]), 'row', r); end
+            r = find(strcmp(V.level, 'quality'));
+            if ~isempty(r), addStyle(hBrw.ut, uistyle('BackgroundColor', [0.984 0.910 0.651]), 'row', r); end
+            r = find(~strcmp(V.indexStatus, 'ok'));
+            if ~isempty(r), addStyle(hBrw.ut, uistyle('FontColor', [0.45 0.45 0.45]), 'row', r); end
+        catch
+        end
+        hBrw.lc.Text = sprintf('%d row(s), %d recording(s)', height(V), numel(unique(V.file)));
+    end
+
+    function browserSelect(evt)
+        if isempty(evt.Indices), hBrw.row = []; else, hBrw.row = evt.Indices(1,1); end
+    end
+
+    function browserDouble(evt)
+        try r = evt.InteractionInformation.Row; catch, r = []; end
+        if ~isempty(r), browserOpen(r(1)); end
+    end
+
+    function browserOpen(r)
+        % a row of the browser in the main window (results file <name>_info.csv of the recording)
+        if nargin < 1
+            r = hBrw.row;
+            try
+                if isempty(r) && isprop(hBrw.ut, 'Selection') && ~isempty(hBrw.ut.Selection), r = hBrw.ut.Selection(1,1); end
+            catch
+            end
+        end
+        if isempty(r) || isempty(hBrw.view) || r > numel(hBrw.view)
+            hBrw.lm.Text = 'Select a row first.'; return;
+        end
+        d = hBrw.D(hBrw.view(r), :);
+        file = d.file{1}; c = d.channel(1); win = []; pick = []; maxLen = 120;
+        if strcmp(d.indexStatus{1}, 'parallel') && ~isempty(d.main{1})   %not analysed: the main file at its window
+            file = d.main{1}; c = nan;
+            win = d.a(1) + [0 120];
+            if isfinite(d.b(1)), win(2) = min(win(2), d.b(1)); end
+        elseif ~strcmp(d.indexStatus{1}, 'ok')
+            hBrw.lm.Text = sprintf('%s was not analysed (%s): %s', d.file{1}, d.indexStatus{1}, d.note{1}); return;
+        elseif isfinite(d.from(1)) && isfinite(d.to(1))
+            win = [d.from(1) d.to(1)];
+        end
+        [~, n] = fileparts(strrep(file, '\', '/'));
+        dd = MyoDishAnalysisWatch('resultFolder', hBrw.res, file);   %folder of the series or flat (2026-10-15)
+        info = '';                                  %results: <name>.xlsx (2026-10-14) or <name>_info.csv; protocols only
+        for cand = {[n '.xlsx'], [n '_info.csv'], [n '_protocols.xlsx'], [n '_protocols_info.csv']}
+            x = fullfile(dd, cand{1});
+            if ~isfile(x), continue; end
+            if endsWith(x, '.xlsx')
+                try
+                    ok = ismember('info', sheetnames(x));
+                catch
+                    ok = false;
+                end
+                if ~ok, continue; end
+            end
+            info = x; break;
+        end
+        if isempty(info)
+            hBrw.lm.Text = sprintf('No results of %s in this folder (%s.xlsx, %s_info.csv).', file, n, n); return;
+        end
+        if isnan(c), goCh = []; if isempty(win), pick = 1; end, else, goCh = c; end
+        goWin = win;
+        figure(fig);
+        openResults(info, pick, maxLen);
+    end
+
+    function st = apiState()
+        % state of the main window for scripts / tests (2026-10-14)
+        st = struct('file', '', 'channel', ch, 'window', [nan nan], 'range', range, 'comments', comK(:)', ...
+            'hiT', hiT, 'flags', strtrim(char(hFlags.String)), 'status', statusText, 'mainRecording', mainRec, ...
+            'mainButton', char(hMain.Visible));
+        if ~isempty(H), st.file = H.file; end
+        if ~isempty(S), st.window = [S.fromSeconds S.toSeconds]; end
+        st.rangeFile = w2f(range);                      %analysed range(s), time in the file (2026-10-14)
+        st.segments = zeros(0, 2);                      %rocker stops side by side: the windows read (file time)
+        if ~isempty(sbs), st.segments = sbs.seg(:, 1:2); end
+        st.xlim = xlim(axMain);
+        st.margin = axMain.Position(1);
+    end
+
+    function Bw = apiBrowse(res, k)
+        % results browser for scripts / tests (the folder is not remembered); k: row k of the table opened
+        if nargin >= 1 && ~isempty(res), onBrowse(res, false); end
+        if nargin >= 2 && ~isempty(k), browserOpen(k); end
+        Bw = hBrw;
     end
 
     function onLoad(~, ~, w)
@@ -613,16 +971,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             return;
         end
         rfCtx = []; rfCache = {}; rfF0 = []; resOnly = [];
+        sbs = [];                                       %continuous window (not side-by-side rocker stops)
         winReq = [from to];
         hFrom.String = sprintf('%.1f', S.fromSeconds); hTo.String = sprintf('%.1f', S.toSeconds);
-        % channel list with the signal range (helps to find the channels with a slice)
-        lbl = cell(1, numel(S.dataChannels));
-        for k = 1:numel(S.dataChannels)
-            x = sort(S.force(k, :));
-            r = x(max(1, round(0.995 * numel(x)))) - x(max(1, round(0.005 * numel(x))));
-            lbl{k} = sprintf('Ch %d  (%.0f %sN)', S.dataChannels(k), r, mu);
-        end
-        hCh.String = lbl;
+        channelLabels();
         range = [S.fromSeconds S.toSeconds];
         manualOff = zeros(0,1);
         analyze(true);
@@ -639,7 +991,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         if ishandle(wb), close(wb); end
         plotOverview();
-        if ~isempty(O), status('Overview: drag = load a time window, wheel = zoom, shift + wheel = move, double-click = whole file.'); end
+        if ~isempty(O), status('Overview: drag = load a time window, wheel = zoom, shift + wheel = move, double-click = whole file, right click = select all.'); end
     end
 
     function goTo(c, w)
@@ -768,7 +1120,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         advMsg = uicontrol(hAdv, tx{:}, 'Position', [12 46 wid-24 46], 'String', ['Hover over a name for its meaning; ' ...
             'Guide: settings guide with figures. Apply or OK analyses the loaded window again (* = the window is read ' ...
             'again). Settings are saved with every export and can be loaded from a settings file or from results.'], ...
-            'FontSize', 8, 'ForegroundColor', [0 0 0.6]);
+            'FontSize', 8, 'ForegroundColor', uiBlueDark);
         bt = {'Style', 'pushbutton', 'Units', 'pixels', 'FontSize', 9};
         uicontrol(hAdv, bt{:}, 'Position', [12 10 80 28], 'String', 'Defaults', 'Callback', @(~,~) advShow(mda_options()), ...
             'TooltipString', 'show the default values (mda_options); Apply or OK uses them');
@@ -782,7 +1134,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'TooltipString', 'settings guide (PDF): the parameters and the markers of the force plot with figures');
         uicontrol(hAdv, bt{:}, 'Position', [wid-298 10 90 28], 'String', 'Cancel', 'Callback', @(~,~) close(hAdv));
         uicontrol(hAdv, bt{:}, 'Position', [wid-202 10 90 28], 'String', 'Apply', 'Callback', @(~,~) advApply(false));
-        uicontrol(hAdv, bt{:}, 'Position', [wid-106 10 90 28], 'String', 'OK', 'Callback', @(~,~) advApply(true));
+        uicontrol(hAdv, bt{:}, mainBtn{:}, 'Position', [wid-106 10 90 28], 'String', 'OK', 'Callback', @(~,~) advApply(true));
         advShow(opts);
     end
 
@@ -864,6 +1216,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         hRocker.Value = strcmp(opts.rocker, 'stopped');
         hStim.Value = strcmp(opts.beats, 'stimulated');
         if closeIt, close(hAdv); else, advShow(opts); end
+        advIndicator();
         msg = sprintf('Advanced settings: %s.', advChangedText());
         if isgraphics(advMsg), advMsg.String = msg; end
         if ~changed || isempty(H), status(msg); return; end
@@ -871,10 +1224,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             try H = mda_readMdd(H.file, [], [], opts); catch, end
         end
         if isempty(S), status(msg); return; end
-        if reread
+        if reread && ~isempty(sbs)                      %rocker stops side by side: the same stops read again
+            rf = w2f(range);
+            if loadSegments(sbs.seg(:, 1:2)), range = mergeRanges(f2w(rf)); analyze(false); end
+        elseif reread
             r0 = range;
             onLoad([], [], winReq);
-            if ~isempty(S) && r0(1) >= S.fromSeconds - 1e-9 && r0(2) <= S.toSeconds + 1e-9, range = r0; analyze(false); end
+            if ~isempty(S) && min(r0(:,1)) >= S.fromSeconds - 1e-9 && max(r0(:,2)) <= S.toSeconds + 1e-9, range = r0; analyze(false); end
         else
             analyze(false);
         end
@@ -943,12 +1299,41 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         nm = {};
         for r = 1:size(advD, 1)
             d = advD(r, :);
-            if isequaln(opts.(d{1}), d0.(d{1})), continue; end
+            if sameOpt(opts.(d{1}), d0.(d{1})), continue; end
             v = opts.(d{1});
             if ischar(v), vs = v; elseif islogical(v), vs = mat2str(v); else, vs = strtrim(sprintf('%g ', v)); end
             nm{end+1} = sprintf('%s = %s', d{1}, vs); %#ok<AGROW>
         end
         if isempty(nm), txt = 'defaults'; else, txt = ['changed: ' strjoin(nm, ', ')]; end
+    end
+
+    function onSizeChanged()
+        advIndicator();
+        fitMargins();
+    end
+
+    function advIndicator()
+        % 'Advanced ...' button (2026-10-14): number of advanced settings that differ from the defaults, in red; the
+        % longest text that fits the button ('Advanced (3 changed)', ... 'Adv. (3)'); tooltip: the changed settings
+        if isempty(hAdvBtn) || ~isgraphics(hAdvBtn), return; end
+        nm = advChanges(opts);
+        n = numel(nm);
+        if n == 0
+            if ~strcmp(hAdvBtn.String, 'Advanced ...'), hAdvBtn.String = 'Advanced ...'; end
+            hAdvBtn.ForegroundColor = [0 0 0];
+            hAdvBtn.TooltipString = [advTip0 '. All advanced settings have their default values.'];
+            return;
+        end
+        cand = {sprintf('Advanced (%d changed)', n), sprintf('Advanced (%d chgd)', n), sprintf('Adv. (%d chgd)', n), ...
+            sprintf('Adv. (%d)', n)};
+        room = hAdvBtn.Position(3) * 0.9;              %(normalized units: Extent as Position; 10 % for the bevel)
+        for k = 1:numel(cand)
+            if ~strcmp(hAdvBtn.String, cand{k}), hAdvBtn.String = cand{k}; end
+            if hAdvBtn.Extent(3) <= room, break; end
+        end
+        hAdvBtn.ForegroundColor = [0.75 0 0];
+        hAdvBtn.TooltipString = sprintf(['%d advanced setting(s) differ from the defaults (values as in settings ' ...
+            'files):\n%s\n\n%s'], n, strjoin(nm, newline), advTip0);
     end
 
     function [o, h] = apiAdvanced(chg)
@@ -990,6 +1375,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function zeroMenuText(cm)
+        hs = findobj(cm, 'Tag', 'rockerStops');         %only with 'only contractions with rocker at rest' (2026-10-14)
+        if ~isempty(hs)
+            if hRocker.Value, hs.Enable = 'on'; else, hs.Enable = 'off'; end
+        end
         h = findobj(cm, 'Tag', 'zeroHere');
         if isempty(h), return; end
         if any(isnan(altPt))
@@ -1061,7 +1450,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'Position', [0.7 0.47 0.29 0.035], 'Callback', @(~,~) drawOverlay());
         c3 = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'normalize (amplitude = 1)', 'Value', 0, 'Position', [0.7 0.435 0.29 0.035], ...
             'Callback', @(~,~) drawOverlay());
-        pG = uipanel(f2, 'Position', [0.7 0.215 0.29 0.21], 'Title', 'Selected group: legend, line, band', 'BackgroundColor', 'w', 'FontSize', 9);
+        pG = uipanel(f2, 'Position', [0.7 0.215 0.29 0.21], 'Title', 'Selected group: legend, line, band', 'BackgroundColor', 'w', 'FontSize', 9, pnlStyle{:});
         uicontrol(pG, d{:}, 'Style', 'text', 'String', 'legend', 'HorizontalAlignment', 'left', 'Position', [0.03 0.72 0.18 0.17]);
         gName = uicontrol(pG, d{:}, 'Style', 'edit', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.21 0.74 0.76 0.18], ...
             'Callback', @(s,~) setGroupStyle('name', s.String), 'TooltipString', 'legend text of the group (empty = automatic)');
@@ -1119,7 +1508,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % new overlay group of channel chX: segments of the filtered signal around the selected contractions
         % (peak - 1 s ... peak + 1.6 s) and the force of the analysed range (time course, t = 0 at its first stimulus)
         ok = true;
-        key = sprintf('%d|%.4f|%.4f|%d|%.6f', chX, range(1), range(2), numel(sel), sum(Bx.t_peak(sel)));
+        key = sprintf('%d|%s|%d|%.6f', chX, mat2str(range, 8), numel(sel), sum(Bx.t_peak(sel)));
         if ~isempty(ovG) && any(strcmp({ovG.key}, key))
             status('This selection is already in the overlay.'); return;
         end
@@ -1141,13 +1530,16 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         G.zero = Cx.zeroForce;
         G.pp = median(Bx.peakToPeakInterval(sel), 'omitnan');
         G.ch = chX; G.range = range;
-        st = Cx.stimTimes(Cx.stimTimes >= range(1) & Cx.stimTimes <= range(2));
+        sp = rngSpan(); G.span = w2f(sp);                 %first start / last end (time in the file)
+        st = Cx.stimTimes(inRng(Cx.stimTimes));
         G.noStim = isempty(st);
-        if G.noStim, G.t0 = range(1); else, G.t0 = st(1); end
-        inR = Cx.t >= range(1) & Cx.t <= range(2);
-        G.trT = reshape(Cx.t(inR), 1, []) - G.t0; G.trY = reshape(Cx.f(inR), 1, []);
-        lab = sprintf('Ch %d, %s - %s, n = %d', chX, fmtClock(range(1), H.totalSeconds >= 3600, true), ...
-            fmtClock(range(2), H.totalSeconds >= 3600, true), n);
+        if G.noStim, G.t0 = sp(1); else, G.t0 = st(1); end
+        inS = Cx.t >= sp(1) & Cx.t <= sp(2);              %time course: outside the range(s) NaN
+        y = reshape(Cx.f(inS), 1, []); y(~inRng(reshape(Cx.t(inS), 1, []))) = nan;
+        G.trT = reshape(Cx.t(inS), 1, []) - G.t0; G.trY = y;
+        lab = sprintf('Ch %d, %s - %s, n = %d', chX, fmtClock(G.span(1), H.totalSeconds >= 3600, true), ...
+            fmtClock(G.span(2), H.totalSeconds >= 3600, true), n);
+        if size(range, 1) > 1, lab = sprintf('%s (%d ranges)', lab, size(range, 1)); end
         r = find(Lbl.channel == chX, 1);
         if ~isempty(r)
             for nm = {'treatment','sliceID'}
@@ -1174,7 +1566,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         dlg = dialog('Name', 'Overlay: channels', 'Units', 'pixels', 'Position', [300 300 360 112 + 24 * nC]);
         uicontrol(dlg, 'Style', 'text', 'Units', 'pixels', 'Position', [10 62 + 24 * nC 340 42], 'HorizontalAlignment', 'left', ...
             'String', sprintf('Channels for the analysed range %s - %s (same settings; manual exclusions only in channel %d):', ...
-            fmtClock(range(1), hrs, true), fmtClock(range(2), hrs, true), ch));
+            fmtClock(w2f(min(range(:,1))), hrs, true), fmtClock(w2f(max(range(:,2))), hrs, true), ch));
         cb = gobjects(1, nC);
         for k = 1:nC
             cb(k) = uicontrol(dlg, 'Style', 'checkbox', 'Units', 'pixels', 'Position', [20 52 + 24 * (nC - k) 320 22], ...
@@ -1214,7 +1606,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 catch ME
                     notes{end+1} = sprintf('channel %d: %s', c, ME.message); continue; %#ok<AGROW>
                 end
-                s = Bx.included & Bx.t_peak >= range(1) & Bx.t_peak <= range(2);
+                s = Bx.included & inRng(Bx.t_peak);
                 if refExclude, s = s & ~deviatingOf(Bx, Cx); end
                 sel = find(s);
             end
@@ -1236,15 +1628,16 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         optsC.zeroForce = zeroUser(c);
         optsC.threshold = thrOf(c);
         Sa = S;
-        if opts.rockerFilter, Sa = rockerFiltered(optsC, c); end
+        if opts.rockerFilter && isempty(sbs), Sa = rockerFiltered(optsC, c); end
         [Bx, Cx] = mda_analyzeChannel(Sa, c, [], optsC);
+        [Bx, Cx] = cutJunctions(Bx, Cx);
     end
 
     function k = groupsOf(c)
         % overlay groups of channel c for the analysed range of the main window
         k = [];
         if isempty(ovG), return; end
-        k = find([ovG.ch] == c & arrayfun(@(G) all(abs(G.range - range) < 1e-6), ovG));
+        k = find([ovG.ch] == c & arrayfun(@(G) isequal(size(G.range), size(range)) && all(abs(G.range(:) - range(:)) < 1e-6), ovG));
     end
 
     function addAndDraw()
@@ -1426,13 +1819,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         hOv.lb.Value = selectedGroup();
         if mode == 3
             if all(isfinite(xr)) && xr(2) > xr(1), xlim(axO, xr); end
-            xline(axO, 0, '--', 'Color', [0 0.3 1], 'HandleVisibility', 'off');
+            xline(axO, 0, '--', 'Color', uiBlue, 'HandleVisibility', 'off');
             info = [{'time course: one trace per group (bands and single contractions: mean beat only)'}, info];
         else
             L = median([ovG.pp], 'omitnan'); if isnan(L), L = 1; end
             if mode == 1
                 xlim(axO, [-0.1, min(1.5, max(0.3, 0.95 * L))]);
-                xline(axO, 0, '--', 'Color', [0 0.3 1], 'HandleVisibility', 'off');
+                xline(axO, 0, '--', 'Color', uiBlue, 'HandleVisibility', 'off');
             else
                 xlim(axO, [-min(0.4, 0.45 * L), min(1.5, 0.9 * L)]);
             end
@@ -1522,7 +1915,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         als = {'aligned at the stimulus (t = 0)', 'aligned at the peak (t = 0)', 'time course of the range, t = 0 at the first stimulus'};
         if hOv.base.Value, b = 'diastolic force subtracted'; else, b = 'zero force subtracted (if known)'; end
         if hOv.norm.Value, u = 'normalized to the amplitude'; else, u = 'uN'; end
-        rg = reshape([ovG.range], 2, [])';
+        rg = vertcat(ovG.span);
         Tgrp = table((1:nG)', {ovG.label}', arrayfun(@legendName, (1:nG)', 'UniformOutput', false), [ovG.ch]', rg(:,1), rg(:,2), ...
             [ovG.t0]', nTr, repmat(als(mode), nG, 1), repmat({b}, nG, 1), repmat({u}, nG, 1), {ovG.band}', ...
             'VariableNames', {'group', 'label', 'legend', 'channel', 'from_s', 'to_s', 'firstStimulus_s', 'nTraces', 'alignment', ...
@@ -1564,7 +1957,16 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'Position', [110 90 1300 660], 'DeleteFcn', @(~,~) clearTrend());
         lightTheme(f2);
         d = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
-        axT = axes(f2, 'Position', [0.06 0.1 0.6 0.82]); box(axT, 'on');
+        axT = axes(f2, 'Position', [0.06 0.33 0.6 0.58]); box(axT, 'on');
+        % comments (2026-10-13): numbered markers in a strip above the plot (independent of the y zoom) and a list
+        % below it; click a marker or a line of the list (or point at a marker) to highlight the comment
+        axC = axes(f2, 'Position', [0.06 0.915 0.6 0.03], 'XTick', [], 'YTick', [], 'YLim', [0 1], 'Box', 'on', ...
+            'Color', [0.97 0.96 0.99], 'XColor', [0.7 0.7 0.7], 'YColor', [0.7 0.7 0.7], 'ButtonDownFcn', @(~,~) trCommentClick());
+        axC.Toolbar = []; disableDefaultInteractivity(axC);
+        uicontrol(f2, d{:}, 'Style', 'text', 'String', ['Comments of the log files (number = marker above the plot; ' ...
+            'click a marker or a line to highlight it)'], 'HorizontalAlignment', 'left', 'Position', [0.06 0.218 0.6 0.025], 'FontSize', 8);
+        lbC = uicontrol(f2, d{:}, 'Style', 'listbox', 'String', {}, 'Position', [0.06 0.015 0.6 0.2], 'FontSize', 9, ...
+            'FontName', 'FixedWidth', 'Callback', @(~,~) trCommentSelect());
         x0 = 0.69; w = 0.3;
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Files in a row (time 0 = start of the first file; order: start time in the log):', ...
             'HorizontalAlignment', 'left', 'Position', [x0 0.92 w 0.05], 'FontSize', 9);
@@ -1608,14 +2010,20 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         cA = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'all channels in one pass (switch channel without recalculation)', 'Value', 0, ...
             'Position', [x0 0.232 w 0.032], 'TooltipString', ['the file is read once for all channels (reading dominates the time); ' ...
             'about 1.5 x the time of one channel, afterwards every channel is shown at once']);
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Calculate', 'FontWeight', 'bold', 'Position', [x0 0.175 w 0.05], ...
+        uicontrol(f2, d{:}, mainBtn{:}, 'Style', 'pushbutton', 'String', 'Calculate', 'Position', [x0 0.175 w 0.05], ...
             'Callback', @(~,~) calcTrend(), 'TooltipString', ['detects the contractions in the files (threshold, filters, zero force and rocker ' ...
             'filter as in the main window); results are kept, so changing parameter / window only redraws']);
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [x0 0.125 0.145 0.042], 'Callback', @(~,~) saveTrendFigure());
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Export data ...', 'Position', [x0+0.155 0.125 0.145 0.042], 'Callback', @(~,~) exportTrend());
         tx = uicontrol(f2, d{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [x0 0.005 w 0.115], 'FontSize', 8);
         hTr = struct('fig', f2, 'ax', axT, 'lbF', lbF, 'pC', pC, 'pR', pR, 'pP', pP, 'eW', eW, 'pS', pS, 'cS', cS, 'cI', cI, ...
-            'cK', cK, 'cT', cT, 'tx', tx, 'pM', pM, 'eWs', eWs, 'eTm', eTm, 'tW', [tW1 tW2], 'cA', cA);
+            'cK', cK, 'cT', cT, 'tx', tx, 'pM', pM, 'eWs', eWs, 'eTm', eTm, 'tW', [tW1 tW2], 'cA', cA, 'axC', axC, 'lbC', lbC, ...
+            'cmtT', zeros(0, 1), 'cmtLab', {{}}, 'cmtLine', gobjects(0), 'cmtMk', gobjects(0), 'cmtNum', gobjects(0), 'cmtSel', 0);
+        try                                                %the strip is not zoomed / panned (x follows the plot)
+            setAllowAxesZoom(zoom(f2), axC, false); setAllowAxesPan(pan(f2), axC, false);
+        catch
+        end
+        set(f2, 'WindowButtonMotionFcn', @(~,~) trCommentHover());
         trSamplingControls();
         addlistener(axT, 'XLim', 'PostSet', @(~,~) trTicks());
         trListFiles(); drawTrend();
@@ -1680,7 +2088,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         [itC, vC] = trChannelItems();
         hTr.pC.String = itC; hTr.pC.Value = vC;
         calcTrend(false);
-        R = struct('data', trData, 'roll', hTr.roll, 'title', hTr.ax.Title.String, 'legend', {{}}, 'fig', hTr.fig);
+        R = struct('data', trData, 'roll', hTr.roll, 'title', hTr.axC.Title.String, 'legend', {{}}, 'fig', hTr.fig, ...
+            'comments', {hTr.lbC.String});
         lg = hTr.ax.Legend;
         if ~isempty(lg) && isvalid(lg), R.legend = lg.String; end
     end
@@ -1836,7 +2245,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         jobs = {};                                          %{file index, from, to}
         for k = 1:numel(trFiles)
             if onlyRange
-                if strcmp(trFiles(k).file, H.file) && all(~isnan(range)), jobs(end+1,:) = {k, range(1), range(2)}; end %#ok<AGROW>
+                spF = w2f(rngSpan());                       %(time in the file; several ranges: first start to last end)
+                if strcmp(trFiles(k).file, H.file) && all(isfinite(spF)), jobs(end+1,:) = {k, spF(1), spF(2)}; end %#ok<AGROW>
             else
                 jobs(end+1,:) = {k, 0, trFiles(k).dur}; %#ok<AGROW>
             end
@@ -1953,7 +2363,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function drawTrend()
         if isempty(hTr) || ~isvalid(hTr.fig), return; end
         axT = hTr.ax; cla(axT); hold(axT, 'on'); legend(axT, 'off');
-        if isempty(trFiles), title(axT, 'no file'); return; end
+        cla(hTr.axC); hold(hTr.axC, 'on'); hTr.lbC.String = {}; hTr.lbC.Value = 1; hTr.cmtSel = 0;
+        hTr.cmtT = zeros(0, 1); hTr.cmtLab = {}; hTr.cmtLine = gobjects(0); hTr.cmtMk = gobjects(0); hTr.cmtNum = gobjects(0);
+        if isempty(trFiles), title(hTr.axC, 'no file'); return; end
         k = hTr.pP.Value; pn = plotList{k,1}; unit = strrep(plotList{k,2}, 'u', mu);
         % files (light background) and gaps (grey)
         yl0 = [0 1];
@@ -2014,35 +2426,44 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 end
             end
         end
-        hTr.cmtTxt = gobjects(0);
-        if hTr.cK.Value                                     %comments (labels only when 30 or fewer are visible, see trTicks)
+        if hTr.cK.Value                                     %comments: numbered markers above the plot, list below (2026-10-13)
+            tc = zeros(0, 1); lab = {};
             for f = 1:numel(trFiles)
                 cm = trFiles(f).comments;
                 if isempty(cm) || height(cm) == 0, continue; end
-                tc = cm.t_file(cm.t_file >= 0 & cm.t_file <= trFiles(f).dur) + trFiles(f).offset;
-                lab = cm.text(cm.t_file >= 0 & cm.t_file <= trFiles(f).dur);
-                if isempty(tc), continue; end
-                xs = [tc tc nan(size(tc))]'; ys = repmat([yl0(1); yl0(2); nan], 1, numel(tc));
-                plot(axT, xs(:), ys(:), ':', 'Color', [0.55 0 0.75], 'HitTest', 'off');
-                lab = cellfun(@(c) [c(1:min(end, 35)) '  '], lab, 'UniformOutput', false);
-                ht = text(axT, tc, repmat(yl0(2), size(tc)), lab, 'Rotation', 90, 'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', ...
-                    'FontSize', 7, 'Color', [0.55 0 0.75], 'Interpreter', 'none', 'Clipping', 'on', 'HitTest', 'off');
-                hTr.cmtTxt = [hTr.cmtTxt; ht(:)];
+                in = cm.t_file >= 0 & cm.t_file <= trFiles(f).dur;
+                tc = [tc; cm.t_file(in) + trFiles(f).offset]; lab = [lab; cellstr(cm.text(in))]; %#ok<AGROW>
             end
+            [tc, o] = sort(tc); lab = lab(o);
+            n = numel(tc);
+            hTr.cmtT = tc; hTr.cmtLab = lab;
+            hTr.cmtLine = gobjects(n, 1); hTr.cmtMk = gobjects(n, 1); hTr.cmtNum = gobjects(n, 1);
+            yb = yl0 + [-100 100] * diff(yl0);               %vertical lines through any y zoom
+            for k = 1:n
+                hTr.cmtLine(k) = plot(axT, [tc(k) tc(k)], yb, ':', 'Color', [0.55 0 0.75], 'HitTest', 'off');
+                hTr.cmtMk(k) = plot(hTr.axC, tc(k), 0.18, 'v', 'MarkerSize', 4, 'Color', [0.55 0 0.75], ...
+                    'MarkerFaceColor', [0.55 0 0.75], 'HitTest', 'off');
+                hTr.cmtNum(k) = text(hTr.axC, tc(k), 0.62, sprintf('%d', k), 'HorizontalAlignment', 'center', ...
+                    'FontSize', 8, 'Color', [0.55 0 0.75], 'Clipping', 'on', 'HitTest', 'off');
+            end
+            hTr.lbC.String = arrayfun(@(k) sprintf('%3d  %s  %s', k, trCommentTime(tc(k)), lab{k}), (1:n)', ...
+                'UniformOutput', false);
+            if n == 0, hTr.lbC.String = {'(no comments)'}; end
         end
+        hTr.axC.YLim = [0 1];
         last = trFiles(end);
         xlim(axT, [0, max(1, last.offset + last.dur)]); ylim(axT, yl0);
         ylabel(axT, sprintf('%s (%s)', pn, unit), 'Interpreter', 'none');
         if ~isempty(hp), legend(axT, hp, nmL, 'Location', 'northeast', 'FontSize', 8); end
         if have && multi
-            title(axT, sprintf('Channels %s (%s), %d contractions (%d shown), %d file(s), sampling: %s', ...
+            title(hTr.axC, sprintf('Channels %s (%s), %d contractions (%d shown), %d file(s), sampling: %s', ...
                 strjoin(arrayfun(@num2str, trChans, 'UniformOutput', false), ', '), rollName, height(trData), nnz(I), ...
                 numel(trFiles), trSampling), 'FontWeight', 'normal', 'FontSize', 9);
         elseif have
-            title(axT, sprintf('Channel %d, %d contractions (%d shown), %d file(s), sampling: %s', trChans(1), height(trData), ...
+            title(hTr.axC, sprintf('Channel %d, %d contractions (%d shown), %d file(s), sampling: %s', trChans(1), height(trData), ...
                 nnz(I), numel(trFiles), trSampling), 'FontWeight', 'normal', 'FontSize', 9);
         else
-            title(axT, 'press Calculate (detects the contractions in the listed files)', 'FontWeight', 'normal', 'FontSize', 9);
+            title(hTr.axC, 'press Calculate (detects the contractions in the listed files)', 'FontWeight', 'normal', 'FontSize', 9);
         end
         grid(axT, 'on');
         trTicks();
@@ -2073,20 +2494,86 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             xlabel(axT, sprintf('time since the start of the first file (%s)', unit));
         end
         set(axT, 'XTick', tk, 'XTickLabel', tl);
-        if isfield(hTr, 'cmtTxt') && ~isempty(hTr.cmtTxt)          %comment labels: no overlapping labels
-            h = hTr.cmtTxt(isgraphics(hTr.cmtTxt));
-            if ~isempty(h)
-                p = arrayfun(@(x) x.Position(1), h);
-                [p, o] = sort(p); h = h(o);
-                u = axT.Units; axT.Units = 'pixels'; wPx = axT.Position(3); axT.Units = u;
-                minDx = 11 * diff(xl) / max(wPx, 1);            %about one text line (font 7) apart
-                show = false(size(p)); last = -inf;
-                for q = 1:numel(p)
-                    if p(q) >= xl(1) && p(q) <= xl(2) && p(q) - last >= minDx, show(q) = true; last = p(q); end
-                end
-                set(h(show), 'Visible', 'on'); set(h(~show), 'Visible', 'off');
+        hTr.axC.XLim = xl;                                  %comment strip follows the x axis of the plot
+        h = hTr.cmtNum;
+        if ~isempty(h) && all(isgraphics(h))                 %numbers of the markers: no overlapping numbers
+            p = hTr.cmtT;
+            u = axT.Units; axT.Units = 'pixels'; wPx = axT.Position(3); axT.Units = u;
+            show = false(size(p)); last = -inf;
+            for q = 1:numel(p)
+                minDx = (6 * numel(sprintf('%d', q)) + 4) * diff(xl) / max(wPx, 1);
+                if p(q) >= xl(1) && p(q) <= xl(2) && p(q) - last >= minDx, show(q) = true; last = p(q); end
             end
+            if hTr.cmtSel > 0, show(hTr.cmtSel) = true; end
+            set(h(show), 'Visible', 'on'); set(h(~show), 'Visible', 'off');
         end
+        if ~isempty(hTr.cmtT)                                %list: times in the current time format (clock / since start)
+            L = arrayfun(@(k) sprintf('%3d  %s  %s', k, trCommentTime(hTr.cmtT(k)), hTr.cmtLab{k}), ...
+                (1:numel(hTr.cmtT))', 'UniformOutput', false);
+            if ~isequal(L, hTr.lbC.String(:)), hTr.lbC.String = L; end
+        end
+    end
+
+    function s = trCommentTime(t)
+        % time of a comment as on the x axis: clock time or time since the start of the first file
+        if hTr.cT.Value && trFiles(1).startKnown
+            s = datestr(trFiles(1).start + t / 86400, 'dd.mm. HH:MM:SS');
+        else
+            s = fmtClock(t, true, true);
+        end
+    end
+
+    function trCommentMark(k, center)
+        % highlight comment k (0 = none): marker, number and line in the plot, line of the list
+        if isempty(hTr) || ~isvalid(hTr.fig) || isempty(hTr.cmtT), return; end
+        pu = [0.55 0 0.75];
+        if hTr.cmtSel > 0 && hTr.cmtSel <= numel(hTr.cmtT) && isgraphics(hTr.cmtLine(hTr.cmtSel))
+            j = hTr.cmtSel;
+            set(hTr.cmtLine(j), 'Color', pu, 'LineWidth', 0.5, 'LineStyle', ':');
+            set(hTr.cmtMk(j), 'Color', pu, 'MarkerFaceColor', pu, 'MarkerSize', 4);
+            set(hTr.cmtNum(j), 'Color', pu, 'FontWeight', 'normal');
+        end
+        hTr.cmtSel = k;
+        if k < 1 || k > numel(hTr.cmtT), trTicks(); return; end
+        set(hTr.cmtLine(k), 'Color', [0.85 0 0], 'LineWidth', 1.5, 'LineStyle', '-');
+        set(hTr.cmtMk(k), 'Color', [0.85 0 0], 'MarkerFaceColor', [0.85 0 0], 'MarkerSize', 7);
+        set(hTr.cmtNum(k), 'Color', [0.85 0 0], 'FontWeight', 'bold', 'Visible', 'on');
+        uistack(hTr.cmtNum(k), 'top');
+        hTr.lbC.Value = k;
+        xl = xlim(hTr.ax);
+        if center && (hTr.cmtT(k) < xl(1) || hTr.cmtT(k) > xl(2))    %outside the view: move the view to it
+            xlim(hTr.ax, hTr.cmtT(k) + [-0.5 0.5] * diff(xl));
+        end
+        trTicks();
+    end
+
+    function trCommentSelect()
+        % line of the comment list selected: highlight the comment in the plot
+        if isempty(hTr) || isempty(hTr.cmtT), return; end
+        trCommentMark(hTr.lbC.Value, true);
+    end
+
+    function k = trCommentAt(maxPx)
+        % comment marker nearest to the pointer in the comment strip (within maxPx pixels; 0 = none)
+        k = 0;
+        if isempty(hTr) || ~isvalid(hTr.fig) || isempty(hTr.cmtT), return; end
+        a = hTr.axC; cp = a.CurrentPoint; x = cp(1, 1); y = cp(1, 2);
+        xl = a.XLim;
+        if x < xl(1) || x > xl(2) || y < 0 || y > 1, return; end
+        u = a.Units; a.Units = 'pixels'; wPx = a.Position(3); a.Units = u;
+        [d, j] = min(abs(hTr.cmtT - x));
+        if d * wPx / diff(xl) <= maxPx, k = j; end
+    end
+
+    function trCommentClick()
+        k = trCommentAt(8);
+        if k > 0, trCommentMark(k, false); end
+    end
+
+    function trCommentHover()
+        % pointer on a comment marker: highlight it and its line in the list
+        k = trCommentAt(5);
+        if k > 0 && k ~= hTr.cmtSel, trCommentMark(k, false); end
     end
 
     function saveTrendFigure()
@@ -2098,7 +2585,24 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         try
             lg = hTr.ax.Legend;
             if ~isempty(lg) && isvalid(lg), c = copyobj([lg hTr.ax], f2); a = c(2); else, a = copyobj(hTr.ax, f2); end
-            a.Units = 'normalized'; a.Position = [0.08 0.11 0.88 0.82];
+            xl = xlim(hTr.ax);
+            k = find(hTr.cmtT >= xl(1) & hTr.cmtT <= xl(2));    %comments in the view: numbered markers and a list
+            wA = 0.88; if ~isempty(k), wA = 0.6; end
+            a.Units = 'normalized'; a.Position = [0.08 0.11 wA 0.76];
+            b = copyobj(hTr.axC, f2); b.Units = 'normalized'; b.Position = [0.08 0.875 wA 0.035];
+            set(b.Children, 'Visible', 'on');
+            for j = 1:numel(b.Children)                  %numbers: as in the window (no overlapping numbers)
+                if isa(b.Children(j), 'matlab.graphics.primitive.Text')
+                    q = str2double(b.Children(j).String);
+                    if ~isnan(q) && q <= numel(hTr.cmtNum), b.Children(j).Visible = hTr.cmtNum(q).Visible; end
+                end
+            end
+            if ~isempty(k)
+                L = arrayfun(@(q) sprintf('%d  %s  %s', q, trCommentTime(hTr.cmtT(q)), hTr.cmtLab{q}), k(:), 'UniformOutput', false);
+                if numel(L) > 45, L = [L(1:44); {sprintf('... and %d more', numel(L) - 44)}]; end
+                annotation(f2, 'textbox', [0.7 0.11 0.29 0.8], 'String', L, 'FontSize', 7, 'EdgeColor', 'none', ...
+                    'Interpreter', 'none', 'VerticalAlignment', 'top', 'FitBoxToText', 'off');
+            end
             saveFigureFile(f2, file);
             status(['Saved: ' file]);
         catch ME
@@ -2269,13 +2773,14 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         file = askFile('data', which);
         if isempty(file), return; end
         clk = @(t) datetime(H.recordingStart + t(:) / 86400, 'ConvertFrom', 'datenum', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS');
-        names = {}; tabs = {};
+        names = {}; tabs = {};                         %(times in the file; rocker stops side by side: mapped, w2f)
         switch which
             case 'force'
                 I = C.t >= xl(1) & C.t <= xl(2);
+                if ~isempty(sbs) && isfield(S, 'gapMask') && numel(S.gapMask) == numel(I), I = I & ~S.gapMask; end
                 t = C.t(I); t = t(:); f = C.f(I); f = f(:);
                 z = mda_zeroForce(S, ch, zeroUser(ch), t);
-                T = table(t, 'VariableNames', {'t_file_s'});
+                T = table(w2f(t), 'VariableNames', {'t_file_s'});
                 if relTime, T.t_window_s = t - S.fromSeconds; end
                 if ~any(isnan(z)), T.force_minus_zero_uN = f - z; else, T.force_signal_uN = f; end
                 if ~isempty(C.rockerArtifact), a = C.rockerArtifact(I); T.rockerArtifactSubtracted_uN = a(:); end
@@ -2289,19 +2794,20 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                     y = C.f(C.iPeaks(loc)); y = y(:);
                     zz = mda_zeroForce(S, ch, zeroUser(ch), B.t_peak(J));
                     if ~any(isnan(zz)), y = y - zz(:); end
-                    inR = B.t_peak >= range(1) & B.t_peak <= range(2); man = isManual(); sel = selected();
+                    inR = inRng(B.t_peak); man = isManual(); sel = selected();
                     st = repmat({'outside the analysed range'}, numel(J), 1);
                     st(inR(J) & ~B.included(J)) = {'excluded by filter'};
                     st(inR(J) & man(J)) = {'excluded by user'};
                     st(sel(J)) = {'selected'};
-                    Tc = table(B.t_peak(J), y, B.beatType(J), st, 'VariableNames', {'t_peak_s', 'peak_force_uN', 'beatType', 'status'});
-                    if ~isnan(H.recordingStart), Tc.clockTime = clk(B.t_peak(J)); end
+                    Tc = table(w2f(B.t_peak(J)), y, B.beatType(J), st, 'VariableNames', {'t_peak_s', 'peak_force_uN', 'beatType', 'status'});
+                    if ~isnan(H.recordingStart), Tc.clockTime = clk(Tc.t_peak_s); end
                     names{end+1} = 'contractions'; tabs{end+1} = Tc;
                 end
                 ts = C.stimTimes(C.stimTimes >= xl(1) & C.stimTimes <= xl(2));
-                names{end+1} = 'stimuli'; tabs{end+1} = table(ts(:), 'VariableNames', {'t_stim_s'});
+                names{end+1} = 'stimuli'; tabs{end+1} = table(w2f(ts(:)), 'VariableNames', {'t_stim_s'});
                 if ~isempty(LE) && height(LE) > 0
-                    cm = LE.isComment & LE.t_file >= xl(1) & LE.t_file <= xl(2);
+                    tw = f2w(LE.t_file);
+                    cm = LE.isComment & tw >= xl(1) & tw <= xl(2);
                     if any(cm)
                         names{end+1} = 'comments';
                         tabs{end+1} = table(LE.t_file(cm), LE.clockTime(cm), LE.text(cm), 'VariableNames', {'t_file_s', 'clockTime', 'comment'});
@@ -2311,7 +2817,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 [tS, cur, ok, ex, iv] = stimData();
                 I = tS >= xl(1) & tS <= xl(2);
                 if C.stimChannel == 0, cur(:) = nan; end    %external trigger pulses: no current
-                T = table(tS(I), cur(I), ok(I), ex(I), iv(I), 'VariableNames', ...
+                T = table(w2f(tS(I)), cur(I), ok(I), ex(I), iv(I), 'VariableNames', ...
                     {'t_file_s', 'current_mA', 'currentReached', 'extraPulse', 'intervalToPreviousPulse_ms'});
                 if relTime, T.t_window_s = T.t_file_s - S.fromSeconds; end
                 if ~isnan(H.recordingStart), T.clockTime = clk(T.t_file_s); end
@@ -2324,7 +2830,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 v = B.(plotList{k,1}); sel = selected();
                 J = B.t_peak >= xl(1) & B.t_peak <= xl(2);
                 vn = matlab.lang.makeValidName([plotList{k,1} '_' strrep(strrep(plotList{k,2}, '/', '_per_'), '*', 'x')]);
-                T = table(B.t_peak(J), v(J), sel(J), 'VariableNames', {'t_peak_s', vn, 'selected'});
+                T = table(w2f(B.t_peak(J)), v(J), sel(J), 'VariableNames', {'t_peak_s', vn, 'selected'});
                 if relTime, T.t_window_s = T.t_peak_s - S.fromSeconds; end
                 if ~isnan(H.recordingStart), T.clockTime = clk(T.t_peak_s); end
                 names{end+1} = plotList{k,1}; tabs{end+1} = T;
@@ -2365,6 +2871,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % export the data of the visible time range with the result of the filter and the settings
         f2 = [];
         if isempty(S) || isempty(C), status('Load a time window first.'); return; end
+        if ~isempty(sbs), status('Rocker artifact: not available for the rocker stops side by side (rocker at rest).'); return; end
         if ~any(S.rockerOn), status('Rocker artifact: the rocker does not move in this window.'); return; end
         optsC = opts; optsC.zeroForce = zeroUser(ch); optsC.threshold = thrOf(ch);
         try
@@ -2403,7 +2910,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         plot(a1, tx, before, 'Color', [0.7 0.7 0.7], 'LineWidth', 0.5);
         plot(a1, tx, after, 'k', 'LineWidth', 0.5);
-        plot(a2, tx, art, 'Color', [0 0.3 1], 'LineWidth', 0.8);
+        plot(a2, tx, art, 'Color', uiBlue, 'LineWidth', 0.8);
         if hasZ, yu = ['force - zero force (' mu 'N)']; else, yu = ['force (' mu 'N, sensor signal)']; end
         ylabel(a1, yu); ylabel(a2, ['rocker artifact (' mu 'N)']); xlabel(a2, xlab);
         legend(a1, {'rocker moving', 'before the rocker filter', 'after (analysed)'}, 'Location', 'northeast', 'Box', 'off');
@@ -2463,9 +2970,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         I.labels = Lbl;
         ep = ''; if ~isempty(EP), ep = EP.file; end
+        Rf = w2f(range);                                   %times in the file (side-by-side rocker stops)
         I.extra = {'createdBy', 'MyoDishAnalysisGUI'; 'channels', sprintf('%d', ch); ...
-            'loadedWindow_s', sprintf('%.15g %.15g', winReq); 'analysedRange_s', sprintf('%.15g %.15g', range); ...
+            'loadedWindow_s', sprintf('%.15g %.15g', winReq); 'analysedRange_s', rowsText(Rf); ...
             'epRecording', ep};
+        if ~isempty(sbs)                                   %rocker stops side by side: the windows read (2026-10-14)
+            I.extra(end+1, :) = {'segments_s', rowsText(sbs.seg(:, 1:2))};
+        end
         if isempty(I.notes), I.notes = {}; end
     end
 
@@ -2476,7 +2987,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         for k = 1:numel(c)
             if isdatetime(c{k}), c{k} = char(c{k}); end
         end
-        f2 = figure('Name', sprintf('Channel %d: contractions %.1f - %.1f s', ch, range(1), range(2)), 'Color', 'w', 'MenuBar', 'none');
+        f2 = figure('Name', sprintf('Channel %d: contractions, %s', ch, rangeText()), 'Color', 'w', 'MenuBar', 'none');
         lightTheme(f2);
         uitable(f2, 'Units', 'normalized', 'Position', [0 0 1 1], 'Data', c, 'ColumnName', T.Properties.VariableNames, 'RowName', []);
     end
@@ -2484,28 +2995,34 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function onExport(~, ~)
         if isempty(B), status('Nothing to export.'); return; end
         [~, n] = fileparts(H.file);
-        def = sprintf('%s_ch%d_%.0f-%.0fs.xlsx', n, ch, range(1), range(2));
+        sp = w2f(rngSpan());
+        def = sprintf('%s_ch%d_%.0f-%.0fs.xlsx', n, ch, sp(1), sp(2));
+        if size(range, 1) > 1, def = sprintf('%s_ch%d_%dranges_%.0f-%.0fs.xlsx', n, ch, size(range, 1), sp(1), sp(2)); end
         if ~isempty(apiFile)
             [pn, fn, fe] = fileparts(apiFile); fn = [fn fe]; apiFile = '';
         else
             [fn, pn] = uiputfile({'*.xlsx', 'Excel (*.xlsx)'; '*.csv', 'text (*.csv)'}, 'Export contractions', def);
             if isequal(fn, 0), return; end
         end
-        T = rangeTable();
-        Sm = summaryRow();
+        Tw = rangeTable();                              %(window time: pulses below)
+        T = rangeTable(true);                           %times in the file; several ranges: column range
+        Sm = summaryAll();
         info = guiInfo();
-        % analysis window (open the results again: same data window, range and threshold)
-        info.thresholds = table(1, ch, range(1), range(2), C.threshold, C.maxStimToPeak, winReq(1), winReq(2), ...
+        % analysis window (open the results again: same data window, range(s) and threshold)
+        Rf = w2f(range); nRg = size(range, 1);
+        info.thresholds = table((1:nRg)', repmat(ch, nRg, 1), Rf(:,1), Rf(:,2), repmat(C.threshold, nRg, 1), ...
+            repmat(C.maxStimToPeak, nRg, 1), repmat(winReq(1), nRg, 1), repmat(winReq(2), nRg, 1), ...
             'VariableNames', {'range','channel','from','to','threshold_uN','maxStimToPeak_s','windowFrom','windowTo'});
-        if opts.pulseTable && isfield(C, 'pulses') && istable(C.pulses) && height(C.pulses) > 0   %pulses of the range
-            Pr = C.pulses(C.pulses.t >= range(1) & C.pulses.t <= range(2), :);
-            [isP, locP] = ismember(Pr.t_peak, T.t_peak);
-            Pr.contraction(:) = nan; Pr.contraction(isP) = T.contraction(locP(isP));
-            info.pulses = [table(repmat({'range1'}, height(Pr), 1), 'VariableNames', {'range'}), Pr];
+        if opts.pulseTable && isfield(C, 'pulses') && istable(C.pulses) && height(C.pulses) > 0   %pulses of the range(s)
+            Pr = C.pulses(inRng(C.pulses.t), :);
+            [isP, locP] = ismember(Pr.t_peak, Tw.t_peak);
+            Pr.contraction(:) = nan; Pr.contraction(isP) = Tw.contraction(locP(isP));
+            lb = arrayfun(@(k) sprintf('range%d', k), max(1, rangeOf(Pr.t)), 'UniformOutput', false);
+            info.pulses = [table(lb(:), 'VariableNames', {'range'}), fileTimes(Pr)];
         end
         if ~isempty(C.rockerFilter)                     %result of the rocker filter (as MyoDishAnalysis)
             RF = C.rockerFilter;
-            info.rockerFilter = cell2table({'range1', ch, S.fromSeconds, S.toSeconds, RF.status, RF.f0, RF.artifactPP, ...
+            info.rockerFilter = cell2table({'range1', ch, winReq(1), winReq(2), RF.status, RF.f0, RF.artifactPP, ...
                 RF.r2, 100 * RF.correctedFraction, RF.message}, 'VariableNames', {'range','channel','from_s','to_s', ...
                 'status','rockerFrequency_Hz','artifact_uN_peakToPeak','artifactR2','corrected_percentOfRockerOnTime','message'});
         end
@@ -2520,7 +3037,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function onAllChannels(~, ~)
         if isempty(S), status('Load a time window first.'); return; end
         [~, n] = fileparts(H.file);
-        def = sprintf('%s_allChannels_%.0f-%.0fs.xlsx', n, range(1), range(2));
+        Rf = w2f(range);
+        def = sprintf('%s_allChannels_%.0f-%.0fs.xlsx', n, Rf(1,1), Rf(end,2));
         [fn, pn] = uiputfile({'*.xlsx', 'Excel (*.xlsx)'; '*.csv', 'text (*.csv)'}, 'All channels', def);
         if isequal(fn, 0), return; end
         status('Analysing all channels ...'); drawnow;
@@ -2529,10 +3047,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             optsAll.zeroForce = zeroUser(H.dataChannels);    %NaN = Offset of the log file
             optsAll.threshold = thrOf(H.dataChannels);       %NaN = auto
             rep = reportAll;                           %analysis report (2026-10-11)
-            MyoDishAnalysis(H.file, [], range(1), range(2), optsAll, 'output', fullfile(pn, fn), 'quiet', true, ...
-                'metadata', Lbl, 'report', rep);
-            status(sprintf('All channels written to %s%s (same settings, manual exclusions not applied).', fn, ...
-                repmat(' and the report (_report.pdf)', 1, rep)));
+            MyoDishAnalysis(H.file, [], Rf(:,1), Rf(:,2), optsAll, 'output', fullfile(pn, fn), 'quiet', true, ...
+                'metadata', Lbl, 'report', rep, 'pooled', size(Rf, 1) > 1);
+            more = '';
+            if size(Rf, 1) > 1, more = sprintf(', %d ranges each in its own data window + ''all ranges''', size(Rf, 1)); end
+            status(sprintf('All channels written to %s%s (same settings, manual exclusions not applied%s).', fn, ...
+                repmat(' and the report (_report.pdf)', 1, rep), more));
         catch ME
             status(['Error: ' ME.message]);
         end
@@ -2542,7 +3062,14 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if isempty(B), return; end
         Sm = summaryRow();
         [~, n, e] = fileparts(H.file);
-        lines = {sprintf('file\t%s', [n e]), sprintf('channel\t%d', ch), sprintf('range (s)\t%.2f\t%.2f', range(1), range(2)), ...
+        Rf = w2f(range);
+        if size(Rf, 1) == 1
+            rl = sprintf('range (s)\t%.2f\t%.2f', Rf(1), Rf(2));
+        else
+            rl = sprintf('ranges (s)\t%d\t%s', size(Rf, 1), strjoin(arrayfun(@(r) sprintf('%.2f-%.2f', Rf(r,1), Rf(r,2)), ...
+                (1:size(Rf, 1))', 'UniformOutput', false), '; '));
+        end
+        lines = {sprintf('file\t%s', [n e]), sprintf('channel\t%d', ch), rl, ...
             sprintf('n contractions\t%d', Sm.nContractions), ...
             sprintf('extra beats\t%d\tof %d contractions\t%.3g %%', Sm.nExtraBeats, Sm.nDetected, Sm.extraBeats_percent), ...
             sprintf('missed beats\t%d\tof %d stimuli\t%.3g %%', Sm.nMissedBeats, Sm.nStimuli, Sm.missedBeats_percent), ...
@@ -2596,9 +3123,17 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             startDragY(axY);
             return;
         end
+        if inAxes(axMain) && ~isempty(comT)                %click on a comment mark at the top of the force plot (2026-10-14)
+            cp = get(axMain, 'CurrentPoint'); yl = ylim(axMain);
+            [d, q] = min(abs(comT - cp(1,1)));
+            if cp(1,2) >= yl(2) - 0.12 * diff(yl) && d <= 0.006 * diff(xlim(axMain))
+                comMarkerClick(comK(q)); return;
+            end
+        end
         if inAxes(axMain) && ~isempty(S)
             x = clampX(axMain);
             if rbRange.Value
+                dragAdd = shiftDown || any(strcmp(fig.CurrentModifier, 'shift'));   %shift + drag: add a range (2026-10-14)
                 startDrag(axMain, x);
             else
                 toggleContraction(x);
@@ -2676,6 +3211,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % and analysed range): left / right = move it by half its length (ext / shift: extend it on that side), up /
         % down = zoom in / out (half / twice its length around the centre, at least 1 s); the window is read again
         if isempty(H) || isempty(S), status('Load a time window first.'); return; end
+        if ~isempty(sbs)
+            status(['Rocker stops side by side: load a window (From / To and Load, or drag in the overview) to return ' ...
+                'to the continuous view.']); return;
+        end
         loadWindow(navStep([S.fromSeconds S.toSeconds], key, ext, [0 H.totalSeconds], 1));
     end
 
@@ -2742,6 +3281,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             if ~isempty(hOv) && isvalid(hOv.fig), delete(hOv.fig); end
             if ~isempty(hPr) && isvalid(hPr.fig), delete(hPr.fig); end
             if ~isempty(hAdv) && isvalid(hAdv), delete(hAdv); end   %advanced settings (2026-10-10)
+            if ~isempty(hBrw) && isvalid(hBrw.fig), delete(hBrw.fig); end   %results browser (2026-10-14)
         catch
         end
     end
@@ -2800,7 +3340,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'Position', [x0+0.215 0.17 0.13 0.03], 'Callback', @(~,~) prTable(), 'TooltipString', ['protocol results: ' ...
             'max. captured frequency, FFR ratios, current thresholds, refractory periods (no peak / no response), ' ...
             'PRP at 15 / 30 / 60 s, per protocol and channel']);
-        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Analyse', 'FontWeight', 'bold', 'Position', [x0 0.11 w0 0.045], ...
+        uicontrol(f4, dd{:}, mainBtn{:}, 'Style', 'pushbutton', 'String', 'Analyse', 'Position', [x0 0.11 w0 0.045], ...
             'Callback', @(~,~) prAnalyse(), 'TooltipString', ['contractions of the ticked protocols and channels, grouped (threshold, ' ...
             'filters, zero force, rocker filter and labels as in the main window)']);
         uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [x0 0.06 0.17 0.04], 'Callback', @(~,~) prSaveFigure());
@@ -2834,8 +3374,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function prAddRange()
-        if any(isnan(range)), hPr.tx.String = 'Select a range in the main window first.'; return; end
-        hPr.tProt.Data = [hPr.tProt.Data; {true, 'manual', 'selected range', round(range(1), 2), round(range(2), 2), 'pacingFrequency', ''}];
+        if any(isnan(range(:))), hPr.tx.String = 'Select a range in the main window first.'; return; end
+        spF = w2f(rngSpan());                              %several ranges: first start to last end (time in the file)
+        hPr.tProt.Data = [hPr.tProt.Data; {true, 'manual', 'selected range', round(spF(1), 2), round(spF(2), 2), 'pacingFrequency', ''}];
     end
 
     function prRemove()
@@ -3040,12 +3581,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         cb = uicheckbox(g, 'Text', 'all log entries (events, settings)', 'ValueChangedFcn', @(~,~) filterComments());
         lbl = uilabel(g, 'Text', '');
         uibutton(g, 'Text', 'Go to', 'ButtonPushedFcn', @(~,~) gotoRow());
-        ut = uitable(g, 'RowName', {}, 'ColumnName', {'date / time', 'time in file', 't (s)', 'ch', 'code', 'text'}, ...
-            'ColumnWidth', {140, 80, 80, 35, 110, 'auto'}, 'CellSelectionCallback', @(~,evt) selectRow(evt));
+        ut = uitable(g, 'RowName', {}, 'ColumnName', {'#', 'date / time', 'time in file', 't (s)', 'ch', 'code', 'text'}, ...
+            'ColumnWidth', {34, 140, 80, 80, 35, 110, 'auto'}, 'CellSelectionCallback', @(~,evt) selectRow(evt));
+        try ut.SelectionType = 'row'; catch, end           %R2021b+
         ut.Layout.Row = 2; ut.Layout.Column = [1 5];
         if isprop(ut, 'DoubleClickedFcn'), ut.DoubleClickedFcn = @(~,evt) dblClickRow(evt); end   %R2021a+
-        hint = uilabel(g, 'Text', ['Double-click a row (or select it and press Go to): loads the data around it ' ...
-            '(window length = loaded window, at least 30 s). Comments are marked purple in the plots.'], 'FontColor', [0.3 0.3 0.3]);
+        hint = uilabel(g, 'Text', ['# = number in the force plot. Select a row: marked in the force plot; double-click ' ...
+            '(or Go to): loads the data around it (window length = loaded window, at least 30 s).'], 'FontColor', [0.3 0.3 0.3]);
         hint.Layout.Row = 3; hint.Layout.Column = [1 5];
         hCom = struct('fig', f2, 'ef', ef, 'cb', cb, 'lbl', lbl, 'ut', ut);
         filterComments();
@@ -3058,7 +3600,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if nargin < 1, q = hCom.ef.Value; end
         comRow = [];
         if isempty(LE) || height(LE) == 0
-            comView = []; hCom.ut.Data = cell(0, 6); return;
+            comView = []; hCom.ut.Data = cell(0, 7); return;
         end
         m = LE.isComment;
         if hCom.cb.Value, m = true(height(LE), 1); end
@@ -3070,10 +3612,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         comView = find(m);
         hrs = H.totalSeconds >= 3600;
-        D = cell(numel(comView), 6);
+        num = cumsum(LE.isComment);                    %number of the comment (force plot)
+        D = cell(numel(comView), 7);
         for k = 1:numel(comView)
             j = comView(k);
-            D(k,:) = {char(LE.clockTime(j)), fmtClock(LE.t_file(j), hrs, true), round(LE.t_file(j) * 10) / 10, ...
+            nk = ''; if LE.isComment(j), nk = sprintf('%d', num(j)); end
+            D(k,:) = {nk, char(LE.clockTime(j)), fmtClock(LE.t_file(j), hrs, true), round(LE.t_file(j) * 10) / 10, ...
                 LE.channel(j), LE.code{j}, LE.text{j}};
         end
         hCom.ut.Data = D;
@@ -3082,7 +3626,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function selectRow(evt)
-        if isempty(evt.Indices), comRow = []; else, comRow = evt.Indices(1,1); end
+        % a row of the comment window: its line in the force plot is marked (if it is in the loaded window)
+        if isempty(evt.Indices), comRow = []; return; end
+        comRow = evt.Indices(1,1);
+        if isempty(comView) || comRow > numel(comView) || isempty(S), return; end
+        t = LE.t_file(comView(comRow));
+        tw = f2w(t);
+        if tw >= S.fromSeconds && tw <= S.toSeconds, hiT = t; plotMain(false); end
     end
 
     function dblClickRow(evt)
@@ -3124,7 +3674,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         yl = ylim(ax);
         hoverHide();
         if ishandle(hDrag), delete(hDrag); end
-        hDrag = patch(ax, [x x x x], yl([1 1 2 2]), [0.2 0.5 1], 'FaceAlpha', 0.25, 'EdgeColor', [0.2 0.5 1], 'HitTest', 'off');
+        hDrag = patch(ax, [x x x x], yl([1 1 2 2]), uiBlue, 'FaceAlpha', 0.22, 'EdgeColor', uiBlue, 'HitTest', 'off');
         set(fig, 'WindowButtonMotionFcn', @(~,~) dragMove(ax), 'WindowButtonUpFcn', @(~,~) dragEnd(ax));
     end
 
@@ -3139,7 +3689,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         xl = xlim(ax);
         hoverHide();
         if ishandle(hDrag), delete(hDrag); end
-        hDrag = patch(ax, xl([1 2 2 1]), dragY0 * [1 1 1 1], [0.2 0.5 1], 'FaceAlpha', 0.25, 'EdgeColor', [0.2 0.5 1], ...
+        hDrag = patch(ax, xl([1 2 2 1]), dragY0 * [1 1 1 1], uiBlue, 'FaceAlpha', 0.22, 'EdgeColor', uiBlue, ...
             'HitTest', 'off', 'YLimInclude', 'off');
         set(fig, 'WindowButtonMotionFcn', @(~,~) dragMoveY(ax), 'WindowButtonUpFcn', @(~,~) dragEndY(ax));
     end
@@ -3172,7 +3722,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if abs(x - dragX0) < 0.003 * diff(xl), return; end      %a click, not a drag
         r = sort([dragX0 x]);
         if ax == axMain
-            range = r;
+            if dragAdd && all(isfinite(range(:))), range = mergeRanges([range; r]); else, range = r; end
+            dragAdd = false;
             refresh(false);
         else
             hFrom.String = sprintf('%.1f', r(1)); hTo.String = sprintf('%.1f', r(2));
@@ -3257,6 +3808,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             Hv(1).x = hvF.t(k); Hv(1).y = hvF.y(k);
             Hv(1).text = sprintf('%s %sN', fmtNum(Hv(1).y, 4), mu);
         end
+        if ~isempty(comT)                                   %comment line under the pointer (2026-10-14)
+            [d, q] = min(abs(comT - x));
+            if d <= 0.006 * diff(xlim(axMain))
+                Hv(1).text = sprintf('%s     comment %d: %s', Hv(1).text, comK(q), LE.text{comIdx(q)});
+            end
+        end
         if ~isempty(hvS) && ~isempty(hvS.t)
             [~, j] = min(abs(hvS.t - x));
             Hv(2).x = hvS.t(j); Hv(2).y = hvS.cur(j);
@@ -3289,7 +3846,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         tz = 0; tMax = H.totalSeconds;
         if relTime, tz = S.fromSeconds; tMax = S.toSeconds - tz; end
         dec = 3; if diff(xlim(axMain)) < 1, dec = 4; end
-        Hv(1).time = sprintf('t = %s (%.*f s)', fmtClock(x - tz, tMax >= 3600, true, dec), dec, x - tz);
+        xf = w2f(x);                                     %side-by-side rocker stops: time in the file
+        if isnan(xf), Hv(1).time = 't = (gap between rocker stops)';
+        else, Hv(1).time = sprintf('t = %s (%.*f s)', fmtClock(xf - tz, tMax >= 3600, true, dec), dec, xf - tz); end
         st = C.stimTimes(:);                                 %EP plots: stimuli of the EP recording (its time base)
         if (isequal(axH, axEPv) || isequal(axH, axEPs)) && ~isempty(EP) && ~isempty(EP.stimTimes), st = EP.stimTimes(:); end
         j = find(st <= x, 1, 'last');
@@ -3352,10 +3911,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             optsC.zeroForce = zeroUser(ch);                 %NaN = Offset of the log file
             optsC.threshold = thrOf(ch);
             Sa = S;
-            if opts.rockerFilter
+            if opts.rockerFilter && isempty(sbs)
                 [Sa, rfMsg] = rockerFiltered(optsC);
+            elseif opts.rockerFilter
+                rfMsg = 'Rocker filter: not used for the rocker stops side by side (rocker at rest).';
             end
             [B, C] = mda_analyzeChannel(Sa, ch, [], optsC);
+            [B, C] = cutJunctions(B, C);
             epMarks = [];
             if ~isempty(EP) && height(B) > 0                %AP parameters of every contraction (EP recording)
                 try
@@ -3429,7 +3991,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function sel = selected()
-        inR = B.t_peak >= range(1) & B.t_peak <= range(2);
+        inR = inRng(B.t_peak);
         sel = B.included & inR & ~isManual();
         if refExclude, sel = sel & ~deviating(); end
     end
@@ -3455,13 +4017,22 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         for k = 1:numel(manualOff), m = m | abs(B.t_peak - manualOff(k)) < 1e-6; end
     end
 
-    function T = rangeTable()
-        inR = B.t_peak >= range(1) & B.t_peak <= range(2);
+    function T = rangeTable(forExport)
+        % contractions of the analysed range(s); forExport: times in the file (side-by-side rocker stops) and with
+        % several ranges the column 'range' (number of the range, 2026-10-14)
+        if nargin < 1, forExport = false; end
+        inR = inRng(B.t_peak);
         man = isManual();
         T = B(inR, :);
         T.included = T.included & ~man(inR);
         T.manuallyExcluded = man(inR);
         T.contraction = (1:height(T))';
+        if forExport
+            T = fileTimes(T);
+            if size(range, 1) > 1
+                T = addvars(T, rangeOf(B.t_peak(inR)), 'After', 'channel', 'NewVariableNames', 'range');
+            end
+        end
         if ~isnan(H.recordingStart) && height(T) > 0
             clockTime = datetime(H.recordingStart + T.t_peak / 86400, 'ConvertFrom', 'datenum', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS');
             T = addvars(T, clockTime, 'After', 't_peak');
@@ -3475,20 +4046,226 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
     end
 
-    function Sm = summaryRow()
+    function Sm = summaryAll()
+        % summary for exports: one row; several ranges: 'all ranges' and one row per range (column range); times in the
+        % file (2026-10-14)
+        Sm = summaryRow();
+        if size(range, 1) > 1
+            P = cell(size(range, 1), 1);
+            for r = 1:size(range, 1), P{r} = summaryRow(range(r, :)); end
+            Sm = [Sm; vertcat(P{:})];
+            lb = [{'all ranges'}; arrayfun(@(r) sprintf('range%d', r), (1:size(range, 1))', 'UniformOutput', false)];
+            Sm = addvars(Sm, lb, 'After', 'file', 'NewVariableNames', 'range');
+        end
+        Sm = fileTimes(Sm);
+    end
+
+    function Sm = summaryRow(R)
+        % summary of the selected contractions over the analysed range(s) (all together), or over the ranges R
+        if nargin < 1, R = range; end
         Bs = B;
         Bs.included = selected();
-        Sm = mda_summarize(Bs, C, range, opts);
+        Sm = mda_summarize(Bs, C, R, opts);
         ap = ismember(C.channel, opts.arrhythmicChannels) || (opts.arrhythmicDetection && Sm.pacedSeconds > 0 && ...
             Sm.arrhythmicFraction > opts.arrhythmicMinFraction);   %as MyoDishAnalysis (2026-10-13)
         Sm = addvars(Sm, ap, 'After', 'pacedSeconds', 'NewVariableNames', 'arrhythmicPacing');
         [~, n, e] = fileparts(H.file);
         Sm = addvars(Sm, {[n e]}, 'Before', 1, 'NewVariableNames', 'file');
         if ~isnan(H.recordingStart)
-            Sm = mda_addLabels(Sm, Lbl, datetime(H.recordingStart + mean(range) / 86400, 'ConvertFrom', 'datenum'));
+            Sm = mda_addLabels(Sm, Lbl, datetime(H.recordingStart + mean(w2f([Sm.from Sm.to]), 'omitnan') / 86400, 'ConvertFrom', 'datenum'));
         else
             Sm = mda_addLabels(Sm, Lbl);
         end
+    end
+
+    % ---------------------------------------------------------------- several analysed ranges, rocker stops side by side (2026-10-14)
+    function tf = inRng(t, R)
+        % t within one of the analysed ranges (rows [from to] of range, or of R)
+        if nargin < 2, R = range; end
+        tf = false(size(t));
+        for r = 1:size(R, 1), tf = tf | (t >= R(r,1) & t <= R(r,2)); end
+    end
+
+    function k = rangeOf(t)
+        % number of the analysed range of each time t (0 = none)
+        k = zeros(size(t));
+        for r = size(range, 1):-1:1, k(t >= range(r,1) & t <= range(r,2)) = r; end
+    end
+
+    function sp = rngSpan()
+        % first start and last end of the analysed range(s)
+        sp = [min(range(:,1)) max(range(:,2))];
+    end
+
+    function txt = rangeText()
+        % analysed range(s) as text (times in the file)
+        hrs = ~isempty(H) && H.totalSeconds >= 3600;
+        tot = sum(diff(range, 1, 2));
+        if size(range, 1) == 1 && isempty(sbs)
+            txt = sprintf('Range %.2f - %.2f s (%.1f s)', range(1), range(2), diff(range));
+        else
+            f = w2f(range);
+            txt = sprintf('%d ranges, %.1f s in total (%s - %s)', size(range, 1), tot, fmtClock(f(1,1), hrs, true), ...
+                fmtClock(f(end,2), hrs, true));
+            if ~isempty(sbs), txt = sprintf('%s; %d rocker stops side by side', txt, size(sbs.seg, 1)); end
+        end
+    end
+
+    function t = w2f(t)
+        % time in the loaded window --> time in the file (side-by-side rocker stops: NaN in the gaps between them)
+        if isempty(sbs), return; end
+        t2 = nan(size(t));
+        for k = 1:size(sbs.seg, 1)
+            in = t >= sbs.seg(k,3) - 1e-9 & t <= sbs.seg(k,4) + 1e-9;
+            t2(in) = t(in) - sbs.shift(k);
+        end
+        t = t2;
+    end
+
+    function t = f2w(t)
+        % time in the file --> time in the loaded window (side-by-side rocker stops: NaN outside the loaded stops)
+        if isempty(sbs), return; end
+        t2 = nan(size(t));
+        for k = 1:size(sbs.seg, 1)
+            in = t >= sbs.seg(k,1) - 1e-9 & t <= sbs.seg(k,2) + 1e-9;
+            t2(in) = t(in) + sbs.shift(k);
+        end
+        t = t2;
+    end
+
+    function k = segOf(t)
+        % rocker stop (segment) of window times t (NaN in the gaps)
+        k = nan(size(t));
+        if isempty(sbs), k(:) = 1; return; end
+        for j = 1:size(sbs.seg, 1), k(t >= sbs.seg(j,3) - 1e-9 & t <= sbs.seg(j,4) + 1e-9) = j; end
+    end
+
+    function T = fileTimes(T)
+        % side-by-side rocker stops: time columns of a contraction or pulse table --> time in the file
+        if isempty(sbs) || isempty(T) || height(T) == 0, return; end
+        for nm = {'t_peak', 't_stim', 't_onset', 't_rise50', 't', 'from', 'to'}
+            if ismember(nm{1}, T.Properties.VariableNames) && isnumeric(T.(nm{1})), T.(nm{1}) = w2f(T.(nm{1})); end
+        end
+        if ismember('pulse', T.Properties.VariableNames) && ismember('t', T.Properties.VariableNames)
+            T.pulse = round(T.t * H.samplingRate);            %sample number in the file
+        end
+    end
+
+    function [Bx, Cx] = cutJunctions(Bx, Cx)
+        % side-by-side rocker stops: intervals to the previous contraction / stimulus across a gap are not intervals
+        if isempty(sbs) || isempty(Bx), return; end
+        sp = segOf(Bx.t_peak);
+        if ismember('peakToPeakInterval', Bx.Properties.VariableNames)
+            bad = segOf(Bx.t_peak - Bx.peakToPeakInterval) ~= sp;
+            Bx.peakToPeakInterval(bad) = nan; Bx.peakToPeakFrequency(bad) = nan;
+        end
+        if ismember('stimInterval', Bx.Properties.VariableNames)
+            bad = segOf(Bx.t_stim - Bx.stimInterval) ~= segOf(Bx.t_stim);
+            Bx.stimInterval(bad) = nan;
+            if ismember('stimFrequency', Bx.Properties.VariableNames), Bx.stimFrequency(bad) = nan; end
+        end
+        if isfield(Cx, 'stimInterval') && numel(Cx.stimInterval) == numel(Cx.stimTimes)
+            st = Cx.stimTimes(:); iv = Cx.stimInterval(:);
+            bad = segOf(st - iv) ~= segOf(st);
+            iv(bad) = nan; Cx.stimInterval = reshape(iv, size(Cx.stimInterval));
+        end
+        if isfield(Cx, 'pulses') && istable(Cx.pulses) && height(Cx.pulses) > 0
+            P = Cx.pulses;
+            for nm = {'couplingInterval_s', 'sinceOnset_s'}
+                if ismember(nm{1}, P.Properties.VariableNames)
+                    bad = segOf(P.t - P.(nm{1})) ~= segOf(P.t);
+                    P.(nm{1})(bad) = nan;
+                end
+            end
+            Cx.pulses = P;
+        end
+    end
+
+    function zoomToSelection()
+        % context menu of the force plot: time axis = the analysed range(s)
+        if isempty(S) || any(~isfinite(range(:))), status('Select a range first.'); return; end
+        sp = rngSpan(); m = max(0.02 * diff(sp), 0.2);
+        xlim(axMain, [max(S.fromSeconds, sp(1) - m), min(S.toSeconds, sp(2) + m)]);
+    end
+
+    function selectAll()
+        % context menu of the overview: load the range shown (whole file or the zoomed part), at most 4 h
+        if isempty(H), return; end
+        if isempty(O) || isempty(ovXL), w = [0 H.totalSeconds]; else, w = ovXL; end
+        if diff(w) > 4 * 3600
+            status(sprintf(['The range shown is %s long: at most 4 h can be loaded. Zoom the overview (mouse wheel) or ' ...
+                'use Trend ... / the command line version for long ranges.'], fmtDuration(diff(w))));
+            return;
+        end
+        hFrom.String = sprintf('%.3f', w(1)); hTo.String = sprintf('%.3f', w(2));
+        onLoad();
+    end
+
+    function selectRockerStops()
+        % context menu of the force plot ('only contractions with rocker at rest'): all rocker stops of the range shown in
+        % the overview are read (each +-2 s) and shown side by side, separated by dashed lines; analysed ranges = the
+        % stops (2026-10-14)
+        if isempty(H), return; end
+        if ~hRocker.Value, status('Tick ''only contractions with rocker at rest'' first.'); return; end
+        if isempty(O), onOverview(); if isempty(O), return; end, end
+        if ~isfield(O, 'rockerRest')
+            status('Overview without rocker intervals: press Overview again.'); return;
+        end
+        if isempty(ovXL), xr = [0 H.totalSeconds]; else, xr = ovXL; end
+        I = O.rockerRest;
+        I = I(I(:,2) > xr(1) & I(:,1) < xr(2), :);
+        I = [max(I(:,1), xr(1)), min(I(:,2), xr(2))];
+        I = I(I(:,2) - I(:,1) >= 1, :);                   %stops of at least 1 s
+        if isempty(I), status('No rocker stop (>= 1 s) in the range shown in the overview.'); return; end
+        if size(I, 1) == 1 && I(1,2) - I(1,1) > 0.98 * diff(xr)
+            status('The rocker does not move in the range shown in the overview: load it as a window instead.'); return;
+        end
+        pad = 2;
+        segs = [max(0, I(:,1) - pad), min(H.totalSeconds, I(:,2) + pad)];
+        segs = mergeRanges(segs);
+        if sum(diff(segs, 1, 2)) > 4 * 3600
+            status('The rocker stops of this range take more than 4 h: zoom the overview.'); return;
+        end
+        if size(segs, 1) > 2000, status(sprintf('%d rocker stops: zoom the overview (at most 2000).', size(segs, 1))); return; end
+        if loadSegments(segs), range = mergeRanges(f2w(I)); range = range(all(isfinite(range), 2), :); analyze(true); plotOverview(); end
+    end
+
+    function ok = loadSegments(segs)
+        % read the windows segs (rows [from to] s in the file) and show them side by side (sbs)
+        ok = false;
+        if ~isempty(EP), EP = []; epMarks = []; showEP(false); status('EP recording removed (not shown with rocker stops side by side).'); end
+        wb = [];
+        if size(segs, 1) > 20, wb = waitbar(0, sprintf('Reading %d rocker stops ...', size(segs, 1)), 'Name', 'Rocker stops'); end
+        Ss = cell(size(segs, 1), 1);
+        try
+            for k = 1:size(segs, 1)
+                Ss{k} = mda_readMdd(H, segs(k,1), segs(k,2), opts);
+                if ~isempty(wb) && mod(k, 10) == 0 && ishandle(wb), waitbar(k / size(segs, 1), wb); end
+            end
+        catch ME
+            if ishandle(wb), close(wb); end
+            status(['Error: ' ME.message]); return;
+        end
+        if ishandle(wb), close(wb); end
+        [S, sbs] = sideBySide(Ss, 1);
+        rfCtx = []; rfCache = {}; rfF0 = []; resOnly = []; manualOff = zeros(0,1);
+        winReq = [segs(1,1) segs(end,2)];
+        hFrom.String = sprintf('%.1f', winReq(1)); hTo.String = sprintf('%.1f', winReq(2));
+        channelLabels();
+        ok = true;
+    end
+
+    function channelLabels()
+        % channel list with the signal range of the loaded window (helps to find the channels with a slice)
+        lbl = cell(1, numel(S.dataChannels));
+        for k = 1:numel(S.dataChannels)
+            x = S.force(k, :);
+            if isfield(S, 'gapMask') && numel(S.gapMask) == numel(x), x = x(~S.gapMask); end
+            x = sort(x);
+            r = x(max(1, round(0.995 * numel(x)))) - x(max(1, round(0.005 * numel(x))));
+            lbl{k} = sprintf('Ch %d  (%.0f %sN)', S.dataChannels(k), r, mu);
+        end
+        hCh.String = lbl;
     end
 
     function refresh(resetX)
@@ -3497,6 +4274,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         plotParam();
         updateSummary();
         drawEP();
+        fitMargins();
     end
 
     function plotMain(resetX)
@@ -3509,27 +4287,34 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         z0 = mda_zeroForce(S, ch, zeroUser(ch), C.t);
         hasZero = ~any(isnan(z0));
         if hasZero, fy = C.f - z0; else, fy = C.f; end
+        if ~isempty(sbs) && isfield(S, 'gapMask') && numel(S.gapMask) == numel(fy), fy(S.gapMask) = nan; end   %between rocker stops
         hvF = struct('t', C.t(:), 'y', double(fy(:)));      %values at the mouse pointer
         showRaw = ~isempty(C.rockerArtifact) && any(C.rockerArtifact ~= 0);   %rocker filter: signal before
         if showRaw, fRaw = fy + C.rockerArtifact; else, fRaw = fy; end
         yl = [min([fy fRaw]) max([fy fRaw])];
+        if any(~isfinite(yl)), yl = [0 1]; end
         yl = yl + [-0.08 0.08] * max(1, diff(yl));
-        % analysed range
-        patch(axMain, range([1 2 2 1]), yl([1 1 2 2]), [1 0.96 0.75], 'EdgeColor', [0.85 0.7 0.2], 'HitTest', 'off');
-        % rocker moving (one patch object with one face per interval)
-        on = diff([false S.rockerOn false]);
-        s1 = find(on == 1); s2 = find(on == -1) - 1;
-        if ~isempty(s1)
-            patch(axMain, [S.t(s1); S.t(s2); S.t(s2); S.t(s1)], repmat(yl([1 1 2 2])', 1, numel(s1)), [0.55 0.55 0.55], ...
-                'FaceAlpha', 0.25, 'EdgeColor', 'none', 'HitTest', 'off');
+        [tCm, ~] = commentsInWindow();
+        if ~isempty(tCm)
+            yl(2) = yl(2) + 0.08 * diff(yl);               %room for the numbered comment marks above the data (2026-10-14)
         end
+        yl(2) = yl(2) + 0.035 * diff(yl);                  %room for the rocker bar at the top (2026-10-14)
+        barH = 0.025 * diff(yl);
+        % analysed range(s) (one face per range)
+        R = range(all(isfinite(range), 2), :);
+        if ~isempty(R)
+            patch(axMain, R(:, [1 2 2 1])', repmat(yl([1 1 2 2])', 1, size(R, 1)), [1 0.96 0.75], 'EdgeColor', [0.85 0.7 0.2], 'HitTest', 'off');
+        end
+        % rocker state: thin bar at the top, green = at rest, grey = moving (2026-10-14; before: grey background)
+        rockerBar(axMain, S.t, S.rockerOn, yl(2) - barH, yl(2));
         if showRaw, plot(axMain, C.t, fRaw, 'Color', [0.72 0.72 0.72], 'LineWidth', 0.5, 'HitTest', 'off'); end
         plot(axMain, C.t, fy, 'k', 'LineWidth', 0.5, 'HitTest', 'off');
+        breakLines(axMain, yl);                            %side-by-side rocker stops: dashed lines between them
         % stimuli
         st = C.stimTimes(C.stimTimes >= S.fromSeconds & C.stimTimes <= S.toSeconds);
         if ~isempty(st)
             xs = [st st nan(size(st))]'; ys = repmat([yl(1); yl(1) + 0.04 * diff(yl); nan], 1, numel(st));
-            plot(axMain, xs(:), ys(:), 'Color', [0 0.3 1], 'HitTest', 'off');
+            plot(axMain, xs(:), ys(:), 'Color', uiBlue, 'HitTest', 'off');
         end
         hasX = false;                                   %extra pulses (status channel bit 16; 2026-10-10): green
         if isfield(C, 'extraTimes') && ~isempty(C.extraTimes)
@@ -3545,7 +4330,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if ~isempty(B)
             [~, loc] = ismember(B.t_peak, C.peakTimes);
             y = fy(C.iPeaks(loc)); y = y(:);
-            inR = B.t_peak >= range(1) & B.t_peak <= range(2);
+            inR = inRng(B.t_peak);
             man = isManual();
             unc = B.included & inR & ~man & B.uncertain;    %uncertain (high sensitivity): orange
             sel = B.included & inR & ~man & ~B.uncertain;
@@ -3578,19 +4363,31 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             hasRes = ~isempty(ro);
             plot(axMain, ro, interp1(C.t, fy, ro), 'ko', 'MarkerSize', 10, 'LineWidth', 1.2, 'HitTest', 'off');
         end
-        % comments of the log file (purple; the one jumped to: solid)
+        % comments of the log file (purple dotted lines, the one selected / jumped to: solid): numbered markers at the
+        % top, numbers as in the comment window; point at a line: its text (top left); click a marker: the comment
+        % window shows it (2026-10-14)
+        comT = []; comTF = []; comK = []; comIdx = []; comNumH = gobjects(0);
         if ~isempty(LE) && height(LE) > 0
-            cm = find(LE.isComment & LE.t_file >= S.fromSeconds & LE.t_file <= S.toSeconds);
+            [tc, comK, cm] = commentsInWindow();         %window time (side by side: condensed), number, row of LE
             hasCom = ~isempty(cm);
             if ~isempty(cm)
-                tc = LE.t_file(cm);
-                xs = [tc tc nan(size(tc))]'; ys = repmat([yl(1); yl(2); nan], 1, numel(tc));
-                plot(axMain, xs(:), ys(:), ':', 'Color', [0.55 0 0.75], 'LineWidth', 1, 'HitTest', 'off');
-                lab = cellfun(@(c) [c(1:min(end, 45)) repmat('...', 1, numel(c) > 45) '  '], LE.text(cm), 'UniformOutput', false);
-                text(axMain, tc, repmat(yl(2), size(tc)), lab, 'Rotation', 90, 'HorizontalAlignment', 'right', ...
-                    'VerticalAlignment', 'bottom', 'FontSize', 7, 'Color', [0.55 0 0.75], 'Interpreter', 'none', 'Clipping', 'on', 'HitTest', 'off');
-                hi = abs(tc - hiT) < 1e-6;
-                if any(hi), plot(axMain, [tc(hi) tc(hi)]', repmat(yl(:), 1, nnz(hi)), '-', 'Color', [0.55 0 0.75], 'LineWidth', 2, 'HitTest', 'off'); end
+                pu = [0.55 0 0.75];
+                comT = tc; comTF = LE.t_file(cm); comIdx = cm;
+                yT = yl(2) - barH;                          %below the rocker bar
+                xs = [tc tc nan(size(tc))]'; ys = repmat([yl(1); yT; nan], 1, numel(tc));
+                plot(axMain, xs(:), ys(:), ':', 'Color', pu, 'LineWidth', 1, 'HitTest', 'off');
+                hi = abs(comTF - hiT) < 1e-6;
+                if any(hi), plot(axMain, [tc(hi) tc(hi)]', repmat([yl(1); yT], 1, nnz(hi)), '-', 'Color', pu, 'LineWidth', 2, 'HitTest', 'off'); end
+                yM = yT - 0.012 * diff(yl);
+                plot(axMain, tc(~hi), yM * ones(nnz(~hi), 1), 'v', 'Color', pu, 'MarkerFaceColor', pu, 'MarkerSize', 7, ...
+                    'LineStyle', 'none', 'HitTest', 'off', 'Tag', 'mdaComment');   %click: onMouseDown
+                if any(hi)
+                    plot(axMain, tc(hi), yM * ones(nnz(hi), 1), 'v', 'Color', [0.85 0 0], 'MarkerFaceColor', [0.85 0 0], ...
+                        'MarkerSize', 7, 'LineStyle', 'none', 'HitTest', 'off', 'Tag', 'mdaComment');
+                end
+                comNumH = text(axMain, tc, repmat(yT - 0.035 * diff(yl), size(tc)), ...
+                    arrayfun(@(k) sprintf('%d', k), comK, 'UniformOutput', false), 'HorizontalAlignment', 'center', ...
+                    'VerticalAlignment', 'top', 'FontSize', 8, 'Color', pu, 'Clipping', 'on', 'HitTest', 'off');
             end
         end
         ylim(axMain, yl);
@@ -3609,12 +4406,54 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 'raw', showRaw));
             ttl = sprintf('Channel %d', ch);
         else
-            ttl = sprintf('Channel %d   (red = selected, orange = uncertain, grey = excluded by filter, x = excluded by you, blue = stimuli, grey background = rocker moving, purple = comments)', ch);
+            ttl = sprintf('Channel %d   (red = selected, orange = uncertain, grey = excluded by filter, x = excluded by you, blue = stimuli, bar at the top: green = rocker at rest, grey = moving, purple = comments)', ch);
             if showRaw, ttl = strrep(ttl, 'purple = comments)', 'purple = comments, light grey = before rocker filter)'); end
             if hasX, ttl = strrep(ttl, ')', ', green = extra pulses / elicited by one)'); end
             if hasAmb, ttl = strrep(ttl, ')', ', diamond = ambiguous stimulus)'); end
         end
+        if ~isempty(sbs)
+            ttl = sprintf('%s   -   %d rocker stops side by side (dashed lines: time gaps)', ttl, size(sbs.seg, 1));
+        end
         title(axMain, ttl, 'FontWeight', 'normal', 'FontSize', 9);
+    end
+
+    function [tw, num, rows] = commentsInWindow()
+        % comments of the log file in the loaded window: window time (side by side: condensed), number (1..n of the
+        % file), row of LE
+        tw = []; num = []; rows = [];
+        if isempty(LE) || height(LE) == 0 || isempty(S), return; end
+        cAll = find(LE.isComment);
+        t = f2w(LE.t_file(cAll));
+        inW = t >= S.fromSeconds & t <= S.toSeconds;     %(NaN: outside the rocker stops)
+        tw = t(inW); num = find(inW); rows = cAll(inW);
+    end
+
+    function rockerBar(ax, t, on, y0, y1)
+        % rocker state as a thin bar from y0 to y1: green = at rest, grey = moving; gaps between side-by-side rocker
+        % stops left empty (2026-10-14)
+        if isempty(t), return; end
+        st = double(on(:)'); 
+        if ~isempty(sbs) && isfield(S, 'gapMask') && numel(S.gapMask) == numel(st), st(S.gapMask) = nan; end
+        cols = {[0.35 0.72 0.35], [0.62 0.62 0.62]};    %at rest, moving
+        dt2 = 0; if numel(t) > 1, dt2 = (t(2) - t(1)) / 2; end
+        for v = 0:1
+            m = st == v;
+            d = diff([false m false]);
+            a = find(d == 1); b = find(d == -1) - 1;
+            if isempty(a), continue; end
+            xa = t(a) - dt2; xb = t(b) + dt2;
+            patch(ax, [xa; xb; xb; xa], repmat([y0; y0; y1; y1], 1, numel(a)), cols{v + 1}, 'EdgeColor', 'none', ...
+                'HitTest', 'off', 'Tag', 'mdaRockerBar');
+        end
+    end
+
+    function breakLines(ax, yl)
+        % side-by-side rocker stops: dashed vertical lines between them (x-axis breaks)
+        if isempty(sbs) || isempty(sbs.breaks), return; end
+        if nargin < 2, yl = ylim(ax); end
+        x = sbs.breaks(:);
+        xs = [x x nan(size(x))]'; ys = repmat([yl(1); yl(2); nan], 1, numel(x));
+        plot(ax, xs(:), ys(:), '--', 'Color', [0.3 0.3 0.3], 'LineWidth', 0.9, 'HitTest', 'off', 'Tag', 'mdaBreak');
     end
 
     function forceLegend(has)
@@ -3629,9 +4468,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'line', {'Marker', 'o', 'Color', [0 0.6 0], 'MarkerSize', 13, 'LineWidth', 1.5}, 'elicited by an extra pulse', has.ex;
             'line', {'Marker', 'd', 'Color', [0 0 0], 'MarkerSize', 12, 'LineWidth', 0.8}, 'ambiguous stimulus assignment', has.amb;
             'line', {'Marker', 'o', 'Color', [0 0 0], 'MarkerSize', 10, 'LineWidth', 1.2}, 'only in the results file', has.res;
-            'line', {'LineStyle', '-', 'Color', [0 0.3 1]}, 'stimulus pulse', true;
+            'line', {'LineStyle', '-', 'Color', uiBlue}, 'stimulus pulse', true;
             'line', {'LineStyle', '-', 'Color', [0 0.6 0], 'LineWidth', 1.2}, 'extra pulse (status bit 16)', has.x;
-            'patch', {[0.55 0.55 0.55], 'FaceAlpha', 0.25, 'EdgeColor', 'none'}, 'rocker moving', true;
+            'patch', {[0.35 0.72 0.35], 'EdgeColor', 'none'}, 'rocker at rest (bar at the top)', true;
+            'patch', {[0.62 0.62 0.62], 'EdgeColor', 'none'}, 'rocker moving (bar at the top)', true;
             'patch', {[1 0.96 0.75], 'EdgeColor', [0.85 0.7 0.2]}, 'analysed range', true;
             'line', {'LineStyle', ':', 'Color', [0.55 0 0.75]}, 'comment of the log file', has.com;
             'line', {'LineStyle', '-', 'Color', [0.72 0.72 0.72]}, 'before the rocker filter', has.raw};
@@ -3689,10 +4529,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         plot(axPar, B.t_peak(sel & ~B.uncertain), v(sel & ~B.uncertain), '.', 'Color', [0.85 0 0], 'MarkerSize', 12);
         plot(axPar, B.t_peak(sel & B.uncertain), v(sel & B.uncertain), '.', 'Color', [1 0.55 0], 'MarkerSize', 12);
         if any(sel)                                        %mean of the selected contractions over the analysed range
-            plot(axPar, range, mean(v(sel), 'omitnan') * [1 1], '--', 'Color', [0.85 0 0], 'LineWidth', 1, 'HitTest', 'off');
+            xm = [range(:, 1:2) nan(size(range, 1), 1)]'; %(one line per range)
+            plot(axPar, xm(:), mean(v(sel), 'omitnan') * ones(numel(xm), 1), '--', 'Color', [0.85 0 0], 'LineWidth', 1, 'HitTest', 'off');
         end
         if endsWith(plotList{k,1}, '_pctRef'), yline(axPar, 100, ':', 'HitTest', 'off'); end   %reference = 100 %
         if endsWith(plotList{k,1}, '_dRef'), yline(axPar, 0, ':', 'HitTest', 'off'); end
+        breakLines(axPar);
         unit = strrep(plotList{k,2}, 'u', mu);
         ylabel(axPar, sprintf('%s (%s)', plotList{k,1}, unit), 'Interpreter', 'none');
         mainTicks();
@@ -3703,7 +4545,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function updateSummary()
         if isempty(B)
-            hTable.Data = {}; hCounts.String = ''; return;
+            hTable.Data = {}; hCounts.String = ''; hFlags.String = ''; return;
         end
         Sm = summaryRow();
         d = cell(size(PI, 1), 5);
@@ -3733,7 +4575,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         d(end+1,:) = {'uncertain extra', sprintf('%d', Sm.nExtraBeatsUncertain), '', Sm.nExtraBeats, 'count'};
         d(end+1,:) = {'uncertain missed', sprintf('%d', Sm.nMissedBeatsUncertain), '', Sm.nStimuli, 'count'};
         if isfield(C, 'referenceBeat') && ~isempty(C.referenceBeat)    %deviating from the reference beat (whole range)
-            inR = B.t_peak >= range(1) & B.t_peak <= range(2);
+            inR = inRng(B.t_peak);
             nCmp = sum(inR & ~isnan(B.refMaxDeviation_SD)); nDev = sum(inR & deviating());
             pDev = nan; if nCmp > 0, pDev = 100 * nDev / nCmp; end
             d(end+1,:) = {sprintf('deviating (> %g SD)', refThr), sprintf('%d', nDev), '', nCmp, 'count'};
@@ -3757,8 +4599,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         hTable.ColumnWidth = cw;
         hTable.Data = d;
         if C.stimChannel == 0, sSrc = ' (ext. trigger)'; else, sSrc = ''; end
-        txt = sprintf(['Range %.2f - %.2f s (%.1f s)\n%d of %d contractions selected (%d stimulated, %d extra)\n' ...
-            '%d stimuli%s (%.2f Hz), %d without contraction\n%s'], range(1), range(2), diff(range), Sm.nContractions, Sm.nDetected, ...
+        txt = sprintf(['%s\n%d of %d contractions selected (%d stimulated, %d extra)\n' ...
+            '%d stimuli%s (%.2f Hz), %d without contraction\n%s'], rangeText(), Sm.nContractions, Sm.nDetected, ...
             Sm.nStimulated, Sm.nExtraBeats, Sm.nStimuli, sSrc, Sm.stimFrequency, Sm.nMissedBeats, labelLine(Sm));
         %(the String of a text control reads back as a padded char matrix: append before assigning, not to hCounts.String)
         if ismember('nExtraPulses', Sm.Properties.VariableNames) && (Sm.nExtraPulses > 0 || Sm.nAmbiguous > 0)
@@ -3774,6 +4616,39 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 C.referenceBeat.align, refThr, w{refWhich}, repmat(', excl.', 1, refExclude));
         end
         hCounts.String = txt;
+        showFlags(Sm);
+    end
+
+    function showFlags(Sm)
+        % flags of the analysis report for the analysed range of this channel (as in the watcher report; 2026-10-14):
+        % red = check the analysis, orange = slice quality, grey = none / too few contractions; descriptions as tooltip
+        hFlags.String = ''; hFlags.TooltipString = '';
+        try
+            fl = mda_report('defaults');
+            Tc = rangeTable();
+            if ~ismember('channel', Tc.Properties.VariableNames), Tc.channel = repmat(ch, height(Tc), 1); end
+            if ~ismember('channel', Sm.Properties.VariableNames), Sm.channel = ch; end
+            R = mda_report('flags', Sm, Tc, [], fl);
+            R = R(R.channel == ch, :);
+            if isempty(R), return; end
+            switch R.level{1}
+                case 'check', col = [0.75 0 0];
+                case 'quality', col = [0.75 0.42 0];
+                otherwise, col = [0.45 0.45 0.45];
+            end
+            if isempty(R.flags{1})
+                if R.nDetected(1) < fl.minBeats, txt = sprintf('Flags: - (fewer than %d contractions)', fl.minBeats);
+                else, txt = 'Flags: none'; end
+            else
+                txt = sprintf('Flags %s: %s', R.flags{1}, strjoin([R.red(~cellfun(@isempty, R.red)) ...
+                    R.yellow(~cellfun(@isempty, R.yellow))], '; '));
+            end
+            hFlags.String = txt; hFlags.ForegroundColor = col;
+            hFlags.TooltipString = sprintf(['flags of the analysis report for this range (watcher report, mda_report):\n' ...
+                'red: check the analysis (I inverted signal, N noise, S large extra beats, D delay, F stimulus frequency)\n' ...
+                'orange: slice quality (C capture, X extra beats, A amplitude, T amplitude change, V amplitude CV)\n%s'], txt);
+        catch
+        end
     end
 
     function c = relCell(Sm, p)
@@ -3791,7 +4666,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     % ---------------------------------------------------------------- reference beat
     function setReference()
         if isempty(B), status('Load a time window first.'); return; end
-        rows = find(B.included & B.t_peak >= range(1) & B.t_peak <= range(2) & ~isManual());   %selection (without the deviation filter)
+        rows = find(B.included & inRng(B.t_peak) & ~isManual());   %selection (without the deviation filter)
         try
             R = mda_referenceBeat('create', C, B, rows, refAlign);   %(no stimulated contractions: upstroke)
         catch ME
@@ -3912,7 +4787,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         ylabel(hRef.a1, ['developed force (' mu 'N)']); ylabel(hRef.a2, 'force / amplitude');
         nDev = 0; nCmp = 0;
         if ~isempty(B) && isfield(C, 'referenceBeat') && ~isempty(C.referenceBeat)
-            inR = B.t_peak >= range(1) & B.t_peak <= range(2);
+            inR = inRng(B.t_peak);
             dv = find(deviating() & inR);
             nDev = numel(dv); nCmp = sum(inR & ~isnan(B.refMaxDeviation_SD));
             if hRef.cD.Value && ~isempty(dv)
@@ -3998,7 +4873,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function drawStim(axT)
         yyaxis(axT, 'right'); cla(axT); ylabel(axT, '');
         yyaxis(axT, 'left'); cla(axT); hold(axT, 'on'); ylabel(axT, '');
-        axT.YAxis(1).Color = [0.85 0 0]; axT.YAxis(2).Color = [0 0.3 1];
+        axT.YAxis(1).Color = [0.85 0 0]; axT.YAxis(2).Color = uiBlue;
         title(axT, '');
         if isempty(C) || isempty(S), return; end
         [tS, cur, ok, ex, iv] = stimData();
@@ -4016,10 +4891,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         if any(~ok), plot(axT, tS(~ok), cur(~ok), 'x', 'Color', [0.8 0 0.8], 'MarkerSize', 5, 'HitTest', 'off'); end
         ylim(axT, [0 max(1, max(cur)) * 1.35]);
+        breakLines(axT, [0 max(1, max(cur)) * 1.35]);
         if isExt, ylabel(axT, 'ext.'); set(axT, 'YTick', []); else, ylabel(axT, 'mA'); set(axT, 'YTickMode', 'auto'); end
         axT.YAxis(1).Exponent = 0;
         yyaxis(axT, 'right');
-        plot(axT, tS, iv, '.', 'Color', [0 0.3 1], 'MarkerSize', 9, 'HitTest', 'off');
+        plot(axT, tS, iv, '.', 'Color', uiBlue, 'MarkerSize', 9, 'HitTest', 'off');
         r = [min(iv) max(iv)];
         if all(isfinite(r)), ylim(axT, r + [-0.25 0.35] * max(diff(r), 0.2 * r(2) + 1)); end
         ylabel(axT, 'ms');
@@ -4043,6 +4919,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         ok = S.stim.currentReached(J); ok = ok(:);
         ex = S.stim.isExtraPulse(J); ex = ex(:);
         iv = [nan; diff(tS)] * 1000;
+        if ~isempty(sbs) && numel(tS) > 1                  %no interval across a gap between rocker stops
+            sg = segOf(tS); iv([false; diff(sg) ~= 0 | isnan(sg(2:end))]) = nan;
+        end
     end
 
     function stimLabels()
@@ -4069,7 +4948,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if ~isempty(w)
             yyaxis(axT, 'right');
             h2 = text(axT, tS(w), iv(w), arrayfun(@(k) sprintf('  %.0f', iv(k)), w, 'UniformOutput', false), ...
-                'Color', [0 0.3 1], 'FontSize', 7, 'HorizontalAlignment', 'left', 'VerticalAlignment', 'middle', 'HitTest', 'off');
+                'Color', uiBlue, 'FontSize', 7, 'HorizontalAlignment', 'left', 'VerticalAlignment', 'middle', 'HitTest', 'off');
             h = [h(:); h2(:)];
             yyaxis(axT, 'left');
         end
@@ -4104,8 +4983,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             patch(axOv, [x(s1)-hb; x(s2)+hb; x(s2)+hb; x(s1)-hb], repmat(yl([1 1 2 2])', 1, numel(s1)), [0.75 0.95 0.75], 'EdgeColor', 'none', 'HitTest', 'off');
         end
         patch(axOv, [x fliplr(x)], [hi fliplr(lo)], [0.2 0.2 0.2], 'EdgeColor', [0.2 0.2 0.2], 'HitTest', 'off');
-        if ~isempty(S)
-            patch(axOv, [S.fromSeconds S.toSeconds S.toSeconds S.fromSeconds], yl([1 1 2 2]), [0.2 0.5 1], 'FaceAlpha', 0.3, 'EdgeColor', [0 0.3 1], 'HitTest', 'off');
+        if ~isempty(S) && ~isempty(sbs)                     %side-by-side rocker stops: each loaded stop
+            q = sbs.seg(:, 1:2);
+            patch(axOv, q(:, [1 2 2 1])', repmat(yl([1 1 2 2])', 1, size(q, 1)), uiBlue, 'FaceAlpha', 0.35, 'EdgeColor', uiBlue, 'HitTest', 'off');
+        elseif ~isempty(S)
+            patch(axOv, [S.fromSeconds S.toSeconds S.toSeconds S.fromSeconds], yl([1 1 2 2]), uiBlue, 'FaceAlpha', 0.27, 'EdgeColor', uiBlue, 'HitTest', 'off');
         end
         if ~isempty(LE) && height(LE) > 0                  %comments: purple ticks at the top
             tc = LE.t_file(LE.isComment & LE.t_file >= 0 & LE.t_file <= O.totalSeconds);
@@ -4117,6 +4999,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         xlim(axOv, xlv); ylim(axOv, yl);
         set(axOv, 'YTickMode', 'auto');
         unit = ovTicks();
+        text(axOv, -0.03, -0.04, ['(' unit ')'], 'Units', 'normalized', 'HorizontalAlignment', 'right', ...
+            'VerticalAlignment', 'top', 'FontSize', 9, 'Color', [0.35 0.35 0.35], 'HitTest', 'off', 'Tag', 'mdaOvUnit');
         if ~any(isnan(zOv)), zs = 'force - zero force'; else, zs = 'sensor signal'; end
         hrs = O.totalSeconds >= 3600;
         if isempty(ovXL)
@@ -4126,6 +5010,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         title(axOv, sprintf('Channel %d, %s, time in %s, %s   (green = rocker at rest, blue = loaded window, purple = comments)', ...
             ch, ws, unit, zs), 'FontWeight', 'normal', 'FontSize', 9);
+        fitMargins();
     end
 
     function onRelTime(~, ~)
@@ -4142,6 +5027,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if relTime, tMax = S.toSeconds - t0; else, tMax = H.totalSeconds; end   %same format as the overview
         [tk, tl, unit] = timeTicks(xlim(axMain) - t0, tMax);
         tk = tk + t0;
+        if ~isempty(sbs)                                   %side-by-side rocker stops: labels = time in the file
+            tF = w2f(tk);
+            [~, tl] = timeTicks([0 1], max(tMax, max(tF(isfinite(tF)) - t0)), tF - t0, diff(xlim(axMain)));
+            tl(~isfinite(tF)) = {''};
+        end
         set(axMain, 'XTick', tk); set(axStim, 'XTick', tk);
         set(axPar, 'XTick', tk, 'XTickLabel', tl);
         if relTime
@@ -4150,10 +5040,47 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             xl = sprintf('time in file (%s)', unit);
         end
         xlabel(axPar, xl);
+        comNumbers();
         if epFrac > 0 && isvalid(axEPs)                  %EP traces below: same ticks, labels at the bottom
             set(axEPv, 'XTick', tk, 'XTickLabel', {}); set(axEPs, 'XTick', tk, 'XTickLabel', tl);
             xlabel(axEPs, xl);
         end
+    end
+
+    function comNumbers()
+        % numbers of the comments in the force plot: overlapping ones hidden (the selected one stays visible)
+        if isempty(comNumH) || ~all(isgraphics(comNumH)), return; end
+        set(axMain, 'Units', 'pixels'); w = axMain.Position(3); set(axMain, 'Units', 'normalized');
+        xl = xlim(axMain);
+        px = (comT - xl(1)) / diff(xl) * w;
+        last = -inf;
+        for q = 1:numel(comNumH)
+            minDx = 6 * numel(sprintf('%d', comK(q))) + 4;
+            sel = abs(comTF(q) - hiT) < 1e-6;
+            vis = px(q) >= 0 && px(q) <= w && (px(q) - last >= minDx || sel);
+            if vis, last = px(q); comNumH(q).Visible = 'on'; else, comNumH(q).Visible = 'off'; end
+        end
+    end
+
+    function comMarkerClick(k)
+        % comment number k (marker in the force plot): selected in the comment window (opened if needed) (2026-10-14)
+        if isempty(LE), return; end
+        cAll = find(LE.isComment);
+        if k < 1 || k > numel(cAll), return; end
+        j = cAll(k);
+        hiT = LE.t_file(j);
+        onComments();
+        if ~isempty(hCom) && isvalid(hCom.fig)
+            if ~ismember(j, comView), hCom.ef.Value = ''; filterComments(); end
+            r = find(comView == j, 1);
+            if ~isempty(r)
+                comRow = r;
+                try hCom.ut.Selection = r; catch, end
+                try scroll(hCom.ut, 'row', r); catch, end
+            end
+        end
+        plotMain(false);
+        status(sprintf('Comment %d (%s, %.1f s in the file): %s', k, char(LE.clockTime(j)), LE.t_file(j), LE.text{j}));
     end
 
     function unit = ovTicks()
@@ -4162,12 +5089,43 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if isempty(O) || ~isvalid(axOv), return; end
         [tk, tl, unit] = timeTicks(xlim(axOv), O.totalSeconds);
         set(axOv, 'XTick', tk, 'XTickLabel', tl);
+        hu = findobj(axOv, 'Tag', 'mdaOvUnit');            %time unit left of the time axis (2026-10-14)
+        if ~isempty(hu), set(hu, 'String', ['(' unit ')']); end
+    end
+
+    function fitMargins()
+        % left edge of the plots: room for the tick labels and y labels of all plots (with wide tick labels or the
+        % two-line label 'zero force unknown' they were cut off at the figure edge) and for the time unit of the
+        % overview; the right edge stays (2026-10-14)
+        if ~isvalid(fig) || ~isvalid(axMain), return; end
+        axs = [axOv axMain axStim axPar];
+        if epFrac > 0 && ~isempty(axEPv) && isvalid(axEPv), axs = [axs axEPv axEPs]; end
+        need = 0.05;
+        try
+            for a = axs
+                ti = a.TightInset; need = max(need, ti(1) + 0.008);
+            end
+            hu = findobj(axOv, 'Tag', 'mdaOvUnit');
+            if ~isempty(hu) && isgraphics(hu(1))
+                e = hu(1).Extent;                           %axes-normalized: left edge negative
+                need = max(need, -e(1) * axOv.Position(3) + 0.006);
+            end
+        catch
+            return;
+        end
+        need = min(need, 0.15);
+        if abs(axMain.Position(1) - need) < 0.002, return; end
+        x1 = axMain.Position(1) + axMain.Position(3);       %right edge of the plots
+        for a = axs
+            p = a.Position; a.Position = [need p(2) x1 - need p(4)];
+        end
+        hNavL.Position(1) = need;
     end
 
     function emptyPlots()
         cla(axMain); legend(axMain, 'off'); cla(axPar); plotStim();
         if epFrac > 0, cla(axEPv); cla(axEPs); end
-        hTable.Data = {}; hCounts.String = '';
+        hTable.Data = {}; hCounts.String = ''; hFlags.String = '';
         plotOverview();
         ylabel(axMain, ['force (' mu 'N)']); xlabel(axPar, 'time in file (s)');
     end
@@ -4187,6 +5145,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function openEP(epFile)
         if isempty(epFile), onCloseEP(); return; end
         if isempty(H), status('Open the .mdd file first: the EP recording is aligned to its stimuli.'); return; end
+        if ~isempty(sbs), status('EP recording: load a continuous window first (not with rocker stops side by side).'); return; end
         status('EP recording: reading and aligning the stimuli ...'); drawnow;
         try
             EPnew = mda_readEPRecording(epFile, H, opts, 'mddChannel', ch);
@@ -4461,6 +5420,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function status(msg)
         hStatus.String = msg;
+        statusText = msg;
     end
 
     function s = labelLine(Sm)
@@ -4488,7 +5448,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         ut = uitable(hLblFig, 'Units', 'normalized', 'Position', [0.01 0.2 0.98 0.78], 'RowName', [], 'FontSize', 10);
         showLabels(ut, Lbl);
         b = {'Style', 'pushbutton', 'Units', 'normalized', 'FontSize', 10};
-        uicontrol(hLblFig, b{:}, 'String', 'Apply and close', 'Position', [0.01 0.03 0.13 0.1], 'Callback', @(~,~) applyLabels(ut, true));
+        uicontrol(hLblFig, b{:}, mainBtn{:}, 'String', 'Apply and close', 'Position', [0.01 0.03 0.13 0.1], 'Callback', @(~,~) applyLabels(ut, true));
         uicontrol(hLblFig, b{:}, 'String', 'Apply', 'Position', [0.15 0.03 0.08 0.1], 'Callback', @(~,~) applyLabels(ut, false));
         uicontrol(hLblFig, b{:}, 'String', 'Fill empty cells from first row', 'Position', [0.24 0.03 0.18 0.1], 'Callback', @(~,~) fillDown(ut));
         uicontrol(hLblFig, b{:}, 'String', 'Load ...', 'Position', [0.43 0.03 0.08 0.1], 'Callback', @(~,~) loadLabels(ut));
@@ -4577,8 +5537,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         apiFile = file;
     end
 
-    function apiSetRange(r)
-        range = sort(r(1:2));
+    function apiSetRange(r, add)
+        % r = [from to] or several rows (s in the loaded window); add = true: added to the selection (shift + drag)
+        if nargin < 2, add = false; end
+        r = reshape(double(r), [], 2); r = sort(r, 2);
+        if add, range = mergeRanges([range; r]); else, range = mergeRanges(r); end
         refresh(false);
     end
 
@@ -4611,6 +5574,107 @@ end
 
 
 % =====================================================================================================
+function v = prefGet(name)
+% folder remembered between sessions (MATLAB preferences, group MyoDishAnalysis; 2026-10-14); '' if missing or gone
+v = '';
+try
+    if ispref('MyoDishAnalysis', name), v = getpref('MyoDishAnalysis', name); end
+catch
+end
+if ~ischar(v) || isempty(v) || ~isfolder(v), v = ''; end
+end
+
+
+function prefSet(name, value)
+try
+    setpref('MyoDishAnalysis', name, char(value));
+catch
+end
+end
+
+
+function setTip(h, txt)
+try h.Tooltip = txt; catch, end                       %UI components: R2019b+
+end
+
+
+function p = resultsRoot(p)
+% results folder of the watcher: p or the nearest parent folder with mda_index.csv (a subfolder was chosen)
+q = p;
+for k = 1:4
+    if isfile(fullfile(q, 'mda_index.csv')), p = q; return; end
+    up = fileparts(q);
+    if isempty(up) || strcmp(up, q), return; end
+    q = up;
+end
+end
+
+
+function c = numText(x, fmt)
+% numbers as text for a table ('' = NaN)
+c = repmat({''}, numel(x), 1);
+k = ~isnan(x(:));
+if any(k), c(k) = compose(fmt, x(k)); end
+end
+
+
+function D = browserRows(X, T)
+% rows of the results browser: one per analysed recording and channel with flags (mda_flags.csv), one per recording
+% without (not analysed: status and message of the index; flags not computed yet: '?'); sorted by recording and
+% channel. Columns main, a, b: main file of a parallel recording (index message 'parallel recording of ...')
+[inX, loc] = ismember(T.file, X.file);
+T = T(inX, :); loc = loc(inX);
+red = ~cellfun(@isempty, T.red); yel = ~cellfun(@isempty, T.yellow);
+note = T.red;
+note(red & yel) = strcat(T.red(red & yel), {'; '}, T.yellow(red & yel));
+note(~red & yel) = T.yellow(~red & yel);
+[pm, pa, pb, ptxt] = parallelOf(X.message);
+isP = ~cellfun(@isempty, ptxt(loc));                   %analysed parallel recordings: marked in the note
+note(isP) = strcat(ptxt(loc(isP)), {'; '}, note(isP));
+note(isP & ~(red | yel)) = ptxt(loc(isP & ~(red | yel)));
+few = strcmp(T.level, 'few beats') & cellfun(@isempty, note);
+note(few) = {'too few contractions for the flags'};
+A = table(T.file, T.channel, T.label, T.flags, T.capture_percent, T.nDetected, T.status, note, T.level, ...
+    X.status(loc), T.from, T.to, loc, 'VariableNames', {'file', 'channel', 'label', 'flags', 'capture', ...
+    'nDetected', 'status', 'note', 'level', 'indexStatus', 'from', 'to', 'row'});
+k = find(~ismember((1:height(X))', loc));               %recordings without flags
+n = numel(k);
+st = X.status(k);
+flg = repmat({''}, n, 1);
+nt = X.message(k);
+ok = strcmp(st, 'ok');
+flg(ok) = {'?'};
+nt(ok) = {'flags not computed yet (Compute flags)'};
+okP = ok & ~cellfun(@isempty, ptxt(k));
+nt(okP) = strcat(ptxt(k(okP)), {'; flags not computed yet (Compute flags)'});
+B = table(X.file(k), nan(n, 1), repmat({''}, n, 1), flg, nan(n, 1), nan(n, 1), st, nt, repmat({''}, n, 1), st, ...
+    nan(n, 1), nan(n, 1), k, 'VariableNames', A.Properties.VariableNames);
+D = [A; B];
+D.main = pm(D.row); D.a = pa(D.row); D.b = pb(D.row);
+D = sortrows(D, {'file', 'channel'});
+D.hay = repmat({''}, height(D), 1);
+if height(D) > 0, D.hay = lower(strcat(D.file, {' '}, D.label, {' '}, D.flags, {' '}, D.status, {' '}, D.note)); end
+end
+
+
+function [m, a, b, txt] = parallelOf(msg)
+% main file (relative path), window (s of the main file) and description of parallel recordings from the messages of
+% the index ('parallel recording of <main> (a-b s of the main file): ...'); '' / NaN for the others
+n = numel(msg);
+m = repmat({''}, n, 1); a = nan(n, 1); b = nan(n, 1); txt = repmat({''}, n, 1);
+for i = find(startsWith(msg, 'parallel recording of'))'
+    t = regexp(msg{i}, '^parallel recording of (.+?\.mdd) \(([^)]*) of the main file\)', 'tokens', 'once', 'ignorecase');
+    if numel(t) < 2, continue; end
+    w = sscanf(regexprep(t{2}, '^from |\s*s$', ''), '%f-%f');   %'a-b s' or 'from a s' (no nested tokens in MATLAB)
+    if isempty(w), continue; end
+    m{i} = t{1}; a(i) = w(1);
+    if numel(w) > 1, b(i) = w(2); end
+    [~, mn, me] = fileparts(t{1});
+    txt{i} = sprintf('parallel recording of %s', [mn me]);
+end
+end
+
+
 function closeDialog(src, ok)
 % OK / Cancel of a modal dialog: result in UserData, uiresume
 f = ancestor(src, 'figure');
@@ -4718,18 +5782,133 @@ else
 end
 end
 
-function [ticks, labels, unit] = timeTicks(xl, tMax)
+function R = parseRows(txt)
+% 'a b; c d; ...' (info table) --> rows [from to]
+R = zeros(0, 2);
+if isempty(txt), return; end
+if isnumeric(txt), R = reshape(double(txt), [], 2); return; end
+p = strsplit(char(txt), ';');
+for k = 1:numel(p)
+    v = sscanf(p{k}, '%f');
+    if numel(v) == 2, R(end+1, :) = v(:)'; end %#ok<AGROW>
+end
+end
+
+function txt = rowsText(R)
+% rows [from to] as text: 'a b' or 'a b; c d; ...' (info table)
+txt = strjoin(arrayfun(@(r) sprintf('%.15g %.15g', R(r,1), R(r,2)), (1:size(R, 1))', 'UniformOutput', false), '; ');
+end
+
+function R = mergeRanges(R)
+% rows [from to] sorted, overlapping or touching ones merged (2026-10-14)
+R = reshape(double(R), [], 2);
+R = R(all(isfinite(R), 2), :);
+if isempty(R), R = [nan nan]; return; end
+R = sortrows(sort(R, 2));
+k = 1;
+for r = 2:size(R, 1)
+    if R(r,1) <= R(k,2), R(k,2) = max(R(k,2), R(r,2)); else, k = k + 1; R(k,:) = R(r,:); end
+end
+R = R(1:k, :);
+end
+
+function [S, V] = sideBySide(Ss, gap)
+% windows Ss (cell of mda_readMdd outputs, sorted, not overlapping) one after another with gap s between them: one
+% window in condensed time (2026-10-14). Between two windows the force is a straight line (no peak), the rocker counts
+% as moving and S.gapMask is true. V.seg = [fileFrom fileTo winFrom winTo] per window, V.shift = winTime - fileTime,
+% V.breaks = window times of the dashed lines. Time-stamped log entries of the file facts (offset, calibration, pulse
+% settings, ...) are moved to window time: an entry between two windows applies from the start of the next one.
+S = Ss{1};
+dt = S.dt;
+nG = max(1, round(gap / dt));
+K = numel(Ss);
+V = struct('seg', zeros(K, 4), 'shift', zeros(K, 1), 'breaks', zeros(max(0, K - 1), 1));
+t = cell(1, 2 * K); F = t; R = t; G = t;
+stimF = fieldnames(S.stim);
+st = cell(K, numel(stimF));
+sp = cell(K, 1);
+tEnd = -inf; q = 0;
+for k = 1:K
+    Sk = Ss{k};
+    if k == 1, sh = 0; else, sh = tEnd + dt * (nG + 1) - Sk.t(1); end
+    if k > 1
+        w = (1:nG) / (nG + 1);
+        f0 = F{q}(:, end); f1 = Sk.force(:, 1);
+        q = q + 1;
+        t{q} = tEnd + dt * (1:nG); F{q} = f0 + (f1 - f0) .* w; R{q} = true(1, nG); G{q} = true(1, nG);
+        V.breaks(k - 1) = tEnd + dt * (nG + 1) / 2;
+    end
+    q = q + 1;
+    t{q} = Sk.t + sh; F{q} = Sk.force; R{q} = logical(Sk.rockerOn); G{q} = false(size(Sk.t));
+    V.seg(k, :) = [Sk.fromSeconds, Sk.toSeconds, Sk.fromSeconds + sh, Sk.toSeconds + sh];
+    V.shift(k) = sh;
+    tEnd = Sk.t(end) + sh;
+    for j = 1:numel(stimF)
+        v = Sk.stim.(stimF{j});
+        if strcmp(stimF{j}, 'time'), v = v + sh; end
+        st{k, j} = reshape(v, [], 1);
+    end
+    if isfield(Sk, 'spikes') && ~isempty(Sk.spikes)
+        x = Sk.spikes; x(:, 2:3) = x(:, 2:3) + sh; sp{k} = x;
+    end
+end
+S.t = [t{1:q}]; S.force = [F{1:q}]; S.rockerOn = [R{1:q}]; S.gapMask = [G{1:q}];
+S.fromSeconds = V.seg(1, 3); S.toSeconds = V.seg(end, 4);
+for j = 1:numel(stimF), S.stim.(stimF{j}) = vertcat(st{:, j}); end
+if isfield(S, 'spikes'), S.spikes = vertcat(zeros(0, 4), sp{:}); end
+for nm = {'offsetLog', 'calibrationLog', 'pulseSettingsLog', 'extraPulseLog', 'rockerSpeedLog'}
+    if isfield(S, nm{1}) && isnumeric(S.(nm{1})) && ~isempty(S.(nm{1}))
+        S.(nm{1})(:, 1) = stepTime(S.(nm{1})(:, 1), V);
+    end
+end
+for nm = {'extendedSensorIntervals', 'rockerLogIntervals'}
+    if isfield(S, nm{1}) && isnumeric(S.(nm{1})) && ~isempty(S.(nm{1})) && size(S.(nm{1}), 2) >= 2
+        S.(nm{1})(:, 1:2) = stepTime(S.(nm{1})(:, 1:2), V);
+    end
+end
+S.sideBySide = V;
+end
+
+function tw = stepTime(tf, V)
+% times of log entries (file) --> window time of sideBySide: within a window shifted with it; between two windows: the
+% start of the next one; before the first: unchanged; after the last: the same distance after its end
+tw = tf;
+for i = 1:numel(tf)
+    x = tf(i);
+    if ~isfinite(x), continue; end
+    k = find(x >= V.seg(:,1) & x <= V.seg(:,2), 1);
+    if ~isempty(k), tw(i) = x + V.shift(k); continue; end
+    k = find(V.seg(:,1) > x, 1);
+    if isempty(k)
+        tw(i) = V.seg(end,4) + (x - V.seg(end,2));
+    elseif k > 1
+        tw(i) = V.seg(k,3) - 1e-6;
+    end
+end
+end
+
+function [ticks, labels, unit] = timeTicks(xl, tMax, given, span)
 % tick positions (s) and labels for a time axis in seconds: h:mm (h:mm:ss when zoomed in) if the axis reaches 1 h or
-% more, otherwise m:ss; decimals of the seconds for steps < 1 s; about 4-10 ticks
-steps = [0.05 0.1 0.2 0.5 1 2 5 10 15 30 60 120 300 600 900 1800 3600 7200 10800 21600 43200];
-k = find(diff(xl) ./ steps <= 10, 1);
+% more, otherwise m:ss; from 2 days 'd h:mm' (steps of days: 'd'; 2026-10-14); decimals of the seconds for steps
+% < 1 s; about 4-10 ticks. given (optional): labels for these times instead (side-by-side rocker stops: the times in
+% the file of the ticks of the condensed axis), the step from span (s shown)
+steps = [0.05 0.1 0.2 0.5 1 2 5 10 15 30 60 120 300 600 900 1800 3600 7200 10800 21600 43200 86400 172800 432000 864000];
+if nargin < 4 || isempty(span), span = diff(xl); end
+k = find(span ./ steps <= 10, 1);
 if isempty(k), k = numel(steps); end
 st = steps(k);
-ticks = (ceil(xl(1) / st) : floor(xl(2) / st)) * st;
-hrs = max(abs(tMax), max(abs(xl))) >= 3600;
+if nargin < 3 || isempty(given), ticks = (ceil(xl(1) / st) : floor(xl(2) / st)) * st; else, ticks = given(:)'; end
+tAll = [abs(tMax), abs(xl(:))', abs(ticks(isfinite(ticks)))];
+hrs = max(tAll) >= 3600;
+days = max(tAll) >= 2 * 86400;
 withSec = st < 60 || ~hrs;
 dec = 0;
 if st < 0.1, dec = 2; elseif st < 1, dec = 1; end
+if days
+    labels = arrayfun(@(t) fmtDays(t, st, withSec, dec), ticks, 'UniformOutput', false);
+    if st >= 86400, unit = 'days'; elseif withSec, unit = 'd h:mm:ss'; else, unit = 'd h:mm'; end
+    return;
+end
 labels = arrayfun(@(t) fmtClock(t, hrs, withSec, dec), ticks, 'UniformOutput', false);
 if ~hrs
     unit = 'm:ss';
@@ -4738,6 +5917,19 @@ elseif withSec
 else
     unit = 'h:mm';
 end
+end
+
+function s = fmtDays(t, st, withSec, dec)
+% seconds --> 'n d' (whole days, steps of days) or 'n d h:mm(:ss)' (time axes from 2 days, 2026-10-14)
+if ~isfinite(t), s = ''; return; end
+neg = t < 0; t = abs(t);
+d = floor(t / 86400 + 1e-9); r = max(0, t - 86400 * d);
+if st >= 86400 && r < 0.5
+    s = sprintf('%d d', d);
+else
+    s = sprintf('%d d %s', d, fmtClock(r, true, withSec, dec));
+end
+if neg, s = ['-' s]; end
 end
 
 function s = fmtClock(t, hrs, withSec, dec)
@@ -4756,14 +5948,19 @@ end
 
 function t = helpText()
 P = mda_parameters();
-t = [{'Comments ...: searchable list of the comments in the log file (date / time, time in the file, text; option: all log entries). Double-click a row (or Go to) to load the data around it. Comments are marked purple in the plots.', ...
+t = [{'Open ...: a recording (.mdd) or results of an analysis (.xlsx, <name>_info.csv, ...; see below). The folder is remembered. A recording opens with its first 120 s loaded and analysed (From / To).', ...
+      'Results ...: results browser of a results folder of the watcher (mda_index.csv): one row per recording and channel with the flags of the watcher report (red = check the analysis, yellow = slice quality; list: all / with flags / red flags / not analysed; search). Double-click a row (or Open): the channel with the settings of its analysis (red flags: the window of the flags, otherwise the first 120 s). Compute flags: for results of older watcher versions. The last folder opens again directly (Folder ... = another one).', ...
+      'Main file (button next to the file name): the open file is a parallel recording (e.g. schedule file or snapshot started from the main recording); opens the main file at the window shown, same channel.', ...
+      'Flags (grey line above the table): flags of the watcher report for the analysed range of the channel (red = check the analysis: I inverted signal, N noise, S large extra beats, D delay, F stimulus frequency; orange = slice quality: C capture, X extra beats, A amplitude, T amplitude change, V amplitude CV).', ...
+      '', ...
+      'Comments ...: searchable list of the comments in the log file (# = number in the force plot, date / time, time in the file, text; option: all log entries). Select a row: the comment is highlighted in the force plot; double-click (or Go to): loads the data around it. Force plot: comments as numbered purple marks at the top (pointer on a mark: its text; click: highlighted and selected in the list).', ...
       '', ...
       'Overview: min/max of the selected channel over the whole recording (green = rocker at rest). Drag in it to load a time window (or type From/To and press Load).', ...
       '', ...
-      'Force plot: red = selected contractions, orange = uncertain contractions (high sensitivity: neither locked to the stimuli nor large compared with the other contractions; not counted with high specificity), grey = excluded by the filters (rocker / stimulated only), x = excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16: pre-pulses, CCM pulses, ...), green rings = contractions elicited by an extra pulse, black diamonds = ambiguous stimulus assignment, grey background = rocker moving, yellow = analysed range.', ...
-      'Advanced ...: all parameters of the method that are based on assumptions or experience, one tab per part (stimulus assignment / onset gate, detection, noise and artifact rules, rocker rules, signal and spike removal, rocker filter, export). Hover over a name for its meaning; Guide = settings guide (PDF) with figures; Defaults = mda_options(); Apply / OK analyse the window again (* = the window is read again). Save settings ... / Load settings ...: settings file (.csv; also results of an analysis); the settings are saved with every export (info table).', ...
+      'Force plot: red = selected contractions, orange = uncertain contractions (high sensitivity: neither locked to the stimuli nor large compared with the other contractions; not counted with high specificity), grey = excluded by the filters (rocker / stimulated only), x = excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16: pre-pulses, CCM pulses, ...), green rings = contractions elicited by an extra pulse, black diamonds = ambiguous stimulus assignment, bar at the top = rocker state (green = at rest, grey = moving), yellow = analysed range(s).', ...
+      'Advanced ...: all parameters of the method that are based on assumptions or experience, one tab per part (stimulus assignment / onset gate, detection, noise and artifact rules, rocker rules, signal and spike removal, rocker filter, export). Hover over a name for its meaning; Guide = settings guide (PDF) with figures; Defaults = mda_options(); Apply / OK analyse the window again (* = the window is read again). Save settings ... / Load settings ...: settings file (.csv; also results of an analysis); the settings are saved with every export (info table). Changed settings: the button shows their number in red (e.g. Advanced (3 changed), shortened if it does not fit: Adv. (3 chgd)); its tooltip lists them with their defaults.', ...
       'Legend of the force plot: menu View or right click in the force plot (it can be dragged).', ...
-      'Cursor in the force plot: "drag = select time range" or "click = exclude / include contraction". Zoom/pan: mouse wheel or figure toolbar (switch the tool off afterwards).', ...
+      'Cursor in the force plot: "drag = select time range" (shift + drag: add a range; several ranges are pooled, exports add one row per range) or "click = exclude / include contraction". Zoom/pan: mouse wheel or figure toolbar (switch the tool off afterwards). Right click: Zoom to the selection; Select all rocker stops of the overview range (with "only contractions with rocker at rest"): every rocker stop of the range shown in the overview side by side (dashed lines = time gaps). Overview, right click: Select all (load the range shown, at most 4 h).', ...
       'Mouse pointer over the force, stimulus, parameter or EP plots: a dashed line and a marker on the curve; the value at that time is shown small in the top left corner of every plot (force; stimulus pulse nearest to it: current and interval; lower plot: parameter of the nearest contraction; EP signal and stimulation). The plot under the pointer also shows the time and the time since the last stimulus.', ...
       'Arrow keys (click into a plot first) and the buttons under the force plot change the loaded window (= blue selection in the overview and analysed range; read again): left / right = move it by half its length, shift + left / right (shift + click) = extend it by half its length on that side, up / down (middle buttons) = zoom in / out (half / twice its length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed overview moves along. The mouse wheel zooms only the display.', ...
       '', ...
@@ -4773,7 +5970,7 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       '', ...
       'Save / Export (menu or right click on a plot): plots as .png / .jpg / .tif / .fig, plotted data (visible time range) as .xlsx / .csv / .txt; overview: picture only. Every data export contains the table info (version, recording, all settings, threshold and zero force of the channel, window and range).', ...
       '', ...
-      'Open results ...: a results file of MyoDishAnalysis, the watcher or an export of the GUI (.xlsx, <name>_info.csv, _summary.csv, _contractions.csv): the recording (path in the file; otherwise next to the results file or asked for), the settings and the analysis window (channel, data window, analysed range; several: list) are restored, the contractions are detected again and compared with the file (status line; black o = contraction of the file not found again, e.g. other version). Contractions excluded by you in an export are excluded again.', ...
+      'Open ... with a results file of MyoDishAnalysis, the watcher or an export of the GUI (.xlsx, <name>_info.csv, _summary.csv, _contractions.csv): the recording (path in the file; otherwise next to the results file or asked for), the settings and the analysis window (channel, data window, analysed range; several: list) are restored, the contractions are detected again and compared with the file (status line; black o = contraction of the file not found again, e.g. other version). Contractions excluded by you in an export are excluded again.', ...
       '', ...
       'Labels ...: labels per channel (setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, treatment, concentration, concentrationUnit, daysInCulture, cultureStart, comment, analyst) - columns of the exported tables; saved as <name>_labels.csv next to the .mdd file and loaded automatically.', ...
       '', ...
@@ -4789,6 +5986,41 @@ t = [{'Comments ...: searchable list of the comments in the log file (date / tim
       'Remove rocker artifact: while the rocker moves, each sensor shows a periodic signal (rocker frequency, 60 rpm = 1.21 Hz). It is estimated per channel between the contractions (+-60 s around the window) and subtracted; light grey = signal before. Not possible (message): rocker frequency not found, no periodic artifact, too little time between the contractions (fast pacing). The setting also applies to All channels, Trend and exports. Rocker artifact ... (button, menu Save / Export, right click in the force plot): extra window with the signal before / after the filter and the removed artifact (also if the filter is off); menu: save as figure, export the data of the visible time range.', ...
       '', 'Parameters:'}, ...
       cellfun(@(n, u, d) sprintf('%s (%s): %s', n, u, d), P(:,1)', P(:,2)', P(:,3)', 'UniformOutput', false)];
+end
+
+
+function nm = advChanges(o)
+% advanced settings (rows of advancedDefs) that differ from the defaults: 'name = value (default x)' (2026-10-14)
+D = advancedDefs();
+d0 = mda_options();
+nm = {};
+for r = 1:size(D, 1)
+    f = D{r, 1};
+    if ~isfield(o, f) || ~isfield(d0, f) || sameOpt(o.(f), d0.(f)), continue; end
+    nm{end+1} = sprintf('%s = %s (default %s)', f, optText(o.(f)), optText(d0.(f))); %#ok<AGROW>
+end
+end
+
+
+function tf = sameOpt(a, b)
+% option values equal; numbers with a relative tolerance of 1e-9 (values typed in the advanced settings window are
+% divided by its scale, e.g. ms -> s)
+if isnumeric(a) && isnumeric(b) && isequal(size(a), size(b))
+    a = double(a(:)); b = double(b(:));
+    tf = all(abs(a - b) <= 1e-9 * max(1, abs(b)) | (isnan(a) & isnan(b)));
+else
+    tf = isequaln(a, b);
+end
+end
+
+
+function s = optText(v)
+% value of an option as text (as the status line of the advanced settings)
+if ischar(v) || isstring(v), s = char(v);
+elseif islogical(v), s = mat2str(v);
+elseif isempty(v), s = '[]';
+else, s = strtrim(sprintf('%g ', v));
+end
 end
 
 
@@ -4873,8 +6105,7 @@ D = {
         'minimum time between two contraction peaks (the more prominent one wins)', ...
         1, 's', 'Detection', false;
     'maxBeatWindow', 'maxBeatWindow', 'num', [], ...
-        ['at most this time before and after a peak belongs to one contraction (diastolic minimum, relaxation)' ...
-        'at most this time before and after a peak belongs to one contraction (diastolic minimum, relaxation)'], ...
+        'at most this time before and after a peak belongs to one contraction (diastolic minimum, relaxation)', ...
         1, 's', 'Detection', false;
     'pacedMinStimuli', 'pacedMinStimuli', 'int', [], ...
         ['a channel counts as paced with at least this many regular pulses in the data window: typical ' ...

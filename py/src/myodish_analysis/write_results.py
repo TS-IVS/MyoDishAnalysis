@@ -11,6 +11,11 @@
         time range), protocols (option protocol), protocolResults (characteristic values per protocol and channel)
     write_results('results.csv', ...)
         results_contractions.csv, results_summary.csv, results_parameters.csv, results_info.csv, ...
+    write_results(..., csv_tables=("contractions", "pulses"), compress=True, sheets=[(name, T), ...])
+        (2026-10-14; results of the watcher) csv_tables: these tables of an .xlsx file as <name>_<table>.csv next to
+        it (large tables: much faster to write and read, no row limit); compress=True: as .csv.gz (gzip); sheets:
+        further tables, after the summary (.csv: <name>_<sheet>.csv). A table with more rows than Excel allows
+        (1048575) is always written as <name>_<table>.csv. contractions=None: no contraction table.
     info_table(info)
         only the info table (key, value): file, ..., software, version, implementation, notes, info['extra'] (rows
         (key, value), e.g. createdBy, channels, loadedWindow_s), option_<name> for every option, log file entries
@@ -173,7 +178,17 @@ def _for_file(T, csv):
     return T
 
 
-def write_results(output_file, contractions, summary, info):
+def _gzip_file(f):
+    """<f>.gz (compression level 6 as MATLAB gzip; mtime 0: identical bytes for identical content), <f> deleted"""
+    import gzip
+    import shutil
+    with open(f, "rb") as src, gzip.GzipFile(f + ".gz", "wb", compresslevel=6, mtime=0) as dst:
+        shutil.copyfileobj(src, dst)
+    os.remove(f)
+    return f + ".gz"
+
+
+def write_results(output_file, contractions, summary, info, csv_tables=(), compress=False, sheets=()):
     p, nm = os.path.split(output_file)
     n, e = os.path.splitext(nm)
     if not e:
@@ -181,40 +196,36 @@ def write_results(output_file, contractions, summary, info):
         output_file = os.path.join(p, n + e)
     paramTable = parameter_table(contractions)
     infoTable = info_table(info)
-    tabs = [("contractions", contractions), ("summary", summary), ("parameters", paramTable), ("info", infoTable)]
+    # tables in the order of the sheets / files; tables that are not given (e.g. contractions=None) are left out
+    tabs = [("contractions", contractions), ("summary", summary)] + list(sheets) + \
+        [("parameters", paramTable), ("info", infoTable)]
     th = info.get("thresholds")  # analysis windows (myodish_analysis, GUI export)
     if isinstance(th, pd.DataFrame) and len(th) > 0:
         tabs.append(("thresholds", th))
     if isinstance(info.get("labels"), pd.DataFrame):
         tabs.append(("labels", info["labels"]))
-    rf = info.get("rockerFilter")
-    if isinstance(rf, pd.DataFrame) and len(rf) > 0:
-        tabs.append(("rockerFilter", rf))
-    pr = info.get("protocols")
-    if isinstance(pr, pd.DataFrame) and len(pr) > 0:
-        tabs.append(("protocols", pr))
-    rr = info.get("protocolResults")
-    if isinstance(rr, pd.DataFrame) and len(rr) > 0:
-        tabs.append(("protocolResults", rr))
-    pu = info.get("pulses")  # all stimulus pulses of the analysed channels and ranges (option pulseTable, 2026-10-10)
-    if isinstance(pu, pd.DataFrame) and len(pu) > 0:
-        tabs.append(("pulses", pu))
-    if e.lower() == ".csv":
-        out = []
-        for name, T in tabs:
-            f = os.path.join(p, f"{n}_{name}.csv")
-            _for_file(T, True).to_csv(f, index=False)
-            out.append(f)
-        return out
-    out = [output_file]
-    if isinstance(pu, pd.DataFrame) and len(pu) >= 1048576:  # Excel row limit: <name>_pulses.csv
-        tabs = [x for x in tabs if x[0] != "pulses"]
-        f = os.path.join(p, f"{n}_pulses.csv")
-        _for_file(pu, True).to_csv(f, index=False)
+    for name in ("rockerFilter", "protocols", "protocolResults", "pulses"):  # pulses: option pulseTable (2026-10-10)
+        T = info.get(name)
+        if isinstance(T, pd.DataFrame) and len(T) > 0:
+            tabs.append((name, T))
+    tabs = [(name, T) for name, T in tabs if isinstance(T, pd.DataFrame)]
+    xls = e.lower() != ".csv"
+    csv_tables = set(csv_tables)
+    out = [output_file] if xls else []
+    sheet_tabs = []
+    for name, T in tabs:
+        if xls and name not in csv_tables and len(T) < 1048576:  # Excel row limit
+            sheet_tabs.append((name, T))
+            continue
+        f = os.path.join(p, f"{n}_{name}.csv")
+        _for_file(T, True).to_csv(f, index=False)
+        if compress and name in csv_tables:
+            f = _gzip_file(f)
         out.append(f)
-    mode = "a" if os.path.isfile(output_file) else "w"
-    kw = dict(if_sheet_exists="replace") if mode == "a" else {}
-    with pd.ExcelWriter(output_file, engine="openpyxl", mode=mode, **kw) as xw:
-        for name, T in tabs:
-            _for_file(T, False).to_excel(xw, sheet_name=name, index=False)
+    if xls:
+        mode = "a" if os.path.isfile(output_file) else "w"
+        kw = dict(if_sheet_exists="replace") if mode == "a" else {}
+        with pd.ExcelWriter(output_file, engine="openpyxl", mode=mode, **kw) as xw:
+            for name, T in sheet_tabs:
+                _for_file(T, False).to_excel(xw, sheet_name=name, index=False)
     return out

@@ -1,6 +1,7 @@
 function ok = mda_testSignalGaps()
-%MDA_TESTSIGNALGAPS  Test of the periods without signal (mda_signalGaps) and of the watcher outputs _gaps.csv and
-%_channels.csv with a synthetic recording (9 channels, 400 Hz, 600 s).
+%MDA_TESTSIGNALGAPS  Test of the periods without signal (mda_signalGaps) and of the watcher outputs gaps and channels
+%(sheets of <name>.xlsx; before 2026-10-14 _gaps.csv, _channels.csv) with a synthetic recording (9 channels, 400 Hz,
+%600 s).
 %
 %   ok = mda_testSignalGaps()   prints the single checks, returns true if all pass
 %
@@ -55,17 +56,18 @@ r = G(G.channel == 2, :);
 ok = check(ok, 'no signal: ch2 whole file', height(r) == 1 && strcmp(r.type{1}, 'no signal') && r.fromStart && r.untilEnd);
 ok = check(ok, 'number of periods (16)', height(G) == 16);
 
-% watcher: _gaps.csv, _channels.csv, summary columns
+% watcher: sheets gaps, channels and summary of <name>.xlsx
 res = fullfile(folder, 'res');
 [X, report] = MyoDishAnalysisWatch(fullfile(folder, 'raw'), res, 'quiet', true, 'minFileAgeMinutes', 0, 'protocols', false);
-Gw = readCsv(fullfile(res, 'gaps_ABC000101_gaps.csv'));
-CH = readCsv(fullfile(res, 'gaps_ABC000101_channels.csv'));
-S = readCsv(fullfile(res, 'gaps_ABC000101_summary.csv'));
-ok = check(ok, 'watcher: _gaps.csv with clock times and comments', strcmp(X.status{1}, 'ok') && height(Gw) == 16 && ...
+xf = fullfile(res, 'gaps_ABC000101', 'gaps_ABC000101.xlsx');   %folder of the recording (2026-10-15)
+Gw = readCsv(xf, 'gaps');
+CH = readCsv(xf, 'channels');
+S = readCsv(xf, 'summary');
+ok = check(ok, 'watcher: gaps with clock times and comments', strcmp(X.status{1}, 'ok') && height(Gw) == 16 && ...
     all(ismember({'clockFrom', 'clockTo', 'comments'}, Gw.Properties.VariableNames)) && ...
     any(contains(Gw.comments, 'chamber 1 out')));
 st = @(c) CH.status{CH.channel == c};
-ok = check(ok, 'watcher: _channels.csv status (no slice, removed, beating if contractions)', strcmp(st(2), 'no slice') && ...
+ok = check(ok, 'watcher: channels status (no slice, removed, beating if contractions)', strcmp(st(2), 'no slice') && ...
     strcmp(st(3), 'removed') && strcmp(st(1), 'beating') == (CH.nContractions(CH.channel == 1) > 0) && ...
     abs(CH.lastSignal_s(CH.channel == 3) - 500) < 1e-6 && ...
     strcmp(CH.idDate{1}, '2000-01-01') && contains(CH.endComments{CH.channel == 3}, 'discarded'));
@@ -84,9 +86,14 @@ ok = check(ok, 'slice register: 7 slices, chamber out / removed / from the start
 end
 
 
-function T = readCsv(f)
-% table of a results file; text columns as text (not datetime)
-o = detectImportOptions(f, 'TextType', 'char', 'Delimiter', ',');
+function T = readCsv(f, sheet)
+% table of a results file (sheet of an .xlsx); text columns as text (not datetime)
+if nargin > 1
+    o = detectImportOptions(f, 'Sheet', sheet, 'TextType', 'char');
+    o.VariableNamesRange = 'A1'; o.DataRange = 'A2';
+else
+    o = detectImportOptions(f, 'TextType', 'char', 'Delimiter', ',');
+end
 txt = intersect({'idDate', 'clockFrom', 'clockTo', 'lastContractionClock', 'status', 'type', 'comments', ...
     'endComments', 'range', 'bin', 'experiment', 'series', 'startTime', 'endTime', 'startReason', 'endStatus', 'daySource', ...
     'lastBeat', 'species', 'sliceID', 'setupID', 'sampleID', 'firstRecording', 'lastRecording', 'recording', ...

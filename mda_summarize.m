@@ -7,7 +7,8 @@ function T = mda_summarize(B, C, range, opts, exclude)
 %   B        contraction table of one channel (mda_analyzeChannel); only rows with included = true and a peak
 %            within range are averaged
 %   C        channel info from mda_analyzeChannel (stimulus times, threshold)
-%   range    [from to] in s
+%   range    [from to] in s; several ranges (n x 2, 2026-10-14): one row over all of them (union; from / to = first
+%            start / last end, stimFrequency from the intervals within the ranges)
 %   opts     options (arrhythmicWindow, arrhythmicMinVariability; [] = defaults)
 %   exclude  [from to] rows of the stimulation protocols (stim-to-stim variability: windows overlapping them are
 %            skipped)
@@ -28,7 +29,8 @@ function T = mda_summarize(B, C, range, opts, exclude)
 % diastolicForce_dRef / diastolicSignal_dRef _mean / _SD (difference to the reference, uN), 2026-10-06.
 % With AP columns (EP recording, mda_analyzeAP): AP_dVdtMax, AP_RMP, AP_Vmax, APD25, APD50, APD90 _mean / _SD / _n.
 %
-% TS 2026-10-04 (uncertain contractions 2026-10-09; extra pulses 2026-10-10; stimulus variability 2026-10-13)
+% TS 2026-10-04 (uncertain contractions 2026-10-09; extra pulses 2026-10-10; stimulus variability 2026-10-13; several
+% ranges 2026-10-14)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -40,17 +42,23 @@ if nargin < 5, exclude = []; end
 PI = mda_parameters();
 params = PI(:,1)';
 
-inRange = B.t_peak >= range(1) & B.t_peak <= range(2);
+R = reshape(double(range), [], 2);                  %one or several ranges [from to] (2026-10-14)
+inRange = inRanges(B.t_peak, R);
 I = inRange & B.included;
 
 ST = C.stimTimes;
-J = ST >= range(1) & ST <= range(2);
+J = inRanges(ST, R);
 fStim = nan;
-if sum(J) > 1, fStim = 1 / median(diff(ST(J))); end
+iv = [];                                            %stimulus intervals within the ranges
+for r = 1:size(R, 1)
+    x = ST(ST >= R(r,1) & ST <= R(r,2));
+    iv = [iv; diff(x(:))]; %#ok<AGROW>
+end
+if ~isempty(iv), fStim = 1 / median(iv); end
 zeroF = nan;
 if isfield(C, 'zeroForce'), zeroF = C.zeroForce; end
 
-T = table(C.channel, range(1), range(2), sum(I), sum(inRange), sum(inRange & strcmp(B.beatType,'stimulated')), ...
+T = table(C.channel, min(R(:,1)), max(R(:,2)), sum(I), sum(inRange), sum(inRange & strcmp(B.beatType,'stimulated')), ...
     sum(inRange & strcmp(B.beatType,'extra')), sum(J), sum(J & ~C.stimCaptured), fStim, C.threshold, zeroF, ...
     'VariableNames', {'channel','from','to','nContractions','nDetected','nStimulated','nExtraBeats','nStimuli', ...
     'nMissedBeats','stimFrequency','detectionThreshold','zeroForce'});
@@ -75,13 +83,13 @@ nDur = 0; nXP = 0; nEl = 0; nAmb = 0;
 if isfield(C, 'stimDuringContraction') && numel(C.stimDuringContraction) == numel(ST)
     nDur = sum(J & C.stimDuringContraction(:) & ~C.stimCaptured(:));
 end
-if isfield(C, 'extraTimes'), nXP = sum(C.extraTimes >= range(1) & C.extraTimes <= range(2)); end
+if isfield(C, 'extraTimes'), nXP = sum(inRanges(C.extraTimes, R)); end
 if ismember('elicitedByExtraPulse', B.Properties.VariableNames), nEl = sum(inRange & B.elicitedByExtraPulse); end
 if ismember('stimAmbiguous', B.Properties.VariableNames), nAmb = sum(inRange & B.stimAmbiguous); end
 T = addvars(T, nDur, nXP, nEl, nAmb, 'After', 'nMissedBeatsUncertain', 'NewVariableNames', ...
     {'nMissedDuringContraction', 'nExtraPulses', 'nElicitedByExtraPulse', 'nAmbiguous'});
 % 2026-10-13: stim-to-stim variability of the regular pulses (arrhythmic pacing)
-[vCV, vFrac, vDur] = stimVariability(ST(J), range, optionOr(opts, 'arrhythmicWindow', 60), ...
+[vCV, vFrac, vDur] = stimVariability(ST(J), R, optionOr(opts, 'arrhythmicWindow', 60), ...
     optionOr(opts, 'arrhythmicMinVariability', 0.1), exclude);
 T = addvars(T, vCV, vFrac, vDur, 'After', 'stimFrequency', 'NewVariableNames', ...
     {'stimVariability_percent', 'arrhythmicFraction', 'pacedSeconds'});
@@ -115,33 +123,42 @@ end
 end
 
 
-function [medCV, frac, dur] = stimVariability(ST, range, window, minCV, X)
-% stim-to-stim variability of the regular pulses ST in range (2026-10-13): windows of window s from the start of the
-% range (the last one shorter); paced windows: >= 6 pulses and no overlap with the [from to] rows of X (stimulation
-% protocols); CV = population SD / mean of their intervals. Median CV (%), fraction of the paced time with CV > minCV,
-% paced time (s); NaN, NaN, 0 without paced windows.
+function [medCV, frac, dur] = stimVariability(ST, R, window, minCV, X)
+% stim-to-stim variability of the regular pulses ST in the ranges R (rows [from to]; 2026-10-13): windows of window s
+% from the start of each range (the last one shorter); paced windows: >= 6 pulses and no overlap with the [from to]
+% rows of X (stimulation protocols); CV = population SD / mean of their intervals. Median CV (%), fraction of the paced
+% time with CV > minCV, paced time (s); NaN, NaN, 0 without paced windows.
 ST = sort(double(ST(:)));
 if isempty(X), X = zeros(0, 2); else, X = reshape(double(X), [], 2); end
-a = double(range(1)); b = double(range(2));
 cvs = []; dur = 0; tVar = 0;
-w = a;
-while w < b
-    e = min(w + double(window), b);
-    x = ST(ST >= w & ST < e);
-    if numel(x) >= 6 && ~any(X(:,1) < e & X(:,2) > w)
-        iv = diff(x);
-        cv = std(iv, 1) / mean(iv);
-        cvs(end+1) = cv; %#ok<AGROW>
-        dur = dur + (e - w);
-        if cv > minCV, tVar = tVar + (e - w); end
+for r = 1:size(R, 1)
+    a = double(R(r,1)); b = double(R(r,2));
+    w = a;
+    while w < b
+        e = min(w + double(window), b);
+        x = ST(ST >= w & ST < e);
+        if numel(x) >= 6 && ~any(X(:,1) < e & X(:,2) > w)
+            iv = diff(x);
+            cv = std(iv, 1) / mean(iv);
+            cvs(end+1) = cv; %#ok<AGROW>
+            dur = dur + (e - w);
+            if cv > minCV, tVar = tVar + (e - w); end
+        end
+        w = e;
     end
-    w = e;
 end
 if isempty(cvs)
     medCV = nan; frac = nan; dur = 0;
 else
     medCV = 100 * median(cvs); frac = tVar / dur;
 end
+end
+
+
+function tf = inRanges(t, R)
+% t within one of the ranges R (rows [from to], bounds included)
+tf = false(size(t));
+for r = 1:size(R, 1), tf = tf | (t >= R(r,1) & t <= R(r,2)); end
 end
 
 

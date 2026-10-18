@@ -17,7 +17,7 @@ function ok = mda_testSliceRegister()
 %   rigB ch2 3 h out with the comment 'slice moved back'            1 slice (put back), nPutBack 1
 % Pendant of py/tests/test_slice_register.py (same results and checks).
 %
-% TS 2026-10-08
+% TS 2026-10-08 (layouts of the watcher, course and overview images 2026-10-15)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -74,6 +74,91 @@ r = get('rigB_sampleY', 1);
 ok = check(ok, 'rigB ch1: days since cultureStart', height(r) == 1 && strcmp(r.daySource{1}, 'cultureStart') && ...
     abs(r.dayStart - 28 / 24) < 1e-9);
 ok = check(ok, 'mda_slices.csv in the order of the register', isequal(A.slice, R.slice));
+% inputs as sheets of <name>.xlsx and <name>_overview.csv.gz (results of the watcher, 2026-10-14) in the flat and in
+% the series layout (2026-10-15): the same register; course image per series and channel, workbook, overview image
+res2 = tempname; mkdir(fullfile(res2, 'expA'));
+cleanup2 = onCleanup(@() rmdir(res2, 's')); %#ok<NASGU>
+f2 = fullfile(res2, 'expA');
+writeScenario(f2);
+asXlsx(f2);
+writetable(table({'expA/rigA_sampleX_1.mdd'}, {'x'}, 3, {'check'}, 'VariableNames', {'file', 'analyzed', 'channel', ...
+    'level'}), fullfile(res2, 'mda_flags.csv'));
+R2 = mda_sliceRegister(res2, [], 'trends', true, 'trendParameters', {'amplitude', 'beatsPerMinute'});
+P = dir(fullfile(f2, 'trends')); P = sort({P(~[P.isdir]).name});
+want = sort([arrayfun(@(c) sprintf('rigA_sampleX_ch%d.png', c), [1 2 3 4 5 7 8], 'UniformOutput', false), ...
+    {'rigA_sampleX_trends.xlsx', 'rigB_sampleY_ch1.png', 'rigB_sampleY_ch2.png', 'rigB_sampleY_trends.xlsx'}]);
+ov = dir(fullfile(f2, 'expA_overview.png'));
+ok = check(ok, 'xlsx / csv.gz inputs (flat): same register; course images, workbooks, overview', sameRegister(R2, R) ...
+    && isequal(P, want) && isscalar(ov) && ov.bytes > 10000);
+wb = fullfile(f2, 'trends', 'rigA_sampleX_trends.xlsx');
+o = detectImportOptions(wb, 'Sheet', 'course', 'TextType', 'char');
+o = setvartype(o, 'bin', 'char');
+Tc = readtable(wb, o);
+c1 = Tc(Tc.channel == 1, :);
+o = detectImportOptions(wb, 'Sheet', 'last24h', 'TextType', 'char');
+o = setvartype(o, 'window', 'char');
+Tl = readtable(wb, o);
+pass = isequal(cellstr(sheetnames(wb))', {'course', 'last24h', 'comments', 'slices'}) && ...
+    isequal(Tc.Properties.VariableNames, {'channel', 'slice', 'bin', 'dayInCulture', 'nBeats', 'amplitude', ...
+    'beatsPerMinute', 'binMinutes'}) && strcmp(c1.bin{1}, '2000-01-01 16:00:00') && ...
+    abs(c1.dayInCulture(1) - 16 / 24) < 1e-3 && all(c1.binMinutes == 30) && all(c1.amplitude == 100) && ...
+    isequal(unique(Tc.slice(Tc.channel == 3))', [1 2]) && isequal(Tl.Properties.VariableNames, {'channel', 'slice', ...
+    'window', 'nBeats', 'amplitude', 'beatsPerMinute'}) && all(string(Tl.window) >= "2000-01-04 06:00:00") && ...
+    height(readtable(wb, 'Sheet', 'slices')) == sum(strcmp(R.series, 'rigA_sampleX'));
+ok = check(ok, 'workbook of the series: course (30-min bins, day in culture), last 24 h, slices', pass);
+% series layout
+res3 = tempname; mkdir(fullfile(res3, 'expA'));
+cleanup3 = onCleanup(@() rmdir(res3, 's')); %#ok<NASGU>
+f3 = fullfile(res3, 'expA');
+writeScenario(f3);
+names = asXlsx(f3);
+for k = 1:numel(names)
+    j = find(names{k} == '_', 1, 'last');
+    d = fullfile(f3, names{k}(1:j-1), sprintf('%02d', str2double(names{k}(j+1:end))));
+    mkdir(d);
+    movefile(fullfile(f3, [names{k} '.xlsx']), d);
+    movefile(fullfile(f3, [names{k} '_overview.csv.gz']), d);
+end
+R3 = mda_sliceRegister(res3, [], 'trends', true, 'trendParameters', {'amplitude', 'beatsPerMinute'});
+D = dir(f3); D = sort({D(~startsWith({D.name}, '.')).name});
+Da = dir(fullfile(f3, 'rigA_sampleX')); Da = sort({Da(~startsWith({Da.name}, '.')).name});
+ok = check(ok, 'series layout expA/<series>/<nn>/: same register; images in expA/<series>/', sameRegister(R3, R) && ...
+    isequal(D, {'expA_overview.png', 'expA_slices.csv', 'rigA_sampleX', 'rigB_sampleY'}) && ...
+    isequal(Da, sort([{'00', '01', '02', '03'}, want(startsWith(want, 'rigA'))])));
+% course data with a single window in the last 24 h whose second parameter is NaN (no error; 2026-10-15)
+t = [(0:29)' * 60; 3 * 86400];
+D = struct('t', t, 'w', 60, 'nb', 60 * ones(31, 1), 'inc', true(31, 1), 'V', [100 * ones(31, 1), [ones(30, 1); NaN]], ...
+    'names', {{'amplitude', 'TTP90'}}, 'units', {{'uN', 's'}}, 't0', 730486, 'xlim', [0 3 * 86400 + 60], ...
+    'bands', zeros(0, 3), 'bandLabels', {{}}, 'com', struct('t', {}, 'text', {}, 'category', {}), 'slices', ...
+    [0 1800 1; 3 * 86400 3 * 86400 + 60 2], 'last24', [2 * 86400 + 60, 3 * 86400 + 60], 'dayBase', NaN, 'red', zeros(0, 2));
+[Tc, Tl] = mda_report('courseData', D);
+ok = check(ok, 'course data: one window in the last 24 h, NaN parameter', height(Tl) == 1 && isnan(Tl.TTP90) && ...
+    isequal(unique(Tc.slice)', [1 2]));
+end
+
+
+function names = asXlsx(f)
+% results of writeScenario as the watcher writes them since 2026-10-14: sheets of <name>.xlsx, <name>_overview.csv.gz
+D = dir(fullfile(f, '*_channels.csv'));
+names = {};
+for k = 1:numel(D)
+    n = D(k).name(1:end-numel('_channels.csv'));
+    names{end+1} = n; %#ok<AGROW>
+    for t = {'channels', 'gaps'}
+        T = readtable(fullfile(f, [n '_' t{1} '.csv']), 'TextType', 'char', 'Delimiter', ',');
+        writetable(T, fullfile(f, [n '.xlsx']), 'Sheet', t{1});
+        delete(fullfile(f, [n '_' t{1} '.csv']));
+    end
+    gzip(fullfile(f, [n '_overview.csv']));
+    delete(fullfile(f, [n '_overview.csv']));
+end
+end
+
+
+function same = sameRegister(R2, R)
+same = height(R2) == height(R) && isequal(R2.series, R.series) && isequal(R2.channel, R.channel) && ...
+    isequal(R2.slice, R.slice) && isequal(R2.startTime, R.startTime) && isequal(R2.endTime, R.endTime) && ...
+    isequal(R2.endStatus, R.endStatus) && isequaln(R2.lastAmplitude, R.lastAmplitude) && isequaln(R2.nBeats, R.nBeats);
 end
 
 

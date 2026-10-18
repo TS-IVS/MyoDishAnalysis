@@ -9,6 +9,7 @@ mda_readResults.m.
     R = read_results('results_info.csv')       (or _summary.csv, _contractions.csv(.gz), _thresholds.csv: the other
                                                 files of the set are found by their names)
     R = read_results('settings.csv')           a single table key, value (settings file of settings.py): options
+    Results of the watcher (<name>.xlsx without the sheet contractions): <name>_contractions.csv(.gz) next to it.
 
 Results of myodish_analysis (output=...), the watcher, the GUI (Export this channel ..., All channels -> file ...,
 protocols) and of the MATLAB version. Used by the GUI to open results: mda-gui results.xlsx.
@@ -110,6 +111,9 @@ def read_results(results_file):
         xl = pd.ExcelFile(results_file)
 
         def get(name):
+            if name == "contractions" and name not in xl.sheet_names:  # watcher: <name>_contractions.csv(.gz)
+                f = os.path.join(p, f"{_SUFFIX.sub('', n)}_contractions.csv")  # next to the .xlsx (2026-10-14)
+                return _read_csv(f if os.path.isfile(f) or not os.path.isfile(f + ".gz") else f + ".gz")
             return _read_sheet(xl, name)
     else:
         base = _SUFFIX.sub("", n)

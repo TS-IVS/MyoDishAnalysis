@@ -33,6 +33,11 @@ restrict the use of the software or of the results obtained with it.
 MATLAB R2019b or newer. **No toolboxes.** Tested with MATLAB R2026a (macOS).
 The log file `<name>_log.log` written by the MyoDish software must be in the same folder as the `.mdd` file.
 Without it, 400 Hz is assumed and the number of channels is derived from the content of the status channel.
+Files of the first MyoDish version (software 1.0.x, 2020/21: 8 force channels at 500 Hz, no status channel) are
+recognized by the file size and the recording duration in the log file or, if they do not fit, by `nChannels` 8 /
+500 Hz in the log file and no channel with the content of a status channel (2026-10-13). They are analysed as unpaced
+channels: contractions only, no stimuli, extra or missed beats; all parameters that need the stimulus are NaN. Older
+log files of this version (`_commands.log`, `_events.log`, `_time.mddt` instead of `<name>_log.log`) are not read.
 
 **Force units**: the `.mdd` file contains arbitrary units (AU). They are converted to µN with the `Calibration`
 entry of each channel in the log file (AU per mN; 1000 → AU = µN, 3000 → AU / 3). While the extended sensor mode
@@ -57,13 +62,32 @@ and atrium, rabbit, pig and rat ventricle (force-frequency, post-rest potentiati
 and rocker speed protocols) and a sharp-electrode recording with its LabChart export.
 
 ## GUI (`MyoDishAnalysisGUI`)
-0. **Comments ...**: searchable list of the comments in the log file (date and time, time in the file, text; option
-   "all log entries" adds events and settings). Search: all typed words must occur. Double-click a row (or select it
-   and press **Go to**) to load the data around the comment (window length = currently loaded window, ≥ 30 s).
-   Comments are marked purple in the overview and the force plot.
+0. **Open ...**: a recording (`.mdd`) or a results file (see **Open ...** with results files below); the folder is
+   remembered. A recording opens with its first window (From / To: 0–120 s) loaded and analysed (2026-10-14).
+   **Results ...**: results browser of a results folder of the watcher (`mda_index.csv`, `mda_flags.csv`; the last
+   folder opens again directly, **Folder ...** chooses another one): one row per recording and channel with label,
+   flags of the analysis report (red background = check the analysis, yellow = slice quality, see "Analysis
+   report"), capture, contractions, channel status and the flag texts; recordings that were not analysed (status and
+   message of the index) in grey. List *all recordings / with flags / red flags / not analysed* and a search field
+   (all typed words must occur). **Double-click** a row (or **Open**): the channel with the settings of its analysis,
+   at the window of the red flags, otherwise the first 120 s of its analysis (results file `<name>.xlsx` or
+   `<name>_info.csv`, see below); a parallel recording that was not analysed: its main file at its time. **Compute flags (n)**: flags of
+   recordings analysed by an older watcher (computed from their result files, saved in `mda_flags.csv`).
+   **Main file** (button next to the file name, shown for a parallel recording such as a schedule file or snapshot
+   started from the main recording; see "Watcher"): opens the main recording at the window shown, same channel.
+   **Flags** (grey line above the table): the flags of the analysis report for the analysed range of the channel
+   (red = check the analysis, orange = slice quality; the pointer shows the codes).
+   **Comments ...**: searchable list of the comments in the log file (# = number in the force plot, date and time,
+   time in the file, text; option "all log entries" adds events and settings). Search: all typed words must occur.
+   Select a row: the comment is highlighted in the force plot; double-click a row (or select it and press **Go to**)
+   to load the data around the comment (window length = currently loaded window, ≥ 30 s). Comments are marked purple
+   in the overview and, numbered as in the list, in the force plot (pointer on a mark: its text; click: highlighted
+   and selected in the list).
 1. **Overview**: min/max envelope of the selected channel over the complete recording
-   (green = rocker at rest; time axis h:mm, or h:mm:ss / m:ss when zoomed in or for short files). Drag in the
-   overview, or type From/To (seconds) and press **Load**, to load a time window.
+   (green = rocker at rest; time axis h:mm, or h:mm:ss / m:ss when zoomed in or for short files, from 2 days
+   *d h:mm* or whole days *n d*; the unit is shown bottom left, e.g. *(h:mm)*). Drag in the overview, or type From/To
+   (seconds) and press **Load**, to load a time window. **Right click → Select all**: loads the range shown in the
+   overview (at most 4 h).
    **Mouse wheel** over the overview: zoom the time axis (shift + wheel: move; double-click: whole file); the zoomed
    part is re-read in more detail (useful for 24-h recordings).
    **Arrow keys** (click into a plot first; MATLAB: not while the toolbar zoom / pan is active) and the **buttons under
@@ -76,10 +100,22 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    Red = selected contractions, orange = uncertain contractions (see *high sensitivity* below), grey = excluded by
    the filters, x = excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16:
    pre-pulses, CCM pulses, ...), green rings = contractions elicited by an extra pulse, black diamonds = ambiguous
-   stimulus assignment (see "Stimulus assignment"), grey background = rocker moving, yellow = analysed range.
+   stimulus assignment (see "Stimulus assignment"), thin bar at the top = rocker state (green = at rest, grey =
+   moving), yellow = analysed range(s).
    **Legend** of these markers in the force plot (menu *View → Legend of the force plot* or right click in the force
    plot; draggable; entries that do not occur in the window are left out).
    Panel *Cursor in the force plot*: *drag = select time range* or *click = exclude / include contraction*.
+   **Several ranges** (2026-10-14): **shift + drag** adds a range to the selection (overlapping ranges are merged).
+   The contractions and stimuli of all ranges are pooled (table, parameter plot with the mean per range, overlay,
+   All channels; *Protocols → add selected range* and *Trend → selected range* use the span from the first to the
+   last range); the exports add one summary row per range (*all ranges*, *range1*, ...; column `range` of the contractions and
+   pulses), and **Open ...** restores the ranges. **Right click** in the force plot: **Zoom to the selection**
+   (time axis = analysed ranges), **Select all rocker stops of the overview range** (with *only contractions with
+   rocker at rest*): every rocker stop (≥ 1 s) within the range shown in the overview is read and shown side by
+   side (dashed lines = time gaps; the time axis keeps the time in the file; at most 4 h of data and 2000 stops);
+   all of them are selected and analysed together, exports keep the time in the file. Loading a window (Load, drag in
+   the overview, arrow keys) returns to the normal view. In this view the rocker filter is off and intervals across
+   the gaps (peak-to-peak, stimulus intervals) are not computed.
    **Advanced ...** (next to *only stimulated contractions*): all parameters of the method that are based on
    assumptions or experience (see "Advanced settings"), one tab per part of the analysis: *Assignment* (onset gate,
    rise phases, pre- / post-pulses, **stimuli**: *auto* / *MyoDish pulses* / *external trigger pulses*), *Detection*,
@@ -90,7 +126,9 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    **Load settings ...** write / read a settings file (a results file can be loaded as well; all settings except the
    threshold and zero force of the channels), **Apply** / **OK** analyse the window again (status line: the settings
    that differ from the defaults). The settings apply to All channels, Protocols, Trend and the exports and are
-   written to the info table of every export.
+   written to the info table of every export. Changed settings (2026-10-14): the button shows their number in red,
+   e.g. *Advanced (3 changed)*, shortened if the text does not fit (*Advanced (3 chgd)*, *Adv. (3 chgd)*); its
+   tooltip lists them with their defaults.
    Mouse wheel: zoom the time axis (shift + wheel: move; double-click: whole loaded window). The figure toolbar
    zoom/pan also works (switch the tool off again to use the mouse modes). Time axis in h:mm:ss or m:ss (decimals
    when zoomed in below ~10 s); checkbox *time 0 = window start* shows the time relative to the
@@ -134,14 +172,19 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    **Trend ...** (next to the list): rolling mean or median (window in min) of a parameter over long periods and
    over several files in a row, e.g. the daily files `_0`, `_1`, `_2` ... of a culture (**Add series** finds all
    `<name>_<number>.mdd` of the open file; **Add files** any others). Time 0 = start of the first file; the files are
-   placed by the recording start in their log files (system time), gaps without data are shown grey ("no data"),
-   comments purple; time axis as time since start (h:mm) or clock time. **Sampling**: *short windows* (default:
-   W = 30 s every T = 10 min; only these windows are read and analysed), *all contractions*, or *rocker stops only*
-   (stop periods from the `rockerSpeed` entries of the log files; contractions with the rocker at rest). Use a rolling
-   window ≥ 2 T. Reading the file dominates the time, not the analysis (24-h file via VPN: ~70 s to read, ~5 s to
-   analyse one channel). Every window is a separate read (~0.25 s via VPN, a few ms in the lab network), so via VPN
-   windows pay off from T ≈ 10 min on (24 h: ~35 s instead of ~75 s), in the lab network already at a few minutes.
-   Analysing only every n-th contraction would not save time (the whole signal must be read and filtered anyway).
+   placed by the recording start in their log files (system time), gaps without data are shown grey ("no data");
+   time axis as time since start (h:mm) or clock time. **Comments** of the log files (2026-10-13): purple dotted lines
+   with numbered markers in a strip above the plot (they stay visible when you zoom; numbers that would overlap are
+   hidden) and a list below the plot (number, time, full text); click a marker or a line of the list, or point at a
+   marker, to highlight the comment (a line of the list outside the view moves the view to it). Saved figures
+   contain the numbered markers (MATLAB: and the list of the comments in the view). **Sampling**: *short windows*
+   (default: W = 30 s every T = 10 min; only these windows are read and analysed), *all contractions*, or *rocker
+   stops only* (stop periods from the `rockerSpeed` entries of the log files; contractions with the rocker at rest).
+   Use a rolling window ≥ 2 T. Reading the file dominates the time, not the analysis (24-h file via VPN: ~70 s to
+   read, ~5 s to analyse one channel). Every window is a separate read (~0.25 s via VPN, a few ms in the lab
+   network), so via VPN windows pay off from T ≈ 10 min on (24 h: ~35 s instead of ~75 s), in the lab network already
+   at a few minutes. Analysing only every n-th contraction would not save time (the whole signal must be read and
+   filtered anyway).
    *All channels in one pass*: the file is read once for all channels (~1.5 × the time of one channel); afterwards
    switching the channel shows its trend without recalculation.
    **Several channels**: *several channels ...* in the channel list (checkboxes) overlays their trends (one colour per
@@ -163,9 +206,9 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    which uses the loaded window). **Every export** (also the data of a plot, the overlay, the trend, the rocker
    artifact) contains the table **info**: version and implementation, recording, analysis date, all settings (with
    the threshold and zero force of the channel), loaded window and analysed range, EP recording (see "Results files").
-   **Open results ...** (button at the top; or `MyoDishAnalysisGUI(resultsFile)`, Python `mda-gui results.xlsx`):
+   **Open ...** with a results file (or `MyoDishAnalysisGUI(resultsFile)`, Python `mda-gui results.xlsx`):
    opens a results file of the command line, the watcher or the GUI (`.xlsx`, `<name>_info.csv`, `_summary.csv`,
-   `_contractions.csv`): the recording (path in the file; if moved: the same name next to the results file, otherwise
+   `_contractions.csv`; watcher: `<name>.xlsx` with the contractions in `<name>_contractions.csv.gz`): the recording (path in the file; if moved: the same name next to the results file, otherwise
    a file dialog), all settings (threshold and zero force of the channel, detection mode, rocker filter, filters,
    stimuli) and the analysis window (several: list of channel, range and time) are restored; contractions excluded by
    you in an export are excluded again. The contractions are detected again and compared with the file (status line:
@@ -320,6 +363,8 @@ Own additional fields are kept as extra columns.
   `rockerFilter`), `'externalTrigger','auto'|'on'|'off'` (see "External trigger"), `'stimAssignment','onset'|'peak'`
   and the gate parameters (see "Stimulus assignment"), `'pulseTable',false` (no pulse table), `'showFigures',true`,
   `'quiet',true`; all others see `help mda_options`.
+* `'pooled',true` (Python `pooled=True`, `--pooled`; 2026-10-14): with several ranges also one summary row per
+  channel over all ranges together (`range` = *all ranges*; contractions and stimuli of the ranges pooled).
 * **Analysis report** (`'report'`; 2026-10-11): with `'output'` also `<output>_report.pdf` (`'report',false`: none;
   `'report','file.pdf'`: this file, also without `'output'`). See "Analysis report".
 * Results files (`'output'`; the watcher; GUI exports): sheet / file **info** (key, value) with the version
@@ -329,7 +374,7 @@ Own additional fields are kept as extra columns.
   `analysedRange_s`, `epRecording`), every option (`option_<name>`, full precision) and the Offset / Calibration
   entries of the log file; sheet **thresholds** = analysis windows (per range, channel and chunk of `chunkSeconds`:
   analysed range `from`–`to`, data read `windowFrom`–`windowTo`, detection threshold). With these the GUI shows
-  exactly the same contractions again (**Open results ...**). `mda_readResults` / `read_results` read them.
+  exactly the same contractions again (**Open ...**). `mda_readResults` / `read_results` read them.
 * `contractions`: one row per detected contraction; `summary`: one row per channel and range
   (counts incl. nExtraBeats, nMissedBeats, extraBeats_percent, missedBeats_percent, nUncertain,
   nStimulatedUncertain, nExtraBeatsUncertain, nMissedBeatsUncertain, nMissedDuringContraction, nExtraPulses,
@@ -345,10 +390,14 @@ MyoDishAnalysisWatch('/data/myodish/raw', '/data/myodish/results', 'rockerFilter
 MyoDishAnalysisWatch(raw, results, 'fromDate', '2026-10-01', 'dryRun', true)   % only list what would be analysed
 MyoDishAnalysisWatch(raw, results, 'schedule', 'daily 10:00')    % in the background: every day at 10:00
 MyoDishAnalysisWatch('status')                                   % scheduled watchers; MyoDishAnalysisWatch('stop')
+MyoDishAnalysisWatch('trends', results, 'include', 'ABC00*')      % trend images again from the results
+MyoDishAnalysisWatch('reorganize', results)                      % earlier results into the folders of the setups
 ```
 ```bash
 mda-watch /data/myodish/raw /data/myodish/results --rocker-filter --quiet
 mda-watch /data/myodish/raw /data/myodish/results --schedule "weekly Sun 05:00"    # until Ctrl+C
+mda-watch /data/myodish/results --trends-only --include "ABC00*"                      # trend images again
+mda-watch /data/myodish/results --reorganize                                         # earlier results into the folders
 ```
 Each pass searches the raw folder (with subfolders) for `.mdd` files and analyses the new and changed ones. The
 watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`.
@@ -366,35 +415,73 @@ watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`.
   `MyoDishAnalysisWatch('stop')` stops them (`'stop', resultsFolder`: one); it ends with the MATLAB session. Python:
   `mda-watch ... --schedule "..."` runs until Ctrl+C (terminal or background process). Missed passes (computer asleep,
   a pass longer than the interval) are not repeated.
-* **Per recording** (results folder, same subfolders as in the raw folder):
-  * `<name>_summary.csv`: one row per channel and time range. The ranges are time bins (`'binMinutes'`, default 60)
+* **Result folders** (`'folders'`, `--folders`; 2026-10-15), so that a daily look does not start with hundreds of
+  files:
+  ```
+  results/ABC000101/                         experiment = folder of the recordings in the raw folder
+      ABC000101_overview.png                 all setups x channels at a glance (see "Trend images")
+      ABC000101_report.pdf                   analysis report of all recordings of the experiment
+      ABC000101_slices.csv                   slice register
+      Setup1_ABC000101/                      one folder per setup (series: file name up to its number)
+          Setup1_ABC000101_ch1.png ... ch8   course of each channel: since the start and the last 24 h
+          Setup1_ABC000101_trends.xlsx       the data of these images
+          00/  01/  02/ ...                  one folder per recording (Setup1_ABC000101_2.mdd -> 02/; also its
+                                             parallel recordings, e.g. Setup1_ABC000101_2_scheduleFile_...)
+  results/mda_index.csv, mda_flags.csv, mda_slices.csv, reports/
+  ```
+  `'series'` (default): `<experiment>/<series>/<nn>/` for recordings with a number in the name,
+  `<experiment>/<name>/` for recordings without a number. `'flat'`: all files of an experiment in `<experiment>/` (as
+  before 2026-10-15; trend images in `<experiment>/trends/`). The GUI, the results browser, the flags, the slice
+  register and `'trends'` read both layouts. Results of the other layout are moved when a recording is analysed
+  again; `MyoDishAnalysisWatch('reorganize', results)` (`mda-watch RESULTS --reorganize`) moves all of them at once and
+  makes the images and reports again (`'folders','flat'` / `--folders flat` back). `d =
+  MyoDishAnalysisWatch('resultFolder', results, 'ABC000101/Setup1_ABC000101_2.mdd')` (Python `results_of`) returns the
+  folder of a recording's results.
+* **Result files per recording** (2026-10-14):
+  * `<name>.xlsx`: the tables as sheets `summary`, `trends`, `trendComments`, `channels`, `gaps`, `events`,
+    `parameters`, `info`, `thresholds`, `labels` (`rockerFilter`); **Open ...** in the GUI (or `MyoDishAnalysisGUI('<name>.xlsx')`) shows the analysis.
+  * `<name>_contractions.csv.gz`, `<name>_pulses.csv.gz`, `<name>_overview.csv.gz`: the large tables, compressed
+    text (sheets of this size are much slower: 1-min overview of 20,000 rows read in 1.4 s instead of 0.07 s in
+    Python, 0.9 s instead of 0.2 s in MATLAB; and Excel has a limit of 1,048,575 rows, exceeded by the contractions of
+    24 recordings of 2020–2026). pandas reads them directly; MATLAB: `gunzip` first, or
+    `mda_readResults('<name>.xlsx')` (contractions included).
+  * `<name>_protocols.xlsx`, `<name>_protocols_contractions.csv.gz`, `_protocols_pulses.csv.gz`: stimulation protocols.
+  * `<name>_ch<c>.png`: trend images (see below; flat layout: `trends/<name>_ch<c>.png`).
+  * `'resultFormat','csv'` (`--result-format csv`): one csv file per table as before 2026-10-14
+    (`<name>_summary.csv`, `_contractions.csv`, `_pulses.csv`, `_parameters.csv`, `_info.csv`, `_thresholds.csv`,
+    `_labels.csv`, `_overview.csv`, `_events.csv`, `_gaps.csv`, `_channels.csv`, `_trends.csv`, `_trendComments.csv`,
+    `_protocols_*.csv`; `'compress',true`:
+    contractions and pulses as `.csv.gz`). The GUI, the results browser, the flags and the slice register read both
+    formats; results are not analysed again because of the format (`'reanalyze','all'` converts them; the files of
+    the other format are removed).
+* **Tables** (sheets or files):
+  * `summary`: one row per channel and time range. The ranges are time bins (`'binMinutes'`, default 60)
     **without the stimulation protocols** (default; `'includeProtocols',true` keeps them, `'protocolMarginSeconds'`
     also excludes some time after each protocol); a bin with a protocol gives several ranges. Columns `range` (clock
     time of the start of the range), `bin` (clock time of the start of the bin), `nComments` / `comments` (comments of
     the log file in the range, this channel or all channels).
-  * `<name>_contractions.csv`: `'contractions','all'` (default: every contraction), `'thinned'` (every
+  * `contractions`: `'contractions','all'` (default: every contraction), `'thinned'` (every
     `'thinFactor'`-th contraction per channel, default 10, `'thinMode','nth'`; or the median of blocks of
     `'thinFactor'` successive contractions of the same type and rocker state, `'thinMode','median'`; extra beats and,
     with `'includeProtocols'`, the contractions in the protocols are always complete) or `'none'`. Columns
     `sampledEvery` (number of contractions represented by the row) and `sampleMode` (`singleBeat` / `median`).
-    `'compress',true`: `<name>_contractions.csv.gz` (a double click unpacks it on macOS and Windows; pandas reads it
-    directly; MATLAB: `gunzip` first; one file per recording). Trends from the summary (all contractions): every n-th
-    contraction can alias the rocker modulation of the amplitude.
-  * `<name>_overview.csv` (`'overviewSeconds'`, default 60; 0 = none): medians of **all** contractions per 1-min
+    `.csv.gz`: a double click unpacks it on macOS and Windows. Trends from the summary or the overview (all
+    contractions): every n-th contraction can alias the rocker modulation of the amplitude.
+  * `overview` (`'overviewSeconds'`, default 60; 0 = none): medians of **all** contractions per 1-min
     window (file time, split at the ranges), channel, beat type, rocker state and inclusion, with `window` (clock time
     of its start), `t_from`, `t_to`, `nBeats`, `beatsPerMinute` and the median of every parameter. About 1/30 (0.5 Hz)
     to 1/60 (1 Hz) of the rows of all contractions (8-h recording, 7 channels: 242,270 contractions, 99 MB →
-    6,949 rows, 2.8 MB); opens in Excel. Medians of fixed windows instead of blocks of n successive contractions:
+    6,949 rows, 2.8 MB). Medians of fixed windows instead of blocks of n successive contractions:
     where stimulated and extra beats alternate (spontaneous rate above the pacing rate), blocks of one beat type stay
-    short. For an archive: all contractions compressed (`'compress',true`) and the overview uncompressed.
-  * `<name>_protocols_*.csv`: every contraction in the protocols, summary per protocol, channel and group,
-    `protocolResults` (if the log file contains protocols).
-  * `<name>_events.csv` (`'events',true`): all entries of the log file with clock time, time in the file, channel,
+    short. Basis of the trend images and of the slice register.
+  * `protocols`: every contraction in the protocols, summary per protocol, channel and group, `protocolResults` (if
+    the log file contains protocols).
+  * `events` (`'events',true`): all entries of the log file with clock time, time in the file, channel,
     code, category (comment, protocol, recording, schedule, stimulation, rocker, calibration, warning, other) and text.
-  * `<name>_gaps.csv` (`'gaps',true`, default): periods without force signal (`mda_signalGaps` / `signal_gaps`, see
+  * `gaps` (`'gaps',true`, default): periods without force signal (`mda_signalGaps` / `signal_gaps`, see
     below) with clock times and the comments of the log file within 5 min of their start or end. The summary gets
     the columns `noSignal_s` (s without signal in the range) and `nChamberOut` (chambers taken out in the range).
-  * `<name>_channels.csv` (`'gaps',true`): one row per channel with recording, `recordingStart`, `fileLength_s`,
+  * `channels` (`'gaps',true`): one row per channel with recording, `recordingStart`, `fileLength_s`,
     `calibration` (`Calibration` entries of the log file for the channel, AU per mN, several values in the order of
     time separated by `;`; 2026-10-10) and the status at the end of the recording (`beating`, `not beating` = no contraction in the last 30 min with signal
     outside the stimulation protocols, `protocols only` = no time outside the protocols, not analysed, `removed` =
@@ -406,12 +493,45 @@ watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`.
     the last contraction (or the end of the signal), `daysInCulture`, the labels `setupID`, `sliceID`, `species`,
     `sampleID`, `cultureStart` and `endComments` (comments of the channel about discarded, removed, not beating,
     fixed, frozen, … slices).
-  * `_parameters`, `_info`, `_labels` (`_rockerFilter`: rocker artifact per channel and 30-min chunk). Labels per
+  * `parameters`, `info`, `labels` (`rockerFilter`: rocker artifact per channel and 30-min chunk). Labels per
     channel: `<name>_labels.csv` next to the `.mdd` file (saved by the GUI).
+* **Trend images** (`'trends'`, default true; `--no-trends`; 2026-10-14), a quick look every morning (PNG, 150 dpi):
+  * `<experiment>_overview.png` (2026-10-15): one row per setup (numbered series), one column per channel. Each cell:
+    the amplitude over the whole time course of the experiment, the last 24 h yellow, new slices dashed; background =
+    status of the last slice at the end of its data (green beating, red not beating, grey removed / replaced, orange
+    signal lost, white no slice); texts: last amplitude, change in the last 24 h (first vs. last 2 h), number of the
+    slice, last amplitude in % of the maximum of the slice. A **red frame** with a number marks channels with red flags
+    (check the analysis) in any of their recordings, also of earlier passes (`mda_flags.csv`).
+  * `<series>/<series>_ch<c>.png` (2026-10-15; flat: `trends/`) per setup and channel: per parameter, left the whole
+    time course since the start of the series (all slices of the channel, line = median per bin of each slice, 30 min
+    up to 7 days, 2 h beyond; slice changes dashed; the last 24 h yellow; recordings with red flags as red bars at the
+    bottom; dates with the day in culture), right the last 24 h of the data (10-min line, protocols, comments numbered
+    with a list below). The first line under the title gives the status of the last slice (since, end status, last
+    contraction, amplitude in % of its maximum). Data in `<series>/<series>_trends.xlsx`: sheets `course` (channel,
+    slice, bin = clock time of its start, dayInCulture, nBeats, the parameters = median of the 1-min values of the bin,
+    binMinutes), `last24h` (the 1-min values), `comments` and `slices` (the rows of the register of the setup).
+    Replaces the images per slice of 2026-10-14.
+  * `<name>_ch<c>.png` per recording and channel with at least 20 included contractions: one panel per
+    parameter of `'trendParameters'` (default amplitude, diastolicForce, TTP90, TTR90; any parameter or
+    `beatsPerMinute`; `--trend-parameters`). Dots = overview (median per minute of the included contractions), line =
+    their median per 10 min (5 min up to 3 h, 30 min beyond 30 h), clock time; stimulation protocols as light blue
+    bands with their name, periods without signal grey, comments of the log file as numbered purple lines with a
+    list below; during a protocol only the comments at its start and end are shown. Title with the labels of the
+    channel (setupID, sliceID, species, tissue, sampleID, treatment); in each panel the median and the change from
+    the first to the last 2 h.
+  * The data of the images (to plot them again in another program): sheet `trends` of `<name>.xlsx` with one row
+    per channel and 1-min window with included contractions (`channel`, `window` = clock time of its start, `t_from`,
+    `nBeats`, the trend parameters in the units of the sheet `parameters`, `bin_from`: the line is the median of the
+    rows with the same `bin_from`; at most 8 × 1,440 rows per day, far below the Excel limit) and sheet
+    `trendComments` (`channel`, `number` as in the image, `t_file`, `clockTime`, `text`).
+  * `MyoDishAnalysisWatch('trends', resultsFolder, 'include', ..., 'trendParameters', {...})` (`mda-watch RESULTS
+    --trends-only ...`): the images and these sheets again from the result files, e.g. with other parameters or for
+    results of earlier versions (also csv results), and the images of the setups and experiments.
 * **Slice register** (`'register',true`, default; `mda_sliceRegister` / `slice_register`, see below):
   `<experiment>/<experiment>_slices.csv` and `mda_slices.csv` (all experiments), updated after every pass.
 * **Index** `mda_index.csv` (one row per recording; the same file for MATLAB and Python): size and time (UTC) of the
-  `.mdd` file, size of the log file, status (`ok`, `error`, `running`, `noLog`), version, implementation, fingerprint
+  `.mdd` file, size of the log file, status (`ok`, `error`, `running`, `incomplete`, `parallel`, `noLog`), version,
+  implementation, fingerprint
   of the core functions, options, analysis time, number of contractions, message. `'reanalyze'`: `'new'` (default)
   = new and changed recordings; `'outdated'` = also those analysed with another version, other options or (same
   implementation) other core functions; `'all'`. Recordings with an analysis error are retried when the file, the
@@ -421,22 +541,73 @@ watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`.
   mean amplitude in the first and last bin with ≥ 10 contractions and flags (no contractions, capture < 90 %, extra
   beats > 10 %, amplitude change > 30 %; `'flagCapture'`, `'flagExtraBeats'`, `'flagAmplitudeChange'`); periods
   without signal by type and the channels that do not end beating.
-* **PDF report** `reports/mda_report_<date>_<time>.pdf` of the same pass (`'report'`, default true; Python
-  `--no-report`): see "Analysis report"; the GUI commands open the `<name>_info.csv` of the recording (settings of the
-  watcher). MATLAB also prints the channels to check as links in the command window.
-* **Skipped**: files changed in the last 10 min (`'minFileAgeMinutes'`), names starting with `.` (rsync temporary
-  files, hidden folders), recordings without `Recording stopped` in the log file (status `running`; analysed when
-  unchanged for 30 h, `'incompleteAfterHours'`), recordings without log file (`noLog`). A lock file
-  (`mda_watch.lock`) prevents two watchers on the same results folder; one left behind by a crashed run is ignored
-  after 12 h (or delete it).
+  The txt report lists the PDF reports of the experiments.
+* **PDF report per experiment** `<experiment>/<experiment>_report.pdf` (`'report'`, default true; Python
+  `--no-report`; one report per experiment instead of one per pass since 2026-10-15; `mda_report_root.pdf` for
+  recordings directly in the raw folder), made again after every pass with analysed recordings of the experiment:
+  first page the overview image, then **all** analysed recordings of the experiment x channels with their flags (the
+  recordings of the last pass in bold, the earlier ones with the flags of `mda_flags.csv`: red flags of earlier days
+  stay visible, also in the list of the channels to check), and pages with traces of the red channels of the last
+  pass. See "Analysis report"; the GUI commands open the `<name>.xlsx` (csv results: `<name>_info.csv`) of the
+  recording (settings of the watcher). MATLAB also prints the channels to check as links in the command window.
+* **Flags** `mda_flags.csv` (2026-10-14; with the PDF report): the flags of the analysis report per recording and
+  channel (file, analyzed, channel, label, status, nDetected, capture_percent, flags, level, red, yellow, from / to =
+  window of the red flags) of all analysed recordings, updated after every pass; read by the results browser of the
+  GUI (**Results ...**), the experiment reports and the overview images.
+  `[T, missing] = MyoDishAnalysisWatch('flags', resultsFolder, compute)` (Python `X, T, missing =
+  flags_table(results_folder, compute)`) returns the flags of the current analyses; `compute = true` computes the
+  missing ones (results of older versions) from the result files and saves them (not while a watcher is running).
+* **Skipped** while written or copied (2026-10-13): files changed in the last 10 min (`'minFileAgeMinutes'`), names
+  starting with `.` (rsync temporary files, hidden folders), and:
+  * `running`: no `Recording stopped` in the log file yet; analysed when the end of the data (start of the recording
+    in the log file + duration from the file size) is 30 h ago (`'incompleteAfterHours'`, `--incomplete-after`),
+    e.g. aborted recordings (without clock time, or with the clock of the recording computer more than 1 h ahead:
+    30 h after the last change of the files);
+  * `incomplete`: the file is shorter than the recording in the log file (`Recording started` → `stopped`) by more
+    than 10 s **and** more than 2 % (`'incompleteTolerance'`, `--incomplete-tolerance`; 1 % before 2026-10-14), e.g.
+    a copy to a network drive that was interrupted; checked again in every pass, analysed with a note in the message
+    when unchanged for 30 h, and again when the copy is completed (the file changes). The tolerance is relative
+    because the sample
+    clock of the controllers deviates from the clock of the computer: in 15,748 stopped recordings of 2020–2026 the
+    file was shorter than the log duration by at most 0.13 % in 99 % of them (99th percentile 2020: 0.35 %, 2021:
+    0.58 %, from 2022 on: 0.05 %; 24-h recordings: up to 90 s), in one setup of 2021 by 1.1–2.1 %. The 10 s protect
+    short recordings, whose start and stop entries can be 1–2 s off (99th percentile of recordings < 15 min: 2.4 s).
+    9 recordings exceed both limits: 6 empty files, one with 1 % of its data, one 2.8 % short and one of that setup
+    (2.05 %); with 1 % they were 22 (14 of that setup), with 10 s alone 1,364.
+    Also `incomplete`, until the file changes (no time limit): empty files (no data; 258 of 17,237 recordings of
+    2020–2026, analysed as `ok` without data before) and files dated before 1990 (robocopy dates files to 1980 until
+    their copy is finished);
+  * `parallel` (`'parallel','skip'`, default; `--parallel skip`): parallel recordings (schedule files, snapshots,
+    FFR or Iso recordings started from the MyoDish software) whose main recording is in the same folder and selected
+    in the same pass (not left out by `'include'`, `'exclude'`, `'filter'` or `'fromDate'`); main recording = a
+    recording whose log file lists the file as `started parallel recording` with the same duration (± max(5 s,
+    1 %)). Their data are in the main file and their stimulation protocols in the main file's `_protocols_*` results;
+    the message names the main file and the time window in it (e.g. `parallel recording of expA/rigA_X_1.mdd
+    (54.6-7554.6 s of the main file)`). Parallel recordings whose main file is not selected (e.g.
+    `'include','*schedule*'`: the schedule files only) or missing (only the parallel file copied), and all of them
+    with `'parallel','analyse'`, are analysed; their message starts with `parallel recording of <main file> (...):
+    analysed (...)`. The slice register ignores parallel recordings whose main file has results in the same results
+    folder, so that no contraction or stimulus of a slice is counted twice in its time course. 6,674 of the 16,463
+    recordings with log file of 2020–2026 are such parallel recordings (5,063 schedule files, 687 snapshots);
+  * `noLog`: no log file, or an empty one; analysed when the log file appears or changes.
+
+  A lock file (`mda_watch.lock`) prevents two watchers on the same results folder (MATLAB, Python, another
+  computer): a second watcher skips its pass. The running watcher refreshes it after every recording and during long
+  steps (2026-10-14); a lock file not refreshed for 1 h (watcher crashed) is ignored (before: 12 h after its
+  creation). The index is written after every analysed recording and once at the end of the pass.
 * **Daily without an open MATLAB / terminal**: the scheduler of the operating system (cron / launchd / Windows task
-  scheduler) with `mda-watch ...` or `matlab -batch "MyoDishAnalysisWatch(...)"`. `'interval', h` (older): one pass
-  every h hours in a loop, MATLAB stays busy; `'schedule'` replaces it.
-* Further options: `'newSliceHours'` (slice register, default 2), `'filter'` (regular expression on the relative
-  path), `'maxFiles'`, `'protocols',false`,
-  `'quiet',true`; all other name/value pairs are analysis options of `MyoDishAnalysis` for all recordings (e.g.
-  `'rockerFilter',true`: rocker artifact removed in chunks of 30 min with 60 s context, result per chunk in
-  `_rockerFilter.csv`). Python only: `--workers n` analyses n recordings in parallel (archives).
+  scheduler) with `mda-watch ...` or `matlab -batch "MyoDishAnalysisWatch(...)"`.
+* **Selecting recordings** (2026-10-13): `'include'` / `'exclude'` (Python `--include` / `--exclude`) take wildcard
+  patterns (`*` any characters, `?` one character; several as a cell array, separated by `,` or `;`, or after
+  `--include`): a pattern without `/` is matched against every folder name and the file name of the path relative to
+  the raw folder, a pattern with `/` against the whole path, e.g. `'include','ABC00*'` (all folders starting with ABC00),
+  `'include','*schedule*'` (schedule files), `'exclude','*test*'`. Upper / lower case is ignored unless
+  `'caseSensitive',true` (`--case-sensitive`). Advanced: `'filter'` (`--filter`), a regular expression on the
+  relative path (`help MyoDishAnalysisWatch`, section ADVANCED OPTIONS; `mda-watch --help`, advanced options).
+* Further options: `'resultFormat'`, `'folders'`, `'trends'`, `'trendParameters'` (see above), `'newSliceHours'` (slice
+  register, default 2), `'maxFiles'`, `'protocols',false`, `'quiet',true`; all other name/value pairs are analysis options of `MyoDishAnalysis` for all recordings (e.g.
+  `'rockerFilter',true`: rocker artifact removed in chunks of 30 min with 60 s context, result per chunk in the
+  sheet / file `rockerFilter`). Python only: `--workers n` analyses n recordings in parallel (archives).
 * Tested on 31 recordings (729 MB, rat, rabbit, pig, human, schedule files up to 2 h, single channel, sharp
   electrode) on one Mac: MATLAB 149 s, Python 69 s; results of MATLAB and Python identical (116 result files, max. relative
   difference 3e-10).
@@ -450,7 +621,7 @@ number, while a connected sensor never gives identical values for seconds (noise
 signal = at least 2 s (`'minSeconds'`) of identical consecutive raw samples; periods of a channel less than 0.5 s apart
 are one (`'mergeSeconds'`). Types:
 * `chamber out`: one channel, the chamber was taken out (and put back at `to`, unless `untilEnd`). Why is not in the
-  signal: see the comments of the log file (`_gaps.csv` lists those within 5 min).
+  signal: see the comments of the log file (the gaps table lists those within 5 min).
 * `board group`: ≥ 3 channels of the same group (1–4 or 5–8) lose the signal within 1 s (`'simultaneous'`), or 2
   channels within 0.1 s (`'simultaneousPair'`) – faster than a person can take chambers out (with two hands, two
   chambers at once). A defective sensor board can disturb all boards of its group, so the chambers were probably not
@@ -472,8 +643,9 @@ after the other, 2 followed within 1 s (0.36 and 0.6 s: both hands, end of the e
 R = mda_sliceRegister('/data/myodish/results')     % all experiments; also written by the watcher after each pass
 ```
 One row per **slice**: a channel of a setup from putting the slice in until it was taken out, the signal was lost or
-the data end. Built from the watcher results (`_channels.csv`, `_gaps.csv`, `_overview.csv`), written to
-`<experiment>/<experiment>_slices.csv` (experiment = subfolder of the results and raw folder) and `mda_slices.csv`
+the data end. Built from the watcher results (tables channels, gaps: sheets of `<name>.xlsx` or `_channels.csv`,
+`_gaps.csv`; `<name>_overview.csv(.gz)`; both layouts of the watcher, see "Result folders"), written to
+`<experiment>/<experiment>_slices.csv` (experiment = folder of the recordings in the raw folder) and `mda_slices.csv`
 (all experiments). The recordings of one setup (series: file name up to its number, e.g. `rigA_sampleX_0`,
 `rigA_sampleX_1`, …) are followed channel by channel in the order of their start. A **new slice** begins with the first
 signal of a channel, after a chamber-out period with a comment such as *new slice*, *replaced*, *exchanged*,
@@ -496,6 +668,100 @@ recordings of the slice, `;` separated), `calibrationChanged` (1 if the calibrat
 from another row with the same `sliceID`, e.g. a slice moved to another setup: force values and fold changes over time
 are only comparable in µN; 2026-10-10), `endComments`. With `endStatus`, `lastAmplitude_pctMax` and `dayEnd` the
 slices that died or were taken out can be counted and classified (e.g. dead vs. weak) with a criterion chosen later.
+`'trends',true` (`trends=True`; the watcher with its default `'trends',true`; 2026-10-15): the course image per setup
+and channel `<series>/<series>_ch<c>.png`, its data `<series>/<series>_trends.xlsx` and the overview image
+`<experiment>_overview.png` (see "Trend images" of the watcher; `'trendParameters'`). `[s, n] =
+mda_sliceRegister('series', name)` gives the series and number of a file name, `mda_sliceRegister('resultFolder', rel,
+folders)` the folder of its results.
+
+## Windows before and after a treatment (`mda_timepoints`; Python `mda-timepoints`; 2026-10-15)
+```matlab
+res = '/data/myodish/results';                       % results folder of the watcher
+TP = mda_timepoints(res, 'Mava100', 'Setup1_ABC000101', [1 3 5], '2000-01-01 15:20', [-10 10 60 240 1440])
+TP = mda_timepoints(res, 'Ome2uM', {'Setup1_ABC000101', 'Setup2_ABC000101'}, {[1 2], [4 5 6]}, ...
+                    {'2000-01-01 13:20:00', '2000-01-01 13:30:00'}, [-60 120], 300)   % one time per setup, 300 s
+```
+```
+mda-timepoints results Mava100 --series Setup1_ABC000101 --channels 1 3 5 --time "2000-01-01 15:20" --offsets -10 10 60 240 1440
+```
+Contraction parameters of channels of one or more setups (series: file name up to its number) in windows that start
+exactly at the treatment time + `offsets` (minutes, required; negative = before) and last `seconds` (default 120 s);
+windows are never shifted. Inputs: `channels` `[]` (all channels with contractions), a vector (every series), a matrix
+with one row per series (0/NaN = none) or a cell array with one vector per series; `time` one clock time, one per
+series or one per channel (the size of the channel matrix, or in the order of the channels). Parameters (default,
+`'parameters'`): `amplitude`, `diastolicForce`, `TTP90`, `TTR90`, `CD50`, `CD90` (10 % upstroke to 90 % relaxation =
+TTP90 + TTR90 of the beat), `dFdtMax`, `dFdtMin` (in **mN/s**; the analysis: µN/s), `AUC`, `beatsPerMinute` (all
+contractions). Per window (sheet `summary`; 2026-10-16): counts (`nBeats`, `nIncluded`, `nExtra`), a **note**, per
+parameter the **mean** of the included contractions (column `<parameter>`) and its normalized value, then per parameter
+`_SD` and `_SEM` (SD / √n), then `_median`, `_q25`, `_q75`, then the average beat (`nAvgBeats`, `avgBeat_diastolic`,
+`avgBeat_amplitude`). Normalized to the baseline window (the last negative offset, `'baseline'`):
+`<parameter>_pctBaseline` = 100 × mean / mean of the baseline window; for the diastolic force, which can be near 0 or
+negative, the absolute change `diastolicForce_delta` = mean − baseline mean (µN). **Windows without contractions**
+although recorded (no chamber out / no signal in the window): the slice does not contract – `amplitude`, `AUC`,
+`dFdtMax`, `dFdtMin` and `beatsPerMinute` are 0 (0 % of baseline), `TTP90`, `TTR90`, `CD50`, `CD90` NaN, and the
+diastolic force (e.g. a contracture without beats) is taken from the signal: median of the force in the window,
+filtered as in the analysis, minus the zero force (needs the recording; note `diastolic force from the signal`).
+Notes: stimulation protocols, chamber out / no signal, user comments in the window, fewer than 80 % of the expected
+contractions, another slice than in the baseline window (slice register; then no normalized values), `no recording`,
+`pending: no data yet` (call again after the next pass of the watcher). `'sampleID'` and `'group'` (one text or one
+per series) name the sample (default: slice register, else the series name after the setup: `Setup1_ABC000101` →
+`ABC000101`) and its group (e.g. `'HTX'`) for pooling (below). Files in
+`<experiment>/timepoints/<label>_<yyyy-mm-dd-HH-MM>/` (never changed by the watcher): `<label>_<time>.xlsx` (sheets
+`summary`, `matrix` = channels × offsets per parameter (mean and normalized), `course` = 1-min values (medians of the
+overview) from 30 min before the first to 30 min after the last window, `beats`, `averageBeats`, `averageBeatsMean`,
+`info`) and the images, each **absolute (`_abs`) and normalized (`_norm`)**: `_timepoints_abs/_norm.png/.fig`
+(mean ± SEM of the beats or % of baseline over the windows, one line per channel, black = mean ± SEM of the channels),
+`_course_abs/_norm` (1-min course, black = mean ± SEM of the channels), `_averageBeats_abs/_norm` and
+`_averageBeatsMean_abs/_norm` (Python: `.png` and `.svg`; without baseline window only `_abs`). `TP` is a struct
+(Python: dict) with the same data (`TP.summary`, `TP.matrix.amplitude` (means), `TP.pctBaseline.amplitude`, ...).
+Times of a substance added during a recording: the comment in the MyoDish log file (shown in the course images of the
+watcher); a comment is often typed a few minutes after the addition.
+
+**Average beats** (`'averageBeats'`, default true; reads the recordings, read only; `'rawFolder'` if the raw folder is
+mounted elsewhere than during the analysis): per window the mean of the included beats (no extra beats, no other
+contraction in the segment), aligned at the stimulus (unpaced: onset), from 0.1 s before to the next beat, filtered as
+in the analysis, minus the zero force of the channel. Three versions: `force_uN` (absolute: diastolic force kept, e.g.
+the rise under omecamtiv mecarbil), `norm_baselineAmplitude` (baseline beat from 0 to 1, all windows on this scale:
+change of amplitude and diastole relative to the baseline, comparable between slices) and `norm_ownAmplitude` (each beat
+with amplitude 1, its diastole keeps the change against the baseline in baseline amplitudes: kinetics without losing the
+diastolic effect), each with its standard error (`_SE`, SD of the beats / √n). Sheets `averageBeats` and
+`averageBeatsMean` (mean, SD and SE of the channels), images `_averageBeats` (one row per channel) and
+`_averageBeatsMean` (± SE shaded), and **one 16:9 slide per channel** `averageBeats/<series>_ch<c>.png/.fig` (Python
+`.png/.svg`): average beats ± SE in µN and with the own amplitude = 1, below a table of the windows (n, amplitude,
+diastolic force, TTP90, TTR90 and their change against the baseline, note) – ready for a slide deck. **Alternans**: two amplitude groups of the included beats
+(1-D 2-means; each ≥ 20 % of the beats, means ≥ 20 % and ≥ 3 SD apart) give a note, e.g. *alternans: 2 amplitude groups
+1693 / 3727 uN (42 % small beats, 83 % of successive beats switch)* (≥ 80 % switch; otherwise *irregular amplitudes: 2
+groups ...*), and average beats of the small and the large beats; mean and median then describe neither group – see
+the average beats.
+
+## Pooling analyses by treatment (`mda_poolTimepoints`; Python `mda-pool-timepoints`; 2026-10-16)
+```matlab
+PT = mda_poolTimepoints(res)                                   % all analyses below the results folder
+PT = mda_poolTimepoints(res, 'labels', {'CTRL', 'OME3uM', 'MAVA1uM'}, 'name', 'myosinModulators')
+PT = mda_poolTimepoints(R(:, 2))                               % TP structs of mda_timepoints calls of a script
+S = PT.slices; s = S.offset_min == 120;                        % statistics, sample as random effect
+BarsWithErrorsFromList(S.amplitude_pctBaseline(s), S.treatment(s), 'lme', 'IDs', S.sampleID(s))
+```
+```
+mda-pool-timepoints results --labels CTRL OME3uM MAVA1uM --name myosinModulators
+```
+The analyses of `mda_timepoints` (`<experiment>/timepoints/<label>_<time>/`, any experiment, sample or day) are pooled
+by their label (treatment). Files in `<results>/timepoints_pooled/<name>/` (`'outputFolder'`): `<name>.xlsx` with the
+sheet **`slices`** (one row per slice and time point: `treatment`, `substance`, `concentration`, `concentrationUnit`
+(from the label: `OME0.5uM` → OME, 0.5, uM), `group`, `sampleID`, `sliceID` (`<series>_ch<c>`), `timePoint`
+(`-1 h`, `+2 h`), `offset_min`, `isBaseline` and all columns of the summary of `mda_timepoints`) – one long table for
+statistics, e.g. with `BarsWithErrorsFromList` – and the sheets `samples` (mean of the slices per sample),
+`treatments` (per treatment and time point: n slices, n samples, mean, SD and SEM of the slices, mean and SEM of the
+samples), `course`, `averageBeatsMean`, `analyses`, `info`; per treatment `<treatment>/<treatment>_timepoints`,
+`_course` and `_averageBeatsMean` (`_abs` and `_norm`, all slices, black = mean ± SEM of the slices), and
+`treatments_abs/_norm/_vsControl` (all treatments side by side: slices as dots, mean ± SEM per time point).
+**Against the controls** (`'control'`, default: labels starting with CTRL, control, vehicle or DMSO; the control
+slices of the same sample at the same time point, otherwise all control slices; columns `controlReference`,
+`nControlSlices`): `<parameter>_pctBaseline_vsControl` = 100 × pctBaseline / mean pctBaseline of the controls
+(corrects the drift of the controls) and `diastolicForce_delta_vsControl` = Δ − mean Δ of the controls (µN). Slices of one sample
+are not independent: use the sheet `samples`, or the slices with the sample as random effect. The sample ID comes
+from `mda_timepoints` (`'sampleID'`); analyses of earlier versions (without sample ID and SEM) are skipped and listed
+in the sheet `analyses` – call `mda_timepoints` again.
 
 ## Stimulation protocols (`'protocol'`, `'groupBy'`; GUI: **Protocols ...**)
 Protocols such as force-frequency (FFR), refractory period (RP, S1-S2), stimulation threshold (ST), post-rest
@@ -798,7 +1064,8 @@ their missed beats do not count in the noise index (N: uncertain contractions wi
 of the watcher writes `arrhythmic pacing` instead of `capture < 90 %`.
 
 ## Analysis report (`mda_report`; Python `report.py`; 1.0.0-beta.5)
-A short PDF that says which analyses should be checked, written by the watcher after every pass, by `MyoDishAnalysis`
+A short PDF that says which analyses should be checked, written by the watcher per experiment after every pass with
+analysed recordings (all recordings of the experiment, the new ones in bold; 2026-10-15), by `MyoDishAnalysis`
 with `'output'` and by the GUI on request. Flags per channel (channels with a slice and ≥ 50 detected contractions;
 thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
 * **check the analysis** (red: the analysis may not work, or technical faults put wrong values into the data):
@@ -975,14 +1242,16 @@ lower plot, the trend and all exports.
 | `docs/MyoDishAnalysis_quickstart_GUI.pdf`, `docs/MyoDishAnalysis_quickstart_watcher.pdf` | quick-start guides: first analysis in the GUI and reading the results (2 pages); the watcher (1 page) |
 | `mda_report.m` | analysis report (PDF): channels to check, traces, commands that open the GUI there |
 | `mda_summarize.m`, `mda_writeResults.m` | summary table, Excel/CSV export (info table: version and all settings) |
-| `mda_readResults.m` | read a results file again (settings, analysis windows, contractions; GUI: Open results) |
+| `mda_readResults.m` | read a results file again (settings, analysis windows, contractions; GUI: Open ...) |
 | `mda_labels.m`, `mda_addLabels.m` | labels per channel (metadata) |
 | `mda_test.m` | self test (parameters, rocker filter) |
 | `mda_testWatch.m` | test of the watcher with example recordings |
 | `mda_testClockTime.m`, `mda_testSignalGaps.m`, `mda_testSliceRegister.m` | tests of the clock-time correction, the periods without signal and the slice register |
+| `mda_timepoints.m`, `mda_testTimepoints.m` | windows before and after a treatment (from the watcher results) and its test |
+| `mda_poolTimepoints.m` | analyses of `mda_timepoints` pooled by treatment (one table of all slices, images; test in `mda_testTimepoints.m`) |
 | `mda_testGateInverted.m` | test of the longer gate of certain contractions, inverted signals and the analysis report |
 | `mda_version.m` | version number |
 | `example_MyoDishAnalysis.m` | examples |
 | `examples/` | anonymized example recordings (`.mdd`, `_log.log`, `_labels.csv`, LabChart `.mat`), see `examples/README.md` |
 | `py/` | Python version (same results), see `py/README.md` |
-| `py/tools/anonymize_recording.py` | anonymize a recording before sharing it (dates, paths, file names, initials) |
+| `py/tools/anonymize_recording.py` | anonymize a recording before sharing it (dates, paths, file names, initials, structured log lines of software 2.1, `_labels.csv`; final check; tests in `py/tests/test_mda.py`) |

@@ -4,11 +4,14 @@
 # Additional terms (GPL-3.0 section 7): see the file NOTICE
 """pyqtgraph building blocks of the GUI: a view box with the mouse behaviour of the MATLAB GUI (wheel = zoom the time
 axis, shift + wheel = move, drag, click, double-click, right click = context menu), plot items with a time axis, a plot
-with a second y axis, and drawing helpers (vertical ticks, rectangles, rotated labels).
+with a second y axis, and drawing helpers (vertical ticks, rectangles).
 
-TS 2026-10-06 (drag with y: EP plots 2026-10-09)
+TS 2026-10-06 (drag with y: EP plots 2026-10-09; accent colors of the user interface 2026-10-13; remembered folders
+2026-10-14)
 """
 from __future__ import annotations
+
+import os
 
 import numpy as np
 import pyqtgraph as pg
@@ -20,11 +23,66 @@ pg.setConfigOptions(antialias=False, background="w", foreground="k")
 
 PURPLE = (140, 0, 191)
 RED = (217, 0, 0)
-BLUE = (0, 77, 255)
+BLUE = (29, 114, 185)  # stimulus pulses, intervals, loaded window (= UI_BLUE; before 2026-10-13: (0, 77, 255))
 GREEN = (0, 153, 0)
 GREY = (128, 128, 128)
 MAGENTA = (230, 0, 230)
 ORANGE = (255, 140, 0)  # uncertain contractions (high sensitivity)
+# accent colors of the user interface (2026-10-13): blue of the main buttons and of the panel titles, dark blue of the
+# status texts, light blues of the table headers and of the selections (as MyoDishAnalysisGUI.m)
+UI_BLUE = "#1D72B9"
+UI_BLUE_DARK = "#155A94"
+UI_BLUE_LIGHT = "#BBD4EA"
+UI_BLUE_TINT = "#EAF2F9"
+STYLE_SHEET = f"""
+QPushButton[primary="true"] {{ background-color: {UI_BLUE}; color: white; font-weight: bold;
+    border: 1px solid {UI_BLUE_DARK}; border-radius: 4px; padding: 3px 12px; }}
+QPushButton[primary="true"]:hover {{ background-color: {UI_BLUE_DARK}; }}
+QPushButton[primary="true"]:pressed {{ background-color: #0F4675; }}
+QPushButton[primary="true"]:disabled {{ background-color: {UI_BLUE_LIGHT}; border-color: {UI_BLUE_LIGHT}; }}
+QGroupBox {{ color: {UI_BLUE}; border: 1px solid {UI_BLUE_LIGHT}; border-radius: 4px; margin-top: 1.1em;
+    padding-top: 4px; }}
+QGroupBox::title {{ subcontrol-origin: margin; left: 8px; padding: 0 3px; }}
+QHeaderView::section {{ background-color: {UI_BLUE_TINT}; color: #3B3B3B; border: none;
+    border-right: 1px solid #DADADA; border-bottom: 1px solid {UI_BLUE_LIGHT}; padding: 2px 4px; }}
+QTabBar::tab:selected {{ color: {UI_BLUE}; }}
+QPushButton[changed="true"] {{ color: #BF0000; }}
+"""
+
+
+def ui_style(app=None):
+    """accent colors of the user interface (STYLE_SHEET, selection color), once per application (2026-10-13)"""
+    app = app or QtWidgets.QApplication.instance()
+    if app is None or app.property("mdaStyle"):
+        return
+    app.setStyleSheet(app.styleSheet() + STYLE_SHEET)
+    pal = app.palette()
+    pal.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor(UI_BLUE))
+    pal.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor("#ffffff"))
+    app.setPalette(pal)
+    app.setProperty("mdaStyle", True)
+
+
+def primary(button):
+    """button of the main action of a window (accent color, STYLE_SHEET)"""
+    button.setProperty("primary", True)
+    return button
+
+
+def pref_get(name):
+    """folder remembered between sessions (QSettings MyoDishAnalysis; 2026-10-14); "" if missing or gone"""
+    try:
+        v = QtCore.QSettings("MyoDishAnalysis", "MyoDishAnalysis").value(name, "")
+    except Exception:  # noqa: BLE001
+        v = ""
+    return v if isinstance(v, str) and v and os.path.isdir(v) else ""
+
+
+def pref_set(name, value):
+    try:
+        QtCore.QSettings("MyoDishAnalysis", "MyoDishAnalysis").setValue(name, str(value))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class MouseViewBox(pg.ViewBox):
@@ -94,6 +152,38 @@ class ElidedLabel(QtWidgets.QLabel):
     def _elide(self):
         fm = self.fontMetrics()
         super().setText(fm.elidedText(self._full, QtCore.Qt.TextElideMode.ElideMiddle, max(10, self.width())))
+
+
+class FitButton(QtWidgets.QPushButton):
+    """push button with several texts, longest first: shows the first one that fits its width (2026-10-14; e.g.
+    'Advanced (3 changed)', 'Advanced (3 chgd)', 'Adv. (3 chgd)'). Its width comes from the layout (stretch), not from
+    the text. set_changed(True): red text (STYLE_SHEET)"""
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self._texts = [text]
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Fixed)
+
+    def set_texts(self, texts):
+        self._texts = [str(t) for t in texts] or [""]
+        self._fit()
+
+    def set_changed(self, tf):
+        if bool(self.property("changed")) != bool(tf):
+            self.setProperty("changed", bool(tf))
+            self.style().unpolish(self)
+            self.style().polish(self)
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self._fit()
+
+    def _fit(self):
+        fm = self.fontMetrics()
+        room = self.width() - 16
+        t = next((t for t in self._texts if fm.horizontalAdvance(t) <= room), self._texts[-1])
+        if t != self.text():
+            super().setText(t)
 
 
 class PlotArea(pg.GraphicsLayoutWidget):
@@ -201,22 +291,6 @@ def rects(plot, x0, x1, y0, y1, brush, pen=None, z=-10):
     it.setZValue(z)
     plot.addItem(it)
     return it
-
-
-def rot_labels(plot, x, y, labels, color, size=7, max_n=60):
-    """labels rotated by 90 degrees, right aligned at (x, y) (comments)."""
-    items = []
-    if len(labels) > max_n:
-        return items
-    f = QtGui.QFont()
-    f.setPointSize(size)
-    for xi, lab in zip(x, labels):
-        t = pg.TextItem(lab, color=color, angle=90, anchor=(1, 1))
-        t.setFont(f)
-        t.setPos(xi, y)
-        plot.addItem(t)
-        items.append(t)
-    return items
 
 
 def runs(mask):

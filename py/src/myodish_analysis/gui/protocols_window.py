@@ -22,6 +22,7 @@ from ..analysis import myodish_analysis
 from ..parameters import PARAMETERS
 from ..protocols import GROUP_BY, find_protocols
 from ..write_results import write_results
+from .widgets import primary
 
 MU = "µ"
 X_LABEL = {"pacingFrequency": ("pacing frequency (Hz)", 1.0), "S2interval": ("S2 interval (ms)", 1000.0),
@@ -131,10 +132,7 @@ class ProtocolWindow(QtWidgets.QWidget):
         self.cTab.currentIndexChanged.connect(lambda *_: self.fill_table())
         g.addWidget(self.cTab, 6, 1)
         v.addLayout(g)
-        b = QtWidgets.QPushButton("Analyse")
-        f = b.font()
-        f.setBold(True)
-        b.setFont(f)
+        b = primary(QtWidgets.QPushButton("Analyse"))
         b.setToolTip("contractions of the ticked protocols and channels, grouped (threshold, filters, zero force, rocker "
                      "filter and labels as in the main window)")
         b.clicked.connect(self.analyse)
@@ -190,11 +188,12 @@ class ProtocolWindow(QtWidgets.QWidget):
         self.tp.setCellWidget(r, 5, cb)
 
     def add_range(self):
-        rg = self.win.range
-        if rg is None or any(math.isnan(x) for x in rg):
+        w = self.win
+        if w.range is None or not np.all(np.isfinite(w.range)):
             self.tx.setText("Select a range in the main window first.")
             return
-        self._add_row("manual", "selected range", rg[0], rg[1], "pacingFrequency", "", True)
+        rg = w.w2f(np.array(w.rng_span()))  # several ranges: first start to last end (time in the file)
+        self._add_row("manual", "selected range", float(rg[0]), float(rg[1]), "pacingFrequency", "", True)
 
     def remove(self):
         r = self.tp.currentRow()

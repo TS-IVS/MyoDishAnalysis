@@ -42,6 +42,9 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %                       in the GUI): default with 'output': <output without extension>_report.pdf; false: none; a
 %                       file name: this file (also without 'output') (2026-10-11)
 %   'labels', {..}      names of the time ranges (e.g. {'baseline','drug'})
+%   'pooled', tf        several ranges: also one summary row per channel over all of them (range 'all ranges';
+%                       contractions of all ranges, stimulus frequency from the intervals within the ranges; default
+%                       false; 2026-10-14, used by MyoDishAnalysisGUI for several selected ranges / rocker stops)
 %   'metadata', m       labels per channel (columns of both tables): struct, table or file (.csv/.xlsx) with
 %                       setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, treatment,
 %                       concentration, concentrationUnit, daysInCulture, cultureStart, comment, analyst (+ own
@@ -105,6 +108,7 @@ if nargin < 4 || isempty(toSeconds), toSeconds = inf; end
 
 % ------------------------------------------------------------------ options
 outputFile = ''; labels = {}; showFigures = false; quiet = false; chunkSeconds = 1800; metadata = []; reportOpt = [];
+pooled = false;
 protocolSel = []; groupBy = '';
 rest = {};
 i = 1;
@@ -121,6 +125,7 @@ while i <= numel(varargin)
             case 'metadata',     metadata = varargin{i+1}; i = i + 2; continue;
             case 'protocol',     protocolSel = varargin{i+1}; i = i + 2; continue;
             case 'groupby',      groupBy = char(varargin{i+1}); i = i + 2; continue;
+            case 'pooled',       pooled = logical(varargin{i+1}); i = i + 2; continue;
         end
     end
     rest{end+1} = varargin{i}; %#ok<AGROW>
@@ -253,6 +258,7 @@ parts = {}; sumParts = {}; thrInfo = zeros(0, 8);
 rfRows = {}; resParts = {}; pulseParts = {};
 spikes = zeros(0, 4);                              %spike artifacts removed ('spikeRemoval'): channel, from, to, size
 nFig = 0;
+poolB = repmat({{}}, 1, numel(channels)); poolC = poolB;   %option 'pooled': contractions and stimuli of all ranges
 f0cache = [];                                       %rocker frequency per rocker speed, estimated once (all channels)
 for r = 1:nR
     n0 = [numel(parts), numel(sumParts), size(thrInfo, 1), size(rfRows, 1), numel(resParts), numel(pulseParts), ...
@@ -355,6 +361,7 @@ for r = 1:nR
                 end
             else
                 T = mda_summarize(B, Cm, ranges(r,:), opts, protW);
+                if pooled, poolB{c}{end+1} = B; poolC{c}{end+1} = Cm; end
                 if grouping                            %same columns as the grouped ranges
                     B.group = repmat({'all'}, height(B), 1); B.groupValue = nan(height(B), 1); B.groupRole = repmat({''}, height(B), 1);
                     B.groupStep = nan(height(B), 1);
@@ -399,8 +406,27 @@ end
 if isempty(parts)
     error('No range analysed: %s', strjoin(H.notes(max(1, end-nR+1):end), ' | '));
 end
+if pooled && nR > 1 && ~grouping                   %one row per channel over all ranges (2026-10-14)
+    for c = 1:numel(channels)
+        if numel(poolB{c}) < 2, continue; end
+        Bp = vertcat(poolB{c}{:});
+        Cp = poolC{c}{1};
+        for f = {'stimTimes', 'stimCaptured', 'stimCapturedCertain', 'stimDuringContraction', 'extraTimes', 'extraElicited'}
+            if ~isfield(Cp, f{1}), continue; end
+            v = cellfun(@(x) reshape(x.(f{1}), [], 1), poolC{c}, 'UniformOutput', false);
+            Cp.(f{1}) = vertcat(v{:});
+        end
+        Cp.threshold = median(cellfun(@(x) x.threshold, poolC{c}));
+        Cp.invertedSignal = any(cellfun(@(x) isfield(x, 'invertedSignal') && x.invertedSignal, poolC{c}));
+        T = mda_summarize(Bp, Cp, ranges, opts, protW);
+        T.invertedSignal = Cp.invertedSignal;
+        sumParts{end+1} = [table({'all ranges'}, 'VariableNames', {'range'}), T]; %#ok<AGROW>
+    end
+end
 thrInfo = sortrows(thrInfo, [1 2 3]);                %order: range, channel, time
 contractions = vertcat(parts{:});
+nonEmpty = cellfun(@height, sumParts) > 0;          %a protocol without contractions in a channel: no summary rows
+if any(nonEmpty), sumParts = sumParts(nonEmpty); else, sumParts = sumParts(1); end   %(as Python; 2026-10-15)
 summary = vertcat(sumParts{:});
 summary = arrhythmicPacing(summary, opts, ~isempty(protocols));   %2026-10-13
 

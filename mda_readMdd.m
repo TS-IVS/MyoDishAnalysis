@@ -9,12 +9,18 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %   O = mda_readMdd(mddFile, 'overview', binSeconds, opts, progressFcn)
 %                                                     min/max of every channel per bin of the whole file
 %   O = mda_readMdd(mddFile, 'overview', [binSeconds fromSeconds toSeconds], ...)   only this part of the file
+%                                                     overview: O.tBin, O.minForce, O.maxForce (uN), O.binSeconds,
+%                                                     O.rockerFraction (fraction of each bin with the rocker moving),
+%                                                     O.rockerRest ([from to] s: rocker at rest, sample resolution;
+%                                                     2026-10-14)
 %
 % FILE FORMAT (MyoDish software; facts from the Seidel lab's importMyoDishData)
 %   - int16, little endian, channels interleaved. Standard: 8 force channels + 1 stimulus/status channel
 %     at 400 Hz (7200 bytes per second). Since MyoDish software 2.0.9708 (07/2026) a file may contain only
 %     the recorded channel(s) + the status channel (single channel mode: 2 x int16 per sample).
-%     Old files (2020/21, software 1.0.x): 8 force channels at 500 Hz, no status channel.
+%     Old files (2020/21, software 1.0.x): 8 force channels at 500 Hz, no status channel. Recognized by the file size
+%     and the recording duration in the log file or, if they do not fit, by nChannels 8 / 500 Hz in the log file and
+%     no channel with the content of a status channel (2026-10-13); analysed as unpaced channels (contractions only).
 %   - sampling rate, recording duration (--> number of channels) and extended sensor mode are read from the
 %     log file <name>_log.log (UTF-16) next to the .mdd file.
 %   - the values in the file are arbitrary units (AU). They are converted to uN with the 'Calibration' entry of each
@@ -58,7 +64,7 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %
 % TS 2026-10-05 (condensed from importMyoDishData, readRecordingInfoFromMyoDishLogFile,
 % readSamplingRateFromMyoDishLogFile; identical data and stimulus times)
-% 2026-10-08: recordingStart from mda_clockTime (12-hour time stamps)
+% 2026-10-08: recordingStart from mda_clockTime (12-hour time stamps); 2026-10-13: old 8-channel files
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -150,14 +156,24 @@ else
     if isempty(nCh)
         % no usable log information: the status channel (last channel) contains almost only 0 or the rocker
         % bit (16384); test 9 channels first, then single channel mode (2), then the others
-        nCh = 9;
         for cand = [9 2 3 4 5 6 7 8]
             if statusFraction(H.file, cand) > 0.95
                 nCh = cand;
                 break;
             end
         end
-        H.notes{end+1} = sprintf('%d channels in the file (from the content of the status channel).', nCh);
+        if ~isempty(nCh)
+            H.notes{end+1} = sprintf('%d channels in the file (from the content of the status channel).', nCh);
+        elseif L.nChannelsController == 8 || fs == 500
+            % no status channel in the file and the log file says 8 channels or 500 Hz: old MyoDish file (software
+            % 1.0.x; 2026-10-13, before: 9 channels assumed and the 9th column read as status channel)
+            nCh = 8;
+            H.notes{end+1} = ['No status channel in the file and 8 channels / 500 Hz in the log file: old 8-channel ' ...
+                'file, contractions only (no stimuli, extra or missed beats).'];
+        else
+            nCh = 9;
+            H.notes{end+1} = '9 channels assumed (no status channel found in the file).';
+        end
     end
 end
 H.nChannelsInFile = nCh;
@@ -365,6 +381,9 @@ O.tBin = (s0 + ((0:nBins-1) + 0.5) * binSamples) / fs;
 O.minForce = nan(nData, nBins);
 O.maxForce = nan(nData, nBins);
 O.rockerFraction = zeros(1, nBins);
+O.rockerRest = zeros(0, 2);                        %rocker at rest [from to] (s), sample resolution (2026-10-14)
+restOpen = [];                                     %start of a rest interval still open at the end of a chunk
+hasRocker = (isfield(S, 'rockerSource') && strcmp(S.rockerSource, 'log')) || S.hasStimChannel;
 
 fid = fopen(S.file, 'r', 'ieee-le');
 if fid < 0, error('mda_readMdd: cannot open %s', S.file); end
@@ -386,21 +405,40 @@ while b0 < nBins
     end
     if isfield(S, 'rockerSource') && strcmp(S.rockerSource, 'log')
         r = double(rockerStateFromLog(S.rockerLogIntervals, (s0 + b0 * binSamples + (0:m-1)) / fs));
+        [O.rockerRest, restOpen] = restIntervals(O.rockerRest, restOpen, r == 0, (s0 + b0 * binSamples) / fs, fs);
         r(end+1:end+pad) = nan;
         O.rockerFraction(b0+(1:nb)) = mean(reshape(r, binSamples, nb), 1, 'omitnan');
     elseif S.hasStimChannel
         r = double(bitand(typecast(raw(S.stimRow,:),'uint16'), uint16(16384)) ~= 0);
+        [O.rockerRest, restOpen] = restIntervals(O.rockerRest, restOpen, r == 0, (s0 + b0 * binSamples) / fs, fs);
         r(end+1:end+pad) = nan;
         O.rockerFraction(b0+(1:nb)) = mean(reshape(r, binSamples, nb), 1, 'omitnan');
     end
     b0 = b0 + nb;
     if ~isempty(progressFcn), progressFcn(min(1, b0 / nBins)); end
 end
+if ~isempty(restOpen), O.rockerRest(end+1, :) = [restOpen, (s0 + nSamples) / fs]; end
+if ~hasRocker && nSamples > 0, O.rockerRest = [s0, s0 + nSamples] / fs; end   %no rocker information: at rest
 for c = 1:nData                                    %AU --> uN (calibration, extended sensor mode)
     kc = mda_calibrationFactor(S, S.dataChannels(c), O.tBin);
     O.minForce(c,:) = O.minForce(c,:) .* kc;
     O.maxForce(c,:) = O.maxForce(c,:) .* kc;
 end
+end
+
+
+function [I, open] = restIntervals(I, open, rest, t0, fs)
+% rocker-at-rest intervals of one chunk appended to I (rows [from to] s; to = time of the first sample with the rocker
+% moving): rest = logical per sample, t0 = time of the first sample; open = start of an interval still open at the end
+% of the previous chunk ([] if none), updated for the next chunk
+x = [~isempty(open), reshape(logical(rest), 1, [])];
+dx = diff(x);
+tOn = t0 + (find(dx == 1) - 1) / fs;
+tOff = t0 + (find(dx == -1) - 1) / fs;
+if ~isempty(open), tOn = [open tOn]; end
+n = numel(tOff);
+if n > 0, I = [I; [reshape(tOn(1:n), [], 1), reshape(tOff, [], 1)]]; end
+if numel(tOn) > n, open = tOn(end); else, open = []; end
 end
 
 

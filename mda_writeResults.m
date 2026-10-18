@@ -1,4 +1,4 @@
-function outFiles = mda_writeResults(outputFile, contractions, summary, info)
+function outFiles = mda_writeResults(outputFile, contractions, summary, info, varargin)
 %MDA_WRITERESULTS  Write contraction table, summary and analysis info to Excel (.xlsx) or text (.csv).
 %
 %   mda_writeResults('results.xlsx', contractions, summary, info)
@@ -10,6 +10,11 @@ function outFiles = mda_writeResults(outputFile, contractions, summary, info)
 %       pulseTable; > 1048575 rows: <name>_pulses.csv)
 %   mda_writeResults('results.csv', ...)
 %       results_contractions.csv, results_summary.csv, results_parameters.csv, results_info.csv, ...
+%   mda_writeResults(..., 'csvTables', {'contractions', 'pulses'}, 'compress', true, 'sheets', {name, T; ...})
+%       (2026-10-14; results of the watcher) 'csvTables': these tables of an .xlsx file as <name>_<table>.csv next to
+%       it (large tables: much faster to write and read, no row limit); 'compress', true: as .csv.gz (gzip);
+%       'sheets': further tables, after the summary (.csv: <name>_<sheet>.csv). A table with more rows than Excel
+%       allows (1048575) is always written as <name>_<table>.csv. contractions = []: no contraction table.
 %   T = mda_writeResults(info)
 %       only the info table (key, value): file, ..., software, version, implementation, notes, info.extra (rows
 %       {key, value}, e.g. createdBy, channels, loadedWindow_s), option_<name> for every option, log file entries
@@ -28,6 +33,15 @@ if nargin == 1 && isstruct(outputFile)              %info table only (GUI export
     outFiles = infoTableOf(outputFile);
     return;
 end
+P = struct('csvTables', {{}}, 'compress', false, 'sheets', {cell(0, 2)});
+pn = fieldnames(P);
+for i = 1:2:numel(varargin)
+    k = find(strcmpi(pn, char(varargin{i})), 1);
+    if isempty(k) || i == numel(varargin), error('mda_writeResults: unknown option or missing value: %s.', char(varargin{i})); end
+    P.(pn{k}) = varargin{i+1};
+end
+P.csvTables = cellstr(P.csvTables);
+P.sheets = reshape(P.sheets, [], 2);
 [p, n, e] = fileparts(outputFile);
 if isempty(e), e = '.xlsx'; outputFile = fullfile(p, [n e]); end
 
@@ -56,64 +70,30 @@ infoTable = infoTableOf(info);
 thr = [];                                           %analysis windows (MyoDishAnalysis, GUI export)
 if isfield(info, 'thresholds') && istable(info.thresholds) && height(info.thresholds) > 0, thr = info.thresholds; end
 
-if strcmpi(e, '.csv')
-    outFiles = {fullfile(p, [n '_contractions.csv']), fullfile(p, [n '_summary.csv']), ...
-        fullfile(p, [n '_parameters.csv']), fullfile(p, [n '_info.csv'])};
-    writetable(contractions, outFiles{1});
-    writetable(summary, outFiles{2});
-    writetable(paramTable, outFiles{3});
-    writetable(infoTable, outFiles{4});
-    if ~isempty(thr)
-        outFiles{end+1} = fullfile(p, [n '_thresholds.csv']);
-        writetable(thr, outFiles{end});
+% tables in the order of the sheets / files; tables that are not given (e.g. contractions = []) are left out
+tabs = [{'contractions', contractions; 'summary', summary}; P.sheets; {'parameters', paramTable; 'info', infoTable}];
+if ~isempty(thr), tabs(end+1, :) = {'thresholds', thr}; end
+if isfield(info, 'labels') && istable(info.labels), tabs(end+1, :) = {'labels', info.labels}; end
+for nm = {'rockerFilter', 'protocols', 'protocolResults', 'pulses'}
+    if isfield(info, nm{1}) && istable(info.(nm{1})) && height(info.(nm{1})) > 0, tabs(end+1, :) = {nm{1}, info.(nm{1})}; end %#ok<AGROW>
+end
+tabs = tabs(cellfun(@istable, tabs(:, 2)), :);
+xls = ~strcmpi(e, '.csv');
+if xls, outFiles = {outputFile}; else, outFiles = {}; end
+for k = 1:size(tabs, 1)
+    nm = tabs{k, 1};
+    if xls && ~ismember(nm, P.csvTables) && height(tabs{k, 2}) < 1048576     %Excel row limit
+        writeSheet(tabs{k, 2}, outputFile, nm);
+        continue;
     end
-    if isfield(info, 'labels') && istable(info.labels)
-        outFiles{end+1} = fullfile(p, [n '_labels.csv']);
-        writetable(info.labels, outFiles{end});
+    f = fullfile(p, [n '_' nm '.csv']);
+    writetable(tabs{k, 2}, f);
+    if P.compress && ismember(nm, P.csvTables)
+        gzip(f);
+        delete(f);
+        f = [f '.gz'];
     end
-    if isfield(info, 'rockerFilter') && istable(info.rockerFilter) && height(info.rockerFilter) > 0
-        outFiles{end+1} = fullfile(p, [n '_rockerFilter.csv']);
-        writetable(info.rockerFilter, outFiles{end});
-    end
-    if isfield(info, 'protocols') && istable(info.protocols) && height(info.protocols) > 0
-        outFiles{end+1} = fullfile(p, [n '_protocols.csv']);
-        writetable(info.protocols, outFiles{end});
-    end
-    if isfield(info, 'protocolResults') && istable(info.protocolResults) && height(info.protocolResults) > 0
-        outFiles{end+1} = fullfile(p, [n '_protocolResults.csv']);
-        writetable(info.protocolResults, outFiles{end});
-    end
-    if isfield(info, 'pulses') && istable(info.pulses) && height(info.pulses) > 0
-        outFiles{end+1} = fullfile(p, [n '_pulses.csv']);
-        writetable(info.pulses, outFiles{end});
-    end
-else
-    outFiles = {outputFile};
-    writeSheet(contractions, outputFile, 'contractions');
-    writeSheet(summary, outputFile, 'summary');
-    writeSheet(paramTable, outputFile, 'parameters');
-    writeSheet(infoTable, outputFile, 'info');
-    if ~isempty(thr), writeSheet(thr, outputFile, 'thresholds'); end
-    if isfield(info, 'labels') && istable(info.labels)
-        writeSheet(info.labels, outputFile, 'labels');
-    end
-    if isfield(info, 'rockerFilter') && istable(info.rockerFilter) && height(info.rockerFilter) > 0
-        writeSheet(info.rockerFilter, outputFile, 'rockerFilter');
-    end
-    if isfield(info, 'protocols') && istable(info.protocols) && height(info.protocols) > 0
-        writeSheet(info.protocols, outputFile, 'protocols');
-    end
-    if isfield(info, 'protocolResults') && istable(info.protocolResults) && height(info.protocolResults) > 0
-        writeSheet(info.protocolResults, outputFile, 'protocolResults');
-    end
-    if isfield(info, 'pulses') && istable(info.pulses) && height(info.pulses) > 0
-        if height(info.pulses) < 1048576                %Excel row limit: otherwise <name>_pulses.csv
-            writeSheet(info.pulses, outputFile, 'pulses');
-        else
-            outFiles{end+1} = fullfile(p, [n '_pulses.csv']);
-            writetable(info.pulses, outFiles{end});
-        end
-    end
+    outFiles{end+1} = f; %#ok<AGROW>
 end
 end
 
