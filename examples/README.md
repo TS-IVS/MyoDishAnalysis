@@ -41,9 +41,10 @@ was shifted by the same number of days). File names, folder paths, the software 
 comments and protocol names were removed. MATLAB and Python give the same results for the anonymized and the original
 files (all parameters identical; clock times shifted). To anonymize your own recordings before sharing them, e.g. with a
 bug report: `python py/tools/anonymize_recording.py <file.mdd> <new_name> --initials AB,CD --show`. The tool also
-handles the structured log lines of the MyoDish software 2.1 (PC and user name, serial number of the controller,
-initials → pseudonyms P1, P2, …, also for the `--initials` in comments) and `<name>_labels.csv` (sample and slice
-IDs, analyst, culture start). `--map study_map.json` gives several recordings of one study the same pseudonyms; the
+handles the structured log lines of the MyoDish software 2.1 and 2.2 (PC and user name, serial number of the
+controller, persons → pseudonyms P1, P2, …, also for the `--initials` in comments and file names; sample, slice and
+chamber IDs, folders, times of the slices, free texts) and `<name>_labels.csv` (sample and slice IDs, analyst, culture
+start). `--map study_map.json` gives several recordings of one study the same pseudonyms; the
 map contains the original values, so keep it to yourself. At the end, the tool searches the output for every value it
 replaced and for the dates of the recording, and stops with an error if one is left (e.g. initials inside a comment).
 

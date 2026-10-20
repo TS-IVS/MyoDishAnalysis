@@ -1079,6 +1079,94 @@ def test_anonymize_v2_log_lines():
     assert kept == old.split("\r\n")
 
 
+def _an_win(*parts, unc=False):
+    """a Windows path as written inside a JSON string (backslashes escaped); built here, not written out"""
+    bs = "\\\\"
+    return (bs + bs if unc else "C" + ":" + bs) + bs.join(parts)
+
+
+AN_J_NEW = [  # events of the control software 2.2 (fields as in its notes of 2026-10-18 and 2026-10-20; values invented)
+    (0, 0, "system", '{"v":1,"event":"user","actionId":"QWERTZUIOP-6","by":"AB","initials":"AB","name":"Anna Beispiel",'
+                     '"previous":"CD"}'),
+    (0, 3, "slice", '{"v":1,"event":"slice_mount","actionId":"QWERTZUIOP-7","by":"AB","mount":"QWERTZUIOP-7",'
+                    '"sliceId":"HX-0042_S7C3","myoDishId":"7","controllerId":"FT0TEST1A","user":"AB","species":"rat",'
+                    '"sampleId":"HX-0042","sampleGroup":"","sliceGroup":"DEX","tissue":"ventricle","treatment":"",'
+                    '"concentration":100,"concentrationUnit":"nM","cultureStart":"2001-01-29T09:30:00+01:00",'
+                    '"installTime":"2001-02-03T10:20:00+01:00","chamberId":"C-00417","owner":"CD","medium":"M199"}'),
+    (5, 3, "slice", '{"v":1,"event":"slice_remove","actionId":"QWERTZUIOP-8","by":"AB","mount":"QWERTZUIOP-7",'
+                    '"sliceId":"HX-0042_S7C3","sampleId":"HX-0042","chamberId":"C-00417","owner":"CD",'
+                    '"removeTime":"2001-02-03T11:40:00+01:00","reason":"AB: end, see '
+                    + _an_win("Data", "HX-0042", "notes.txt") + '",'
+                    '"destination":"fixed 03.02.2001","removedBy":"AB"}'),
+    (6, 0, "scheduleRun", '{"v":1,"event":"start","actionId":"QWERTZUIOP-9","by":"CD","run":"QWERTZUIOP-9",'
+                          '"file":"FFR_AB.txt","path":"' + _an_win("Users", "jdoe", "schedules", "FFR_AB.txt")
+                          + '","size":288,'
+                          '"sha256":"16ab"}'),
+    (7, 0, "scheduleRun", '{"v":1,"event":"load","actionId":"QWERTZUIOP-10","by":"auto","run":"QWERTZUIOP-10",'
+                          '"file":"sub_AB.txt","path":"' + _an_win("Users", "jdoe", "sub_AB.txt")
+                          + '","parentFile":"FFR_AB.txt",'
+                          '"line":9}'),
+    (8, 0, "protocolRun", '{"v":1,"event":"start","actionId":"QWERTZUIOP-11","by":"AB","run":"QWERTZUIOP-11",'
+                          '"type":"FFR","name":"FFR_AB 03.02.2001","scheduleFile":"FFR_AB.txt","line":3}'),
+    (9, 1, "doc", '{"v":1,"event":"action","actionId":"QWERTZUIOP-12","by":"AB","action":"Added substance",'
+                  '"kind":"addition","channels":[1],"sliceId":"HX-0042_S7C1","mount":null,'
+                  '"time":"2001-02-03T10:45:12+01:00","substance":"isoprenaline","concentration":0.1,"unit":"uM",'
+                  '"comment":"AB: first dose","takesChamberOut":false,"run":null}'),
+    (10, 0, "backup", '{"v":1,"event":"backup_setting","actionId":"QWERTZUIOP-13","by":"AB","copy":true,'
+                      '"target":"' + _an_win("server", "lab", "jdoe", "backup", unc=True) + '","previousTarget":"",'
+                      '"parallel":false}'),
+    (11, 0, "backup", '{"v":1,"event":"backup_failed","actionId":"QWERTZUIOP-14","by":"auto","file":"'
+                      + AN_NAME + '.mdd",'
+                      '"to":"' + _an_win("server", "lab", "jdoe", "backup", unc=True) + '","reason":"access denied: '
+                      + _an_win("server", "lab", "jdoe", "backup", AN_NAME + ".mdd", unc=True) + '","retryMinutes":10}'),
+    (12, 0, "system", '{"v":1,"event":"dataFolder","actionId":"QWERTZUIOP-15","by":"auto","file":"'
+                      + AN_NAME + '.mdd",'
+                      '"role":"main","kind":"sync","client":"LabSyncBox","evidence":"'
+                      + _an_win("Users", "jdoe", "LabSyncBox")
+                      + '","folder":"' + _an_win("Users", "jdoe", "LabSyncBox", "HX-0042") + '","answer":null}'),
+    (13, 2, "chamber", '{"v":1,"event":"chamber_in","actionId":"QWERTZUIOP-16","by":"auto","kind":"back",'
+                       '"out":"QWERTZUIOP-5","ago":3.0,"duration":40.5,"check":"rigor"}'),
+    (14, 2, "rigor", '{"v":1,"event":"check_answer","actionId":"QWERTZUIOP-17","by":"AB","rigor":true,'
+                     '"answer":"unchanged","reason":"chamberBack","trigger":"QWERTZUIOP-16","slice":null,'
+                     '"mount":"QWERTZUIOP-7","sliceId":"HX-0042_S7C2","cultureStartUnknown":false}')]
+AN_NEW_SECRETS = ("Anna", "Beispiel", "HX-0042", "C-00417", "jdoe", "server", "LabSyncBox", "Data",
+                  "2001-01-29", "2001-02-03", "03.02.2001", "_AB", "AB:", '"AB"', '"CD"', "FT0TEST1")
+
+
+def test_anonymize_events_2_2():
+    """fields of the slice, user, schedule, protocol, doc, backup, folder, chamber and rigor events (2026-10-20)"""
+    rows = ["systemTime;dataLogTime;channel;code;value"]
+    rows += ["2001 02 03 10:%02d:00:000;%d;%d;%s;%s" % (t, 1000 * t, ch, code, j) for t, ch, code, j in AN_J_NEW]
+    names = an.Pseudonyms()
+    txt = an.anonymize_log_text("\r\n".join(rows), AN_NAME, "rec1", AN_DAYS, ["AB"], names)[0]
+    for x in AN_NEW_SECRETS:
+        assert x not in txt, x
+    assert txt.isascii() and len(txt.split("\r\n")) == len(rows)
+    J = [j for _, j in _an_json_lines(txt)]
+    u, m, r, s1, s2, p, d, b1, b2, f, c, g = J
+    assert (u["by"], u["initials"], u["name"], u["previous"]) == ("P1", "P1", "P1", "P2")
+    assert (m["sliceId"], m["sampleId"], m["user"], m["owner"], m["chamberId"]) == ("S1_S7C3", "S1", "P1", "P2",
+                                                                                    "chamber1")
+    assert (m["cultureStart"], m["installTime"]) == ("1999-12-27T09:30:00+01:00", "2000-01-01T10:20:00+01:00")
+    assert (m["species"], m["tissue"], m["sliceGroup"], m["myoDishId"], m["controllerId"], m["concentration"]) == \
+        ("rat", "ventricle", "DEX", "7", "controller1", 100)
+    assert (r["removeTime"], r["reason"], r["destination"], r["removedBy"]) == \
+        ("2000-01-01T11:40:00+01:00", "P1: end, see notes.txt", "fixed 01.01.2000", "P1")
+    assert (s1["file"], s1["path"], s1["by"], s1["sha256"], s1["size"]) == ("FFR_P1.txt", "FFR_P1.txt", "P2", "16ab",
+                                                                             288)
+    assert (s2["file"], s2["path"], s2["parentFile"]) == ("sub_P1.txt", "sub_P1.txt", "FFR_P1.txt")
+    assert (p["name"], p["scheduleFile"], p["type"]) == ("FFR_P1 01.01.2000", "FFR_P1.txt", "FFR")
+    assert (d["sliceId"], d["time"], d["comment"], d["substance"]) == ("S1_S7C1", "2000-01-01T10:45:12+01:00",
+                                                                      "P1: first dose", "isoprenaline")
+    assert (b1["target"], b1["previousTarget"], b2["to"], b2["file"]) == ("folder1", "", "folder1", "rec1.mdd")
+    assert b2["reason"] == "access denied: rec1.mdd" and b2["retryMinutes"] == 10
+    assert (f["client"], f["evidence"], f["folder"], f["kind"]) == ("sync client", "removed", "folder2", "sync")
+    assert (c["out"], c["duration"], c["check"]) == ("QWERTZUIOP-5", 40.5, "rigor")
+    assert (g["sliceId"], g["by"], g["mount"], g["answer"]) == ("S1_S7C2", "P1", "QWERTZUIOP-7", "unchanged")
+    assert names.dates == {an.dt.date(2001, 1, 29), an.dt.date(2001, 2, 3)}
+    assert "slice_mount species: rat" in names.texts and any(t.startswith("slice_remove reason:") for t in names.texts)
+
+
 def test_anonymize_initials_pseudonyms():
     """--initials: 'AB: comment' -> 'P1: comment', '_AB' in protocol names -> '_P1', the same pseudonyms as 'by'"""
     src = "\r\n".join(["systemTime;dataLogTime;channel;code;value",

@@ -48,16 +48,35 @@ MATLAB and Python versions have the same version number and give the same result
 ### Added
 - **Structured events of the MyoDish control software** (builds from 2026-10, release 2.2): `mda_logEntries(logFile,
   'events')` (Python `log_events`) reads the log lines whose value is one JSON object (codes system, slice,
-  protocolRun, scheduleRun, doc): time in the file, channel, code, event, actionId, by, waiting (written before the log
-  was opened) and all fields by name; lines cut off by a crash are counted and left out. **`mda_protocols` /
+  protocolRun, scheduleRun, doc, chamber, rigor, backup): time in the file, dataLogTime as written (`t_logged`),
+  channel, code, event, actionId, by, waiting and all fields by name; lines cut off by a crash are counted and left
+  out. **Waiting lines** (logged while no main recording ran and written into the next main log right before its
+  `LogFile created/opened`): the lines after the last `LogFile closed` of this log (or from `MyodishControlSoftware
+  opened`, a new run of the program, e.g. after a crash) up to its next opening, `LogFile2`/`LogFile3` (second and
+  rocker stop recording) included, only lines about this log; their time in the file is that of the opening (their
+  dataLogTime is the frozen counter of the last main recording, often of another file). With the first rule, a file
+  first written as second recording and then continued as main recording lost its first protocol (found by the
+  developer of the control software in its example logs). **`mda_protocols` /
   `find_protocols` take the protocols from the `protocolRun` events** where a log has them (start paired with end or
   abort by run, exact times, type and name of the start, also for protocols started by hand; notes for aborted
   protocols, protocols started before the recording or the file, and protocols without end); the automatic comments
-  `start/end <TYPE> protocol` next to them are not read again, and comment protocols of the same type that overlap one
-  are dropped. New protocol types `doseResponse`, `substance`, `stretch`, `other` (groupBy none); names with dose
+  `start/end <TYPE> protocol` written right before them are not read again (each paired with the next `protocolRun`
+  line of its kind and type, also when the two lines got different times), and comment protocols of the same type
+  that overlap one are dropped. New protocol types `doseResponse`, `substance`, `stretch`, `other` (groupBy none); names with dose
   response or the word DRC are `doseResponse` (tested first, as the control software; without end comment treated like
   `unknown`). Older recordings unchanged. Tested with a synthetic log in the format of the control software (dev build
-  2.1.9787.20360); no recording with these lines exists yet.
+  2.1.9787.20360) and with 26 example event logs of its replay test (simulated device; anonymized in
+  `py/tests/event_logs_2_2`); no lab recording with these lines exists yet.
+- **`py/tools/anonymize_recording.py`: the fields of the newer events of the control software** (slice, user,
+  protocolRun, scheduleRun, doc, backup, dataFolder, chamber, rigor): persons (`initials`, `user`, `owner`,
+  `removedBy`, `previous` and the full `name` of the event user) → `P1`, …; `sampleId` → `S1`, … and the sample inside
+  `sliceId` (as in `_labels.csv`); `chamberId` → `chamber1`, …; folders (`folder`, `target`, `previousTarget`, `to`) →
+  `folder1`, …; `scheduleFile`, `parentFile`, `preset` → file names, with the `--initials` rule `_AB` → `_P1` (also in
+  `file` and `path`); times `cultureStart`, `installTime`, `removeTime`, `time` shifted by the same number of days;
+  protocol names and free texts (`comment`, `text`, `destination`, `reason` of `slice_remove` and `backup_failed`) like
+  comments; `client` (sync program) and `evidence` replaced. The final check also searches for the dates of the shifted
+  times, `--show` lists the free texts and slice labels, and network paths are reduced to file names
+  like drive paths.
 - **`mda_timepoints`** (Python `timepoints`, `mda-timepoints`; new files `mda_timepoints.m`, `mda_testTimepoints.m`,
   `py/src/myodish_analysis/timepoints.py`, `py/tests/test_timepoints.py`): contraction parameters in windows before
   and after a treatment from the results of the watcher, e.g. `mda_timepoints(res, 'Mava100', 'Setup1_ABC000101',

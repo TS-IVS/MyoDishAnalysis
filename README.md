@@ -844,14 +844,20 @@ P = mda_protocols(file)                                              % protocols
   window).
 * **Structured events of the control software** (builds from 2026-10, release 2.2; 2026-10-18): besides the old text
   lines, the log file gets lines whose value is one JSON object (codes `system`, `slice`, `protocolRun`,
-  `scheduleRun`, later `doc`). `mda_logEntries(logFile, 'events')` (Python `log_events`) returns them as a table: time
-  in the file, channel, code, event, actionId, by, `waiting` (written before the log was opened: the event happened
-  while no main recording ran) and all fields (`data`, read by name). Lines cut off by a crash are counted and left out.
+  `scheduleRun`, `doc`, `chamber`, `rigor`, `backup`). `mda_logEntries(logFile, 'events')` (Python `log_events`)
+  returns them as a table: time in the file, dataLogTime as written (`t_logged`), channel, code, event, actionId, by,
+  `waiting` and all fields (`data`, read by name). Lines cut off by a crash are counted and left out. **Waiting
+  lines** (2026-10-20): the software keeps what happens while no main recording runs and writes it into the next main
+  log right before its `LogFile created/opened`; these lines (after the last `LogFile closed` of the log, or from
+  `MyodishControlSoftware opened`, up to its next opening; `LogFile2`/`LogFile3` of the second and rocker stop
+  recording included) get the time of that opening, since their dataLogTime is the frozen counter of the last main
+  recording (often of another file).
   **Protocols from `protocolRun`**: where the log has these events, `mda_protocols` takes the protocols from them (start
   paired with end or abort by `run`; exact times; type and name of the start, also for protocols started by hand;
   notes `aborted: <reason>`, `started before this recording`, `started before this file`, `no end in the log: …`);
-  the automatic comments `start <TYPE> protocol` / `end <TYPE> protocol` written next to them are not read again, and
-  a comment protocol of the same type that overlaps one is dropped. New types of the software: `doseResponse`,
+  the automatic comments `start <TYPE> protocol` / `end <TYPE> protocol` written right before them are not read again
+  (each paired with the next `protocolRun` line of its kind and type), and a comment protocol of the same type that
+  overlaps one is dropped. New types of the software: `doseResponse`,
   `substance`, `stretch`, `other` (groupBy `none`); names with dose response (any spelling) or the word `DRC` are
   `doseResponse` (tested first, as the software). Older recordings are read as before. The watcher leaves all protocols
   out of the regular summary (`'includeProtocols'`, default false), also those of the new types.
@@ -1318,4 +1324,5 @@ lower plot, the trend and all exports.
 | `example_MyoDishAnalysis.m` | examples |
 | `examples/` | anonymized example recordings (`.mdd`, `_log.log`, `_labels.csv`, LabChart `.mat`), see `examples/README.md` |
 | `py/` | Python version (same results), see `py/README.md` |
-| `py/tools/anonymize_recording.py` | anonymize a recording before sharing it (dates, paths, file names, initials, structured log lines of software 2.1, `_labels.csv`; final check; tests in `py/tests/test_mda.py`) |
+| `py/tools/anonymize_recording.py` | anonymize a recording before sharing it (dates, paths, file names, initials, structured log lines of software 2.1 and 2.2: persons, samples, slices, chambers, folders, times, free texts; `_labels.csv`; final check; tests in `py/tests/test_mda.py`) |
+| `py/tests/event_logs_2_2/` | anonymized example event logs of the control software (release 2.2 preview, simulated device), test data of `test_protocol_end.py` and `mda_testProtocolEnd.m` |

@@ -34,8 +34,10 @@ protocolRun events (control software from 2026-10, release 2.2; 2026-10-18): if 
 these protocols are taken from them (protocol_runs: start paired with end or abort by run, exact times, type and name
 of the start, types of the software FFR, RP, ST, PRP, PD, rockerSpeed, doseResponse, substance, stretch, other; notes
 'aborted: <reason>', 'started before this recording (...)', 'started before this file', 'no end in the log: ...'); the
-automatic comments 'start/end <TYPE> protocol' next to them are not read again, comment protocols of the same type
-that overlap one are dropped; older recordings unchanged. Names with 'dose response' or the word DRC: doseResponse
+automatic comments 'start/end <TYPE> protocol' next to them are not read again (each paired with the next protocolRun
+line of its kind and type, 2026-10-20), comment protocols of the same type that overlap one are dropped; older
+recordings unchanged. Waiting events (started while no recording ran, see log_events): from = where the file was when
+the recording began (2026-10-20). Names with 'dose response' or the word DRC: doseResponse
 (tested first, as the control software); without end comment treated like unknown.
 
 group_beats: see the help of mda_groupBeats.m (same quantities, groups, columns; return_stimuli=True: also Z, the
@@ -242,21 +244,33 @@ def protocol_runs(V, T=math.inf, tStop=None):
 
 def auto_comments(E, V):
     """rows of E with the automatic comments 'start <TYPE> protocol' / 'end <TYPE> protocol' that the control software
-    writes next to each protocolRun start / end / abort (same type, within 1 s): boolean array"""
+    writes right before each protocolRun start / end / abort: boolean array. Each comment is paired with the next
+    protocolRun line of the same kind (start / end or abort) and type after it in the log, unless another such comment
+    comes first (2026-10-20; before: same type within 1 s, which a delay between the two writes can exceed)."""
     skip = np.zeros(len(E), bool)
     if V is None or not len(V):
         return skip
     R = V[V["code"].astype(str).str.lower().eq("protocolrun")]
     if not len(R):
         return skip
-    tR = R["t_file"].to_numpy(float)
+    typ = [str(d.get("type") or "").lower() for d in R["data"]]
+    ev = R["event"].astype(str).tolist()
+    rows = R["row"].to_numpy(int)
+    used = np.zeros(len(R), bool)
+    com = []  # the automatic comments: (row, kind 1 start / 2 end, type)
     for i in np.flatnonzero(E["isComment"].to_numpy(bool)):
         m = _AUTO.match(str(E["text"].iloc[i]).strip())
-        if not m:
+        if m:
+            com.append((int(i), 1 if m.group(1).lower() == "start" else 2, m.group(2).lower()))
+    for i, k, t in com:
+        want = ("start",) if k == 1 else ("end", "abort")
+        c = next((j for j in range(len(R)) if not used[j] and ev[j] in want and rows[j] > i and typ[j] == t), None)
+        if c is None:
             continue
-        want = ("start",) if m.group(1).lower() == "start" else ("end", "abort")
-        k = np.flatnonzero(R["event"].isin(want).to_numpy(bool) & (np.abs(tR - float(E["t_file"].iloc[i])) <= 1.0))
-        skip[i] = any(str(R["data"].iloc[j].get("type", "")).lower() == m.group(2).lower() for j in k)
+        if any(i < i2 < rows[c] and k2 == k and t2 == t for i2, k2, t2 in com):
+            continue  # that one is its comment
+        used[c] = True
+        skip[i] = True
     return skip
 
 

@@ -21,13 +21,23 @@ number of days):
   - initials given with --initials AB,CD: 'AB: comment' -> 'P1: comment', '_AB' in protocol (schedule file) names ->
     '_P1' (pseudonyms of persons, the same as for 'by' in structured lines and analyst / owner in _labels.csv).
   - connectedDevice (serial number of the USB adapter): replaced by a generic text.
-  - structured log lines (software 2.1 and later; the value is one JSON object): changed by field name, in every
-    event: pc -> 'PC', winUser -> 'user', pnp -> 'USB serial device', software -> major.minor ('2.1'),
-    controllerId and ftdiSerial -> 'controller1', 'controller2', ..., by (initials) -> 'P1', 'P2', ... ('auto' and
-    null kept), file, previousFile and path -> file name, the recording's own name replaced by <new_name>. All other
-    fields are kept (IDs that link events, time zone, port, numbers exactly as written). The line stays one line of
-    pure ASCII JSON (';' as \\u003b). A structured line that cannot be read (cut off after a crash) is kept unchanged
-    and reported.
+  - structured log lines (software 2.1 and later; the value is one JSON object): changed by field name (and event
+    where a name means different things), in every event:
+      pc -> 'PC', winUser -> 'user', pnp -> 'USB serial device', software -> major.minor ('2.1');
+      controllerId and ftdiSerial -> 'controller1', 'controller2', ...; chamberId -> 'chamber1', ...;
+      persons: by, initials, user, owner, removedBy and previous (event user) -> 'P1', 'P2', ... ('auto' and null
+      kept); name of the event user (full name of a person) -> the pseudonym of that person;
+      sampleId -> 'S1', ... (as sampleID of _labels.csv); sliceId -> the sample pseudonym inside the slice ID;
+      file, previousFile, path, scheduleFile, parentFile, preset -> file name (own name -> <new_name>; '_AB' of
+      --initials -> '_P1'); folders (folder, target, previousTarget, to) -> 'folder1', 'folder2', ...;
+      times cultureStart, installTime, removeTime, time -> shifted by the same number of days (time of day and offset
+      kept); protocol names (name of protocolRun and scheduleRun) and free texts (comment, text, destination, and
+      reason of slice_remove and backup_failed) -> like comments (paths, own name, --initials, dates);
+      client (sync program) -> 'sync client', evidence -> 'removed'.
+    All other fields are kept (IDs that link events, time zone, port, labels of the slices such as species, tissue,
+    groups, treatment, medium, substance, numbers exactly as written); the free texts and labels are listed by --show.
+    The line stays one line of pure ASCII JSON (';' as \\u003b). A structured line that cannot be read (cut off after
+    a crash) is kept unchanged and reported.
   - <name>_labels.csv (if present) -> <new_name>_labels.csv: sampleID -> 'S1', 'S2', ..., the sample ID inside sliceID
     ('<sampleID>_S<setup>C<channel>') replaced by the same pseudonym, analyst and owner -> pseudonyms of persons (the
     same as 'by' in the log), cultureStart shifted by the same number of days, comment as the comments of the log.
@@ -35,15 +45,16 @@ number of days):
 --map FILE.json: pseudonyms read before and written after the run, so that the recordings of one study get the same
 pseudonyms. The map contains the original values: keep it, do not share it.
 Final check: the output files are searched for every original value that was replaced (PC and user name, serial
-numbers, initials, sample and slice IDs, the original file name) and for the dates of the recording (forms
-'1999 12 24', '24.12.1999', '24/Dec/1999', '1999-12-24'). If one is still there (e.g. inside a free-text
+numbers, initials, names, sample, slice and chamber IDs, folders, the original file name) and for the dates of the
+recording and of the shifted times of structured lines (forms '1999 12 24', '24.12.1999', '24/Dec/1999',
+'1999-12-24'). If one is still there (e.g. inside a free-text
 comment), the output files are deleted and the tool stops with an error naming the line.
 Line order, codes, channels and all numbers used by the analysis are kept, so MyoDishAnalysis gives the same
 results (clock times shifted by the same number of days). Check the free-text comments yourself (--show) before
 sharing: names or other identifying words inside comments cannot be recognized automatically.
 
 TS 2026-10-07 (structured log lines, _labels.csv, --map, final check, time stamps without leading zeros, 12-hour
-builds, file time: 2026-10-17)
+builds, file time: 2026-10-17; fields of the slice, protocol, schedule, doc, backup and folder events: 2026-10-20)
 """
 from __future__ import annotations
 
@@ -62,7 +73,7 @@ _SYS = re.compile(r"^(\s*)(\d{4}) (\d{1,2}) (\d{1,2}) (\d{1,2}:\d{1,2}:\d{1,2}(?
 _STAMP = re.compile(r"(?<!\d)\d{4} \d{1,2} \d{1,2} \d{1,2}:\d{1,2}:\d{1,2}(?::\d+)?")  # systemTime inside a text
 _FRAG = re.compile(r"(?:[^\\;\r\n]*\\)+")  # directory part of a path cut off at the start of a broken line
 _H12 = (7713, 7970)   # software 2.0.7713-2.0.7970 wrote 12-hour time stamps (clock_time.py of MyoDishAnalysis)
-_PATH = re.compile(r"[A-Za-z]:\\(?:[^\\\r\n]*\\)*")  # directory part of a Windows path
+_PATH = re.compile(r"(?:[A-Za-z]:\\|\\\\)(?:[^\\\r\n]*\\)*")  # directory part of a Windows path (drive or network path)
 _MONTHS = {"jan": 1, "feb": 2, "mar": 3, "mrz": 3, "mär": 3, "apr": 4, "may": 5, "mai": 5, "jun": 6, "jul": 7,
            "aug": 8, "sep": 9, "oct": 10, "okt": 10, "nov": 11, "dec": 12, "dez": 12}
 _MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -70,16 +81,24 @@ _DATE_TXT = re.compile(r"(\d{1,2})([./])([A-Za-zä]{3})\2(\d{4})")      # 01/Mar
 _DATE_NUM = re.compile(r"(\d{1,2})([./])(\d{1,2})\2(\d{4})")           # 31.01.2000, 18/03/2000
 _ISO_DAY = re.compile(r"^(\s*)(\d{4})-(\d{2})-(\d{2})(?=[T ]|$)")     # 2000-01-31 08:30, 2000-01-31T08:30:00+01:00
 
-# structured log lines: fields by name (the same name means the same in every event). Later events (slice, doc,
-# protocolRun, scheduleRun) add person, sample and free-text fields and ISO times: not handled yet.
+# structured log lines: fields by name; names that mean different things in different events (name, reason,
+# previous) by event as well (fields of the control software, notes of its development of 2026-10-18 and 2026-10-20)
 _FIXED = {"pc": "PC", "winUser": "user", "pnp": "USB serial device"}
+_GENERIC = {"client": "sync client", "evidence": "removed"}   # sync program, how a synchronised folder was recognized
 _CONTROLLER = ("controllerId", "ftdiSerial")
-_PERSON = ("by",)
-_PATHS = ("file", "previousFile", "path")
+_PERSON = ("by", "initials", "user", "owner", "removedBy")
+_PATHS = ("file", "previousFile", "path", "scheduleFile", "parentFile", "preset")
+_FOLDERS = ("folder", "target", "previousTarget", "to")
+_TIMES = ("cultureStart", "installTime", "removeTime", "time")
+_FREE = ("comment", "text", "destination")
+_FREE_REASON = ("slice_remove", "backup_failed")             # events whose reason is free text
+_NAME_TEXT = ("protocolRun", "scheduleRun")                   # codes whose name is a protocol name
+_LABELS = ("species", "tissue", "sampleGroup", "sliceGroup", "treatment", "medium", "substance", "vehicle")
 _KEEP_PERSON = ("auto",)
 _KEY_STR = re.compile(r'"(%s)"\s*:\s*"((?:[^"\\]|\\.)*)"'
-                      % "|".join(tuple(_FIXED) + ("software",) + _CONTROLLER + _PERSON))
-_SUBSTRING = ("controller", "pnp", "software", "file name")  # searched anywhere by the final check (else as words)
+                      % "|".join(tuple(_FIXED) + ("software", "sampleId", "sliceId", "chamberId", "name")
+                                 + _CONTROLLER + _PERSON))
+_SUBSTRING = ("controller", "pnp", "software", "file name", "folder")  # searched anywhere by the final check
 
 
 class AnonymizationError(RuntimeError):
@@ -90,7 +109,8 @@ class Pseudonyms:
     """consistent pseudonyms per value ('controller1', 'P1', 'S1', 'slice1'), the same in all files of a run and, with
     a map file (--map), in several runs. originals: original value -> kind of every value replaced in this run (for
     the final check); unreadable: line numbers of structured log lines that could not be read."""
-    PREFIX = {"controller": "controller", "person": "P", "sample": "S", "slice": "slice"}
+    PREFIX = {"controller": "controller", "person": "P", "sample": "S", "slice": "slice", "chamber": "chamber",
+              "folder": "folder"}
 
     def __init__(self, map_file=None):
         self.map = {k: {} for k in self.PREFIX}
@@ -101,6 +121,8 @@ class Pseudonyms:
                 self.map[k].update({str(a): str(b) for a, b in (d.get(k) or {}).items()})
         self.originals = {}
         self.unreadable = []
+        self.dates = set()      # original dates of the shifted times of structured lines (for the final check)
+        self.texts = []         # free texts and labels of structured lines (for --show)
 
     def get(self, kind, value):
         m = self.map[kind]
@@ -281,7 +303,7 @@ def anonymize_log_text(txt, old_stem, new_stem, days, initials=(), names=None):
             if mt:   # rest of a broken line glued to the next entry: replaced (its time is not read anyway)
                 f[0] = "(cut) " + _shift_system_time(f[0][mt.start():], days)
         if f[4].lstrip().startswith("{"):             # structured line (JSON; old lines never start with '{')
-            f[4] = _json_value(f[4], i, old_stem, new_stem, names)
+            f[4] = _json_value(f[4], i, _Ctx(old_stem, new_stem, names, days, pre, suf, f[3].strip()))
             out.append(";".join(f))
             continue
         code, v = f[3].strip().lower(), f[4]
@@ -334,17 +356,54 @@ def _software(v):
     return m.group(1) + "." + m.group(2) if m else v.split(".")[0]
 
 
-def _json_field(key, v, names, old_stem, new_stem):
+class _Ctx:
+    """what a structured line needs: names of the recording, pseudonyms, days of the shift, --initials patterns, code"""
+
+    def __init__(self, old_stem, new_stem, names, days, pre, suf, code):
+        self.old, self.new, self.names, self.days, self.pre, self.suf, self.code = \
+            old_stem, new_stem, names, days, pre, suf, code
+
+
+def _file_name(v, c):
+    """a path or file name -> file name; own name -> new name; '_AB' of --initials -> '_P1'"""
+    v = re.split(r"[\\/]", v)[-1].replace(c.old, c.new)
+    return v if c.pre is None else _replace_initials(v, c.pre, c.suf, c.names, False)
+
+
+def _free_text(v, c, comment=True):
+    """a free text or protocol name, like the comments of the old lines: paths -> file names, own name, --initials,
+    dates shifted"""
+    v = _PATH.sub("", v).replace(c.old, c.new)
+    if c.pre is not None:
+        v = _replace_initials(v, c.pre, c.suf, c.names, comment)
+    return _shift_stamps(_shift_text_dates(v, c.days), c.days)
+
+
+def _iso_time(v, c):
+    m = _ISO_DAY.match(v)
+    if m:
+        try:
+            c.names.dates.add(dt.date(int(m.group(2)), int(m.group(3)), int(m.group(4))))
+        except ValueError:
+            pass
+    return _shift_iso(v, c.days)
+
+
+def _json_field(key, v, c, ev, obj):
+    """the anonymized value of field key (event ev, obj = the object that holds it, for the sample of a slice ID)"""
     if isinstance(v, _Obj):
-        return _Obj((k, _json_field(k, x, names, old_stem, new_stem)) for k, x in v)
+        return _json_object(v, c, ev)
     if isinstance(v, list):
-        return [_json_field(key, x, names, old_stem, new_stem) for x in v]
+        return [_json_field(key, x, c, ev, obj) for x in v]
     if not isinstance(v, str) or isinstance(v, _Raw) or v == "":
         return v                                     # numbers, true, false, null, ''
+    names = c.names
     if key in _FIXED:
         if v != _FIXED[key]:
             names.replaced(v, key)
         return _FIXED[key]
+    if key in _GENERIC:
+        return _GENERIC[key]
     if key == "software":
         s = _software(v)
         if s != v:
@@ -352,16 +411,49 @@ def _json_field(key, v, names, old_stem, new_stem):
         return s
     if key in _CONTROLLER:
         return names.get("controller", v)
-    if key in _PERSON:
+    if key in _PERSON or (key == "previous" and ev == "user"):
         return v if v in _KEEP_PERSON else names.get("person", v)
+    if key == "name" and ev == "user":               # full name of a person: the pseudonym of that person
+        who = dict((k, x) for k, x in obj if k in ("initials", "by"))
+        ini = who.get("initials") or who.get("by")
+        names.replaced(v, "person")
+        return names.get("person", ini) if isinstance(ini, str) and ini and not isinstance(ini, _Raw) \
+            else names.get("person", v)
+    if key == "sampleId":
+        return names.get("sample", v.strip())
+    if key == "sliceId":
+        sample = dict(obj).get("sampleId")
+        return _slice_id(v, sample if isinstance(sample, str) and not isinstance(sample, _Raw) else "", names)
+    if key == "chamberId":
+        return names.get("chamber", v)
+    if key in _FOLDERS:
+        return names.get("folder", v)
     if key in _PATHS:
-        return re.split(r"[\\/]", v)[-1].replace(old_stem, new_stem)
+        return _file_name(v, c)
+    if key in _TIMES:
+        return _iso_time(v, c)
+    if key in _FREE or (key == "reason" and ev in _FREE_REASON):
+        v = _free_text(v, c)
+        names.texts.append("%s %s: %s" % (ev or c.code, key, v))
+        return v
+    if key == "name" and c.code in _NAME_TEXT:
+        v = _free_text(v, c, False)
+        names.texts.append("%s name: %s" % (ev or c.code, v))
+        return v
+    if key in _LABELS:
+        names.texts.append("%s %s: %s" % (ev or c.code, key, v))
     return v
 
 
-def _json_value(v, line, old_stem, new_stem, names):
+def _json_object(o, c, ev=None):
+    ev = next((x for k, x in o if k == "event" and isinstance(x, str)), ev)
+    return _Obj((k, _json_field(k, x, c, ev, o)) for k, x in o)
+
+
+def _json_value(v, line, c):
     """the anonymized value of a structured line. A value that cannot be read is kept unchanged (line number in
     names.unreadable; its identifying values in names.originals, so that the final check finds them)."""
+    names = c.names
     try:
         obj = _loads(v.strip())
     except (ValueError, RecursionError):
@@ -377,9 +469,13 @@ def _json_value(v, line, old_stem, new_stem, names):
                 names.replaced(x, "controller")
             elif k in _PERSON and x not in _KEEP_PERSON:
                 names.replaced(x, "person")
+            elif k in ("sampleId", "sliceId", "chamberId") and x:
+                names.replaced(x, {"sampleId": "sample", "sliceId": "slice", "chamberId": "chamber"}[k])
+            elif k == "name" and x and re.search(r'"event"\s*:\s*"user"', v):   # full name of a person
+                names.replaced(x, "person")
         return v
-    new = _dumps(_json_field(None, obj, names, old_stem, new_stem)).replace(";", "\\u003b")
-    if not new.isascii() or any(c in new for c in ";\r\n\t"):
+    new = _dumps(_json_field(None, obj, c, None, None)).replace(";", "\\u003b")
+    if not new.isascii() or any(ch in new for ch in ";\r\n\t"):
         raise ValueError("structured log line %d cannot be written as one line of ASCII JSON" % line)
     return v[:len(v) - len(v.lstrip())] + new + v[len(v.rstrip()):]
 
@@ -535,7 +631,7 @@ def anonymize(mdd, new_name, outdir, date="2000-01-01", mat=None, show=False, in
     repl = [p for m in names.map.values() for p in m.values()] + list(_FIXED.values()) + [new_name]
     left = find_left(files, values, repl)
     # ... and no date of the recording (the dates of the log lines before the shift)
-    dates = _log_dates(txt.splitlines()) if days else []
+    dates = (_log_dates(txt.splitlines()) + sorted(names.dates)) if days else []
     rx = _dates_regex(set(dates) - {d + dt.timedelta(days=days) for d in dates})
     if rx is not None:
         left += [(fn, i, "date", m.group(0)) for fn, lines in whole for i, x in lines for m in [rx.search(x)] if m]
@@ -555,6 +651,8 @@ def anonymize(mdd, new_name, outdir, date="2000-01-01", mat=None, show=False, in
     if show:
         for c in sorted(set(comments)):
             print("   comment:", c)
+        for c in sorted(set(names.texts)):
+            print("   structured:", c)
         for v, k in names.originals.items():
             if k in names.map and v in names.map[k]:
                 print("   %s: %s -> %s" % (k, v, names.map[k][v]))

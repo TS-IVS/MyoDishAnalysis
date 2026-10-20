@@ -28,15 +28,24 @@ session and values):
     1800 s    doseResponse 'iso DRC' by hand, no end        --> 1800 ... 2400 s (end of the file)
     1900 s    a JSON line cut off (counted, left out); a comment starting with '{' (no structured line)
 
-TS 2026-10-10 (protocolRun events 2026-10-18)
+Example event logs of the control software (py/tests/event_logs_2_2, see its README; 2026-10-20): waiting lines
+(also of a file first written as second recording, a new run of the program, the time of the opening that follows),
+pairing of the automatic comments with the next protocolRun line, the new codes chamber, rigor and backup.
+
+TS 2026-10-10 (protocolRun events 2026-10-18; example logs of the control software 2026-10-20)
 """
+import glob
 import json
 import math
+import os
 
 import numpy as np
 
 import myodish_analysis as mda
-from myodish_analysis.log_entries import log_events
+from myodish_analysis.log_entries import log_entries, log_events
+from myodish_analysis.protocols import auto_comments
+
+EV_LOGS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "event_logs_2_2")
 
 FS = 400
 T = 2400
@@ -288,3 +297,70 @@ def test_dose_response_names(tmp_path):
     assert [protocol_type(x) for x in ("dose response FFR", "doseResponse", "Iso_DRC_1nM-1uM", "dose-response",
                                        "FFR", "address")] == \
         ["doseResponse", "doseResponse", "doseResponse", "doseResponse", "FFR", "other"]
+
+
+def _ev(name):
+    return os.path.join(EV_LOGS, *name.split("/"))
+
+
+def test_event_logs_waiting_lines():
+    """waiting lines (2026-10-20): LogFile2/3 count, only lines about this log, time of the opening that follows"""
+    files = sorted(glob.glob(os.path.join(EV_LOGS, "*", "*_log.log")))
+    assert len(files) == 26
+    for f in files:
+        E = log_entries(f)
+        V = log_events(E)
+        assert V.attrs["nUnreadable"] == 0 and len(V) > 0, f
+        opens = [(i, t) for i, (c, x, t) in enumerate(zip(E["code"], E["text"], E["t_file"]))
+                 if c == "Event" and str(x).startswith("LogFile") and (" opened" in x or " created" in x)]
+        for r in V[V["waiting"]].itertuples():   # t_file = time of the next opening of this log
+            assert r.t_file == next(t for i, t in opens if i > r.row), f
+    # a file first written as the second recording, then continued as main recording: both protocols
+    V = log_events(_ev("recording_callers/p_log.log"))
+    assert not V["waiting"].any()
+    P = mda.find_protocols(_ev("recording_callers/p_log.log"))
+    assert P["name"].tolist() == ["first protocol", "second protocol"]
+    np.testing.assert_allclose(P["from"], [0, 2])
+    np.testing.assert_allclose(P["to"], [2, 4])
+    # a whole schedule run while no recording ran (at the time of the end of another file): time of LogFile created
+    V = log_events(_ev("recording_callers/c_log.log"))
+    w = V[V["waiting"]]
+    assert w["event"].tolist() == ["start", "reset"] and w["code"].tolist() == ["scheduleRun"] * 2
+    np.testing.assert_allclose(w["t_logged"], [7.25, 7.25])
+    np.testing.assert_allclose(w["t_file"], [0, 0])
+    # backup lines (code backup): waiting in the log of the next recording; a new run of the program
+    V = log_events(_ev("backup_update_conflict/d_00_log.log"))
+    assert (V["code"].iloc[0], V["event"].iloc[0], bool(V["waiting"].iloc[0])) == ("backup", "backup_copied", True)
+    assert (V["t_logged"].iloc[0], V["t_file"].iloc[0]) == (9.9, 0.0)
+    V = log_events(_ev("backup_update_conflict/c_00_log.log"))
+    assert V.loc[V["waiting"], "event"].tolist() == ["backup_setting", "identity", "backup_copied"]
+    np.testing.assert_allclose(V.loc[V["waiting"], "t_file"], [0, 4.9, 4.9])
+    # 'LogFile closed' of the main log inside a rocker stop log: no end of its session
+    assert not log_events(_ev("recording_files/a_rockerStops_log.log"))["waiting"].any()
+
+
+def test_event_logs_auto_comments(tmp_path):
+    """automatic comments paired with the next protocolRun line of their kind and type (2026-10-20), also when the
+    protocolRun line has a later dataLogTime than its comment (here + 1.5 s)"""
+    src = _ev("protocol_new_form/a_log.log")
+    P = mda.find_protocols(src)
+    assert P["type"].tolist() == ["FFR", "ST", "PD", "other"]
+    assert P["name"].tolist() == ["force frequency", "short threshold", "pulse durations", "unknown type"]
+    with open(src, "rb") as fh:
+        lines = fh.read().decode("utf-16").split("\r\n")
+    for i, ln in enumerate(lines):
+        p = ln.split(";", 4)
+        if len(p) == 5 and p[3] == "protocolRun":
+            p[1] = str(int(p[1]) + 1500)
+            lines[i] = ";".join(p)
+    f = str(tmp_path / "shifted_log.log")
+    with open(f, "wb") as fh:
+        fh.write(b"\xff\xfe" + "\r\n".join(lines).encode("utf-16-le"))
+    E = log_entries(f)
+    auto = auto_comments(E, log_events(E))
+    com = E["isComment"] & E["text"].str.match(r"^(start|end) \S+ protocol$")
+    assert com.sum() == 8 and auto[com.to_numpy(bool)].all() and not auto[~com.to_numpy(bool)].any()
+    Q = mda.find_protocols(f)
+    assert Q["name"].tolist() == P["name"].tolist()
+    np.testing.assert_allclose(Q["from"], P["from"] + 1.5)
+

@@ -18,7 +18,8 @@ E.attrs['clock']   info of clock_time (format '24h' / '12h', nCorrected, ambiguo
 Lines (UTF-16 or UTF-8): systemTime;dataLogTime_ms;channel;code;value, e.g.
   2000 01 01 09:44:35:717;1025;0;comment;start rockerSpeedTest
 
-TS 2026-10-06 (port of mda_logEntries.m, TS 2026-10-05; 12-hour time stamps 2026-10-08)
+TS 2026-10-06 (port of mda_logEntries.m, TS 2026-10-05; 12-hour time stamps 2026-10-08; structured events 2026-10-18;
+waiting lines, codes chamber, rigor and backup 2026-10-20)
 """
 from __future__ import annotations
 
@@ -156,27 +157,84 @@ def log_entries(log_file):
     return E
 
 
-STRUCTURED_CODES = ("system", "slice", "protocolrun", "schedulerun", "doc")
+STRUCTURED_CODES = ("system", "slice", "protocolrun", "schedulerun", "doc", "chamber", "rigor", "backup")
+_LOGFILE = re.compile(r"^logfile[23]?\s+(opened|created|closed)\s*:\s*(.*)$", re.I)
+_NEW_RUN = re.compile(r"^myodishcontrolsoftware opened", re.I)
+
+
+def waiting_lines(code, text, t):
+    """waiting lines of a log (2026-10-20, see log_events): w (bool array) and t_next = dataLogTime (s) of the
+    'LogFile created/opened' of this log that follows each waiting line (NaN otherwise)"""
+    low = [str(c).strip().lower() for c in code]
+    txt = [str(x).strip() for x in text]
+    n = len(low)
+    w = np.zeros(n, bool)
+    t_next = np.full(n, np.nan)
+    kind, name = [""] * n, [""] * n
+    for i in range(n):
+        if low[i] == "event":
+            m = _LOGFILE.match(txt[i])
+            if m:
+                kind[i] = m.group(1).lower()
+                name[i] = re.split(r"[\\/]", m.group(2).strip())[-1].strip().lower()
+    first = next((i for i in range(n) if kind[i] in ("opened", "created")), None)
+    if first is None:
+        return w, t_next
+    own = [x == name[first] for x in name]
+    is_open = [own[i] and kind[i] in ("opened", "created") for i in range(n)]
+    is_close = [own[i] and kind[i] == "closed" for i in range(n)]
+    inside = False
+    for i in range(n):
+        if is_open[i]:
+            inside = True
+        elif is_close[i]:
+            inside = False  # the closing line still belongs to its session
+        elif low[i] == "event" and _NEW_RUN.match(txt[i]):
+            inside = False  # a new run of the program (e.g. after a crash)
+            w[i] = True
+        else:
+            w[i] = not inside
+    nxt = math.nan  # only lines followed by an opening of this log are waiting
+    tt = np.asarray(t, float)
+    for i in range(n - 1, -1, -1):
+        if is_open[i]:
+            nxt = float(tt[i])
+        if w[i]:
+            if math.isnan(nxt):
+                w[i] = False
+            else:
+                t_next[i] = nxt
+    return w, t_next
 
 
 def log_events(src):
     """Structured events of a MyoDish log file (2026-10-18): lines of the control software (builds from 2026-10, release
-    2.2) whose value is one JSON object, code system, slice, protocolRun, scheduleRun or doc. MATLAB:
-    mda_logEntries(logFile, 'events').
+    2.2) whose value is one JSON object, code system, slice, protocolRun, scheduleRun, doc, chamber, rigor or backup.
+    MATLAB: mda_logEntries(logFile, 'events').
 
         V = log_events(log_file)      or  V = log_events(E)  (E = log_entries(log_file), in log order)
 
     V: DataFrame, one row per structured line, in log order: row (row of E, from 0; MATLAB from 1), clockTime, t_file
-    (s), channel, code, event, actionId, by ('' if null), waiting, data (dict of all fields of the JSON object, read by
-    name; absent fields are absent).
-    waiting: the event happened while no main recording ran and was written before 'LogFile created/opened' of this
-    log (its t_file is the position of the file at that moment, not the time of the event). The old text lines stay as
-    they are and are not in V. A line is structured if its code is one of these and its value starts with '{' (old
+    (s), t_logged (s), channel, code, event, actionId, by ('' if null), waiting, data (dict of all fields of the JSON
+    object, read by name; absent fields are absent).
+    t_logged: the dataLogTime of the line. t_file: the same, except for a waiting line.
+    waiting (2026-10-20): the event happened while no main recording ran; the control software keeps such lines in
+    memory and writes them into the next main log right before its 'LogFile created/opened'. Their dataLogTime is the
+    frozen counter of the last main recording of that program run (another file, or 0), not a time in this file, so
+    their t_file is the dataLogTime of that 'LogFile created/opened' (where this file was when the recording began).
+    Rule: waiting are the lines after the last 'LogFile closed' of this log (or after the start of the log, or from a
+    line 'MyodishControlSoftware opened' = a new run of the program, e.g. after a crash) up to the next 'LogFile
+    created/opened' of this log; LogFile2 (second recording) and LogFile3 (rocker stop recording) count as well, and
+    only lines about this log (the file name after the colon = the name in its first 'LogFile created/opened' line; a
+    main log also holds lines about the other logs). Logs of a second or rocker stop recording have no waiting lines.
+    Known limit: when the software lost the 'LogFile2/3 closed' line of the previous session (it does when all files are
+    closed at once), the waiting lines before the next opening are not recognized. The old text lines stay as they are
+    and are not in V. A line is structured if its code is one of these and its value starts with '{' (old
     lines never do; comments are checked by the code); lines that cannot be read (e.g. cut off by a crash) are counted
     in V.attrs['nUnreadable'] (rows of E in V.attrs['unreadable']) and left out. Unknown events and fields are kept."""
     import json
     E = src if isinstance(src, pd.DataFrame) else log_entries(src)
-    cols = ["row", "clockTime", "t_file", "channel", "code", "event", "actionId", "by", "waiting", "data"]
+    cols = ["row", "clockTime", "t_file", "t_logged", "channel", "code", "event", "actionId", "by", "waiting", "data"]
     if len(E) == 0:
         V = pd.DataFrame({c: [] for c in cols})
         V.attrs.update(nUnreadable=0, unreadable=[])
@@ -185,9 +243,7 @@ def log_events(src):
     txt = E["text"].astype(str).str.strip()
     low = code.str.lower()
     isS = (low.isin(STRUCTURED_CODES) & txt.str.startswith("{")).to_numpy(bool)
-    opens = np.flatnonzero((low.eq("event") & txt.str.match(r"logfile (opened|created)", case=False)).to_numpy(bool))
-    stops = np.flatnonzero((low.eq("recording") & txt.str.lower().str.contains("stopped")
-                            & ~txt.str.lower().str.contains("parallel")).to_numpy(bool))
+    wait, t_open = waiting_lines(code.tolist(), txt.tolist(), E["t_file"].to_numpy(float))
     rows, bad = [], []
     for i in np.flatnonzero(isS):
         try:
@@ -197,12 +253,10 @@ def log_events(src):
         if not isinstance(d, dict):
             bad.append(int(i))
             continue
-        nxt = opens[opens > i]
-        prv = opens[opens < i]
-        waiting = bool(nxt.size) and (not prv.size or bool(np.any((stops > prv[-1]) & (stops < i))))
-        rows.append([int(i), E["clockTime"].iloc[i], float(E["t_file"].iloc[i]), float(E["channel"].iloc[i]),
+        t = float(E["t_file"].iloc[i])
+        rows.append([int(i), E["clockTime"].iloc[i], float(t_open[i]) if wait[i] else t, t, float(E["channel"].iloc[i]),
                      code.iloc[i], str(d.get("event") or ""), str(d.get("actionId") or ""), str(d.get("by") or ""),
-                     waiting, d])
+                     bool(wait[i]), d])
     V = pd.DataFrame(rows, columns=cols)
     if len(V):
         V["clockTime"] = pd.to_datetime(V["clockTime"])

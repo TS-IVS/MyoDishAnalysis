@@ -17,19 +17,31 @@ function E = mda_logEntries(logFile, mode)
 %   2000 01 01 09:44:35:717;1025;0;comment;start rockerSpeedTest
 %
 % STRUCTURED EVENTS (2026-10-18): lines of the control software (builds from 2026-10, release 2.2) whose value is one
-% JSON object, code system, slice, protocolRun, scheduleRun or doc (the old text lines stay as they are):
-%   V   table, one row per structured line, in log order: row (row of E), clockTime, t_file, channel, code, event,
-%       actionId, by ('' if null), waiting, data (struct of all fields of the JSON object, jsondecode: read fields by
-%       name, absent fields are absent, null = [])
-%   waiting: the event happened while no main recording ran and was written before 'LogFile created/opened' of this
-%   log (its t_file is the position of the file at that moment, not the time of the event). A line is structured if
-%   its code is one of these and its value starts with '{' (old lines never do; comments are checked by the code).
-%   Lines that cannot be read (e.g. cut off by a crash) are counted in V.Properties.UserData.nUnreadable (rows of E:
-%   .unreadable) and left out; unknown events and fields are kept.
+% JSON object, code system, slice, protocolRun, scheduleRun, doc, chamber, rigor or backup (the old text lines stay as
+% they are):
+%   V   table, one row per structured line, in log order: row (row of E), clockTime, t_file, t_logged, channel, code,
+%       event, actionId, by ('' if null), waiting, data (struct of all fields of the JSON object, jsondecode: read
+%       fields by name, absent fields are absent, null = [])
+%   t_logged: the dataLogTime of the line (s). t_file: the same, except for a waiting line.
+%   waiting (2026-10-20): the event happened while no main recording ran; the control software keeps such lines in
+%   memory and writes them into the next main log right before its 'LogFile created/opened'. Their dataLogTime is the
+%   frozen counter of the last main recording of that program run (another file, or 0), not a time in this file, so
+%   their t_file is the dataLogTime of that 'LogFile created/opened' (where this file was when the recording began).
+%   Rule: waiting are the lines after the last 'LogFile closed' of this log (or after the start of the log, or from a
+%   line 'MyodishControlSoftware opened' = a new run of the program, e.g. after a crash) up to the next 'LogFile
+%   created/opened' of this log; LogFile2 (second recording) and LogFile3 (rocker stop recording) count as well, and
+%   only lines about this log (the file name after the colon = the name in its first 'LogFile created/opened' line;
+%   a main log also holds lines about the other logs). Logs of a second or rocker stop recording have no waiting
+%   lines. Known limit: when the software lost the 'LogFile2/3 closed' line of the previous session (it does when all
+%   files are closed at once), the waiting lines before the next opening are not recognized.
+%   A line is structured if its code is one of these and its value starts with '{' (old lines never do; comments are
+%   checked by the code). Lines that cannot be read (e.g. cut off by a crash) are counted in
+%   V.Properties.UserData.nUnreadable (rows of E: .unreadable) and left out; unknown events and fields are kept.
 %
 % Python: myodish_analysis.log_entries.log_entries, log_events.
 %
-% TS 2026-10-05 (12-hour time stamps 2026-10-08; structured events 2026-10-18)
+% TS 2026-10-05 (12-hour time stamps 2026-10-08; structured events 2026-10-18; waiting lines, codes chamber, rigor and
+% backup 2026-10-20)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -92,19 +104,20 @@ end
 
 function V = structuredEvents(E)
 % structured events of the log entries E (see the help)
-V = table(zeros(0,1), NaT(0,1), zeros(0,1), zeros(0,1), cell(0,1), cell(0,1), cell(0,1), cell(0,1), false(0,1), ...
-    cell(0,1), 'VariableNames', {'row','clockTime','t_file','channel','code','event','actionId','by','waiting','data'});
+V = table(zeros(0,1), NaT(0,1), zeros(0,1), zeros(0,1), zeros(0,1), cell(0,1), cell(0,1), cell(0,1), cell(0,1), ...
+    false(0,1), cell(0,1), 'VariableNames', ...
+    {'row','clockTime','t_file','t_logged','channel','code','event','actionId','by','waiting','data'});
 V.Properties.UserData = struct('nUnreadable', 0, 'unreadable', zeros(0,1));
 if ~istable(E) || height(E) == 0, return; end
 code = strtrim(cellstr(string(E.code)));
 txt = strtrim(cellstr(string(E.text)));
 low = lower(code);
-isS = ismember(low, {'system', 'slice', 'protocolrun', 'schedulerun', 'doc'}) & startsWith(txt, '{');
-opens = find(strcmp(low, 'event') & ~cellfun(@isempty, regexpi(txt, '^logfile (opened|created)', 'once')));
-stops = find(strcmp(low, 'recording') & contains(lower(txt), 'stopped') & ~contains(lower(txt), 'parallel'));
+isS = ismember(low, {'system', 'slice', 'protocolrun', 'schedulerun', 'doc', 'chamber', 'rigor', 'backup'}) & ...
+    startsWith(txt, '{');
+[wait, tOpen] = waitingLines(low, txt, E.t_file);
 idx = find(isS);
 bad = zeros(0, 1);
-R = cell(numel(idx), 10);
+R = cell(numel(idx), 11);
 n = 0;
 for k = idx(:)'
     try
@@ -113,19 +126,63 @@ for k = idx(:)'
         d = [];
     end
     if ~isstruct(d) || ~isscalar(d), bad(end+1, 1) = k; continue; end %#ok<AGROW>
-    nxt = opens(opens > k); prv = opens(opens < k);
-    w = ~isempty(nxt) && (isempty(prv) || any(stops > prv(end) & stops < k));
+    t = E.t_file(k);
+    if wait(k), t = tOpen(k); end
     n = n + 1;
-    R(n, :) = {k, E.clockTime(k), E.t_file(k), E.channel(k), code{k}, fieldText(d, 'event'), ...
-        fieldText(d, 'actionId'), fieldText(d, 'by'), w, d};
+    R(n, :) = {k, E.clockTime(k), t, E.t_file(k), E.channel(k), code{k}, fieldText(d, 'event'), ...
+        fieldText(d, 'actionId'), fieldText(d, 'by'), wait(k), d};
 end
 R = R(1:n, :);
 if n > 0
-    V = table(vertcat(R{:, 1}), vertcat(R{:, 2}), vertcat(R{:, 3}), vertcat(R{:, 4}), R(:, 5), R(:, 6), R(:, 7), ...
-        R(:, 8), vertcat(R{:, 9}), R(:, 10), 'VariableNames', ...
-        {'row','clockTime','t_file','channel','code','event','actionId','by','waiting','data'});
+    V = table(vertcat(R{:, 1}), vertcat(R{:, 2}), vertcat(R{:, 3}), vertcat(R{:, 4}), vertcat(R{:, 5}), R(:, 6), ...
+        R(:, 7), R(:, 8), R(:, 9), vertcat(R{:, 10}), R(:, 11), 'VariableNames', ...
+        {'row','clockTime','t_file','t_logged','channel','code','event','actionId','by','waiting','data'});
 end
 V.Properties.UserData = struct('nUnreadable', numel(bad), 'unreadable', bad);
+end
+
+
+function [w, tNext] = waitingLines(low, txt, t)
+% waiting lines of a log (2026-10-20, see the help): w true for a waiting line, tNext = dataLogTime (s) of the
+% 'LogFile created/opened' of this log that follows it
+n = numel(low);
+w = false(n, 1);
+tNext = nan(n, 1);
+isEv = strcmp(low, 'event');
+tok = cell(n, 1);
+tok(isEv) = regexpi(txt(isEv), '^logfile[23]?\s+(opened|created|closed)\s*:\s*(.*)$', 'tokens', 'once');
+kind = repmat({''}, n, 1);
+name = repmat({''}, n, 1);
+for i = find(~cellfun(@isempty, tok))'
+    kind{i} = lower(tok{i}{1});
+    p = regexp(strtrim(tok{i}{2}), '[\\/]', 'split');
+    name{i} = lower(strtrim(p{end}));
+end
+first = find(ismember(kind, {'opened', 'created'}), 1);
+if isempty(first), return; end
+own = strcmp(name, name{first});
+isOpen = own & ismember(kind, {'opened', 'created'});
+isClose = own & strcmp(kind, 'closed');
+isRun = isEv & ~cellfun(@isempty, regexpi(txt, '^myodishcontrolsoftware opened', 'once'));
+in = false;
+for i = 1:n
+    if isOpen(i)
+        in = true;
+    elseif isClose(i)
+        in = false;                               %the closing line still belongs to its session
+    elseif isRun(i)
+        in = false; w(i) = true;                  %a new run of the program (e.g. after a crash)
+    else
+        w(i) = ~in;
+    end
+end
+nxt = nan;                                        %only lines followed by an opening of this log are waiting
+for i = n:-1:1
+    if isOpen(i), nxt = t(i); end
+    if w(i)
+        if isnan(nxt), w(i) = false; else, tNext(i) = nxt; end
+    end
+end
 end
 
 

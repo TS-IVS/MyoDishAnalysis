@@ -14,8 +14,10 @@ function ok = mda_testProtocolEnd()
 %                every 30 s, interval and current unchanged   --> PD ends at 1890 s (pulse duration unchanged)
 % Second recording (2026-10-11): protocol keywords of comments (unknown type, StimThresh) and interruptions (software
 % restart, connection lost). Pendant of py/tests/test_protocol_end.py (same recordings and checks).
+% Example event logs of the control software (py/tests/event_logs_2_2, 2026-10-20): waiting lines, pairing of the
+% automatic comments with the next protocolRun line, code backup.
 %
-% TS 2026-10-10
+% TS 2026-10-10 (example logs of the control software 2026-10-20)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -110,6 +112,59 @@ writeRecording(f5, T, fs, {100, 0, 'comment', 'start Iso DRC protocol'; 200, 0, 
 P5 = mda_protocols(strrep(f5, '.mdd', '_log.log'));
 ok = check(ok, 'names with dose response or DRC: doseResponse', isequal(P5.type', {'doseResponse', 'doseResponse'}) && ...
     isequal(P5.from', [100 300]) && isequal(P5.to', [200 400]) && isequal(P5.groupBy', {'none', 'none'}));
+% 2026-10-20: example event logs of the control software (py/tests/event_logs_2_2, see its README)
+ev = fullfile(fileparts(mfilename('fullpath')), 'py', 'tests', 'event_logs_2_2');
+L = dir(fullfile(ev, '*', '*_log.log'));
+pass = numel(L) == 26;
+for i = 1:numel(L)
+    E = mda_logEntries(fullfile(L(i).folder, L(i).name));
+    V = mda_logEntries(E, 'events');
+    op = find(strcmp(E.code, 'Event') & ~cellfun(@isempty, regexp(E.text, '^LogFile\d? (opened|created)', 'once')));
+    w = find(V.waiting);
+    for j = w(:)'
+        k = op(find(op > V.row(j), 1));
+        pass = pass && ~isempty(k) && V.t_file(j) == E.t_file(k);
+    end
+    pass = pass && V.Properties.UserData.nUnreadable == 0 && height(V) > 0;
+end
+ok = check(ok, 'example logs: all read, waiting lines at the time of the next opening', pass);
+pf = fullfile(ev, 'recording_callers', 'p_log.log');
+V = mda_logEntries(pf, 'events');
+P6 = mda_protocols(pf);
+ok = check(ok, 'example logs: second recording continued as main recording, both protocols', ~any(V.waiting) && ...
+    isequal(P6.name', {'first protocol', 'second protocol'}) && isequal(P6.from', [0 2]) && isequal(P6.to', [2 4]));
+V = mda_logEntries(fullfile(ev, 'recording_callers', 'c_log.log'), 'events');
+W = V(V.waiting, :);
+ok = check(ok, 'example logs: schedule run while no recording ran: time of LogFile created', ...
+    isequal(W.event', {'start', 'reset'}) && isequal(W.t_logged', [7.25 7.25]) && isequal(W.t_file', [0 0]));
+V = mda_logEntries(fullfile(ev, 'backup_update_conflict', 'd_00_log.log'), 'events');
+V2 = mda_logEntries(fullfile(ev, 'backup_update_conflict', 'c_00_log.log'), 'events');
+ok = check(ok, 'example logs: code backup, waiting backup lines, new run of the program', ...
+    strcmp(V.code{1}, 'backup') && strcmp(V.event{1}, 'backup_copied') && V.waiting(1) && V.t_logged(1) == 9.9 && ...
+    V.t_file(1) == 0 && isequal(V2.event(V2.waiting)', {'backup_setting', 'identity', 'backup_copied'}) && ...
+    max(abs(V2.t_file(V2.waiting)' - [0 4.9 4.9])) < 1e-12);
+V = mda_logEntries(fullfile(ev, 'recording_files', 'a_rockerStops_log.log'), 'events');
+ok = check(ok, 'example logs: LogFile closed of the main log in a rocker stop log: no waiting lines', ~any(V.waiting));
+src = fullfile(ev, 'protocol_new_form', 'a_log.log');
+P7 = mda_protocols(src);
+fid = fopen(src, 'r'); b = fread(fid, inf, 'uint8=>uint8')'; fclose(fid);
+txt = char(double(b(3:2:end)) + 256 * double(b(4:2:end)));
+lines = regexp(txt, '\r\n', 'split');
+for i = 1:numel(lines)
+    q = strsplit(lines{i}, ';');
+    if numel(q) >= 5 && strcmp(q{4}, 'protocolRun')
+        q{2} = sprintf('%d', str2double(q{2}) + 1500);
+        lines{i} = strjoin(q, ';');
+    end
+end
+f8 = fullfile(folder, 'shifted_log.log');
+fid = fopen(f8, 'w'); fwrite(fid, [255 254], 'uint8');
+u = double(strjoin(lines, sprintf('\r\n')));
+fwrite(fid, [mod(u, 256); floor(u / 256)], 'uint8'); fclose(fid);
+P8 = mda_protocols(f8);
+ok = check(ok, 'example logs: protocolRun lines 1.5 s after their comments: same protocols', ...
+    isequal(P7.type', {'FFR', 'ST', 'PD', 'other'}) && isequal(P8.name', P7.name') && ...
+    max(abs(P8.from - P7.from - 1.5)) < 1e-9 && height(P8) == 4);
 end
 
 

@@ -50,8 +50,10 @@ function P = mda_protocols(src, regularMinutes)
 % 'started before this file' (end without start: from 0) or 'no end in the log: end of the file' / '...: software
 % restarted'. A protocol whose start and end were both written before the log was opened ran between two recordings
 % and is not listed. The automatic comments 'start <TYPE> protocol' / 'end <TYPE> protocol' next to these events are
-% not read again; comment protocols of the same type that overlap a protocolRun protocol are dropped; other comments
-% are read as before (older recordings: unchanged).
+% not read again (each paired with the next protocolRun line of its kind and type, 2026-10-20); comment protocols of
+% the same type that overlap a protocolRun protocol are dropped; other comments are read as before (older recordings:
+% unchanged). Waiting events (started while no recording ran, see mda_logEntries): from = where the file was when the
+% recording began (2026-10-20).
 % Names with 'dose response' (any spelling) or the word DRC: type doseResponse (tested first, as the control software;
 % 2026-10-18); without end comment it is treated like type unknown.
 %
@@ -466,17 +468,30 @@ end
 
 function skip = autoComments(E, V)
 % rows of E with the automatic comments 'start <TYPE> protocol' / 'end <TYPE> protocol' that the control software
-% writes next to each protocolRun start / end / abort (same type, within 1 s)
+% writes right before each protocolRun start / end / abort: each comment is paired with the next protocolRun line of
+% the same kind (start / end or abort) and type after it in the log, unless another such comment comes first
+% (2026-10-20; before: same type within 1 s, which a delay between the two writes can exceed)
 skip = false(height(E), 1);
 if ~istable(V) || height(V) == 0, return; end
 R = V(strcmpi(V.code, 'protocolRun'), :);
 if height(R) == 0, return; end
 typ = lower(cellfun(@(d) fieldOr(d, 'type', ''), R.data, 'UniformOutput', false));
+isStart = strcmp(R.event, 'start');
+isEnd = ismember(R.event, {'end', 'abort'});
+used = false(height(R), 1);
+ci = zeros(0, 1); ck = zeros(0, 1); ct = cell(0, 1);   %the automatic comments: row, kind (1 start, 2 end), type
 for i = find(E.isComment)'
     tok = regexp(strtrim(E.text{i}), '^(start|end)\s+(\S+)\s+protocol$', 'tokens', 'once', 'ignorecase');
     if isempty(tok), continue; end
-    if strcmpi(tok{1}, 'start'), want = {'start'}; else, want = {'end', 'abort'}; end
-    skip(i) = any(ismember(R.event, want) & abs(R.t_file - E.t_file(i)) <= 1 & strcmp(typ, lower(tok{2})));
+    ci(end+1, 1) = i; ck(end+1, 1) = 1 + strcmpi(tok{1}, 'end'); ct{end+1, 1} = lower(tok{2}); %#ok<AGROW>
+end
+for j = 1:numel(ci)
+    if ck(j) == 1, want = isStart; else, want = isEnd; end
+    c = find(~used & want & R.row > ci(j) & strcmp(typ, ct{j}), 1);
+    if isempty(c), continue; end
+    if any(ci > ci(j) & ci < R.row(c) & ck == ck(j) & strcmp(ct, ct{j})), continue; end   %that one is its comment
+    used(c) = true;
+    skip(ci(j)) = true;
 end
 end
 
