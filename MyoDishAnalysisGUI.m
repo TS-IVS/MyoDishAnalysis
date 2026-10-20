@@ -3819,7 +3819,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             Hv(2).x = hvS.t(j); Hv(2).y = hvS.cur(j);
             if C.stimChannel == 0, tx = 'ext. trigger'; else, tx = sprintf('%g mA', hvS.cur(j)); end
             if ~isnan(hvS.iv(j)), tx = sprintf('%s, interval %.0f ms', tx, hvS.iv(j)); end
-            if ~hvS.ok(j), tx = [tx ', current not reached']; end
+            if hvS.ok(j) == 0, tx = [tx ', current not reached']; end
             Hv(2).text = tx;
         end
         if ~isempty(B) && height(B) > 0
@@ -4889,7 +4889,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             xs = [tS(m) tS(m) nan(nnz(m),1)]'; ys = [zeros(nnz(m),1) cur(m) nan(nnz(m),1)]';
             plot(axT, xs(:), ys(:), '-', 'Color', col, 'HitTest', 'off');
         end
-        if any(~ok), plot(axT, tS(~ok), cur(~ok), 'x', 'Color', [0.8 0 0.8], 'MarkerSize', 5, 'HitTest', 'off'); end
+        nr = ok == 0;                                      %current not reached (NaN: unknown)
+        if any(nr), plot(axT, tS(nr), cur(nr), 'x', 'Color', [0.8 0 0.8], 'MarkerSize', 5, 'HitTest', 'off'); end
         ylim(axT, [0 max(1, max(cur)) * 1.35]);
         breakLines(axT, [0 max(1, max(cur)) * 1.35]);
         if isExt, ylabel(axT, 'ext.'); set(axT, 'YTick', []); else, ylabel(axT, 'mA'); set(axT, 'YTickMode', 'auto'); end
@@ -4916,7 +4917,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         [tS, o] = sort(S.stim.time(J)); J = J(o); tS = tS(:);
         cur = double(S.stim.current(J)); cur = cur(:);
         if C.stimChannel == 0, cur = ones(size(cur)); end   %external trigger pulses: no current
-        ok = S.stim.currentReached(J); ok = ok(:);
+        ok = double(S.stim.currentReached(J)); ok = ok(:);   %1 / 0 / NaN = unknown (2026-10-20)
         ex = S.stim.isExtraPulse(J); ex = ex(:);
         iv = [nan; diff(tS)] * 1000;
         if ~isempty(sbs) && numel(tS) > 1                  %no interval across a gap between rocker stops
@@ -4941,7 +4942,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         yyaxis(axT, 'left'); ylL = ylim(axT);
         lab = arrayfun(@(k) sprintf('%g', cur(k)), v, 'UniformOutput', false);
         if C.stimChannel == 0, lab(:) = {'ext'}; end
-        lab(~ok(v)) = strcat(lab(~ok(v)), ' ?!');
+        lab(ok(v) == 0) = strcat(lab(ok(v) == 0), ' ?!');
         h = text(axT, tS(v), min(cur(v) + 0.04 * diff(ylL), ylL(2)), lab, 'Color', [0.85 0 0], ...
             'FontSize', 7, 'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'HitTest', 'off');
         w = v(~isnan(iv(v)));

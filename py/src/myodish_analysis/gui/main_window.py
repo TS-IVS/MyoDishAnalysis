@@ -2154,7 +2154,7 @@ class MainWindow(QtWidgets.QMainWindow):
         cur = np.asarray(S.stim.current, float)[J]
         if C.stimChannel == 0:  # external trigger pulses: no current
             cur = np.ones(cur.size)
-        ok = np.asarray(S.stim.currentReached, bool)[J]
+        ok = np.asarray(S.stim.currentReached, float)[J]  # 1 / 0 / NaN = unknown (2026-10-20)
         ex = np.asarray(S.stim.isExtraPulse, bool)[J]
         iv = np.r_[np.nan, np.diff(tS)] * 1000
         if self.sbs is not None and tS.size > 1:  # no interval across a gap between rocker stops
@@ -2195,8 +2195,9 @@ class MainWindow(QtWidgets.QMainWindow):
         for m, col in ((~ex, RED), (ex, GREEN)):
             if m.any():
                 vlines(p, tS[m], 0, cur[m], col)
-        if (~ok).any():
-            p.addItem(pg.ScatterPlotItem(tS[~ok], cur[~ok], symbol="x", size=7, pen=pg.mkPen((204, 0, 204)),
+        nr = ok == 0  # current not reached (NaN: unknown)
+        if nr.any():
+            p.addItem(pg.ScatterPlotItem(tS[nr], cur[nr], symbol="x", size=7, pen=pg.mkPen((204, 0, 204)),
                                          brush=(204, 0, 204)))
         p.vb.setYRange(0, max(1.0, float(cur.max())) * 1.35, padding=0)
         self.break_lines(p, 0, max(1.0, float(cur.max())) * 1.35)
@@ -2242,7 +2243,7 @@ class MainWindow(QtWidgets.QMainWindow):
         f = QtGui.QFont()
         f.setPointSize(7)
         for k in v:
-            lab = "ext" if self.C.stimChannel == 0 else f"{cur[k]:g}" + (" ?!" if not ok[k] else "")
+            lab = "ext" if self.C.stimChannel == 0 else f"{cur[k]:g}" + (" ?!" if ok[k] == 0 else "")
             t = pg.TextItem(lab, color=RED, anchor=(0.5, 1))
             t.setFont(f)
             t.setPos(tS[k], min(cur[k] + 0.04 * (ylL[1] - ylL[0]), ylL[1]))
@@ -3512,7 +3513,7 @@ class MainWindow(QtWidgets.QMainWindow):
             tx = "ext. trigger" if self.C.stimChannel == 0 else f"{cur[j]:g} mA"
             if not math.isnan(iv[j]):
                 tx += f", interval {iv[j]:.0f} ms"
-            if not ok[j]:
+            if ok[j] == 0:
                 tx += ", current not reached"
             Hv[1].update(x=float(tS[j]), y=float(cur[j]), text=tx)
         B = self.B

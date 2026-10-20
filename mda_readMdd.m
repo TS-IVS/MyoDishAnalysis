@@ -60,11 +60,21 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               force (numel(dataChannels) x n, uN), rockerOn (1 x n logical),
 %               stim (struct with fields time, channel, current, currentReached, external, isExtraPulse,
 %               rockerOn; one entry per stimulus pulse of any channel; channel 0 = external trigger pulse)
+%               currentReached (2026-10-20): 1 = the current of the pulse was reached, 0 = not reached, NaN = unknown.
+%               The firmware (V18G-V19C) writes the result of a pulse ("current not reached", status bit 9) into the
+%               report of the NEXT base pulse of the same channel (the report is written at the start of a pulse, its
+%               result exists only at its end; a failure of an extra pulse of that channel in between is OR-ed in).
+%               So the result of a base pulse is bit 9 of the next base pulse of its channel, searched up to 600 s
+%               beyond the window; the bit 9 of the first pulse of a file belongs to the time before the file. NaN:
+%               the last base pulse of a channel (no later pulse within 600 s or the end of the file), extra pulses
+%               and external trigger pulses (no result of their own). In single channel mode the firmware reports
+%               failures of channel 1 only in some configurations, so a 1 is not certain there.
 %   Single channel files: force has one row = channel 1, stim.channel keeps the physical channel number.
 %
 % TS 2026-10-05 (condensed from importMyoDishData, readRecordingInfoFromMyoDishLogFile,
 % readSamplingRateFromMyoDishLogFile; identical data and stimulus times)
-% 2026-10-08: recordingStart from mda_clockTime (12-hour time stamps); 2026-10-13: old 8-channel files
+% 2026-10-08: recordingStart from mda_clockTime (12-hour time stamps); 2026-10-13: old 8-channel files;
+% 2026-10-20: currentReached = bit 9 of the next base pulse of the channel
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -309,7 +319,7 @@ for c = 1:nData                                    %AU --> uN (calibration, exte
 end
 
 % status channel: stimulus pulses and rocker state
-S.stim = struct('time',zeros(0,1),'channel',zeros(0,1),'current',zeros(0,1),'currentReached',false(0,1), ...
+S.stim = struct('time',zeros(0,1),'channel',zeros(0,1),'current',zeros(0,1),'currentReached',zeros(0,1), ...
     'external',false(0,1),'isExtraPulse',false(0,1),'rockerOn',false(0,1));
 S.rockerOn = false(1,n);
 isLog = isfield(S, 'rockerSource') && strcmp(S.rockerSource, 'log');
@@ -330,7 +340,8 @@ if S.hasStimChannel && nRaw > 0
     S.stim.time = ((i0 + idx(:) - 1) / fs);
     S.stim.channel = ch(:);
     S.stim.current = double(bitand(pc(:), uint16(255)));          %bits 1-8 [mA]
-    S.stim.currentReached = bitand(pc(:), uint16(256)) == 0;      %bit 9
+    S.stim.currentReached = shiftedReached(S, fid, i0 + nRaw, ch(:), bitand(pc(:), uint16(256)) ~= 0, ...
+        bitand(pc(:), uint16(32768)) ~= 0);                       %bit 9 of the next base pulse (2026-10-20)
     S.stim.external = bitand(pc(:), uint16(8192)) ~= 0;           %bit 14
     S.stim.isExtraPulse = bitand(pc(:), uint16(32768)) ~= 0;      %bit 16
     S.stim.rockerOn = reshape(rockerBit(idx), [], 1);
@@ -355,6 +366,52 @@ if isLog && nRaw > 0                               %rocker state from the 'rocke
     state = rockerStateFromLog(S.rockerLogIntervals, (i0 + (0:nRaw-1)) / fs);
     S.rockerOn = any(reshape(state, nDS, n), 1);
     S.stim.rockerOn = reshape(state(round(S.stim.time * fs) - i0 + 1), [], 1);
+end
+end
+
+
+% =====================================================================================================
+function r = shiftedReached(S, fid, iNext, ch, bit9, isExtra)
+% current reached of every pulse (1 / 0 / NaN, see the help): result of a base pulse = bit 9 of the next base pulse of
+% the same channel; for the last base pulse of a channel in the window the next one is searched in the file from raw
+% sample iNext (0-based) on, up to 600 s
+r = nan(numel(ch), 1);
+base = ~isExtra & ch >= 1 & ch <= 8;
+chans = unique(ch(base));
+if isempty(chans), return; end
+lastBit = nextBit9(S, fid, iNext, chans);
+for q = 1:numel(chans)
+    k = find(base & ch == chans(q));
+    r(k(1:end-1)) = double(~bit9(k(2:end)));
+    r(k(end)) = 1 - lastBit(q);                                   %NaN: not found
+end
+end
+
+
+function b = nextBit9(S, fid, s, chans)
+% bit 9 (1 / 0) of the first base pulse of each channel in chans at or after raw sample s (0-based), searched up to
+% 600 s; NaN if there is none
+b = nan(numel(chans), 1);
+nCh = S.nChannelsInFile;
+fs = S.samplingRate;
+sEnd = min(S.totalSamples, s + round(600 * fs));
+todo = true(numel(chans), 1);
+while s < sEnd && any(todo)
+    m = min(round(60 * fs), sEnd - s);
+    fseek(fid, s * nCh * 2, 'bof');
+    raw = fread(fid, [nCh m], 'int16=>int16');
+    if isempty(raw), break; end
+    code = typecast(raw(S.stimRow, :), 'uint16');
+    pc = code(bitand(code, uint16(49151)) ~= 0 & bitand(code, uint16(32768)) == 0);   %pulses, no extra pulses
+    c = double(bitand(bitshift(pc, -9), uint16(15)));
+    c(c > 8) = c(c > 8) - 8;
+    c(c == 0) = 8;
+    c(bitand(pc, uint16(16383)) == uint16(8192)) = 0;             %external trigger pulses
+    for q = find(todo)'
+        f = find(c == chans(q), 1);
+        if ~isempty(f), b(q) = double(bitand(pc(f), uint16(256)) ~= 0); todo(q) = false; end
+    end
+    s = s + size(raw, 2);
 end
 end
 

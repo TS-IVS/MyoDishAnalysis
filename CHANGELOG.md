@@ -5,6 +5,16 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
+- **Current reached (status bit 9) assigned to the right pulse.** The controller writes the report of a pulse when the
+  pulse starts, and the result ("current not reached") only becomes known at its end; bit 9 of a pulse is therefore
+  the result of the previous base pulse of the same channel (firmware V18G–V19C, confirmed by the firmware source and
+  3,285 of 3,285 pulse pairs). `mda_readMdd` / `read_mdd` now give each base pulse the bit 9 of the next base pulse of
+  its channel (searched up to 600 s beyond the window read); `stim.currentReached` and the column `currentReached`
+  of the pulse table are 1 / 0 / NaN (unknown: the last pulse of a channel in the file, extra pulses, external
+  trigger pulses) instead of true / false, and `currentReached_percent` leaves the unknown pulses out. This changes
+  `currentReached_percent` of threshold protocols (before: the first pulse of every current step carried the result
+  of the last pulse of the step before) and `currentReached` in all pulse tables; recordings analysed before need to
+  be analysed again for these columns.
 - **MATLAB `mda_timepoints`, `mda_poolTimepoints`: relative results folder** (e.g. `mda_timepoints('results', ...)`)
   was resolved against the folder MATLAB was started in (Java), not the current folder: *no mda_index.csv in ...* or
   no analyses found after `cd`. Relative paths now refer to the current folder (`pwd`), as in Python.

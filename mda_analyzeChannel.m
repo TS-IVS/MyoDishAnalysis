@@ -167,9 +167,9 @@ PX = false(size(PT));
 if stimCh > 0 && isfield(S.stim, 'isExtraPulse') && ~legacy
     x = S.stim.isExtraPulse(:); PX = x(selP);
 end
-PC = nan(size(PT)); PR = true(size(PT));           %current (mA) and current reached (status channel)
+PC = nan(size(PT)); PR = ones(size(PT));           %current (mA) and current reached (1 / 0 / NaN, mda_readMdd)
 if isfield(S.stim, 'current'), x = S.stim.current(:); PC = x(selP); end
-if isfield(S.stim, 'currentReached'), x = S.stim.currentReached(:); PR = x(selP); end
+if isfield(S.stim, 'currentReached'), x = double(S.stim.currentReached(:)); PR = x(selP); end
 [PT, o] = sort(PT); PX = PX(o); PC = PC(o); PR = PR(o);
 STall = PT;                                         %all pulses (latency of the peaks: locked to any pulse)
 ST = PT(~PX);                                       %regular pulses (counts, intervals, missed beats)
@@ -925,7 +925,8 @@ end
 function P = pulseTable(channel, PT, PX, PC, PR, pDur, fs, range, pOfBeat, owner, during, tStim, tOn, tEnd, tPk, ...
     sel, pNom, snapMs)
 % one row per pulse of the range: pulse (ID = raw sample number in the file, from 0), channel, t (s), extra (status
-% channel bit 16), current_mA, currentReached, chargeDuration_us, pauseDuration_us, dechargeDuration_us, outcome
+% channel bit 16), current_mA, currentReached (1 / 0 / NaN = unknown, see mda_readMdd), chargeDuration_us,
+% pauseDuration_us, dechargeDuration_us, outcome
 % ('elicited' / 'duringContraction' / 'noResponse'), role ('eliciting' / 'pre' / 'post' / ''), contraction (number
 % of the contraction it belongs to, NaN if outside the range), t_peak of that contraction, tRel_ms (pre / post: time
 % relative to its eliciting pulse, as in prePulses / postPulses), couplingInterval_s (to the previous eliciting pulse),

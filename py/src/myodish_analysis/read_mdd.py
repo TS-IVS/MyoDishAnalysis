@@ -47,6 +47,15 @@ OUTPUT (S, a Struct with the field names of the MATLAB version)
   data:       t (s; centre of the averaged raw samples, first raw sample = 0 s), dt, force (nData x n, uN),
               rockerOn (bool, n), stim (Struct of arrays: time, channel, current, currentReached, external,
               isExtraPulse, rockerOn; one entry per stimulus pulse of any channel)
+              currentReached (2026-10-20): 1 = the current of the pulse was reached, 0 = not reached, NaN = unknown.
+              The firmware (V18G-V19C) writes the result of a pulse ("current not reached", status bit 9) into the
+              report of the NEXT base pulse of the same channel (the report is written at the start of a pulse, its
+              result exists only at its end; a failure of an extra pulse of that channel in between is OR-ed in). So
+              the result of a base pulse is bit 9 of the next base pulse of its channel, searched up to 600 s beyond
+              the window; the bit 9 of the first pulse of a file belongs to the time before the file. NaN: the last
+              base pulse of a channel (no later pulse within 600 s or the end of the file), extra pulses and external
+              trigger pulses (no result of their own). In single channel mode the firmware reports failures of
+              channel 1 only in some configurations, so a 1 is not certain there.
   Single channel files: force has one row = channel 1, stim.channel keeps the physical channel number.
   External trigger pulses (status bit 14 without channel / current bits, e.g. an external stimulator at the external
   controller unit): stim.channel = 0 (before 2026-10-08 channel 8); consecutive samples of such a pulse = one pulse;
@@ -316,7 +325,7 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False, opts
 
     # status channel: stimulus pulses and rocker state
     S.stim = Struct(time=np.zeros(0), channel=np.zeros(0, dtype=int), current=np.zeros(0),
-                    currentReached=np.zeros(0, bool), external=np.zeros(0, bool), isExtraPulse=np.zeros(0, bool),
+                    currentReached=np.zeros(0), external=np.zeros(0, bool), isExtraPulse=np.zeros(0, bool),
                     rockerOn=np.zeros(0, bool))
     S.rockerOn = np.zeros(n, bool)
     isLog = S.get("rockerSource") == "log"
@@ -336,7 +345,7 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False, opts
         S.stim.time = (i0 + idx) / fs
         S.stim.channel = ch
         S.stim.current = (pc & 255).astype(float)  # bits 1-8 [mA]
-        S.stim.currentReached = (pc & 256) == 0  # bit 9
+        S.stim.currentReached = shifted_reached(S, i0 + nRaw, ch, (pc & 256) != 0, (pc & 32768) != 0)  # 2026-10-20
         S.stim.external = (pc & 8192) != 0  # bit 14
         S.stim.isExtraPulse = (pc & 32768) != 0  # bit 16
         S.stim.rockerOn = rockerBit[idx].copy()
@@ -359,6 +368,54 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False, opts
         S.rockerOn = state.reshape(n, nDS).any(axis=1)
         S.stim.rockerOn = state[np.round(S.stim.time * fs).astype(int) - i0]
     return S
+
+
+def shifted_reached(S, i_next, ch, bit9, is_extra):
+    """current reached of every pulse (1 / 0 / NaN, see read_mdd; 2026-10-20): result of a base pulse = bit 9 of the
+    next base pulse of the same channel; for the last base pulse of a channel in the window the next one is searched in
+    the file from raw sample i_next (0-based) on, up to 600 s. MATLAB: shiftedReached in mda_readMdd.m."""
+    ch = np.asarray(ch, int)
+    bit9 = np.asarray(bit9, bool)
+    r = np.full(ch.size, np.nan)
+    base = ~np.asarray(is_extra, bool) & (ch >= 1) & (ch <= 8)
+    chans = np.unique(ch[base])
+    if not chans.size:
+        return r
+    last = next_bit9(S, i_next, chans)
+    for q, c in enumerate(chans):
+        k = np.flatnonzero(base & (ch == c))
+        r[k[:-1]] = (~bit9[k[1:]]).astype(float)
+        r[k[-1]] = 1.0 - last[q]  # NaN: not found
+    return r
+
+
+def next_bit9(S, s, chans):
+    """bit 9 (1 / 0) of the first base pulse of each channel in chans at or after raw sample s (0-based), searched up to
+    600 s; NaN if there is none"""
+    b = np.full(len(chans), np.nan)
+    nCh = S.nChannelsInFile
+    fs = S.samplingRate
+    s_end = min(S.totalSamples, s + round(600 * fs))
+    todo = np.ones(len(chans), bool)
+    while s < s_end and todo.any():
+        m = min(round(60 * fs), s_end - s)
+        raw = np.fromfile(S.file, dtype="<i2", count=nCh * m, offset=s * nCh * 2)
+        m = raw.size // nCh
+        if m == 0:
+            break
+        code = np.ascontiguousarray(raw[: m * nCh].reshape(m, nCh)[:, S.stimRow]).view(np.uint16)
+        pc = code[((code & 49151) != 0) & ((code & 32768) == 0)]  # pulses, no extra pulses
+        c = ((pc >> 9) & 15).astype(int)
+        c[c > 8] -= 8
+        c[c == 0] = 8
+        c[(pc & 16383) == 8192] = 0  # external trigger pulses
+        for q in np.flatnonzero(todo):
+            f = np.flatnonzero(c == chans[q])
+            if f.size:
+                b[q] = float((pc[f[0]] & 256) != 0)
+                todo[q] = False
+        s += m
+    return b
 
 
 def rocker_intervals_from_log(R, delay, T):

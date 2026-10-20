@@ -976,6 +976,45 @@ def test_gui_several_ranges_rocker_stops(tmp_path):
         QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
 
 
+# ------------------------------------------------------------------------------------------------ status bit 9
+def test_current_reached_previous_pulse(tmp_path):
+    """bit 9 of the status channel = result of the previous base pulse of the channel (2026-10-20; pendant of
+    bit9Checks in mda_testExtraPulses.m): synthetic file, 720 s, 400 Hz"""
+    fs, T = 400, 720
+    n = T * fs
+    code = np.zeros(n, np.uint16)
+    t3 = np.arange(0, 119, 2.0); b3 = np.zeros(t3.size, bool); b3[[0, 3, 10, 29]] = True
+    t5 = np.r_[np.arange(0, 40.0), np.arange(100, 111.0)]; b5 = t5 == 100
+    t6 = np.r_[np.arange(0, 11.0), 700.0]; b6 = t6 == 700
+    for t, b, c, cur, off in ((t3, b3, 3, 40, 0), (t5, b5, 5, 50, 1), (t6, b6, 6, 30, 2)):
+        code[np.round(t * fs).astype(int) + off] = c * 512 + cur + 256 * b
+    code[round(51.01 * fs)] = 32768 + 3 * 512 + 20  # extra pulse of channel 3
+    X = np.full((9, n), -383, "<i2")
+    X[8] = code.view("<i2")
+    f = str(tmp_path / "bit9_rigA_0.mdd")
+    X.T.tofile(f)
+    lines = ["systemTime;dataLogTime;channel;code;value", "2026 01 01 06:00:00:000;0;0;nChannels;9",
+             "2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd", "2026 01 01 06:00:00:000;0;0;samplingRate Recording;400",
+             "2026 01 01 06:12:00:000;%d;0;Recording;stopped: x.mdd" % (T * 1000)]
+    with open(f[:-4] + "_log.log", "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    S, S1, S2 = mda.read_mdd(f, 0, T), mda.read_mdd(f, 0, 50), mda.read_mdd(f, 50, T)
+
+    def cr(S, c, x):
+        k = (np.asarray(S.stim.channel) == c) & (np.asarray(S.stim.isExtraPulse, bool) == x)
+        return np.asarray(S.stim.currentReached, float)[k]
+
+    e3 = np.r_[(~b3[1:]).astype(float), np.nan]
+    e5 = np.r_[(~b5[1:]).astype(float), np.nan]
+    np.testing.assert_array_equal(cr(S, 3, False), e3)
+    assert np.isnan(cr(S, 3, True)).all() and cr(S, 3, True).size == 1
+    np.testing.assert_array_equal(cr(S, 5, False), e5)
+    np.testing.assert_array_equal(np.r_[cr(S1, 3, False), cr(S2, 3, False)], e3)
+    np.testing.assert_array_equal(np.r_[cr(S1, 5, False), cr(S2, 5, False)], e5)
+    np.testing.assert_array_equal(cr(S, 6, False), np.r_[np.ones(10), 0, np.nan])
+    np.testing.assert_array_equal(cr(S1, 6, False), np.r_[np.ones(10), np.nan])
+
+
 # ------------------------------------------------------------------------------------------------ anonymization
 # py/tools/anonymize_recording.py with a log file of the format of software 2.1 (structured JSON lines between the old
 # text lines) and a _labels.csv: example recording 9 with a synthetic original name, date, version, PC, user, controller

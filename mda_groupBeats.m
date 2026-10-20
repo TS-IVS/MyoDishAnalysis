@@ -54,7 +54,8 @@ function [B, G, Z, notes] = mda_groupBeats(H, B, C, range, by, opts, steadyN)
 %          the protocol; an extra pulse belongs to the group of the nearest regular pulse.
 %   G      one row per group (order: role, value): group, groupValue, groupRole, groupStep, groupBy, then the columns of
 %          mda_summarize for the contractions and stimuli of the group, capture_percent (stimuli followed by a
-%          contraction), currentReached_percent (stimuli with the set current reached) and amplitude_pctOfRef
+%          contraction), currentReached_percent (stimuli with the set current reached; stimuli with an unknown result,
+%          e.g. the last one of the file, left out, see mda_readMdd) and amplitude_pctOfRef
 %          (mean amplitude in % of the group 'S1' / 'steady'; NaN for the other quantities). stimFrequency of a group =
 %          1 / median interval from the previous stimulus.
 %          amplitude_CV (population SD / mean of the included amplitudes, from mda_summarize) and irregular
@@ -356,7 +357,7 @@ for q = 1:numel(keys)
     T.stimFrequency = 1 / median(prevInt(js), 'omitnan');
     if ~any(js), T.stimFrequency = nan; end
     capt = nan; reach = nan;
-    if any(js), capt = 100 * mean(captured(js)); reach = 100 * mean(reached(js)); end
+    if any(js), capt = 100 * mean(captured(js)); reach = 100 * mean(reached(js), 'omitnan'); end   %NaN: unknown
     T = addvars(T, capt, reach, 'After', 'missedBeats_percent', 'NewVariableNames', {'capture_percent', 'currentReached_percent'});
     T = [table(keys(q), kv(q), roleOrder(kr(q)), ks(q), {by}, 'VariableNames', {'group','groupValue','groupRole','groupStep','groupBy'}), T]; %#ok<AGROW>
     parts{q} = T;

@@ -781,7 +781,9 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
         pj = pj[~np.isnan(pj)]
         T["stimFrequency"] = 1.0 / float(np.median(pj)) if js.any() and pj.size else math.nan
         capt = 100 * float(np.mean(captured[js])) if js.any() else math.nan
-        reach = 100 * float(np.mean(reached[js])) if js.any() else math.nan
+        rj = np.asarray(reached, float)[js]
+        rj = rj[~np.isnan(rj)]  # unknown result (e.g. the last pulse of the file, read_mdd): left out
+        reach = 100 * float(np.mean(rj)) if rj.size else math.nan
         pos = list(T.columns).index("missedBeats_percent") + 1
         T.insert(pos, "capture_percent", capt)
         T.insert(pos + 1, "currentReached_percent", reach)

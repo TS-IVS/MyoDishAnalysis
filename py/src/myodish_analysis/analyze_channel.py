@@ -151,11 +151,11 @@ def analyze_channel(S, channel, range_=None, opts=None):
     if stimCh > 0 and "isExtraPulse" in S.stim and not legacy:
         PX = np.asarray(S.stim.isExtraPulse, bool).ravel()[selP]
     PC = np.full(PT.size, np.nan)  # current (mA) and current reached (status channel)
-    PR = np.ones(PT.size, bool)
+    PR = np.ones(PT.size)  # current reached: 1 / 0 / NaN = unknown (read_mdd)
     if "current" in S.stim:
         PC = np.asarray(S.stim.current, float).ravel()[selP]
     if "currentReached" in S.stim:
-        PR = np.asarray(S.stim.currentReached, bool).ravel()[selP]
+        PR = np.asarray(S.stim.currentReached, float).ravel()[selP]
     o = np.argsort(PT, kind="stable")
     PT, PX, PC, PR = PT[o], PX[o], PC[o], PR[o]
     STall = PT  # all pulses (latency of the peaks: locked to any pulse)
@@ -921,7 +921,8 @@ def pulse_text(sel, owner, PT, PX, PC, pDur, pNom, pOfBeat, tOn, n, snapMs=5.0, 
 def pulse_table(channel, PT, PX, PC, PR, pDur, fs, range_, pOfBeat, owner, during, tStim, tOn, tEnd, tPk, sel, pNom,
                 snapMs=5.0):
     """one row per pulse of the range: pulse (ID = raw sample number in the file, from 0), channel, t (s), extra
-    (status channel bit 16), current_mA, currentReached, chargeDuration_us, pauseDuration_us, dechargeDuration_us,
+    (status channel bit 16), current_mA, currentReached (1 / 0 / NaN = unknown, see read_mdd), chargeDuration_us,
+    pauseDuration_us, dechargeDuration_us,
     outcome ('elicited' / 'duringContraction' / 'noResponse'), role ('eliciting' / 'pre' / 'post' / ''), contraction
     (number of the contraction it belongs to, NaN if outside the range), t_peak of that contraction, tRel_ms (pre /
     post: time relative to its eliciting pulse, as in prePulses / postPulses), couplingInterval_s (to the previous

@@ -868,7 +868,7 @@ P = mda_protocols(file)                                              % protocols
   |---|---|---|
   | `pacingFrequency` | 1 / interval from the previous stimulus (Hz); intervals within 2 % form a cluster, its frequency (1 / median interval) is rounded to `frequencyResolution` (0.1 Hz) at ≥ 1 Hz and to `frequencyResolutionLow` (0.05 Hz) below 1 Hz: clusters with the same rounded frequency are one group (0.99, 1.0, 1.001 Hz = `1 Hz`; 0.74, 0.75 Hz = `0.75 Hz`; before 2026-10-10: label rounded to 0.05 Hz at all rates, `groupValue` unrounded); `groupValue` = the rounded frequency, `stimFrequency` = 1 / median interval. **FFR protocols** (2026-10-10, option `steadyStateBeats`, default 10): each frequency is summarized from its steady state, the last 10 contractions of the longest run of consecutive stimuli at this frequency (other runs, e.g. the basic pacing before and after the protocol, are not used; `groupStep` = number of the run), of its longest sequence of captured stimuli whose previous and next stimuli are captured, too (partial capture, e.g. 2:1: no steady state, note); 0 = all contractions of the frequency (versions ≤ 1.0.0-beta.3) | FFR |
   | `S2interval` | S2 = premature stimulus (interval < 95 % of the previous one, next interval longer, previous stimulus not premature); groups `S2 <ms>` and `post-S2 <ms>` (the next stimulus; post-extrasystolic potentiation; S2 intervals within 7.5 ms are one group), `S1` (other stimuli at the basic interval, median ± 5 %, not followed by an S2), `pre-S2` (S1 followed by an S2: relaxation cut off) and `other` (other intervals, e.g. trains at a higher rate between the S1-S2 steps; analyse them with `pacingFrequency`) | RP |
-  | `stimCurrent` | current of the pulse (mA, status channel); `currentReached_percent` per group | ST |
+  | `stimCurrent` | current of the pulse (mA, status channel); `currentReached_percent` per group (pulses whose current was reached; pulses with an unknown result left out, see *Current reached* below) | ST |
   | `pauseLength` | first stimulus after a pause (interval ≥ 1.5 s, ≥ 1.5 × the median interval and ≥ 1.5 × the interval before; the median interval returns within the next 3 stimuli): `rest <s>`, one group per pause with `groupStep` = number of the pause (pooling over channels whose effective pauses differ); stimuli within 10 s after a pause `after rest` (decaying potentiation, not part of the reference); other stimuli at the median interval (± 5 %) `steady` (reference); all others `other`. Pauses (interval − steady interval) within `pauseTolerance` (10 %) of the shortest pause of a set have the same pause length (`groupValue` = their median interval, equal labels numbered `#n`) | PRP |
   | `pulseDuration` | `chargeDuration` entry of the log file for the stimulated channel (ms) | PD |
   | `rockerSpeed` | rocker speed at the peak (rpm, `rockerSpeed` entries of the log file); all contractions by default | rockerSpeed |
@@ -1068,11 +1068,23 @@ channel 10k + c = extra pulse #k of channel c).
   Time resolution of the pulses: 2.5 ms (400 Hz).
 * **Pulse table** (`info.pulses`, sheet / file `pulses`; `'pulseTable',false` = none; xlsx with ≥ 1,048,576 rows:
   `<name>_pulses.csv`; watcher: like the contractions, `_pulses.csv(.gz)`): one row per pulse of the analysed
-  channels and ranges: `pulse` (ID = raw sample number), `channel`, `t`, `extra`, `current_mA`, `currentReached`,
+  channels and ranges: `pulse` (ID = raw sample number), `channel`, `t`, `extra`, `current_mA`, `currentReached`
+  (1 / 0 / NaN = unknown),
   durations, `outcome` (`elicited` / `duringContraction` / `noResponse`), `role` (`eliciting` / `pre` / `post`),
   `contraction` (number in the contraction table), `t_peak`, `tRel_ms`, `couplingInterval_s` (to the previous
   eliciting pulse), `sinceOnset_s` (to the onset of the latest contraction) and `phase` (sinceOnset / onset … 90 %
   relaxation). Threshold, refractory period and pre-pulse effects can be evaluated from it as special cases.
+* **Current reached** (2026-10-20): the controller writes the report of a pulse into the status channel when the
+  pulse starts; whether its current was reached is known only at its end. Status bit 9 ("current not reached") of a
+  pulse is therefore the result of the **previous base pulse of the same channel** (firmware V18G–V19C; confirmed
+  from the firmware source and 3,285 of 3,285 pulse pairs in recordings of test controllers; a failure of an extra
+  pulse of that channel in between counts as well). `mda_readMdd` / `read_mdd` assign it accordingly:
+  `stim.currentReached` = 1 (reached), 0 (not reached) or NaN (unknown: the last base pulse of a channel when no
+  later pulse of that channel follows within 600 s or the file ends; extra pulses and external trigger pulses, which
+  have no result of their own). The bit 9 of the first pulse of a file belongs to the time before the file and is not
+  used. Before 2026-10-20 every pulse got its own bit 9, i.e. the result of the pulse before it. In single channel
+  mode the firmware reports failures of channel 1 only in some configurations, so `currentReached` = 1 is not
+  certain there.
 * `'stimAssignment','peak'`: as in versions ≤ 1.0.0-beta.3 (peak `minStimToPeak` … min(stimulus interval, 1 s) after
   a pulse, the most prominent peak after it; extra pulses count as regular pulses). Results files of these versions
   are opened with `'peak'` (`mda_readResults`).
