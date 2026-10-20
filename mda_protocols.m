@@ -31,7 +31,8 @@ function P = mda_protocols(src, regularMinutes)
 %   FFR          FFR, force-frequency, frequency          pacingFrequency
 %   RP           refractory, RP, S1S2, S2                 S2interval
 %   ST           threshold, thresh, stimCurrent, ST       stimCurrent
-%   PRP          post rest, PRP, rest potentiation        pauseLength
+%   PRP          post rest, PRP, rest potentiation,       pauseLength
+%                post pause, pause potentiation (2026-10-20)
 %   PD           pulse duration, PD                       pulseDuration
 %   rockerSpeed  rocker speed                             rockerSpeed
 %   unknown      no type keyword, but protocol, Protokoll, programme, program or Test (comments only)    none
@@ -342,7 +343,7 @@ key = normName(name);
 tok = lower(regexp(char(name), '[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+', 'match'));   %words: 'PD_Test' -> pd, test
 if contains(key, 'doseresponse') || ismember('drc', tok)   %first, as the control software (2026-10-18)
     typ = 'doseResponse';
-elseif ~isempty(regexp(key, 'postrest|prp|restpotentiation', 'once'))
+elseif ~isempty(regexp(key, 'postrest|prp|restpotentiation|postpause|pausepotentiation', 'once'))   %post pause: 2026-10-20
     typ = 'PRP';
 elseif ~isempty(regexp(key, 'refractory|^rp|s1s2|^s2', 'once')) || ismember('rp', tok)
     typ = 'RP';

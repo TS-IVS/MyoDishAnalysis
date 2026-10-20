@@ -299,6 +299,24 @@ def test_dose_response_names(tmp_path):
         ["doseResponse", "doseResponse", "doseResponse", "doseResponse", "FFR", "other"]
 
 
+def test_post_pause_keywords(tmp_path):
+    """'post pause' and 'pause potentiation' are PRP keywords (2026-10-20); comments of an older standard schedule
+    without end comments: each protocol ends at the start of the next one"""
+    from myodish_analysis.protocols import protocol_type
+    assert [protocol_type(x) for x in ("post-pause-potentiation", "Post pause potentiation", "PostPause_3-120s",
+                                       "pause potentiation", "pause", "post rest")] == ["PRP"] * 4 + ["other", "PRP"]
+    f = str(tmp_path / "std_rigA_0.mdd")
+    write_recording(f, [(20, 0, "comment", "Start refractory period"), (1016, 0, "comment",
+                                                                         "Start post-pause-potentiation"),
+                        (1261, 0, "comment", "Start stimulation threshold"),
+                        (1873, 0, "comment", "Start force-frequency relation")])
+    P = mda.find_protocols(f[:-4] + "_log.log")
+    assert P["type"].tolist() == ["RP", "PRP", "ST", "FFR"]
+    assert P["groupBy"].tolist() == ["S2interval", "pauseLength", "stimCurrent", "pacingFrequency"]
+    np.testing.assert_allclose(P["from"], [20, 1016, 1261, 1873])
+    np.testing.assert_allclose(P["to"][:3], [1016, 1261, 1873])
+
+
 def _ev(name):
     return os.path.join(EV_LOGS, *name.split("/"))
 

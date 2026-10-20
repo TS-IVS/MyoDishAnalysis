@@ -46,6 +46,9 @@ MATLAB and Python versions have the same version number and give the same result
   keeps the time of last change of the recording, shifted by the same number of days.
 
 ### Added
+- **Protocol keywords `post pause` and `pause potentiation`** (type PRP, e.g. `Start post-pause-potentiation` of an
+  older standard schedule that several labs use). Before, such a protocol was not recognized at all (no keyword).
+  None of the 16,488 recordings of 2020–2026 on the lab disk has such a comment.
 - **Structured events of the MyoDish control software** (builds from 2026-10, release 2.2): `mda_logEntries(logFile,
   'events')` (Python `log_events`) reads the log lines whose value is one JSON object (codes system, slice,
   protocolRun, scheduleRun, doc, chamber, rigor, backup): time in the file, dataLogTime as written (`t_logged`),

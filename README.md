@@ -833,7 +833,7 @@ P = mda_protocols(file)                                              % protocols
   the column `protocolNote` of `protocolResults`. Checked with 125 protocols that have an end comment (end estimated
   as if it were missing): FFR, ST, RP, PRP mostly within 10 s of the comment (the regular pacing starts a few s before
   it); PD protocols followed by another protocol within < 5 min end at that protocol. Type from keywords:
-  FFR / frequency → `FFR`, refractory / S1S2 → `RP`, threshold / stimCurrent → `ST`, post rest / PRP → `PRP`,
+  FFR / frequency → `FFR`, refractory / S1S2 → `RP`, threshold / stimCurrent → `ST`, post rest / post pause / PRP → `PRP`,
   pulse duration → `PD`, rocker speed → `rockerSpeed`, others `other` (FFR, RP, ST, PRP, PD also as words of a
   name such as `PD_Test_12Steps`). Schedule files loaded by a schedule (log events `Loaded schedule file …` /
   `Jumped back from loaded schedule file …`) are protocols, too, if their file name contains such a keyword

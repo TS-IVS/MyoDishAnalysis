@@ -22,8 +22,8 @@ P: DataFrame, one row per protocol: type, name, number (k-th protocol of this ty
 quantity), startComment, endComment, note.
 Types (keywords in the name) and default grouping: FFR (FFR, force-frequency, frequency): pacingFrequency;
 RP (refractory, RP, S1S2, S2): S2interval; ST (threshold, thresh, stimCurrent, ST): stimCurrent; PRP (post rest, PRP,
-rest potentiation): pauseLength; PD (pulse duration, PD): pulseDuration; rockerSpeed (rocker speed): rockerSpeed;
-unknown: none. FFR, RP, ST, PRP, PD also as separate words or parts of a CamelCase / underscore name ('PD_Test').
+rest potentiation, post pause, pause potentiation; 2026-10-20): pauseLength; PD (pulse duration, PD): pulseDuration;
+rockerSpeed (rocker speed): rockerSpeed; unknown: none. FFR, RP, ST, PRP, PD also as separate words or parts of a CamelCase / underscore name ('PD_Test').
 A comment without a type keyword is a protocol of type 'unknown' only if it contains a general protocol keyword
 (protocol, Protokoll, programme, program, Test); otherwise it is no protocol ('Software new started', 'start Iso
 Wash In'). A protocol of type 'unknown' without end comment needs regular pacing within UNKNOWN_MAX_S (2 h) after its
@@ -119,7 +119,7 @@ def protocol_type(name):
     tok = [w.lower() for w in _WORDS.findall(str(name))]
     if "doseresponse" in key or "drc" in tok:
         return "doseResponse"
-    if re.search(r"postrest|prp|restpotentiation", key):
+    if re.search(r"postrest|prp|restpotentiation|postpause|pausepotentiation", key):  # post pause: 2026-10-20
         return "PRP"
     if re.search(r"refractory|^rp|s1s2|^s2", key) or "rp" in tok:
         return "RP"
