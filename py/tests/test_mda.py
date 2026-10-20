@@ -979,7 +979,8 @@ def test_gui_several_ranges_rocker_stops(tmp_path):
 # ------------------------------------------------------------------------------------------------ status bit 9
 def test_current_reached_previous_pulse(tmp_path):
     """bit 9 of the status channel = result of the previous base pulse of the channel (2026-10-20; pendant of
-    bit9Checks in mda_testExtraPulses.m): synthetic file, 720 s, 400 Hz"""
+    bit9Checks in mda_testExtraPulses.m): synthetic file, 720 s, 400 Hz; an extra pulse between two base pulses makes a
+    bit 9 of the next base pulse ambiguous (NaN)"""
     fs, T = 400, 720
     n = T * fs
     code = np.zeros(n, np.uint16)
@@ -988,7 +989,7 @@ def test_current_reached_previous_pulse(tmp_path):
     t6 = np.r_[np.arange(0, 11.0), 700.0]; b6 = t6 == 700
     for t, b, c, cur, off in ((t3, b3, 3, 40, 0), (t5, b5, 5, 50, 1), (t6, b6, 6, 30, 2)):
         code[np.round(t * fs).astype(int) + off] = c * 512 + cur + 256 * b
-    code[round(51.01 * fs)] = 32768 + 3 * 512 + 20  # extra pulse of channel 3
+    code[np.round(np.r_[51.01, 56.01] * fs).astype(int)] = 32768 + 3 * 512 + 20  # extra pulses of channel 3
     X = np.full((9, n), -383, "<i2")
     X[8] = code.view("<i2")
     f = str(tmp_path / "bit9_rigA_0.mdd")
@@ -999,15 +1000,20 @@ def test_current_reached_previous_pulse(tmp_path):
     with open(f[:-4] + "_log.log", "w") as fh:
         fh.write("\n".join(lines) + "\n")
     S, S1, S2 = mda.read_mdd(f, 0, T), mda.read_mdd(f, 0, 50), mda.read_mdd(f, 50, T)
+    S3, S4 = mda.read_mdd(f, 0, 57), mda.read_mdd(f, 0, 56.005)  # extra pulse at 56.01 s in the window / after it
 
     def cr(S, c, x):
         k = (np.asarray(S.stim.channel) == c) & (np.asarray(S.stim.isExtraPulse, bool) == x)
         return np.asarray(S.stim.currentReached, float)[k]
 
     e3 = np.r_[(~b3[1:]).astype(float), np.nan]
+    e3[t3 == 56] = np.nan  # extra pulse at 56.01 s, next base pulse (58 s) with bit 9: ambiguous
     e5 = np.r_[(~b5[1:]).astype(float), np.nan]
     np.testing.assert_array_equal(cr(S, 3, False), e3)
-    assert np.isnan(cr(S, 3, True)).all() and cr(S, 3, True).size == 1
+    assert np.isnan(cr(S, 3, True)).all() and cr(S, 3, True).size == 2
+    assert e3[t3 == 50][0] == 1  # extra pulse at 51.01 s, next base pulse without bit 9: reached
+    np.testing.assert_array_equal(cr(S3, 3, False), e3[:29])
+    np.testing.assert_array_equal(cr(S4, 3, False), e3[:29])
     np.testing.assert_array_equal(cr(S, 5, False), e5)
     np.testing.assert_array_equal(np.r_[cr(S1, 3, False), cr(S2, 3, False)], e3)
     np.testing.assert_array_equal(np.r_[cr(S1, 5, False), cr(S2, 5, False)], e5)

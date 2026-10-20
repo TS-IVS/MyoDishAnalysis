@@ -135,8 +135,10 @@ end
 function chk = bit9Checks()
 % bit 9 of the status channel (2026-10-20): the result of a base pulse is bit 9 of the next base pulse of its channel.
 % Synthetic file, 720 s, 400 Hz. Channel 3: pulses every 2 s from 0 to 118 s, bit 9 on pulses 1 (before the file), 4,
-% 11, 30, one extra pulse at 51.01 s. Channel 5: 1 Hz from 0 to 39 s, pause, 100 to 110 s, bit 9 at 100 s (= result of
-% the pulse at 39 s). Channel 6: 1 Hz from 0 to 10 s and one pulse at 700 s with bit 9 (result of the pulse at 10 s).
+% 11, 30, extra pulses at 51.01 s (next base pulse without bit 9: the pulse at 50 s reached) and 56.01 s (next base
+% pulse at 58 s with bit 9: the failure may be the extra pulse's, the pulse at 56 s unknown). Channel 5: 1 Hz from 0 to
+% 39 s, pause, 100 to 110 s, bit 9 at 100 s (= result of the pulse at 39 s). Channel 6: 1 Hz from 0 to 10 s and one
+% pulse at 700 s with bit 9 (result of the pulse at 10 s).
 fs = 400; T = 720; n = T * fs;
 code = zeros(1, n, 'uint16');
 t3 = 0:2:118; b3 = false(size(t3)); b3([1 4 11 30]) = true;
@@ -145,7 +147,7 @@ t6 = [0:10, 700]; b6 = t6 == 700;
 for k = 1:numel(t3), code(round(t3(k) * fs) + 1) = uint16(3 * 512 + 40 + 256 * b3(k)); end
 for k = 1:numel(t5), code(round(t5(k) * fs) + 2) = uint16(5 * 512 + 50 + 256 * b5(k)); end
 for k = 1:numel(t6), code(round(t6(k) * fs) + 3) = uint16(6 * 512 + 30 + 256 * b6(k)); end
-code(round(51.01 * fs) + 1) = uint16(32768 + 3 * 512 + 20);           %extra pulse of channel 3
+code(round([51.01 56.01] * fs) + 1) = uint16(32768 + 3 * 512 + 20);   %extra pulses of channel 3
 X = -383 * ones(9, n, 'int16');
 X(9, :) = typecast(code, 'int16');
 base = [tempname '_bit9'];
@@ -159,11 +161,15 @@ fclose(fid);
 S = mda_readMdd(mdd, 0, T);
 S1 = mda_readMdd(mdd, 0, 50);
 S2 = mda_readMdd(mdd, 50, T);
+S3 = mda_readMdd(mdd, 0, 57);                       %extra pulse at 56.01 s after the last base pulse, in the window
+S4 = mda_readMdd(mdd, 0, 56.005);                   %extra pulse at 56.01 s after the window (look-ahead)
 delete(mdd); delete(lg);
 cr = @(S, c, x) reshape(S.stim.currentReached(S.stim.channel == c & S.stim.isExtraPulse == x), 1, []);
-e3 = [double(~b3(2:end)) nan]; e5 = [double(~b5(2:end)) nan];
+e3 = [double(~b3(2:end)) nan]; e3(t3 == 56) = nan; e5 = [double(~b5(2:end)) nan];
 chk = {'bit 9: result of the previous base pulse of the channel (channel 3), last pulse unknown', isequaln(cr(S, 3, false), e3); ...
-    'bit 9: extra pulse without result of its own (NaN)', isequaln(cr(S, 3, true), nan); ...
+    'bit 9: extra pulses without result of their own (NaN)', isequaln(cr(S, 3, true), [nan nan]); ...
+    'bit 9: extra pulse before the next base pulse: bit 9 = 0 -> reached (50 s), bit 9 = 1 -> unknown (56 s)', ...
+    e3(t3 == 50) == 1 && isequaln(cr(S3, 3, false), e3(1:29)) && isequaln(cr(S4, 3, false), e3(1:29)); ...
     'bit 9: across a pause of 60 s (channel 5: the pulse at 39 s not reached)', isequaln(cr(S, 5, false), e5); ...
     'bit 9: windows 0-50 / 50-720 s give the same results (look-ahead into the file)', ...
     isequaln([cr(S1, 3, false) cr(S2, 3, false)], e3) && isequaln([cr(S1, 5, false) cr(S2, 5, false)], e5); ...

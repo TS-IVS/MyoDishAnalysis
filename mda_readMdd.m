@@ -66,9 +66,11 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               result exists only at its end; a failure of an extra pulse of that channel in between is OR-ed in).
 %               So the result of a base pulse is bit 9 of the next base pulse of its channel, searched up to 600 s
 %               beyond the window; the bit 9 of the first pulse of a file belongs to the time before the file. NaN:
-%               the last base pulse of a channel (no later pulse within 600 s or the end of the file), extra pulses
-%               and external trigger pulses (no result of their own). In single channel mode the firmware reports
-%               failures of channel 1 only in some configurations, so a 1 is not certain there.
+%               the last base pulse of a channel (no later pulse within 600 s or the end of the file), a base pulse
+%               followed by an extra pulse of its channel when the next base pulse has bit 9 (the failure may be the
+%               extra pulse's), extra pulses and external trigger pulses (no result of their own). In single channel
+%               mode the firmware reports failures of channel 1 only in some configurations, so a 1 is not certain
+%               there.
 %   Single channel files: force has one row = channel 1, stim.channel keeps the physical channel number.
 %
 % TS 2026-10-05 (condensed from importMyoDishData, readRecordingInfoFromMyoDishLogFile,
@@ -374,24 +376,34 @@ end
 function r = shiftedReached(S, fid, iNext, ch, bit9, isExtra)
 % current reached of every pulse (1 / 0 / NaN, see the help): result of a base pulse = bit 9 of the next base pulse of
 % the same channel; for the last base pulse of a channel in the window the next one is searched in the file from raw
-% sample iNext (0-based) on, up to 600 s
+% sample iNext (0-based) on, up to 600 s. Extra pulses of the channel between the two base pulses are OR-ed into that
+% bit 9 (firmware), so a 1 there is ambiguous: NaN (2026-10-20)
 r = nan(numel(ch), 1);
 base = ~isExtra & ch >= 1 & ch <= 8;
 chans = unique(ch(base));
 if isempty(chans), return; end
-lastBit = nextBit9(S, fid, iNext, chans);
+[lastBit, lastExtra] = nextBit9(S, fid, iNext, chans);
 for q = 1:numel(chans)
     k = find(base & ch == chans(q));
-    r(k(1:end-1)) = double(~bit9(k(2:end)));
-    r(k(end)) = 1 - lastBit(q);                                   %NaN: not found
+    nb = [double(bit9(k(2:end))); lastBit(q)];                    %bit 9 of the next base pulse (NaN: none found)
+    amb = false(numel(k), 1);                                     %extra pulse of the channel before the next base pulse
+    e = find(isExtra & ch == chans(q));
+    if ~isempty(e)
+        bin = discretize(e, [k; Inf]);                            %base pulse before each extra pulse
+        amb(bin(~isnan(bin))) = true;
+    end
+    amb(end) = amb(end) || lastExtra(q);
+    r(k) = 1 - nb;
+    r(k(amb & nb == 1)) = NaN;
 end
 end
 
 
-function b = nextBit9(S, fid, s, chans)
-% bit 9 (1 / 0) of the first base pulse of each channel in chans at or after raw sample s (0-based), searched up to
-% 600 s; NaN if there is none
+function [b, x] = nextBit9(S, fid, s, chans)
+% b: bit 9 (1 / 0) of the first base pulse of each channel in chans at or after raw sample s (0-based), searched up to
+% 600 s; NaN if there is none. x: an extra pulse of the channel lies between s and that base pulse
 b = nan(numel(chans), 1);
+x = false(numel(chans), 1);
 nCh = S.nChannelsInFile;
 fs = S.samplingRate;
 sEnd = min(S.totalSamples, s + round(600 * fs));
@@ -402,14 +414,21 @@ while s < sEnd && any(todo)
     raw = fread(fid, [nCh m], 'int16=>int16');
     if isempty(raw), break; end
     code = typecast(raw(S.stimRow, :), 'uint16');
-    pc = code(bitand(code, uint16(49151)) ~= 0 & bitand(code, uint16(32768)) == 0);   %pulses, no extra pulses
+    pc = code(bitand(code, uint16(49151)) ~= 0);                  %pulses
+    ex = bitand(pc, uint16(32768)) ~= 0;                          %extra pulses
     c = double(bitand(bitshift(pc, -9), uint16(15)));
     c(c > 8) = c(c > 8) - 8;
     c(c == 0) = 8;
     c(bitand(pc, uint16(16383)) == uint16(8192)) = 0;             %external trigger pulses
     for q = find(todo)'
-        f = find(c == chans(q), 1);
-        if ~isempty(f), b(q) = double(bitand(pc(f), uint16(256)) ~= 0); todo(q) = false; end
+        f = find(c == chans(q) & ~ex, 1);
+        if isempty(f)
+            x(q) = x(q) || any(c == chans(q) & ex);
+        else
+            b(q) = double(bitand(pc(f), uint16(256)) ~= 0);
+            x(q) = x(q) || any(c(1:f-1) == chans(q) & ex(1:f-1));
+            todo(q) = false;
+        end
     end
     s = s + size(raw, 2);
 end

@@ -10,8 +10,9 @@ MATLAB and Python versions have the same version number and give the same result
   the result of the previous base pulse of the same channel (firmware V18G–V19C, confirmed by the firmware source and
   3,285 of 3,285 pulse pairs). `mda_readMdd` / `read_mdd` now give each base pulse the bit 9 of the next base pulse of
   its channel (searched up to 600 s beyond the window read); `stim.currentReached` and the column `currentReached`
-  of the pulse table are 1 / 0 / NaN (unknown: the last pulse of a channel in the file, extra pulses, external
-  trigger pulses) instead of true / false, and `currentReached_percent` leaves the unknown pulses out. This changes
+  of the pulse table are 1 / 0 / NaN (unknown: the last pulse of a channel in the file; a base pulse followed by an
+  extra pulse of its channel when the next base pulse has bit 9, since the firmware ORs the failure of an extra pulse
+  into that bit; extra pulses, external trigger pulses) instead of true / false, and `currentReached_percent` leaves the unknown pulses out. This changes
   `currentReached_percent` of threshold protocols (before: the first pulse of every current step carried the result
   of the last pulse of the step before) and `currentReached` in all pulse tables; recordings analysed before need to
   be analysed again for these columns.

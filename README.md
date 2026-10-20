@@ -1080,8 +1080,9 @@ channel 10k + c = extra pulse #k of channel c).
   from the firmware source and 3,285 of 3,285 pulse pairs in recordings of test controllers; a failure of an extra
   pulse of that channel in between counts as well). `mda_readMdd` / `read_mdd` assign it accordingly:
   `stim.currentReached` = 1 (reached), 0 (not reached) or NaN (unknown: the last base pulse of a channel when no
-  later pulse of that channel follows within 600 s or the file ends; extra pulses and external trigger pulses, which
-  have no result of their own). The bit 9 of the first pulse of a file belongs to the time before the file and is not
+  later pulse of that channel follows within 600 s or the file ends; a base pulse followed by an extra pulse of its
+  channel when the next base pulse has bit 9, because the failure may be the extra pulse's; extra pulses and external
+  trigger pulses, which have no result of their own). The bit 9 of the first pulse of a file belongs to the time before the file and is not
   used. Before 2026-10-20 every pulse got its own bit 9, i.e. the result of the pulse before it. In single channel
   mode the firmware reports failures of channel 1 only in some configurations, so `currentReached` = 1 is not
   certain there.
