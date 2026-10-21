@@ -71,6 +71,11 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
+- **MATLAB GUI: guarded callbacks and an error log.** Every callback (buttons, lists, mouse, keys) and the plotting
+  after the detection run guarded: an error is shown in the status line in red (`Error in …: …`) instead of only in
+  the command window, and appended with version, file, window, channel and stack to
+  `<tempdir>/MyoDishAnalysisGUI_errors.log` (an empty window after *Load* that needed a restart could not be
+  reproduced; the log tells what went wrong next time). `MDA_DEBUG` also prints the report.
 - **Channels at half the recording rate: half-rate interpolation** (option `halfRateInterpolation`, default on;
   `S.halfRateInterpolated`): where the inferred sensor rate is unambiguously samplingRate / 2 (new boards at 200 Hz in
   a 400-Hz recording, see "Sensor rate" below), the repeated raw values are replaced by a linear interpolation between

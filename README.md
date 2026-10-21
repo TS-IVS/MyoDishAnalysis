@@ -253,6 +253,14 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    choose the contractions (rocker at rest / all / rocker moving) and press **Analyse**: summary per group (table) and
    a parameter against the quantity (mean ± SD / SEM; S1 / steady state as dashed line, post-S2 dotted). Threshold,
    filters, zero force, rocker filter and labels are taken from the main window. **Save figure** / **Export**.
+9. **If the window stays empty or a button does nothing** (MATLAB GUI, 2026-10-21): every callback and the plotting
+   run guarded. An error is shown in the status line in red (`Error in …: …`) and appended with the version, file,
+   window, channel and stack to the error log `MyoDishAnalysisGUI_errors.log` in the temporary folder (`tempdir`
+   in MATLAB: on Windows `%TEMP%`, on macOS `/var/folders/…/T/`); send that file with a bug report. With the
+   environment variable `MDA_DEBUG` set (`setenv('MDA_DEBUG', '1')`) the report is also printed in the command
+   window. A frequent cause of errors inside MATLAB's own GUI code is a user function on the MATLAB path that
+   shadows a MATLAB function (e.g. a `split.m`, `contains.m` or `range.m` in a toolbox folder added with
+   `addpath(genpath(...))`): `which split -all` lists all of them; remove that folder from the path.
 
 ## EP recordings (`mda_readEPRecording`)
 `EP = mda_readEPRecording(matFile, mda_readMdd(mddFile))` places a LabChart recording on the time axis of the

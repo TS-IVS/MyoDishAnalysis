@@ -219,36 +219,36 @@ mainBtn = {'BackgroundColor', uiBlue, 'ForegroundColor', 'w', 'FontWeight', 'bol
 
 % ------------------------------------------------------------------ figure and controls
 fig = figure('Name', 'MyoDishAnalysis', 'NumberTitle', 'off', 'Color', 'w', 'Units', 'pixels', ...
-    'Position', [40 40 1450 880], 'MenuBar', 'none', 'ToolBar', 'figure', 'WindowButtonDownFcn', @onMouseDown, ...
-    'WindowButtonMotionFcn', @onMouseMove, 'WindowScrollWheelFcn', @onScroll, 'WindowKeyPressFcn', @onKey, 'WindowKeyReleaseFcn', @onKeyRelease, ...
+    'Position', [40 40 1450 880], 'MenuBar', 'none', 'ToolBar', 'figure', 'WindowButtonDownFcn', guard(@onMouseDown), ...
+    'WindowButtonMotionFcn', guard(@onMouseMove), 'WindowScrollWheelFcn', guard(@onScroll), 'WindowKeyPressFcn', guard(@onKey), 'WindowKeyReleaseFcn', guard(@onKeyRelease), ...
     'DeleteFcn', @onClose);
 lightTheme(fig);
 movegui(fig, 'onscreen');
 dflt = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
 
-uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Open ...', 'Position', [0.005 0.955 0.065 0.035], 'Callback', @onOpen, ...
+uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Open ...', 'Position', [0.005 0.955 0.065 0.035], 'Callback', guard(@onOpen), ...
     'TooltipString', ['a recording (.mdd) or results of an analysis (.xlsx, _info.csv, ...: recording, settings and ' ...
     'analysis window are restored, the contractions detected again and compared with the file); the folder is remembered']);
-uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Results ...', 'Position', [0.156 0.955 0.07 0.035], 'Callback', @(~,~) onBrowse(), ...
+uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Results ...', 'Position', [0.156 0.955 0.07 0.035], 'Callback', guard(@(~,~) onBrowse()), ...
     'TooltipString', ['results browser: the recordings and channels of a results folder of the watcher with the flags of ' ...
     'the analysis report; double-click opens them']);
-uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', '+ EP recording ...', 'Position', [0.072 0.955 0.08 0.035], 'Callback', @onOpenEP, ...
+uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', '+ EP recording ...', 'Position', [0.072 0.955 0.08 0.035], 'Callback', guard(@onOpenEP), ...
     'TooltipString', 'add an electrophysiological recording (LabChart .mat export, e.g. sharp electrode: voltage + stimulation) aligned to the stimuli of the open .mdd file');
 hFile = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'no file', 'HorizontalAlignment', 'left', 'Position', [0.229 0.952 0.131 0.03]);
 hMain = uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Main file', 'Position', [0.318 0.955 0.042 0.035], ...
-    'Visible', 'off', 'Callback', @(~,~) onMainFile());   %parallel recording: opens the main file at this window
+    'Visible', 'off', 'Callback', guard(@(~,~) onMainFile()));   %parallel recording: opens the main file at this window
 uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'Channel', 'HorizontalAlignment', 'right', 'Position', [0.36 0.952 0.04 0.03]);
-hCh = uicontrol(fig, dflt{:}, 'Style', 'popupmenu', 'String', {'-'}, 'Position', [0.405 0.957 0.1 0.033], 'Callback', @onChannel);
+hCh = uicontrol(fig, dflt{:}, 'Style', 'popupmenu', 'String', {'-'}, 'Position', [0.405 0.957 0.1 0.033], 'Callback', guard(@onChannel));
 uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'From (s)', 'HorizontalAlignment', 'right', 'Position', [0.505 0.952 0.04 0.03]);
 hFrom = uicontrol(fig, dflt{:}, 'Style', 'edit', 'String', '0', 'Position', [0.548 0.957 0.055 0.033]);
 uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'To (s)', 'HorizontalAlignment', 'right', 'Position', [0.603 0.952 0.03 0.03]);
 hTo = uicontrol(fig, dflt{:}, 'Style', 'edit', 'String', '60', 'Position', [0.636 0.957 0.055 0.033]);
-uicontrol(fig, dflt{:}, mainBtn{:}, 'Style', 'pushbutton', 'String', 'Load', 'Position', [0.695 0.955 0.045 0.035], 'Callback', @onLoad);
-uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Overview', 'Position', [0.744 0.955 0.05 0.035], 'Callback', @onOverview, ...
+uicontrol(fig, dflt{:}, mainBtn{:}, 'Style', 'pushbutton', 'String', 'Load', 'Position', [0.695 0.955 0.045 0.035], 'Callback', guard(@onLoad));
+uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Overview', 'Position', [0.744 0.955 0.05 0.035], 'Callback', guard(@onOverview), ...
     'TooltipString', 'overview of the whole file (min/max envelope)');
-uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Comments ...', 'Position', [0.797 0.955 0.05 0.035], 'Callback', @onComments, ...
+uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Comments ...', 'Position', [0.797 0.955 0.05 0.035], 'Callback', guard(@onComments), ...
     'TooltipString', 'searchable list of the comments in the log file; double-click = go to');
-uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Protocols ...', 'Position', [0.85 0.955 0.05 0.035], 'Callback', @onProtocols, ...
+uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Protocols ...', 'Position', [0.85 0.955 0.05 0.035], 'Callback', guard(@onProtocols), ...
     'TooltipString', ['stimulation protocols of the log file (FFR, refractory period, threshold, post-rest potentiation ...): ' ...
     'contractions grouped by pacing frequency, S2 interval, current, rest interval ...']);
 hInfo = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.903 0.942 0.096 0.05], ...
@@ -260,22 +260,22 @@ axStim = axes(fig, 'Position', [0.05 0.315 0.70 0.105], 'FontSize', 9, 'XTickLab
 axPar = axes(fig, 'Position', [0.05 0.07 0.70 0.2], 'FontSize', 10);
 % buttons under the force plot (as the arrow keys): loaded window (selection) left / right (shift + click: extend), zoom in / out
 nb = {'Style', 'pushbutton', 'Units', 'normalized', 'FontSize', 9, 'BackgroundColor', 'w'};
-hNavL = uicontrol(fig, nb{:}, 'String', char(9664), 'Position', [0.05 0.4485 0.022 0.026], 'Callback', @(~,~) onNavButton('leftarrow'), ...
+hNavL = uicontrol(fig, nb{:}, 'String', char(9664), 'Position', [0.05 0.4485 0.022 0.026], 'Callback', guard(@(~,~) onNavButton('leftarrow')), ...
     'TooltipString', 'loaded window (selection): move it to the left by half its length (shift + click: extend it to the left; key: left arrow)');
-uicontrol(fig, nb{:}, 'String', char([8594 8592]), 'Position', [0.373 0.4485 0.026 0.026], 'Callback', @(~,~) onNavButton('uparrow'), ...
+uicontrol(fig, nb{:}, 'String', char([8594 8592]), 'Position', [0.373 0.4485 0.026 0.026], 'Callback', guard(@(~,~) onNavButton('uparrow')), ...
     'TooltipString', 'loaded window (selection): zoom in to half its length around the centre (key: up arrow)');
-uicontrol(fig, nb{:}, 'String', char([8592 8594]), 'Position', [0.401 0.4485 0.026 0.026], 'Callback', @(~,~) onNavButton('downarrow'), ...
+uicontrol(fig, nb{:}, 'String', char([8592 8594]), 'Position', [0.401 0.4485 0.026 0.026], 'Callback', guard(@(~,~) onNavButton('downarrow')), ...
     'TooltipString', 'loaded window (selection): zoom out to twice its length (key: down arrow)');
-uicontrol(fig, nb{:}, 'String', char(9654), 'Position', [0.728 0.4485 0.022 0.026], 'Callback', @(~,~) onNavButton('rightarrow'), ...
+uicontrol(fig, nb{:}, 'String', char(9654), 'Position', [0.728 0.4485 0.022 0.026], 'Callback', guard(@(~,~) onNavButton('rightarrow')), ...
     'TooltipString', 'loaded window (selection): move it to the right by half its length (shift + click: extend it to the right; key: right arrow)');
 uicontrol(fig, 'Style', 'text', 'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w', 'String', 'Lower plot:', ...
     'HorizontalAlignment', 'right', 'Position', [0.05 0.272 0.05 0.025]);
 hPar = uicontrol(fig, 'Style', 'popupmenu', 'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w', ...
     'String', cellfun(@(n, u) sprintf('%s (%s)', n, strrep(u, 'u', char(181))), plotList(:,1), plotList(:,2), 'UniformOutput', false), ...
-    'Position', [0.103 0.274 0.17 0.027], 'Callback', @(~,~) plotParam(), ...
+    'Position', [0.103 0.274 0.17 0.027], 'Callback', guard(@(~,~) plotParam()), ...
     'TooltipString', 'parameter of every contraction shown in the lower plot (red = selected contractions)');
 uicontrol(fig, 'Style', 'pushbutton', 'Units', 'normalized', 'FontSize', 10, 'String', 'Trend ...', ...
-    'Position', [0.278 0.273 0.05 0.029], 'Callback', @onTrend, 'TooltipString', ...
+    'Position', [0.278 0.273 0.05 0.029], 'Callback', guard(@onTrend), 'TooltipString', ...
     'rolling average of a parameter over long periods, also over several .mdd files (e.g. _0, _1, _2 ...) in a row');
 hStimTxt = gobjects(0);
 for ax = [axOv axMain axStim axPar]
@@ -332,53 +332,53 @@ pnl = uipanel(fig, 'Position', [0.765 0.01 0.232 0.925], 'Title', 'Analysis', 'B
 bg = uibuttongroup(pnl, 'Position', [0.03 0.885 0.94 0.105], 'Title', 'Cursor in the force plot', 'BackgroundColor', 'w', 'FontSize', 9, pnlStyle{:});
 rbRange = uicontrol(bg, dflt{:}, 'Style', 'radiobutton', 'String', 'drag = select time range', 'Position', [0.03 0.52 0.94 0.42]);
 uicontrol(bg, dflt{:}, 'Style', 'radiobutton', 'String', 'click = exclude / include contraction', 'Position', [0.03 0.06 0.94 0.42]);
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Labels ...', 'Position', [0.03 0.835 0.46 0.04], 'Callback', @onLabels, ...
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Labels ...', 'Position', [0.03 0.835 0.46 0.04], 'Callback', guard(@onLabels), ...
     'TooltipString', 'labels per channel: setupID, sliceID, species, sampleID, groups, treatment, days in culture, analyst ...');
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Range = loaded window', 'Position', [0.51 0.835 0.46 0.04], 'Callback', @onWholeWindow);
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Range = loaded window', 'Position', [0.51 0.835 0.46 0.04], 'Callback', guard(@onWholeWindow));
 thrTip = ['minimum prominence of a contraction peak, per channel: auto or a manual value for the selected channel ' ...
     '(kept when you switch channels; also used for All channels, Protocols and Trend)'];
 uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', ['Threshold, this ch. (' mu 'N)'], 'HorizontalAlignment', 'left', 'Position', [0.03 0.79 0.5 0.03], ...
     'TooltipString', thrTip);
-hThrMode = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'auto','manual'}, 'Position', [0.52 0.795 0.22 0.035], 'Callback', @onThreshold, ...
+hThrMode = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'auto','manual'}, 'Position', [0.52 0.795 0.22 0.035], 'Callback', guard(@onThreshold), ...
     'TooltipString', thrTip);
-hThr = uicontrol(pnl, dflt{:}, 'Style', 'edit', 'String', '', 'Position', [0.76 0.795 0.21 0.035], 'Callback', @onThresholdValue, ...
+hThr = uicontrol(pnl, dflt{:}, 'Style', 'edit', 'String', '', 'Position', [0.76 0.795 0.21 0.035], 'Callback', guard(@onThresholdValue), ...
     'TooltipString', thrTip);
 uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', ['Zero force (' mu 'N)'], 'HorizontalAlignment', 'left', 'Position', [0.03 0.75 0.5 0.03], ...
     'TooltipString', 'sensor signal without load; diastolic force = diastolic signal - zero force. Empty = Offset entry of the log file');
-hZero = uicontrol(pnl, dflt{:}, 'Style', 'edit', 'String', '', 'Position', [0.52 0.755 0.22 0.035], 'Callback', @onZero, ...
+hZero = uicontrol(pnl, dflt{:}, 'Style', 'edit', 'String', '', 'Position', [0.52 0.755 0.22 0.035], 'Callback', guard(@onZero), ...
     'TooltipString', 'empty = Offset entry of the log file');
 hZeroSrc = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.76 0.75 0.23 0.03], 'FontSize', 8);
-hRocker = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'only contractions with rocker at rest', 'Position', [0.03 0.715 0.94 0.035], 'Callback', @onFilter);
-hStim = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'only stimulated contractions', 'Position', [0.03 0.68 0.585 0.035], 'Callback', @onFilter);
+hRocker = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'only contractions with rocker at rest', 'Position', [0.03 0.715 0.94 0.035], 'Callback', guard(@onFilter));
+hStim = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'only stimulated contractions', 'Position', [0.03 0.68 0.585 0.035], 'Callback', guard(@onFilter));
 advTip0 = ['advanced settings: stimulus assignment (onset gate), stimulus source (MyoDish / external trigger), ' ...
     'detection and filter parameters, pulse table (for users who know the method; see mda_options)'];
 hAdvBtn = uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Advanced ...', 'Position', [0.615 0.68 0.355 0.037], ...
-    'Callback', @onAdvanced, 'TooltipString', advTip0);   %number of changed settings in red (advIndicator, 2026-10-14)
+    'Callback', guard(@onAdvanced), 'TooltipString', advTip0);   %number of changed settings in red (advIndicator, 2026-10-14)
 hRF = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'remove rocker artifact', 'Position', [0.03 0.645 0.585 0.033], ...
-    'Callback', @onRockerFilter, 'TooltipString', ['subtracts the periodic signal of the rocker movement (estimated per channel ' ...
+    'Callback', guard(@onRockerFilter), 'TooltipString', ['subtracts the periodic signal of the rocker movement (estimated per channel ' ...
     'between the contractions, +-60 s around the window); light grey in the force plot = signal before. See mda_rockerFilter']);
 hDet = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'high sensitivity', 'high specificity'}, ...
-    'Position', [0.615 0.647 0.355 0.035], 'Callback', @onDetection, 'TooltipString', ['auto threshold: high sensitivity counts ' ...
+    'Position', [0.615 0.647 0.355 0.035], 'Callback', guard(@onDetection), 'TooltipString', ['auto threshold: high sensitivity counts ' ...
     'all contractions and marks the uncertain ones (orange: neither locked to the stimuli nor large compared with the ' ...
     'typical contraction and the noise before the stimuli); high specificity does not count them (option detection)']);
 hRel = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'time 0 = window start', 'Position', [0.03 0.61 0.585 0.033], ...
-    'Callback', @onRelTime, 'TooltipString', 'time axis: 0 = start of the loaded window (display only; From/To, tables and exports keep the time in the file, s)');
+    'Callback', guard(@onRelTime), 'TooltipString', 'time axis: 0 = start of the loaded window (display only; From/To, tables and exports keep the time in the file, s)');
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Rocker artifact ...', 'Position', [0.615 0.609 0.355 0.035], ...
-    'Callback', @(~,~) onRockerWindow(), 'TooltipString', ['periodic signal of the rocker movement that the rocker filter ' ...
+    'Callback', guard(@(~,~) onRockerWindow()), 'TooltipString', ['periodic signal of the rocker movement that the rocker filter ' ...
     'removes (estimated for this channel and window, also if the filter is off): extra window, save as figure, export data']);
 hCounts = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.03 0.49 0.94 0.118], 'FontSize', 9);
 hFlags = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.03 0.462 0.94 0.026], ...
     'FontSize', 9, 'ForegroundColor', [0.45 0.45 0.45]);   %flags of the analysis report for this range (2026-10-14)
 hTable = uitable(pnl, 'Units', 'normalized', 'Position', [0.03 0.215 0.94 0.245], 'RowName', [], ...
     'ColumnName', {'parameter','mean','median','SD','n','unit'}, 'ColumnWidth', {96, 58, 58, 52, 32, 40}, 'FontSize', 9);
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Overlay contractions', 'Position', [0.03 0.165 0.46 0.04], 'Callback', @onOverlay, ...
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Overlay contractions', 'Position', [0.03 0.165 0.46 0.04], 'Callback', guard(@onOverlay), ...
     'TooltipString', ['overlay of the selected contractions (mean beat or time course); press again (or Add in the overlay window) to add ' ...
     'another selection as a new group; other channels of the same range: Channels ... in the overlay window']);
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Show table', 'Position', [0.51 0.165 0.46 0.04], 'Callback', @onShowTable);
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Export this channel ...', 'Position', [0.03 0.12 0.46 0.04], 'Callback', @onExport);
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'All channels -> file ...', 'Position', [0.51 0.12 0.46 0.04], 'Callback', @onAllChannels);
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Copy summary', 'Position', [0.03 0.075 0.46 0.04], 'Callback', @onCopy);
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Help', 'Position', [0.51 0.075 0.46 0.04], 'Callback', @(~,~) lightTheme(helpdlg(helpText(), 'MyoDishAnalysis')));
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Show table', 'Position', [0.51 0.165 0.46 0.04], 'Callback', guard(@onShowTable));
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Export this channel ...', 'Position', [0.03 0.12 0.46 0.04], 'Callback', guard(@onExport));
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'All channels -> file ...', 'Position', [0.51 0.12 0.46 0.04], 'Callback', guard(@onAllChannels));
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Copy summary', 'Position', [0.03 0.075 0.46 0.04], 'Callback', guard(@onCopy));
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Help', 'Position', [0.51 0.075 0.46 0.04], 'Callback', guard(@(~,~) lightTheme(helpdlg(helpText(), 'MyoDishAnalysis'))));
 hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.', 'HorizontalAlignment', 'left', 'Position', [0.03 0.003 0.94 0.068], 'FontSize', 9, 'ForegroundColor', uiBlueDark);
 
 % functions for scripts / tests: api = fig.UserData; api.setRange([t1 t2]); api.toggleAt(t);
@@ -759,10 +759,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         b = uibutton(g, 'Text', 'Reload', 'ButtonPushedFcn', @(~,~) browserLoad());
         setTip(b, 'read the index and the flags again (e.g. after a pass of the watcher)');
         uilabel(g, 'Text', 'Search:');
-        ef = uieditfield(g, 'text', 'ValueChangedFcn', @(~,~) browserFilter());
+        ef = uieditfield(g, 'text', 'ValueChangedFcn', guard(@(~,~) browserFilter()));
         try ef.Placeholder = 'recording, label, status, flag text ... (several words: all must occur)'; catch, end
         dd = uidropdown(g, 'Items', {'all recordings', 'with flags', 'red flags (check the analysis)', 'not analysed'}, ...
-            'ValueChangedFcn', @(~,~) browserFilter());
+            'ValueChangedFcn', guard(@(~,~) browserFilter()));
         lc = uilabel(g, 'Text', '', 'HorizontalAlignment', 'right');
         bc = uibutton(g, 'Text', 'Compute flags', 'Enable', 'off', 'ButtonPushedFcn', @(~,~) browserCompute());
         setTip(bc, ['recordings analysed without flags (older watcher versions): flags computed from their result ' ...
@@ -771,7 +771,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'FontColor', [1 1 1], 'FontWeight', 'bold');
         ut = uitable(g, 'RowName', {}, 'ColumnName', {'recording', 'ch', 'label', 'flags', 'capture %', ...
             'contractions', 'status', 'note'}, 'ColumnWidth', {300, 32, 140, 50, 85, 100, 95, 'auto'}, ...
-            'CellSelectionCallback', @(~,evt) browserSelect(evt));
+            'CellSelectionCallback', guard(@(~,evt) browserSelect(evt)));
         ut.Layout.Row = 3; ut.Layout.Column = [1 6];
         try ut.SelectionType = 'row'; catch, end           %R2021b+
         if isprop(ut, 'DoubleClickedFcn'), ut.DoubleClickedFcn = @(~,evt) browserDouble(evt); end   %R2021a+
@@ -1122,19 +1122,19 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'again). Settings are saved with every export and can be loaded from a settings file or from results.'], ...
             'FontSize', 8, 'ForegroundColor', uiBlueDark);
         bt = {'Style', 'pushbutton', 'Units', 'pixels', 'FontSize', 9};
-        uicontrol(hAdv, bt{:}, 'Position', [12 10 80 28], 'String', 'Defaults', 'Callback', @(~,~) advShow(mda_options()), ...
+        uicontrol(hAdv, bt{:}, 'Position', [12 10 80 28], 'String', 'Defaults', 'Callback', guard(@(~,~) advShow(mda_options())), ...
             'TooltipString', 'show the default values (mda_options); Apply or OK uses them');
-        uicontrol(hAdv, bt{:}, 'Position', [98 10 120 28], 'String', 'Load settings ...', 'Callback', @(~,~) advLoad(), ...
+        uicontrol(hAdv, bt{:}, 'Position', [98 10 120 28], 'String', 'Load settings ...', 'Callback', guard(@(~,~) advLoad()), ...
             'TooltipString', ['settings file (Save settings ...) or results of an analysis (.xlsx, _info.csv): all ' ...
             'settings except the threshold and zero force of the channels; Apply or OK uses them']);
-        uicontrol(hAdv, bt{:}, 'Position', [224 10 120 28], 'String', 'Save settings ...', 'Callback', @(~,~) advSave(), ...
+        uicontrol(hAdv, bt{:}, 'Position', [224 10 120 28], 'String', 'Save settings ...', 'Callback', guard(@(~,~) advSave()), ...
             'TooltipString', ['all settings as shown (with the rocker filter, detection and filters of the main ' ...
             'window) as a settings file (.csv): mda_options(''settings'', file), MyoDishAnalysis(..., ''settings'', file)']);
-        uicontrol(hAdv, bt{:}, 'Position', [350 10 90 28], 'String', 'Guide', 'Callback', @(~,~) advGuide(), ...
+        uicontrol(hAdv, bt{:}, 'Position', [350 10 90 28], 'String', 'Guide', 'Callback', guard(@(~,~) advGuide()), ...
             'TooltipString', 'settings guide (PDF): the parameters and the markers of the force plot with figures');
-        uicontrol(hAdv, bt{:}, 'Position', [wid-298 10 90 28], 'String', 'Cancel', 'Callback', @(~,~) close(hAdv));
-        uicontrol(hAdv, bt{:}, 'Position', [wid-202 10 90 28], 'String', 'Apply', 'Callback', @(~,~) advApply(false));
-        uicontrol(hAdv, bt{:}, mainBtn{:}, 'Position', [wid-106 10 90 28], 'String', 'OK', 'Callback', @(~,~) advApply(true));
+        uicontrol(hAdv, bt{:}, 'Position', [wid-298 10 90 28], 'String', 'Cancel', 'Callback', guard(@(~,~) close(hAdv)));
+        uicontrol(hAdv, bt{:}, 'Position', [wid-202 10 90 28], 'String', 'Apply', 'Callback', guard(@(~,~) advApply(false)));
+        uicontrol(hAdv, bt{:}, mainBtn{:}, 'Position', [wid-106 10 90 28], 'String', 'OK', 'Callback', guard(@(~,~) advApply(true)));
         advShow(opts);
     end
 
@@ -1432,59 +1432,59 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Groups (one per added selection or channel):', 'HorizontalAlignment', 'left', ...
             'Position', [0.7 0.945 0.29 0.035]);
         lb = uicontrol(f2, d{:}, 'Style', 'listbox', 'String', {}, 'Position', [0.7 0.7 0.29 0.245], 'FontSize', 9, ...
-            'Callback', @(~,~) showGroupStyle());
+            'Callback', guard(@(~,~) showGroupStyle()));
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Add current selection', 'Position', [0.7 0.645 0.14 0.045], ...
-            'Callback', @(~,~) addAndDraw(), 'TooltipString', 'contractions selected in the main window (channel, range, filters, exclusions)');
+            'Callback', guard(@(~,~) addAndDraw()), 'TooltipString', 'contractions selected in the main window (channel, range, filters, exclusions)');
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Channels (same range) ...', 'Position', [0.85 0.645 0.14 0.045], ...
-            'Callback', @(~,~) chooseChannels(), 'TooltipString', ['channels for the analysed range of the main window (checkboxes): ' ...
+            'Callback', guard(@(~,~) chooseChannels()), 'TooltipString', ['channels for the analysed range of the main window (checkboxes): ' ...
             'same settings and filters, threshold and zero force of each channel; manual exclusions only in the channel of the main window']);
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Remove group', 'Position', [0.7 0.595 0.14 0.045], 'Callback', @(~,~) removeGroup());
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Clear all', 'Position', [0.85 0.595 0.14 0.045], 'Callback', @(~,~) clearGroups());
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Remove group', 'Position', [0.7 0.595 0.14 0.045], 'Callback', guard(@(~,~) removeGroup()));
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Clear all', 'Position', [0.85 0.595 0.14 0.045], 'Callback', guard(@(~,~) clearGroups()));
         al = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', {'mean beat: align at the stimulus (t = 0)', ...
             'mean beat: align at the peak (t = 0)', 'time course of the range: t = 0 at the first stimulus'}, ...
-            'Position', [0.7 0.545 0.29 0.04], 'Callback', @(~,~) drawOverlay(), 'TooltipString', ...
+            'Position', [0.7 0.545 0.29 0.04], 'Callback', guard(@(~,~) drawOverlay()), 'TooltipString', ...
             'time course: force of the whole range of each group, t = 0 at its first stimulus (the channels are not stimulated at the same time)');
         c1 = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'single contractions', 'Value', 1, 'Position', [0.7 0.505 0.29 0.035], ...
-            'Callback', @(~,~) drawOverlay());
+            'Callback', guard(@(~,~) drawOverlay()));
         c2 = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'subtract diastolic force (developed force)', 'Value', 1, ...
-            'Position', [0.7 0.47 0.29 0.035], 'Callback', @(~,~) drawOverlay());
+            'Position', [0.7 0.47 0.29 0.035], 'Callback', guard(@(~,~) drawOverlay()));
         c3 = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'normalize (amplitude = 1)', 'Value', 0, 'Position', [0.7 0.435 0.29 0.035], ...
-            'Callback', @(~,~) drawOverlay());
+            'Callback', guard(@(~,~) drawOverlay()));
         pG = uipanel(f2, 'Position', [0.7 0.215 0.29 0.21], 'Title', 'Selected group: legend, line, band', 'BackgroundColor', 'w', 'FontSize', 9, pnlStyle{:});
         uicontrol(pG, d{:}, 'Style', 'text', 'String', 'legend', 'HorizontalAlignment', 'left', 'Position', [0.03 0.72 0.18 0.17]);
         gName = uicontrol(pG, d{:}, 'Style', 'edit', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.21 0.74 0.76 0.18], ...
-            'Callback', @(s,~) setGroupStyle('name', s.String), 'TooltipString', 'legend text of the group (empty = automatic)');
-        uicontrol(pG, d{:}, 'Style', 'pushbutton', 'String', 'colour ...', 'Position', [0.03 0.51 0.26 0.18], 'Callback', @(~,~) pickGroupColor());
+            'Callback', guard(@(s,~) setGroupStyle('name', s.String)), 'TooltipString', 'legend text of the group (empty = automatic)');
+        uicontrol(pG, d{:}, 'Style', 'pushbutton', 'String', 'colour ...', 'Position', [0.03 0.51 0.26 0.18], 'Callback', guard(@(~,~) pickGroupColor()));
         uicontrol(pG, d{:}, 'Style', 'text', 'String', 'width', 'HorizontalAlignment', 'right', 'Position', [0.3 0.49 0.13 0.17]);
         gWidth = uicontrol(pG, d{:}, 'Style', 'edit', 'String', '2', 'Position', [0.44 0.51 0.13 0.18], ...
-            'Callback', @(s,~) setGroupStyle('width', str2double(s.String)), 'TooltipString', 'line width of the mean (points)');
+            'Callback', guard(@(s,~) setGroupStyle('width', str2double(s.String))), 'TooltipString', 'line width of the mean (points)');
         gLine = uicontrol(pG, d{:}, 'Style', 'popupmenu', 'String', ovLineNames, 'Position', [0.6 0.51 0.37 0.18], ...
-            'Callback', @(s,~) setGroupStyle('style', ovLineStyles{s.Value}));
+            'Callback', guard(@(s,~) setGroupStyle('style', ovLineStyles{s.Value})));
         gBand = uicontrol(pG, d{:}, 'Style', 'popupmenu', 'String', ovBandNames, 'Position', [0.03 0.28 0.94 0.18], ...
-            'Callback', @(s,~) setGroupStyle('band', ovBands{s.Value}), 'TooltipString', 'transparent band around the mean (mean beat)');
+            'Callback', guard(@(s,~) setGroupStyle('band', ovBands{s.Value})), 'TooltipString', 'transparent band around the mean (mean beat)');
         uicontrol(pG, d{:}, 'Style', 'pushbutton', 'String', 'line and band for all groups', 'Position', [0.03 0.05 0.94 0.18], ...
-            'Callback', @(~,~) styleToAll(), 'TooltipString', 'width, line style and band of the selected group for all groups (colours and legends stay)');
+            'Callback', guard(@(~,~) styleToAll()), 'TooltipString', 'width, line style and band of the selected group for all groups (colours and legends stay)');
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [0.7 0.155 0.093 0.045], ...
-            'Callback', @(~,~) saveOverlayFigure(), 'TooltipString', '.png / .jpg / .tif / .fig');
+            'Callback', guard(@(~,~) saveOverlayFigure()), 'TooltipString', '.png / .jpg / .tif / .fig');
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Export data ...', 'Position', [0.798 0.155 0.093 0.045], ...
-            'Callback', @(~,~) exportOverlay(), 'TooltipString', ...
+            'Callback', guard(@(~,~) exportOverlay()), 'TooltipString', ...
             'mean, SD, SEM, min, max, n and all single traces of every group (time course: the traces): .xlsx / .csv / .txt');
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Edit figure ...', 'Position', [0.896 0.155 0.094 0.045], ...
-            'Callback', @(~,~) editOverlayFigure(), 'TooltipString', ...
+            'Callback', guard(@(~,~) editOverlayFigure()), 'TooltipString', ...
             'copy of the plot as a normal MATLAB figure: edit everything (texts, lines, axes, legend) with the plot tools, save from its menu');
         % texts of the figure (empty = automatic)
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'title', 'HorizontalAlignment', 'right', 'Position', [0.005 0.083 0.04 0.03]);
         eT = uicontrol(f2, d{:}, 'Style', 'edit', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.05 0.085 0.4 0.038], ...
-            'Callback', @(~,~) drawOverlay(), 'TooltipString', 'title of the plot (empty = automatic)');
+            'Callback', guard(@(~,~) drawOverlay()), 'TooltipString', 'title of the plot (empty = automatic)');
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'legend', 'HorizontalAlignment', 'right', 'Position', [0.455 0.083 0.05 0.03]);
         eL = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', ovLegendNames, 'Position', [0.51 0.087 0.16 0.038], ...
-            'Callback', @(~,~) drawOverlay(), 'TooltipString', 'position of the legend');
+            'Callback', guard(@(~,~) drawOverlay()), 'TooltipString', 'position of the legend');
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'x axis', 'HorizontalAlignment', 'right', 'Position', [0.005 0.033 0.04 0.03]);
         eX = uicontrol(f2, d{:}, 'Style', 'edit', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.05 0.035 0.29 0.038], ...
-            'Callback', @(~,~) drawOverlay(), 'TooltipString', 'label of the x axis (empty = automatic)');
+            'Callback', guard(@(~,~) drawOverlay()), 'TooltipString', 'label of the x axis (empty = automatic)');
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'y axis', 'HorizontalAlignment', 'right', 'Position', [0.345 0.033 0.04 0.03]);
         eY = uicontrol(f2, d{:}, 'Style', 'edit', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.39 0.035 0.28 0.038], ...
-            'Callback', @(~,~) drawOverlay(), 'TooltipString', 'label of the y axis (empty = automatic)');
+            'Callback', guard(@(~,~) drawOverlay()), 'TooltipString', 'label of the y axis (empty = automatic)');
         mo = uimenu(f2, 'Text', 'Save / Export');
         uimenu(mo, 'Text', 'Save overlay figure (.png / .jpg / .tif / .fig) ...', 'MenuSelectedFcn', @(~,~) saveOverlayFigure());
         uimenu(mo, 'Text', 'Export overlay data (.xlsx / .csv / .txt) ...', 'MenuSelectedFcn', @(~,~) exportOverlay());
@@ -1572,8 +1572,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             cb(k) = uicontrol(dlg, 'Style', 'checkbox', 'Units', 'pixels', 'Position', [20 52 + 24 * (nC - k) 320 22], ...
                 'String', sprintf('Channel %d', chs(k)), 'Value', have(k));
         end
-        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [170 12 80 28], 'String', 'OK', 'Callback', @(s,~) closeDialog(s, true));
-        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [260 12 80 28], 'String', 'Cancel', 'Callback', @(s,~) closeDialog(s, false));
+        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [170 12 80 28], 'String', 'OK', 'Callback', guard(@(s,~) closeDialog(s, true)));
+        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [260 12 80 28], 'String', 'Cancel', 'Callback', guard(@(s,~) closeDialog(s, false)));
         uiwait(dlg);
         if ~isvalid(dlg), return; end                       %closed with the window button
         okD = isequal(dlg.UserData, true);
@@ -1961,31 +1961,31 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % comments (2026-10-13): numbered markers in a strip above the plot (independent of the y zoom) and a list
         % below it; click a marker or a line of the list (or point at a marker) to highlight the comment
         axC = axes(f2, 'Position', [0.06 0.915 0.6 0.03], 'XTick', [], 'YTick', [], 'YLim', [0 1], 'Box', 'on', ...
-            'Color', [0.97 0.96 0.99], 'XColor', [0.7 0.7 0.7], 'YColor', [0.7 0.7 0.7], 'ButtonDownFcn', @(~,~) trCommentClick());
+            'Color', [0.97 0.96 0.99], 'XColor', [0.7 0.7 0.7], 'YColor', [0.7 0.7 0.7], 'ButtonDownFcn', guard(@(~,~) trCommentClick()));
         axC.Toolbar = []; disableDefaultInteractivity(axC);
         uicontrol(f2, d{:}, 'Style', 'text', 'String', ['Comments of the log files (number = marker above the plot; ' ...
             'click a marker or a line to highlight it)'], 'HorizontalAlignment', 'left', 'Position', [0.06 0.218 0.6 0.025], 'FontSize', 8);
         lbC = uicontrol(f2, d{:}, 'Style', 'listbox', 'String', {}, 'Position', [0.06 0.015 0.6 0.2], 'FontSize', 9, ...
-            'FontName', 'FixedWidth', 'Callback', @(~,~) trCommentSelect());
+            'FontName', 'FixedWidth', 'Callback', guard(@(~,~) trCommentSelect()));
         x0 = 0.69; w = 0.3;
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Files in a row (time 0 = start of the first file; order: start time in the log):', ...
             'HorizontalAlignment', 'left', 'Position', [x0 0.92 w 0.05], 'FontSize', 9);
         lbF = uicontrol(f2, d{:}, 'Style', 'listbox', 'String', {}, 'Position', [x0 0.71 w 0.21], 'FontSize', 9);
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Add files ...', 'Position', [x0 0.655 0.085 0.045], 'Callback', @(~,~) trAddFiles());
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Add files ...', 'Position', [x0 0.655 0.085 0.045], 'Callback', guard(@(~,~) trAddFiles()));
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Add series (_0, _1, ...)', 'Position', [x0+0.09 0.655 0.135 0.045], ...
-            'Callback', @(~,~) trAddSeries(), 'TooltipString', 'all files <name>_<number>.mdd in the folder of the open file');
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Remove', 'Position', [x0+0.23 0.655 0.07 0.045], 'Callback', @(~,~) trRemove());
+            'Callback', guard(@(~,~) trAddSeries()), 'TooltipString', 'all files <name>_<number>.mdd in the folder of the open file');
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Remove', 'Position', [x0+0.23 0.655 0.07 0.045], 'Callback', guard(@(~,~) trRemove()));
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Channel', 'HorizontalAlignment', 'left', 'Position', [x0 0.6 0.07 0.035]);
         if isempty(trChans) || ~all(ismember(trChans, H.dataChannels)), trChans = ch; end
         trMulti = trMulti(ismember(trMulti, H.dataChannels));
         [itC, vC] = trChannelItems();
         pC = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', itC, 'Value', vC, 'Position', [x0+0.07 0.605 0.08 0.035], ...
-            'Callback', @(~,~) trChannel(), 'TooltipString', ['channel of the trend; ''several channels ...'' = several channels ' ...
+            'Callback', guard(@(~,~) trChannel()), 'TooltipString', ['channel of the trend; ''several channels ...'' = several channels ' ...
             'overlaid (one colour per channel)']);
         pR = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', {'whole files', 'selected range (open file only)'}, 'Position', [x0+0.16 0.605 0.14 0.035]);
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Sampling', 'HorizontalAlignment', 'left', 'Position', [x0 0.55 0.07 0.035]);
         pM = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', {'all contractions', 'short windows (W s every T min)', ...
-            'rocker stops only (log file)'}, 'Value', 2, 'Position', [x0+0.07 0.555 0.23 0.035], 'Callback', @(~,~) trSamplingControls(), ...
+            'rocker stops only (log file)'}, 'Value', 2, 'Position', [x0+0.07 0.555 0.23 0.035], 'Callback', guard(@(~,~) trSamplingControls()), ...
             'TooltipString', ['short windows: only W s every T min are read and analysed (much faster for 24-h files, the reading ' ...
             'dominates); rocker stops: only the rocker stops of the log files (contractions with the rocker at rest)']);
         tW1 = uicontrol(f2, d{:}, 'Style', 'text', 'String', 'window W (s)', 'HorizontalAlignment', 'left', 'Position', [x0 0.5 0.09 0.035]);
@@ -1997,24 +1997,24 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             '(~0.25 s per window) windows pay off from ~10 min on; in the lab network already at a few minutes']);
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Parameter', 'HorizontalAlignment', 'left', 'Position', [x0 0.45 0.07 0.035]);
         pP = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', hPar.String, 'Value', hPar.Value, 'Position', [x0+0.07 0.455 0.23 0.035], ...
-            'Callback', @(~,~) drawTrend());
+            'Callback', guard(@(~,~) drawTrend()));
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Rolling window (min)', 'HorizontalAlignment', 'left', 'Position', [x0 0.4 0.13 0.035]);
-        eW = uicontrol(f2, d{:}, 'Style', 'edit', 'String', '60', 'Position', [x0+0.13 0.405 0.06 0.035], 'Callback', @(~,~) drawTrend());
-        pS = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', {'mean', 'median'}, 'Position', [x0+0.2 0.405 0.1 0.035], 'Callback', @(~,~) drawTrend());
-        cS = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'single contractions', 'Value', 1, 'Position', [x0 0.36 w 0.032], 'Callback', @(~,~) drawTrend());
+        eW = uicontrol(f2, d{:}, 'Style', 'edit', 'String', '60', 'Position', [x0+0.13 0.405 0.06 0.035], 'Callback', guard(@(~,~) drawTrend()));
+        pS = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', {'mean', 'median'}, 'Position', [x0+0.2 0.405 0.1 0.035], 'Callback', guard(@(~,~) drawTrend()));
+        cS = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'single contractions', 'Value', 1, 'Position', [x0 0.36 w 0.032], 'Callback', guard(@(~,~) drawTrend()));
         cI = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'only included contractions (filters of the main window)', 'Value', 1, ...
-            'Position', [x0 0.328 w 0.032], 'Callback', @(~,~) drawTrend());
-        cK = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'comments of the log files', 'Value', 1, 'Position', [x0 0.296 w 0.032], 'Callback', @(~,~) drawTrend());
+            'Position', [x0 0.328 w 0.032], 'Callback', guard(@(~,~) drawTrend()));
+        cK = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'comments of the log files', 'Value', 1, 'Position', [x0 0.296 w 0.032], 'Callback', guard(@(~,~) drawTrend()));
         cT = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'clock time (date) instead of time since start', 'Value', 0, ...
-            'Position', [x0 0.264 w 0.032], 'Callback', @(~,~) trTicks());
+            'Position', [x0 0.264 w 0.032], 'Callback', guard(@(~,~) trTicks()));
         cA = uicontrol(f2, d{:}, 'Style', 'checkbox', 'String', 'all channels in one pass (switch channel without recalculation)', 'Value', 0, ...
             'Position', [x0 0.232 w 0.032], 'TooltipString', ['the file is read once for all channels (reading dominates the time); ' ...
             'about 1.5 x the time of one channel, afterwards every channel is shown at once']);
         uicontrol(f2, d{:}, mainBtn{:}, 'Style', 'pushbutton', 'String', 'Calculate', 'Position', [x0 0.175 w 0.05], ...
-            'Callback', @(~,~) calcTrend(), 'TooltipString', ['detects the contractions in the files (threshold, filters, zero force and rocker ' ...
+            'Callback', guard(@(~,~) calcTrend()), 'TooltipString', ['detects the contractions in the files (threshold, filters, zero force and rocker ' ...
             'filter as in the main window); results are kept, so changing parameter / window only redraws']);
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [x0 0.125 0.145 0.042], 'Callback', @(~,~) saveTrendFigure());
-        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Export data ...', 'Position', [x0+0.155 0.125 0.145 0.042], 'Callback', @(~,~) exportTrend());
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [x0 0.125 0.145 0.042], 'Callback', guard(@(~,~) saveTrendFigure()));
+        uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Export data ...', 'Position', [x0+0.155 0.125 0.145 0.042], 'Callback', guard(@(~,~) exportTrend()));
         tx = uicontrol(f2, d{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [x0 0.005 w 0.115], 'FontSize', 8);
         hTr = struct('fig', f2, 'ax', axT, 'lbF', lbF, 'pC', pC, 'pR', pR, 'pP', pP, 'eW', eW, 'pS', pS, 'cS', cS, 'cI', cI, ...
             'cK', cK, 'cT', cT, 'tx', tx, 'pM', pM, 'eWs', eWs, 'eTm', eTm, 'tW', [tW1 tW2], 'cA', cA, 'axC', axC, 'lbC', lbC, ...
@@ -2023,7 +2023,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             setAllowAxesZoom(zoom(f2), axC, false); setAllowAxesPan(pan(f2), axC, false);
         catch
         end
-        set(f2, 'WindowButtonMotionFcn', @(~,~) trCommentHover());
+        set(f2, 'WindowButtonMotionFcn', guard(@(~,~) trCommentHover()));
         trSamplingControls();
         addlistener(axT, 'XLim', 'PostSet', @(~,~) trTicks());
         trListFiles(); drawTrend();
@@ -2072,8 +2072,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             cb(k) = uicontrol(dlg, 'Style', 'checkbox', 'Units', 'pixels', 'Position', [20 50 + 24 * (nC - k) 260 22], ...
                 'String', sprintf('Channel %d', chs(k)), 'Value', ismember(chs(k), trChans));
         end
-        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [110 12 80 28], 'String', 'OK', 'Callback', @(s,~) closeDialog(s, true));
-        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [200 12 80 28], 'String', 'Cancel', 'Callback', @(s,~) closeDialog(s, false));
+        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [110 12 80 28], 'String', 'OK', 'Callback', guard(@(s,~) closeDialog(s, true)));
+        uicontrol(dlg, 'Style', 'pushbutton', 'Units', 'pixels', 'Position', [200 12 80 28], 'String', 'Cancel', 'Callback', guard(@(s,~) closeDialog(s, false)));
         uiwait(dlg);
         if ~isvalid(dlg), return; end                       %closed with the window button
         if isequal(dlg.UserData, true), sel = chs([cb.Value] == 1); end
@@ -3312,13 +3312,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'ColumnName', {'use', 'type', 'name', 'from (s)', 'to (s)', 'group by', 'note'}, ...
             'ColumnFormat', {'logical', 'char', 'char', 'numeric', 'numeric', 'char', 'char'}, ...
             'ColumnEditable', [true true true true true true false], 'ColumnWidth', {32, 60, 140, 62, 62, 105, 90}, ...
-            'CellSelectionCallback', @(~, ev) setappdata(f4, 'prRow', ev.Indices), ...
+            'CellSelectionCallback', guard(@(~, ev) setappdata(f4, 'prRow', ev.Indices)), ...
             'TooltipString', ['group by: pacingFrequency, S2interval, stimCurrent, pauseLength, rockerSpeed, pulseDuration, ' ...
             'log:<code> (any numeric entry of the log file, e.g. log:pauseDuration), none']);
-        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Find in log file', 'Position', [x0 0.55 0.11 0.04], 'Callback', @(~,~) prFind());
-        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', '+ selected range', 'Position', [x0+0.117 0.55 0.11 0.04], 'Callback', @(~,~) prAddRange(), ...
+        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Find in log file', 'Position', [x0 0.55 0.11 0.04], 'Callback', guard(@(~,~) prFind()));
+        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', '+ selected range', 'Position', [x0+0.117 0.55 0.11 0.04], 'Callback', guard(@(~,~) prAddRange()), ...
             'TooltipString', 'add the range selected in the main window as a protocol (choose the grouping)');
-        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Remove', 'Position', [x0+0.234 0.55 0.111 0.04], 'Callback', @(~,~) prRemove());
+        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Remove', 'Position', [x0+0.234 0.55 0.111 0.04], 'Callback', guard(@(~,~) prRemove()));
         uicontrol(f4, dd{:}, 'Style', 'text', 'String', 'Channels', 'HorizontalAlignment', 'left', 'Position', [x0 0.49 0.08 0.03]);
         lbC = uicontrol(f4, dd{:}, 'Style', 'listbox', 'String', arrayfun(@(c) sprintf('Ch %d', c), H.dataChannels, 'UniformOutput', false), ...
             'Max', 2, 'Min', 0, 'Value', max(1, find(H.dataChannels == ch, 1)), 'Position', [x0+0.08 0.39 0.12 0.13], ...
@@ -3332,21 +3332,21 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         prPar = [PI(~startsWith(PI(:,1), 'ref'), 1:2); {'amplitude_pctOfRef', '% of S1 / steady'; 'capture_percent', '%'; 'nContractions', ''}];
         uicontrol(f4, dd{:}, 'Style', 'text', 'String', 'Parameter', 'HorizontalAlignment', 'left', 'Position', [x0 0.25 0.08 0.03]);
         pPa = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', strcat(prPar(:,1), {' ('}, strrep(prPar(:,2), 'u', mu), {')'}), ...
-            'Position', [x0+0.08 0.255 0.265 0.03], 'Callback', @(~,~) prDraw());
+            'Position', [x0+0.08 0.255 0.265 0.03], 'Callback', guard(@(~,~) prDraw()));
         uicontrol(f4, dd{:}, 'Style', 'text', 'String', 'Show', 'HorizontalAlignment', 'left', 'Position', [x0 0.205 0.08 0.03]);
-        pSh = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', {'-'}, 'Position', [x0+0.08 0.21 0.265 0.03], 'Callback', @(~,~) prDraw(), ...
+        pSh = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', {'-'}, 'Position', [x0+0.08 0.21 0.265 0.03], 'Callback', guard(@(~,~) prDraw()), ...
             'TooltipString', 'protocols grouped by the same quantity are shown together');
         pSD = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', {[char(177) ' SD'], [char(177) ' SEM'], 'mean only'}, ...
-            'Position', [x0+0.08 0.17 0.13 0.03], 'Callback', @(~,~) prDraw());
+            'Position', [x0+0.08 0.17 0.13 0.03], 'Callback', guard(@(~,~) prDraw()));
         pTb = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', {'table: groups', 'table: protocol results'}, ...
-            'Position', [x0+0.215 0.17 0.13 0.03], 'Callback', @(~,~) prTable(), 'TooltipString', ['protocol results: ' ...
+            'Position', [x0+0.215 0.17 0.13 0.03], 'Callback', guard(@(~,~) prTable()), 'TooltipString', ['protocol results: ' ...
             'max. captured frequency, FFR ratios, current thresholds, refractory periods (no peak / no response), ' ...
             'PRP at 15 / 30 / 60 s, per protocol and channel']);
         uicontrol(f4, dd{:}, mainBtn{:}, 'Style', 'pushbutton', 'String', 'Analyse', 'Position', [x0 0.11 w0 0.045], ...
-            'Callback', @(~,~) prAnalyse(), 'TooltipString', ['contractions of the ticked protocols and channels, grouped (threshold, ' ...
+            'Callback', guard(@(~,~) prAnalyse()), 'TooltipString', ['contractions of the ticked protocols and channels, grouped (threshold, ' ...
             'filters, zero force, rocker filter and labels as in the main window)']);
-        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [x0 0.06 0.17 0.04], 'Callback', @(~,~) prSaveFigure());
-        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Export ...', 'Position', [x0+0.175 0.06 0.17 0.04], 'Callback', @(~,~) prExport());
+        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [x0 0.06 0.17 0.04], 'Callback', guard(@(~,~) prSaveFigure()));
+        uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Export ...', 'Position', [x0+0.175 0.06 0.17 0.04], 'Callback', guard(@(~,~) prExport()));
         tx = uicontrol(f4, dd{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [x0 0.0 w0 0.055], 'FontSize', 8);
         hPr = struct('fig', f4, 'file', H.file, 'ax', axP, 'tRes', tRes, 'tProt', tProt, 'lbC', lbC, 'pRk', pRk, 'cSt', cSt, ...
             'pPa', pPa, 'par', {prPar}, 'pSh', pSh, 'pSD', pSD, 'pTb', pTb, 'tx', tx);
@@ -3577,14 +3577,14 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         g = uigridlayout(f2, [3 5]);
         g.RowHeight = {28, '1x', 22}; g.ColumnWidth = {55, '1x', 230, 110, 80};
         uilabel(g, 'Text', 'Search:');
-        ef = uieditfield(g, 'text', 'ValueChangedFcn', @(~,~) filterComments());
+        ef = uieditfield(g, 'text', 'ValueChangedFcn', guard(@(~,~) filterComments()));
         try ef.ValueChangingFcn = @(~,evt) filterComments(evt.Value); catch, end   %live search (R2018b+)
         try ef.Placeholder = 'text (several words: all must occur)'; catch, end
-        cb = uicheckbox(g, 'Text', 'all log entries (events, settings)', 'ValueChangedFcn', @(~,~) filterComments());
+        cb = uicheckbox(g, 'Text', 'all log entries (events, settings)', 'ValueChangedFcn', guard(@(~,~) filterComments()));
         lbl = uilabel(g, 'Text', '');
         uibutton(g, 'Text', 'Go to', 'ButtonPushedFcn', @(~,~) gotoRow());
         ut = uitable(g, 'RowName', {}, 'ColumnName', {'#', 'date / time', 'time in file', 't (s)', 'ch', 'code', 'text'}, ...
-            'ColumnWidth', {34, 140, 80, 80, 35, 110, 'auto'}, 'CellSelectionCallback', @(~,evt) selectRow(evt));
+            'ColumnWidth', {34, 140, 80, 80, 35, 110, 'auto'}, 'CellSelectionCallback', guard(@(~,evt) selectRow(evt)));
         try ut.SelectionType = 'row'; catch, end           %R2021b+
         ut.Layout.Row = 2; ut.Layout.Column = [1 5];
         if isprop(ut, 'DoubleClickedFcn'), ut.DoubleClickedFcn = @(~,evt) dblClickRow(evt); end   %R2021a+
@@ -3677,7 +3677,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         hoverHide();
         if ishandle(hDrag), delete(hDrag); end
         hDrag = patch(ax, [x x x x], yl([1 1 2 2]), uiBlue, 'FaceAlpha', 0.22, 'EdgeColor', uiBlue, 'HitTest', 'off');
-        set(fig, 'WindowButtonMotionFcn', @(~,~) dragMove(ax), 'WindowButtonUpFcn', @(~,~) dragEnd(ax));
+        set(fig, 'WindowButtonMotionFcn', guard(@(~,~) dragMove(ax)), 'WindowButtonUpFcn', @(~,~) dragEnd(ax));
     end
 
     function dragMove(ax)
@@ -3693,7 +3693,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if ishandle(hDrag), delete(hDrag); end
         hDrag = patch(ax, xl([1 2 2 1]), dragY0 * [1 1 1 1], uiBlue, 'FaceAlpha', 0.22, 'EdgeColor', uiBlue, ...
             'HitTest', 'off', 'YLimInclude', 'off');
-        set(fig, 'WindowButtonMotionFcn', @(~,~) dragMoveY(ax), 'WindowButtonUpFcn', @(~,~) dragEndY(ax));
+        set(fig, 'WindowButtonMotionFcn', guard(@(~,~) dragMoveY(ax)), 'WindowButtonUpFcn', @(~,~) dragEndY(ax));
     end
 
     function dragMoveY(ax)
@@ -3702,7 +3702,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function dragEndY(ax)
-        set(fig, 'WindowButtonMotionFcn', @onMouseMove, 'WindowButtonUpFcn', '');
+        set(fig, 'WindowButtonMotionFcn', guard(@onMouseMove), 'WindowButtonUpFcn', '');
         y = clampY(ax);
         if ishandle(hDrag), delete(hDrag); end
         yl = ylim(ax);
@@ -3717,7 +3717,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function dragEnd(ax)
-        set(fig, 'WindowButtonMotionFcn', @onMouseMove, 'WindowButtonUpFcn', '');
+        set(fig, 'WindowButtonMotionFcn', guard(@onMouseMove), 'WindowButtonUpFcn', '');
         x = clampX(ax);
         if ishandle(hDrag), delete(hDrag); end
         xl = xlim(ax);
@@ -3938,8 +3938,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if strcmp(C.thresholdMode, 'auto'), hThr.String = sprintf('%.0f', C.threshold); end
         if isnan(C.zeroForce), hZero.String = ''; else, hZero.String = sprintf('%.0f', C.zeroForce); end
         hZeroSrc.String = C.zeroSource;
-        refresh(resetX);
-        if ~isempty(hRef) && isvalid(hRef.fig), drawReference(); end
+        try
+            refresh(resetX);
+            if ~isempty(hRef) && isvalid(hRef.fig), drawReference(); end
+        catch ME
+            guiError(ME, 'plotting'); return;           %the error log tells what went wrong (2026-10-21)
+        end
         msg = sprintf('Channel %d: %d contractions detected (threshold %.0f %sN, %s).', ch, height(B), C.threshold, mu, C.thresholdMode);
         if any(B.uncertain), msg = sprintf('%s %d uncertain (orange).', msg, nnz(B.uncertain)); end
         if isfield(C, 'noContractions') && C.noContractions
@@ -4720,23 +4724,23 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         a1 = axes(f3, 'Position', [0.06 0.12 0.33 0.78]); a2 = axes(f3, 'Position', [0.45 0.12 0.33 0.78]);
         x0 = 0.81; w = 0.18;
         uicontrol(f3, d{:}, 'Style', 'text', 'String', 'deviating if more than', 'HorizontalAlignment', 'left', 'Position', [x0 0.88 w 0.04]);
-        eX = uicontrol(f3, d{:}, 'Style', 'edit', 'String', num2str(refThr), 'Position', [x0 0.83 0.06 0.045], 'Callback', @(~,~) refSettings());
+        eX = uicontrol(f3, d{:}, 'Style', 'edit', 'String', num2str(refThr), 'Position', [x0 0.83 0.06 0.045], 'Callback', guard(@(~,~) refSettings()));
         uicontrol(f3, d{:}, 'Style', 'text', 'String', 'SD of the reference', 'HorizontalAlignment', 'left', 'Position', [x0+0.065 0.825 0.12 0.045]);
         pW = uicontrol(f3, d{:}, 'Style', 'popupmenu', 'String', {'absolute (incl. amplitude)', 'normalized (shape)', 'absolute or normalized'}, ...
-            'Value', refWhich, 'Position', [x0 0.77 w 0.045], 'Callback', @(~,~) refSettings());
+            'Value', refWhich, 'Position', [x0 0.77 w 0.045], 'Callback', guard(@(~,~) refSettings()));
         cX = uicontrol(f3, d{:}, 'Style', 'checkbox', 'String', 'exclude from the selection', 'Value', refExclude, ...
-            'Position', [x0 0.71 w 0.045], 'Callback', @(~,~) refSettings());
+            'Position', [x0 0.71 w 0.045], 'Callback', guard(@(~,~) refSettings()));
         cD = uicontrol(f3, d{:}, 'Style', 'checkbox', 'String', 'show deviating contractions', 'Value', 1, ...
-            'Position', [x0 0.66 w 0.045], 'Callback', @(~,~) drawReference());
+            'Position', [x0 0.66 w 0.045], 'Callback', guard(@(~,~) drawReference()));
         uicontrol(f3, d{:}, 'Style', 'text', 'String', 'aligned at', 'HorizontalAlignment', 'left', 'Position', [x0 0.6 0.06 0.04]);
         pA = uicontrol(f3, d{:}, 'Style', 'popupmenu', 'String', {'stimulus', '50 % upstroke'}, ...
-            'Value', 1 + strcmp(refAlign, 'upstroke'), 'Position', [x0+0.055 0.605 w-0.055 0.045], 'Callback', @(~,~) refSettings(), ...
+            'Value', 1 + strcmp(refAlign, 'upstroke'), 'Position', [x0+0.055 0.605 w-0.055 0.045], 'Callback', guard(@(~,~) refSettings()), ...
             'TooltipString', ['stimulus: a changed stimulus-to-contraction latency counts as deviation (contractions without stimulus: ' ...
             'aligned at the 50 % upstroke). 50 % upstroke: shape only.']);
-        uicontrol(f3, d{:}, 'Style', 'pushbutton', 'String', 'Save reference ...', 'Position', [x0 0.525 w 0.06], 'Callback', @(~,~) saveReference());
-        uicontrol(f3, d{:}, 'Style', 'pushbutton', 'String', 'Load reference ...', 'Position', [x0 0.455 w 0.06], 'Callback', @(~,~) loadReference(), ...
+        uicontrol(f3, d{:}, 'Style', 'pushbutton', 'String', 'Save reference ...', 'Position', [x0 0.525 w 0.06], 'Callback', guard(@(~,~) saveReference()));
+        uicontrol(f3, d{:}, 'Style', 'pushbutton', 'String', 'Load reference ...', 'Position', [x0 0.455 w 0.06], 'Callback', guard(@(~,~) loadReference()), ...
             'TooltipString', 'reference saved before (e.g. baseline of the same slice); used for the current channel');
-        uicontrol(f3, d{:}, 'Style', 'pushbutton', 'String', 'Remove reference', 'Position', [x0 0.385 w 0.06], 'Callback', @(~,~) clearReference());
+        uicontrol(f3, d{:}, 'Style', 'pushbutton', 'String', 'Remove reference', 'Position', [x0 0.385 w 0.06], 'Callback', guard(@(~,~) clearReference()));
         tx = uicontrol(f3, d{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [x0 0.01 w 0.36], 'FontSize', 8);
         hRef = struct('fig', f3, 'a1', a1, 'a2', a2, 'eX', eX, 'pW', pW, 'cX', cX, 'cD', cD, 'pA', pA, 'tx', tx);
         drawReference();
@@ -5271,11 +5275,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             hEPtxt = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'FontSize', 9, ...
                 'Position', [0.77, 70 * px, 0.225, (dH - 78) * px]);
             hEPclean = uicontrol(fig, dflt{:}, 'Style', 'checkbox', 'String', 'remove stimulus artefact', 'Value', epClean, ...
-                'Position', [0.77, 42 * px, 0.225, 24 * px], 'Callback', @(src,~) epSetClean(src.Value), 'TooltipString', ...
+                'Position', [0.77, 42 * px, 0.225, 24 * px], 'Callback', guard(@(src,~) epSetClean(src.Value)), 'TooltipString', ...
                 ['signal plot: the stimulus pulses (stimulation channel) and the artefact after them replaced by straight ' ...
                 'lines (grey), display only: the AP parameters are measured on the recorded signal (mda_analyzeAP removeArtefacts)']);
             hEPclose = uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Remove EP recording', ...
-                'Position', [0.77, 8 * px, 0.12, 30 * px], 'Callback', @onCloseEP);
+                'Position', [0.77, 8 * px, 0.12, 30 * px], 'Callback', guard(@onCloseEP));
             % right click in the EP plots: y limits, artefacts (2026-10-09)
             for iEP = 1:2
                 cmEP = uicontextmenu(fig);
@@ -5431,9 +5435,49 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         for q = 1:numel(kA), epArtMask(kA(q):kB(q)) = true; end
     end
 
+    function g = guard(f)
+        % callbacks of the GUI: an error inside a callback is shown in the status line and written to the error log
+        % instead of only in the command window (an empty window after Load with no message, 2026-10-21)
+        g = @(varargin) guarded(f, varargin{:});
+    end
+
+    function guarded(f, varargin)
+        try
+            f(varargin{:});
+        catch ME
+            guiError(ME, func2str(f));
+        end
+    end
+
+    function guiError(ME, where)
+        % error of a callback or of the plotting: status line (red), report appended to the error log
+        % <tempdir>/MyoDishAnalysisGUI_errors.log (version, file, window, channel, stack); MDA_DEBUG: report displayed
+        lf = fullfile(tempdir, 'MyoDishAnalysisGUI_errors.log');
+        try
+            fid = fopen(lf, 'a');
+            if fid > 0
+                fn = ''; w = [nan nan];
+                if ~isempty(H) && isfield(H, 'file'), [~, n, e] = fileparts(H.file); fn = [n e]; end
+                if ~isempty(S), w = [S.fromSeconds S.toSeconds]; end
+                fprintf(fid, '%s  MyoDishAnalysis %s (%s)  file %s  window %g-%g s  channel %d  in %s\n%s\n\n', ...
+                    char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss')), mda_version(), version, fn, w(1), w(2), ch, where, ...
+                    getReport(ME, 'extended', 'hyperlinks', 'off'));
+                fclose(fid);
+            end
+        catch
+        end
+        try
+            status(sprintf('Error in %s: %s  (details: %s)', where, ME.message, lf));
+            hStatus.ForegroundColor = [0.75 0 0];
+        catch
+        end
+        if ~isempty(getenv('MDA_DEBUG')), disp(getReport(ME, 'extended')); end
+    end
+
     function status(msg)
         hStatus.String = msg;
         statusText = msg;
+        hStatus.ForegroundColor = uiBlueDark;
     end
 
     function s = labelLine(Sm)
@@ -5461,11 +5505,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         ut = uitable(hLblFig, 'Units', 'normalized', 'Position', [0.01 0.2 0.98 0.78], 'RowName', [], 'FontSize', 10);
         showLabels(ut, Lbl);
         b = {'Style', 'pushbutton', 'Units', 'normalized', 'FontSize', 10};
-        uicontrol(hLblFig, b{:}, mainBtn{:}, 'String', 'Apply and close', 'Position', [0.01 0.03 0.13 0.1], 'Callback', @(~,~) applyLabels(ut, true));
-        uicontrol(hLblFig, b{:}, 'String', 'Apply', 'Position', [0.15 0.03 0.08 0.1], 'Callback', @(~,~) applyLabels(ut, false));
-        uicontrol(hLblFig, b{:}, 'String', 'Fill empty cells from first row', 'Position', [0.24 0.03 0.18 0.1], 'Callback', @(~,~) fillDown(ut));
-        uicontrol(hLblFig, b{:}, 'String', 'Load ...', 'Position', [0.43 0.03 0.08 0.1], 'Callback', @(~,~) loadLabels(ut));
-        uicontrol(hLblFig, b{:}, 'String', 'Save ...', 'Position', [0.52 0.03 0.08 0.1], 'Callback', @(~,~) saveLabels(ut));
+        uicontrol(hLblFig, b{:}, mainBtn{:}, 'String', 'Apply and close', 'Position', [0.01 0.03 0.13 0.1], 'Callback', guard(@(~,~) applyLabels(ut, true)));
+        uicontrol(hLblFig, b{:}, 'String', 'Apply', 'Position', [0.15 0.03 0.08 0.1], 'Callback', guard(@(~,~) applyLabels(ut, false)));
+        uicontrol(hLblFig, b{:}, 'String', 'Fill empty cells from first row', 'Position', [0.24 0.03 0.18 0.1], 'Callback', guard(@(~,~) fillDown(ut)));
+        uicontrol(hLblFig, b{:}, 'String', 'Load ...', 'Position', [0.43 0.03 0.08 0.1], 'Callback', guard(@(~,~) loadLabels(ut)));
+        uicontrol(hLblFig, b{:}, 'String', 'Save ...', 'Position', [0.52 0.03 0.08 0.1], 'Callback', guard(@(~,~) saveLabels(ut)));
         uicontrol(hLblFig, 'Style', 'text', 'Units', 'normalized', 'Position', [0.61 0.01 0.38 0.14], 'BackgroundColor', 'w', ...
             'HorizontalAlignment', 'left', 'FontSize', 9, 'String', ['cultureStart, e.g. 1999-12-24 14:30: daysInCulture is then ' ...
             'calculated for every contraction. analyst: your initials. Saved as <name>_labels.csv next to the .mdd file, ' ...
