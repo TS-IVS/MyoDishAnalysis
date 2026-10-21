@@ -244,7 +244,8 @@ else
             top = o(1:min(numel(o), numel(ST)));
             if isnan(CL), hw = opts.lockWindow; else, hw = min(opts.lockWindow, opts.lockWindowRel * CL); end
             lk = latencyLock(lat, top, hw);
-            lowKeep = reshape(prom(:) < thr & prom(:) >= lowThr & lk(:) & ~S.rockerOn(cand(:)) & ~drop(:), size(prom));
+            ro = S.rockerOn(cand);
+            lowKeep = reshape(prom(:) < thr & prom(:) >= lowThr & lk(:) & ~ro(:) & ~drop(:), size(prom));
             nLocked = nnz(lowKeep);
             keepLow = keepLow | lowKeep;
         end
