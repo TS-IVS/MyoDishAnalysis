@@ -338,7 +338,7 @@ def test_protocol_results_examples():
     def res(f, ch, **kw):
         return mda.myodish_analysis(os.path.join(EX, f), ch, quiet=True, **kw)[2]["protocolResults"].iloc[0]
     r = res("example8_rabbitVentricle_EP.mdd", 1, protocol="RP", rocker="any")  # S2 463 ms: none, 492 ms: full
-    assert 463 < r["refPeriodNoPeak_ms"] < 492 and r["refPeriodNoPeakStep_ms"] == 29
+    assert 463 < r["refPeriodNoPeak_ms"] < 492 and r["refPeriodNoPeakStep_ms"] == 30  # 492.5 - 462.5 (0.5-ms steps)
     assert 463 <= r["refPeriodNoResponse_ms"] < 492 and r["S2noiseLevel_pct"] < 10
     r = res("example3_humanVentricle.mdd", 6, protocol="FFR")
     assert r["maxCapturedFrequency_Hz"] == 4 and 90 < r["FFR_1Hz_pct"] < 115 and 60 < r["FFR_3Hz_pct"] < 90
@@ -401,9 +401,7 @@ def test_s2_groups_last_pulse_and_grid(tmp_path):
     g = S[S["groupRole"] == "S2"]
     assert g["group"].tolist() == [f"S2 {x:g} ms" for x in sorted(s2)]  # groups sorted by value, 127.5 and 120 apart
     assert "S2 1000 ms" not in S["group"].tolist()
-    assert int(S.loc[S["group"] == "S1", "nStimuli"].iloc[0]) == 6 + 3 * 10 - 10 - 1  # pre-S2 and the last stimulus
-    assert int(S.loc[S["group"] == "S1", "nStimuli"].iloc[0]) + int(S.loc[S["group"] == "pre-S2", "nStimuli"].iloc[0]) \
-        == 6 + 3 * 10 - 1 or True
+    assert int(S.loc[S["group"] == "S1", "nStimuli"].iloc[0]) == 6 + 3 * 10 - 10  # the last S1 of every step is pre-S2
     assert all(int(x) == 1 for x in g["nStimuli"])
     assert S.loc[S["groupRole"] == "postS2", "nStimuli"].sum() == 10
 
