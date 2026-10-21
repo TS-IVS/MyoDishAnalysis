@@ -66,6 +66,8 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
+- **GUI: column `median`** in the parameter table (and in the copied summary) next to mean, SD and n: the median of
+  the selected contractions is less affected by post-rest or partly refractory contractions (a user's request).
 - **Sensor rate per channel, inferred** (summary columns `sensorRate_inferred`, `repeatedSamples_percent`;
   `S.sensorRate`, `S.repeatedSamples_percent` of `mda_readMdd` / `read_mdd`). The new sensor boards measure at 200 Hz
   in a 400-Hz recording, so every value appears twice; the log does not say which board a channel has. MDA infers

@@ -645,7 +645,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lFlags.setStyleSheet("color: #737373")
         pv.addWidget(self.lFlags)
         self.tbl = QtWidgets.QTableWidget(0, 5)
-        self.tbl.setHorizontalHeaderLabels(["parameter", "mean", "SD", "n", "unit"])
+        self.tbl.setHorizontalHeaderLabels(["parameter", "mean", "median", "SD", "n", "unit"])
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.verticalHeader().setDefaultSectionSize(18)
         self.tbl.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -1545,6 +1545,15 @@ class MainWindow(QtWidgets.QMainWindow):
         T.insert(0, "file", os.path.basename(H.file))
         return add_labels(T, self.Lbl, when)
 
+    def sel_median(self, p, sel):
+        """median of parameter p over the selected contractions (column 'median' of the summary table, 2026-10-21;
+        mean, SD and n come from summarize)"""
+        if p not in self.B.columns:
+            return math.nan
+        v = self.B[p].to_numpy(float)[sel]
+        v = v[~np.isnan(v)]
+        return float(np.median(v)) if v.size else math.nan
+
     def summary_row(self, R=None):
         """summary of the selected contractions over the analysed range(s) (all together), or over the ranges R"""
         Bs = self.B.copy()
@@ -2005,44 +2014,48 @@ class MainWindow(QtWidgets.QMainWindow):
             self.lFlags.setText("")
             return
         Sm = self.summary_row().iloc[0]
+        sel = self.selected()  # median of the selected contractions (2026-10-21)
         rows = []
         for nm, u, _ in PARAMETERS:
-            rows.append([nm, fmt_num(Sm[nm + "_mean"], 4), fmt_num(Sm[nm + "_SD"], 3), str(int(Sm[nm + "_n"])),
+            rows.append([nm, fmt_num(Sm[nm + "_mean"], 4), fmt_num(self.sel_median(nm, sel), 4),
+                         fmt_num(Sm[nm + "_SD"], 3), str(int(Sm[nm + "_n"])),
                          u.replace("u", MU) if u.startswith("u") else u])
         if "APD90" in B.columns:
             for nm, u, _ in AP_PARAMETERS:
-                rows.append([nm, fmt_num(Sm[nm + "_mean"], 4), fmt_num(Sm[nm + "_SD"], 3), str(int(Sm[nm + "_n"])), u])
-        rows.append(["extra beats", f"{int(Sm.nExtraBeats)}", "", str(int(Sm.nDetected)), "count"])
-        rows.append(["extra beats", fmt_num(Sm.extraBeats_percent, 3), "", str(int(Sm.nDetected)), "%"])
-        rows.append(["missed beats", f"{int(Sm.nMissedBeats)}", "", str(int(Sm.nStimuli)), "count"])
-        rows.append(["missed beats", fmt_num(Sm.missedBeats_percent, 3), "", str(int(Sm.nStimuli)), "%"])
+                rows.append([nm, fmt_num(Sm[nm + "_mean"], 4), fmt_num(self.sel_median(nm, sel), 4),
+                             fmt_num(Sm[nm + "_SD"], 3), str(int(Sm[nm + "_n"])), u])
+        rows.append(["extra beats", f"{int(Sm.nExtraBeats)}", "", "", str(int(Sm.nDetected)), "count"])
+        rows.append(["extra beats", fmt_num(Sm.extraBeats_percent, 3), "", "", str(int(Sm.nDetected)), "%"])
+        rows.append(["missed beats", f"{int(Sm.nMissedBeats)}", "", "", str(int(Sm.nStimuli)), "count"])
+        rows.append(["missed beats", fmt_num(Sm.missedBeats_percent, 3), "", "", str(int(Sm.nStimuli)), "%"])
         if "nMissedDuringContraction" in Sm.index:  # 2026-10-10
-            rows.append(["missed in a contraction", f"{int(Sm.nMissedDuringContraction)}", "", str(int(Sm.nStimuli)),
-                         "count"])
+            rows.append(["missed in a contraction", f"{int(Sm.nMissedDuringContraction)}", "", "",
+                         str(int(Sm.nStimuli)), "count"])
             if Sm.nExtraPulses > 0:
-                rows.append(["extra pulses", f"{int(Sm.nExtraPulses)}", "", "", "count"])
-                rows.append(["elicited by extra pulse", f"{int(Sm.nElicitedByExtraPulse)}", "", str(int(Sm.nStimulated)),
-                             "count"])
-            rows.append(["ambiguous stimulus", f"{int(Sm.nAmbiguous)}", "", str(int(Sm.nStimulated)), "count"])
-        rows.append(["uncertain (all)", f"{int(Sm.nUncertain)}", "", str(int(Sm.nDetected)), "count"])
-        rows.append(["uncertain stimulated", f"{int(Sm.nStimulatedUncertain)}", "", str(int(Sm.nStimulated)), "count"])
-        rows.append(["uncertain extra", f"{int(Sm.nExtraBeatsUncertain)}", "", str(int(Sm.nExtraBeats)), "count"])
-        rows.append(["uncertain missed", f"{int(Sm.nMissedBeatsUncertain)}", "", str(int(Sm.nStimuli)), "count"])
+                rows.append(["extra pulses", f"{int(Sm.nExtraPulses)}", "", "", "", "count"])
+                rows.append(["elicited by extra pulse", f"{int(Sm.nElicitedByExtraPulse)}", "", "",
+                             str(int(Sm.nStimulated)), "count"])
+            rows.append(["ambiguous stimulus", f"{int(Sm.nAmbiguous)}", "", "", str(int(Sm.nStimulated)), "count"])
+        rows.append(["uncertain (all)", f"{int(Sm.nUncertain)}", "", "", str(int(Sm.nDetected)), "count"])
+        rows.append(["uncertain stimulated", f"{int(Sm.nStimulatedUncertain)}", "", "", str(int(Sm.nStimulated)),
+                     "count"])
+        rows.append(["uncertain extra", f"{int(Sm.nExtraBeatsUncertain)}", "", "", str(int(Sm.nExtraBeats)), "count"])
+        rows.append(["uncertain missed", f"{int(Sm.nMissedBeatsUncertain)}", "", "", str(int(Sm.nStimuli)), "count"])
         has_ref = self.C.get("referenceBeat") is not None
         if has_ref:
             inR = self.in_range()
             nCmp = int(np.sum(inR & ~np.isnan(B["refMaxDeviation_SD"].to_numpy(float))))
             nDev = int(np.sum(inR & self.deviating()))
             pDev = 100 * nDev / nCmp if nCmp > 0 else math.nan
-            rows.append([f"deviating (> {self.ref_thr:g} SD)", f"{nDev}", "", str(nCmp), "count"])
-            rows.append([f"deviating (> {self.ref_thr:g} SD)", fmt_num(pDev, 3), "", str(nCmp), "%"])
+            rows.append([f"deviating (> {self.ref_thr:g} SD)", f"{nDev}", "", "", str(nCmp), "count"])
+            rows.append([f"deviating (> {self.ref_thr:g} SD)", fmt_num(pDev, 3), "", "", str(nCmp), "%"])
             for k, (nm, _, _) in enumerate(PARAMETERS):
                 rows[k].insert(2, self.rel_cell(Sm, nm))
             for r in rows[len(PARAMETERS):]:
                 r.insert(2, "")
-            cols = ["parameter", "mean", "%ref", "SD", "n", "unit"]
+            cols = ["parameter", "mean", "%ref", "median", "SD", "n", "unit"]
         else:
-            cols = ["parameter", "mean", "SD", "n", "unit"]
+            cols = ["parameter", "mean", "median", "SD", "n", "unit"]
         self.tbl.clear()
         self.tbl.setColumnCount(len(cols))
         self.tbl.setHorizontalHeaderLabels(cols)
@@ -3211,9 +3224,11 @@ class MainWindow(QtWidgets.QMainWindow):
             if v:
                 lines.append(f"{nm}\t{v}")
         has_ref = self.C.get("referenceBeat") is not None
-        lines.append("parameter\tmean\tSD\tn\tunit" + ("\trelative to reference" if has_ref else ""))
+        sel = self.selected()
+        lines.append("parameter\tmean\tmedian\tSD\tn\tunit" + ("\trelative to reference" if has_ref else ""))
         for nm, u, _ in PARAMETERS:
-            ln = f"{nm}\t{Sm[nm + '_mean']:.6g}\t{Sm[nm + '_SD']:.6g}\t{int(Sm[nm + '_n'])}\t{u}"
+            ln = (f"{nm}\t{Sm[nm + '_mean']:.6g}\t{self.sel_median(nm, sel):.6g}\t{Sm[nm + '_SD']:.6g}\t"
+                  f"{int(Sm[nm + '_n'])}\t{u}")
             if has_ref:
                 c = self.rel_cell(Sm, nm)
                 c = c[1:] + " uN" if c.startswith("Δ") else (c + " %" if c else "")

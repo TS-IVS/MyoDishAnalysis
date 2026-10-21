@@ -159,7 +159,8 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    green = extra pulse; x = current not reached) and the interval to the previous pulse (blue, ms). With 40 pulses
    or fewer in view, the values are written next to the pulses (as `drawStimPulses` 'displayCurrents' /
    'displayIntervals'; "?!" = current not reached).
-4. **Table**: mean, SD and n (contractions with a value) of the selected contractions; at the end **extra beats**
+4. **Table**: mean, median, SD and n (contractions with a value) of the selected contractions (the median is
+   less affected by post-rest or partly refractory contractions; the results files keep mean, SD and n); at the end **extra beats**
    (contractions without an adequate stimulus, count and % of the detected contractions) and **missed beats**
    (stimuli without a contraction above the detection threshold, count and % of the stimuli), both over the whole
    range, independent of the rocker / stimulated filters; **uncertain** contractions (all, stimulated, extra) and

@@ -370,7 +370,7 @@ hCounts = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlig
 hFlags = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.03 0.462 0.94 0.026], ...
     'FontSize', 9, 'ForegroundColor', [0.45 0.45 0.45]);   %flags of the analysis report for this range (2026-10-14)
 hTable = uitable(pnl, 'Units', 'normalized', 'Position', [0.03 0.215 0.94 0.245], 'RowName', [], ...
-    'ColumnName', {'parameter','mean','SD','n','unit'}, 'ColumnWidth', {108, 66, 60, 38, 42}, 'FontSize', 9);
+    'ColumnName', {'parameter','mean','median','SD','n','unit'}, 'ColumnWidth', {96, 58, 58, 52, 32, 40}, 'FontSize', 9);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Overlay contractions', 'Position', [0.03 0.165 0.46 0.04], 'Callback', @onOverlay, ...
     'TooltipString', ['overlay of the selected contractions (mean beat or time course); press again (or Add in the overlay window) to add ' ...
     'another selection as a new group; other channels of the same range: Channels ... in the overlay window']);
@@ -3083,9 +3083,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             if ~isempty(v), lines{end+1} = sprintf('%s\t%s', ln{k}, v); end %#ok<AGROW>
         end
         hasRef = isfield(C, 'referenceBeat') && ~isempty(C.referenceBeat);
-        lines{end+1} = sprintf('parameter\tmean\tSD\tn\tunit%s', repmat(sprintf('\trelative to reference'), 1, hasRef));
+        sel = selected();
+        lines{end+1} = sprintf('parameter\tmean\tmedian\tSD\tn\tunit%s', repmat(sprintf('\trelative to reference'), 1, hasRef));
         for k = 1:size(PI, 1)
-            lines{end+1} = sprintf('%s\t%.6g\t%.6g\t%d\t%s', PI{k,1}, Sm.([PI{k,1} '_mean']), Sm.([PI{k,1} '_SD']), Sm.([PI{k,1} '_n']), PI{k,2}); %#ok<AGROW>
+            lines{end+1} = sprintf('%s\t%.6g\t%.6g\t%.6g\t%d\t%s', PI{k,1}, Sm.([PI{k,1} '_mean']), selMedian(PI{k,1}, sel), ...
+                Sm.([PI{k,1} '_SD']), Sm.([PI{k,1} '_n']), PI{k,2}); %#ok<AGROW>
             if hasRef                                   %2026-10-06: % of the reference (diastolic: difference in uN)
                 c = relCell(Sm, PI{k,1});
                 if startsWith(c, char(916)), c = [c(2:end) ' uN']; elseif ~isempty(c), c = [c ' %']; end
@@ -4548,38 +4550,41 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             hTable.Data = {}; hCounts.String = ''; hFlags.String = ''; return;
         end
         Sm = summaryRow();
-        d = cell(size(PI, 1), 5);
+        sel = selected();                                  %median of the selected contractions (2026-10-21)
+        d = cell(size(PI, 1), 6);
         for k = 1:size(PI, 1)
-            d(k,:) = {PI{k,1}, fmtNum(Sm.([PI{k,1} '_mean']), 4), fmtNum(Sm.([PI{k,1} '_SD']), 3), Sm.([PI{k,1} '_n']), strrep(PI{k,2}, 'u', mu)};
+            d(k,:) = {PI{k,1}, fmtNum(Sm.([PI{k,1} '_mean']), 4), fmtNum(selMedian(PI{k,1}, sel), 4), ...
+                fmtNum(Sm.([PI{k,1} '_SD']), 3), Sm.([PI{k,1} '_n']), strrep(PI{k,2}, 'u', mu)};
         end
         if ismember('APD90', B.Properties.VariableNames)  %AP parameters (EP recording)
             for k = 1:size(APP, 1)
-                d(end+1,:) = {APP{k,1}, fmtNum(Sm.([APP{k,1} '_mean']), 4), fmtNum(Sm.([APP{k,1} '_SD']), 3), Sm.([APP{k,1} '_n']), APP{k,2}}; %#ok<AGROW>
+                d(end+1,:) = {APP{k,1}, fmtNum(Sm.([APP{k,1} '_mean']), 4), fmtNum(selMedian(APP{k,1}, sel), 4), ...
+                    fmtNum(Sm.([APP{k,1} '_SD']), 3), Sm.([APP{k,1} '_n']), APP{k,2}}; %#ok<AGROW>
             end
         end
         % whole range, independent of the rocker / stimulated filters: n = detected contractions / stimuli
-        d(end+1,:) = {'extra beats', sprintf('%d', Sm.nExtraBeats), '', Sm.nDetected, 'count'};
-        d(end+1,:) = {'extra beats', fmtNum(Sm.extraBeats_percent, 3), '', Sm.nDetected, '%'};
-        d(end+1,:) = {'missed beats', sprintf('%d', Sm.nMissedBeats), '', Sm.nStimuli, 'count'};
-        d(end+1,:) = {'missed beats', fmtNum(Sm.missedBeats_percent, 3), '', Sm.nStimuli, '%'};
+        d(end+1,:) = {'extra beats', sprintf('%d', Sm.nExtraBeats), '', '', Sm.nDetected, 'count'};
+        d(end+1,:) = {'extra beats', fmtNum(Sm.extraBeats_percent, 3), '', '', Sm.nDetected, '%'};
+        d(end+1,:) = {'missed beats', sprintf('%d', Sm.nMissedBeats), '', '', Sm.nStimuli, 'count'};
+        d(end+1,:) = {'missed beats', fmtNum(Sm.missedBeats_percent, 3), '', '', Sm.nStimuli, '%'};
         if ismember('nMissedDuringContraction', Sm.Properties.VariableNames)   %2026-10-10
-            d(end+1,:) = {'missed in a contraction', sprintf('%d', Sm.nMissedDuringContraction), '', Sm.nStimuli, 'count'};
+            d(end+1,:) = {'missed in a contraction', sprintf('%d', Sm.nMissedDuringContraction), '', '', Sm.nStimuli, 'count'};
             if Sm.nExtraPulses > 0
-                d(end+1,:) = {'extra pulses', sprintf('%d', Sm.nExtraPulses), '', [], 'count'};
-                d(end+1,:) = {'elicited by extra pulse', sprintf('%d', Sm.nElicitedByExtraPulse), '', Sm.nStimulated, 'count'};
+                d(end+1,:) = {'extra pulses', sprintf('%d', Sm.nExtraPulses), '', '', [], 'count'};
+                d(end+1,:) = {'elicited by extra pulse', sprintf('%d', Sm.nElicitedByExtraPulse), '', '', Sm.nStimulated, 'count'};
             end
-            d(end+1,:) = {'ambiguous stimulus', sprintf('%d', Sm.nAmbiguous), '', Sm.nStimulated, 'count'};
+            d(end+1,:) = {'ambiguous stimulus', sprintf('%d', Sm.nAmbiguous), '', '', Sm.nStimulated, 'count'};
         end
-        d(end+1,:) = {'uncertain (all)', sprintf('%d', Sm.nUncertain), '', Sm.nDetected, 'count'};
-        d(end+1,:) = {'uncertain stimulated', sprintf('%d', Sm.nStimulatedUncertain), '', Sm.nStimulated, 'count'};
-        d(end+1,:) = {'uncertain extra', sprintf('%d', Sm.nExtraBeatsUncertain), '', Sm.nExtraBeats, 'count'};
-        d(end+1,:) = {'uncertain missed', sprintf('%d', Sm.nMissedBeatsUncertain), '', Sm.nStimuli, 'count'};
+        d(end+1,:) = {'uncertain (all)', sprintf('%d', Sm.nUncertain), '', '', Sm.nDetected, 'count'};
+        d(end+1,:) = {'uncertain stimulated', sprintf('%d', Sm.nStimulatedUncertain), '', '', Sm.nStimulated, 'count'};
+        d(end+1,:) = {'uncertain extra', sprintf('%d', Sm.nExtraBeatsUncertain), '', '', Sm.nExtraBeats, 'count'};
+        d(end+1,:) = {'uncertain missed', sprintf('%d', Sm.nMissedBeatsUncertain), '', '', Sm.nStimuli, 'count'};
         if isfield(C, 'referenceBeat') && ~isempty(C.referenceBeat)    %deviating from the reference beat (whole range)
             inR = inRng(B.t_peak);
             nCmp = sum(inR & ~isnan(B.refMaxDeviation_SD)); nDev = sum(inR & deviating());
             pDev = nan; if nCmp > 0, pDev = 100 * nDev / nCmp; end
-            d(end+1,:) = {sprintf('deviating (> %g SD)', refThr), sprintf('%d', nDev), '', nCmp, 'count'};
-            d(end+1,:) = {sprintf('deviating (> %g SD)', refThr), fmtNum(pDev, 3), '', nCmp, '%'};
+            d(end+1,:) = {sprintf('deviating (> %g SD)', refThr), sprintf('%d', nDev), '', '', nCmp, 'count'};
+            d(end+1,:) = {sprintf('deviating (> %g SD)', refThr), fmtNum(pDev, 3), '', '', nCmp, '%'};
         end
         % 2026-10-06: column '% ref' (mean relative to the reference contractions; diastolic: difference) if the channel has
         % a reference beat
@@ -4588,9 +4593,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             rc = repmat({''}, size(d, 1), 1);
             for k = 1:size(PI, 1), rc{k} = relCell(Sm, PI{k,1}); end
             d = [d(:,1:2), rc, d(:,3:end)];
-            cn = {'parameter', 'mean', '%ref', 'SD', 'n', 'unit'}; cw = {90, 52, 46, 54, 26, 44};
+            cn = {'parameter', 'mean', '%ref', 'median', 'SD', 'n', 'unit'}; cw = {84, 48, 42, 48, 46, 26, 40};
         else
-            cn = {'parameter', 'mean', 'SD', 'n', 'unit'}; cw = {108, 66, 60, 38, 42};
+            cn = {'parameter', 'mean', 'median', 'SD', 'n', 'unit'}; cw = {96, 58, 58, 52, 32, 40};
         end
         if numel(hTable.ColumnName) ~= numel(cn)        %column count changes: new table (the header is not redrawn reliably)
             pT = hTable.Position; delete(hTable);
@@ -4649,6 +4654,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 'orange: slice quality (C capture, X extra beats, A amplitude, T amplitude change, V amplitude CV)\n%s'], txt);
         catch
         end
+    end
+
+    function m = selMedian(p, sel)
+        % median of parameter p over the selected contractions (column 'median' of the summary table, 2026-10-21; the
+        % mean, SD and n come from mda_summarize)
+        m = nan;
+        if ismember(p, B.Properties.VariableNames), m = median(B.(p)(sel), 'omitnan'); end
     end
 
     function c = relCell(Sm, p)
