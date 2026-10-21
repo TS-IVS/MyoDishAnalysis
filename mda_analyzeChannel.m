@@ -489,6 +489,12 @@ if opts.rockerFilter        %contraction during a rocker movement whose artifact
 end
 
 C.channel = channel;
+C.sensorRate = NaN;                     %inferred from repeated raw values (mda_readMdd, 2026-10-21)
+C.repeatedSamples_percent = NaN;
+if isfield(S, 'sensorRate') && numel(S.sensorRate) >= row
+    C.sensorRate = S.sensorRate(row);
+    C.repeatedSamples_percent = S.repeatedSamples_percent(row);
+end
 C.stimChannel = stimCh;
 C.t = t;
 C.f = f;

@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Periods without signal (signal_gaps) and the watcher outputs _gaps.csv / _channels.csv with a synthetic recording
-(9 channels, 400 Hz, 600 s). Pendant of mda_testSignalGaps.m (same recording and checks).
+(9 channels, 400 Hz, 600 s; channel 6 repeats every value like a sensor board at half the recording rate: inferred
+sensor rate, 2026-10-21). Pendant of mda_testSignalGaps.m (same recording and checks).
 
 TS 2026-10-08
 """
@@ -12,6 +13,7 @@ import os
 import numpy as np
 import pandas as pd
 
+from myodish_analysis.read_mdd import read_mdd
 from myodish_analysis.signal_gaps import signal_gaps
 from myodish_analysis.watch import watch
 
@@ -25,6 +27,7 @@ def write_recording(f):
     x = np.zeros((9, n))
     for c in range(1, 9):
         x[c - 1] = np.round(-10000 + 500 * c + 20 * np.sin(0.7 * k + c) + 13 * np.sin(1.3 * k + 0.5 * c))
+    x[5, 1::2] = x[5, 0::2]  # ch6: every value twice (sensor board at half the recording rate, 2026-10-21)
     x[0, 39920:39960] += 2000  # spike 99.8-99.9 s
     x[0, 64000:] += 300  # other level after putting the chamber back
 
@@ -94,6 +97,11 @@ def test_signal_gaps_and_watcher(tmp_path):
     r = G[G["channel"] == 2]
     assert len(r) == 1 and r["type"].iat[0] == "no signal" and r["fromStart"].iat[0] and r["untilEnd"].iat[0]
     assert len(G) == 16
+    # sensor rate inferred from repeated raw values (2026-10-21): ch6 200 Hz, ch2 no signal, the others 400 Hz
+    Sr = read_mdd(f, 0, T)
+    np.testing.assert_array_equal(Sr.sensorRate, [400, np.nan, 400, 400, 400, 200, 400, 400])
+    rp = np.asarray(Sr.repeatedSamples_percent)
+    assert abs(rp[5] - 50) < 2 and (rp[[0, 2, 3, 4, 6, 7]] < 10).all() and np.isnan(rp[1])
 
     # watcher: sheets gaps, channels of <name>.xlsx (2026-10-14; before _gaps.csv, _channels.csv) in the folder of the
     # recording (name without a number: <name>/, 2026-10-15), summary columns
@@ -113,6 +121,8 @@ def test_signal_gaps_and_watcher(tmp_path):
     s1 = S[S["channel"] == 1]
     assert abs(s1["noSignal_s"].sum() - 79.95) < 1e-6 and s1["nChamberOut"].sum() == 1
     assert "signal gaps: 6 chamber out, 6 board group, 2 controller, 1 saturated" in report
+    assert (S.loc[S["channel"] == 6, "sensorRate_inferred"] == 200).all()
+    assert (S.loc[S["channel"] == 1, "sensorRate_inferred"] == 400).all()
     # slice register: one slice per channel with signal; short chamber-out periods and technical periods belong to it
     R = pd.read_csv(os.path.join(res, "mda_slices.csv"), keep_default_na=False)
     assert len(R) == 7 and 2 not in set(R["channel"]) and "slice register: 7 slices in 1 experiment(s)" in report

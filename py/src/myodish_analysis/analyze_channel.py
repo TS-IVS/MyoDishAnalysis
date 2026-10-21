@@ -481,6 +481,12 @@ def analyze_channel(S, channel, range_=None, opts=None):
 
     C = Struct()
     C.channel = channel
+    C.sensorRate = math.nan  # inferred from repeated raw values (read_mdd, 2026-10-21)
+    C.repeatedSamples_percent = math.nan
+    sr = S.get("sensorRate")
+    if sr is not None and np.size(sr) > row:
+        C.sensorRate = float(np.asarray(sr, float).ravel()[row])
+        C.repeatedSamples_percent = float(np.asarray(S.repeatedSamples_percent, float).ravel()[row])
     C.stimChannel = stimCh
     C.t = t
     C.f = f

@@ -10,7 +10,8 @@ function ok = mda_testSignalGaps()
 % group of 4 within 1 s), ch4 0-50 s (from the start) and 400-410 s at 32767 (saturated), ch7 450 s and ch1 450.05 s
 % (both groups: controller), ch3 from 500 s to the end, ch6 520-540 s with one different sample at 530 s (one
 % period), ch8 570 s and ch4 570.4 s (two chambers taken out with both hands: chamber out), ch2 the whole file (no
-% signal). Pendant of py/tests/test_signal_gaps.py (same recording and checks).
+% signal). Channel 6 repeats every value like a sensor board at half the recording rate (inferred sensor rate,
+% 2026-10-21). Pendant of py/tests/test_signal_gaps.py (same recording and checks).
 %
 % TS 2026-10-08
 
@@ -55,6 +56,10 @@ ok = check(ok, 'one different sample at 530 s: one period 520-540 s', height(r) 
 r = G(G.channel == 2, :);
 ok = check(ok, 'no signal: ch2 whole file', height(r) == 1 && strcmp(r.type{1}, 'no signal') && r.fromStart && r.untilEnd);
 ok = check(ok, 'number of periods (16)', height(G) == 16);
+Sr = mda_readMdd(f, 0, 600);                           %sensor rate inferred from repeated raw values (2026-10-21)
+ok = check(ok, 'sensor rate inferred: ch6 200 Hz (every value twice), ch2 no signal, others 400 Hz', ...
+    isequaln(Sr.sensorRate, [400 NaN 400 400 400 200 400 400]) && abs(Sr.repeatedSamples_percent(6) - 50) < 2 && ...
+    all(Sr.repeatedSamples_percent([1 3:5 7 8]) < 10) && isnan(Sr.repeatedSamples_percent(2)));
 
 % watcher: sheets gaps, channels and summary of <name>.xlsx
 res = fullfile(folder, 'res');
@@ -74,6 +79,8 @@ ok = check(ok, 'watcher: channels status (no slice, removed, beating if contract
 s1 = S(S.channel == 1, :);
 ok = check(ok, 'watcher: summary noSignal_s and nChamberOut', abs(sum(s1.noSignal_s) - 79.95) < 1e-6 && ...
     sum(s1.nChamberOut) == 1 && contains(report, 'signal gaps: 6 chamber out, 6 board group, 2 controller, 1 saturated'));
+ok = check(ok, 'watcher: summary sensorRate_inferred (ch6 200 Hz, ch1 400 Hz)', ...
+    all(S.sensorRate_inferred(S.channel == 6) == 200) && all(S.sensorRate_inferred(S.channel == 1) == 400));
 % slice register: one slice per channel with signal; short chamber-out periods and technical periods belong to it
 R = readCsv(fullfile(res, 'mda_slices.csv'));
 r1 = R(R.channel == 1, :); r3 = R(R.channel == 3, :); r4 = R(R.channel == 4, :);
@@ -110,6 +117,7 @@ x = zeros(nCh, n);
 for c = 1:8
     x(c, :) = round(-10000 + 500 * c + 20 * sin(0.7 * k + c) + 13 * sin(1.3 * k + 0.5 * c));
 end
+x(6, 2:2:end) = x(6, 1:2:end);                         %ch6: every value twice (board at half the recording rate)
 x(1, 39921:39960) = x(1, 39921:39960) + 2000;          %spike 99.8-99.9 s
 x(1, 64001:end) = x(1, 64001:end) + 300;               %other level after putting the chamber back
 hold = @(x, c, a, b, v) setRange(x, c, round(a * fs) + 1, round(b * fs), v);

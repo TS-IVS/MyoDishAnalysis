@@ -58,6 +58,14 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               'Recording' entries; used by MyoDishAnalysisWatch to skip recordings that are still running)
 %   data:       t (1 x n, s; centre of the averaged raw samples, first raw sample = 0 s), dt,
 %               force (numel(dataChannels) x n, uN), rockerOn (1 x n logical),
+%               sensorRate, repeatedSamples_percent (1 x numel(dataChannels), 2026-10-21): sensor rate of each data
+%               channel inferred from repeated raw values in the window read. Boards that measure at half the recording
+%               rate (new boards, MMC5983, at 200 Hz in a 400-Hz recording, firmware V19C) deliver every value twice
+%               (about 50 % repeated samples), boards at the recording rate a few %. Runs of more than 4 identical values
+%               (chamber out, sensor gone, saturation) are left out. sensorRate = samplingRate (< 20 %),
+%               samplingRate / 2 (> 35 %), NaN in between or with less than 1 s of samples. Inferred, not logged.
+%               The timing parameters of a channel at 200 Hz have a resolution of 5 ms, and a sample can be up to one
+%               sensor period older than its row.
 %               stim (struct with fields time, channel, current, currentReached, external, isExtraPulse,
 %               rockerOn; one entry per stimulus pulse of any channel; channel 0 = external trigger pulse)
 %               currentReached (2026-10-20): 1 = the current of the pulse was reached, 0 = not reached, NaN = unknown.
@@ -298,6 +306,12 @@ S.t = ((i0 + (0:n-1) * nDS) + (nDS - 1) / 2) / fs;          %centre of the avera
 % identical to the median used by importMyoDishData)
 nData = numel(S.dataChannels);
 S.force = zeros(nData, n);
+% sensor rate of every data channel, inferred from repeated raw values (2026-10-21; see inferSensorRate)
+S.sensorRate = nan(1, nData);
+S.repeatedSamples_percent = nan(1, nData);
+for c = 1:min(nData, size(raw, 1))
+    [S.sensorRate(c), S.repeatedSamples_percent(c)] = inferSensorRate(raw(c, :), fs);
+end
 S.spikes = zeros(0, 4);                            %channel, from, to (s, time in the file), size (AU)
 Xr = [];
 if spikeRemoval && nRaw > 0
@@ -373,6 +387,28 @@ end
 
 
 % =====================================================================================================
+function [rate, pct] = inferSensorRate(x, fs)
+% sensor rate of a data channel inferred from repeated raw values (2026-10-21). Sensor boards that measure at half the
+% recording rate (MMC5983 at 200 Hz in a 400-Hz recording, firmware V19C) deliver every value twice. Runs of more than 4
+% identical values (chamber out, sensor gone, saturation) are left out. pct: share of the remaining samples that equal
+% the sample before (%; about 50 for such boards, a few % for boards at the recording rate); rate: fs (pct < 20),
+% fs / 2 (pct > 35), NaN in between or with less than 1 s of samples
+rate = NaN; pct = NaN;
+x = double(x(:));
+if numel(x) < 2, return; end
+st = find([true; diff(x) ~= 0]);                                 %start of each run of identical values
+L = diff([st; numel(x) + 1]);                                    %run lengths
+L = L(L <= 4);
+if sum(L) < fs, return; end
+pct = 100 * sum(L - 1) / sum(L);
+if pct < 20
+    rate = fs;
+elseif pct > 35
+    rate = fs / 2;
+end
+end
+
+
 function r = shiftedReached(S, fid, iNext, ch, bit9, isExtra)
 % current reached of every pulse (1 / 0 / NaN, see the help): result of a base pulse = bit 9 of the next base pulse of
 % the same channel; for the last base pulse of a channel in the window the next one is searched in the file from raw

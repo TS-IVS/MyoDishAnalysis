@@ -379,7 +379,8 @@ Own additional fields are kept as extra columns.
   (counts incl. nExtraBeats, nMissedBeats, extraBeats_percent, missedBeats_percent, nUncertain,
   nStimulatedUncertain, nExtraBeatsUncertain, nMissedBeatsUncertain, nMissedDuringContraction, nExtraPulses,
   nElicitedByExtraPulse, nAmbiguous; stimFrequency, stimVariability_percent, arrhythmicFraction, pacedSeconds,
-  arrhythmicPacing (see "Arrhythmic pacing"); mean, SD and n of all parameters of the included contractions). Column
+  arrhythmicPacing (see "Arrhythmic pacing"); sensorRate_inferred, repeatedSamples_percent (see "Sensor rate"); mean,
+  SD and n of all parameters of the included contractions). Column
   `uncertain` of `contractions`: contraction found with high sensitivity only (option `'detection'`, see "Signal
   processing and detection"). `info.pulses` (sheet / file **pulses**, option `'pulseTable'`, default on): one row per
   stimulus pulse (see "Stimulus assignment").
@@ -1086,6 +1087,17 @@ channel 10k + c = extra pulse #k of channel c).
   used. Before 2026-10-20 every pulse got its own bit 9, i.e. the result of the pulse before it. In single channel
   mode the firmware reports failures of channel 1 only in some configurations, so `currentReached` = 1 is not
   certain there.
+* **Sensor rate** (2026-10-21): the new sensor boards (MMC5983) measure at 200 Hz, and the controller (firmware V19C)
+  sends their value in every 2.5-ms row of a 400-Hz recording, so each value appears twice; the old boards (FXOS8700)
+  deliver a new value in every row. The log does not say which board a channel has. `mda_readMdd` / `read_mdd`
+  therefore infer it from the raw data of the window read: `repeatedSamples_percent` = share of samples equal to the
+  sample before (runs of more than 4 identical values, i.e. chamber out, sensor gone or saturation, left out; about
+  50 % for new boards, 1–8 % for old boards in lab recordings of 2026-10), `sensorRate` = sampling rate (< 20 %), half
+  the sampling rate (> 35 %) or NaN (in between, or less than 1 s of samples). Both are columns of the summary
+  (`sensorRate_inferred`, `repeatedSamples_percent`). On a channel at 200 Hz the timing parameters (stimToOnset,
+  TTP, TTR50/90, CD50 …) have a resolution of 5 ms, and a sample can be up to 5 ms older than its row; compare such
+  values only between channels and windows of the same rate. Later software versions log the rate of every port;
+  MDA will then read it from the log.
 * `'stimAssignment','peak'`: as in versions ≤ 1.0.0-beta.3 (peak `minStimToPeak` … min(stimulus interval, 1 s) after
   a pulse, the most prominent peak after it; extra pulses count as regular pulses). Results files of these versions
   are opened with `'peak'` (`mda_readResults`).

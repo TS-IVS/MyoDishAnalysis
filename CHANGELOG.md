@@ -57,6 +57,11 @@ MATLAB and Python versions have the same version number and give the same result
   keeps the time of last change of the recording, shifted by the same number of days.
 
 ### Added
+- **Sensor rate per channel, inferred** (summary columns `sensorRate_inferred`, `repeatedSamples_percent`;
+  `S.sensorRate`, `S.repeatedSamples_percent` of `mda_readMdd` / `read_mdd`). The new sensor boards measure at 200 Hz
+  in a 400-Hz recording, so every value appears twice; the log does not say which board a channel has. MDA infers
+  the rate from the share of repeated raw values (about 50 % against 1–8 % for the old boards in lab recordings of
+  2026-10). Timing parameters of such channels have a resolution of 5 ms. No other results change.
 - **Protocol keywords `post pause` and `pause potentiation`** (type PRP, e.g. `Start post-pause-potentiation` of an
   older standard schedule that several labs use). Before, such a protocol was not recognized at all (no keyword).
   None of the 16,488 recordings of 2020–2026 on the lab disk has such a comment.

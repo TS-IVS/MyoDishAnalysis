@@ -45,6 +45,13 @@ OUTPUT (S, a Struct with the field names of the MATLAB version)
               extendedSensorFactor, rockerSource ('status channel' or 'log'), rockerLogIntervals ([from to] in s
               with rocker speed > 0 according to the log file)
   data:       t (s; centre of the averaged raw samples, first raw sample = 0 s), dt, force (nData x n, uN),
+              sensorRate, repeatedSamples_percent (nData; 2026-10-21): sensor rate of each data channel inferred
+              from repeated raw values in the window read. Boards that measure at half the recording rate (new boards,
+              MMC5983, at 200 Hz in a 400-Hz recording, firmware V19C) deliver every value twice (about 50 % repeated
+              samples), boards at the recording rate a few %. Runs of more than 4 identical values (chamber out, sensor
+              gone, saturation) are left out. sensorRate = samplingRate (< 20 %), samplingRate / 2 (> 35 %), NaN in
+              between or with less than 1 s of samples. Inferred, not logged. The timing parameters of a channel at
+              200 Hz have a resolution of 5 ms, and a sample can be up to one sensor period older than its row.
               rockerOn (bool, n), stim (Struct of arrays: time, channel, current, currentReached, external,
               isExtraPulse, rockerOn; one entry per stimulus pulse of any channel)
               currentReached (2026-10-20): 1 = the current of the pulse was reached, 0 = not reached, NaN = unknown.
@@ -307,6 +314,11 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False, opts
     # identical to the median used by importMyoDishData)
     nData = len(S.dataChannels)
     S.force = np.zeros((nData, 0 if stim_only else n))
+    # sensor rate of every data channel, inferred from repeated raw values (2026-10-21; see infer_sensor_rate)
+    S.sensorRate = np.full(nData, np.nan)
+    S.repeatedSamples_percent = np.full(nData, np.nan)
+    for c in range(0 if stim_only else min(nData, raw.shape[0])):
+        S.sensorRate[c], S.repeatedSamples_percent[c] = infer_sensor_rate(raw[c], fs)
     S.spikes = np.zeros((0, 4))  # channel, from, to (s, time in the file), size (AU)
     Xr = None
     if spike_removal and not stim_only and nRaw > 0:
@@ -369,6 +381,26 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False, opts
         S.rockerOn = state.reshape(n, nDS).any(axis=1)
         S.stim.rockerOn = state[np.round(S.stim.time * fs).astype(int) - i0]
     return S
+
+
+def infer_sensor_rate(x, fs):
+    """sensor rate of a data channel inferred from repeated raw values (2026-10-21). Sensor boards that measure at half
+    the recording rate (MMC5983 at 200 Hz in a 400-Hz recording, firmware V19C) deliver every value twice. Runs of more
+    than 4 identical values (chamber out, sensor gone, saturation) are left out. Returns (rate, pct): pct = share of the
+    remaining samples that equal the sample before (%; about 50 for such boards, a few % for boards at the recording
+    rate); rate = fs (pct < 20), fs / 2 (pct > 35), NaN in between or with less than 1 s of samples. MATLAB:
+    inferSensorRate in mda_readMdd.m."""
+    x = np.asarray(x, float).ravel()
+    if x.size < 2:
+        return math.nan, math.nan
+    st = np.flatnonzero(np.r_[True, np.diff(x) != 0])  # start of each run of identical values
+    L = np.diff(np.r_[st, x.size])  # run lengths
+    L = L[L <= 4]
+    if L.sum() < fs:
+        return math.nan, math.nan
+    pct = 100.0 * float((L - 1).sum()) / float(L.sum())
+    rate = float(fs) if pct < 20 else (float(fs) / 2 if pct > 35 else math.nan)
+    return rate, pct
 
 
 def shifted_reached(S, i_next, ch, bit9, is_extra):

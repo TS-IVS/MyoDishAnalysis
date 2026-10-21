@@ -22,7 +22,9 @@ function T = mda_summarize(B, C, range, opts, exclude)
 % intervals in windows of arrhythmicWindow, %), arrhythmicFraction (fraction of the paced time in windows whose CV
 % exceeds arrhythmicMinVariability), pacedSeconds (paced time of these windows: >= 5 intervals, no overlap with
 % exclude; 2026-10-13; MyoDishAnalysis adds arrhythmicPacing),
-% detectionThreshold (uN), zeroForce (uN, zero of diastolicForce), then <parameter>_mean, <parameter>_SD and
+% detectionThreshold (uN), zeroForce (uN, zero of diastolicForce), sensorRate_inferred (Hz) and repeatedSamples_percent
+% (sensor rate of the channel inferred from repeated raw values in the window read, see mda_readMdd; 2026-10-21),
+% then <parameter>_mean, <parameter>_SD and
 % <parameter>_n (number of included contractions with a value of this parameter, 2026-10-05) for every parameter;
 % amplitude_CV after amplitude_n (population SD / mean of the included amplitudes, NaN with < 2; 2026-10-10).
 % With a reference beat (option referenceBeat): <parameter>_pctRef_mean / _SD (% of the reference) and
@@ -93,6 +95,10 @@ T = addvars(T, nDur, nXP, nEl, nAmb, 'After', 'nMissedBeatsUncertain', 'NewVaria
     optionOr(opts, 'arrhythmicMinVariability', 0.1), exclude);
 T = addvars(T, vCV, vFrac, vDur, 'After', 'stimFrequency', 'NewVariableNames', ...
     {'stimVariability_percent', 'arrhythmicFraction', 'pacedSeconds'});
+% 2026-10-21: sensor rate of the channel inferred from repeated raw values (mda_readMdd)
+sr = nan; rp = nan;
+if isfield(C, 'sensorRate'), sr = C.sensorRate; rp = C.repeatedSamples_percent; end
+T = addvars(T, sr, rp, 'After', 'zeroForce', 'NewVariableNames', {'sensorRate_inferred', 'repeatedSamples_percent'});
 for k = 1:numel(params)
     v = B.(params{k})(I);
     T.([params{k} '_mean']) = mean(v, 'omitnan');

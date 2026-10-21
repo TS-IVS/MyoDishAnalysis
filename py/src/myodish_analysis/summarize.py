@@ -22,7 +22,9 @@ another pulse), nExtraPulses (status channel bit 16), nElicitedByExtraPulse, nAm
 (Hz, from the median stimulus interval in the range), stimVariability_percent (median CV of the stimulus intervals in
 windows of arrhythmicWindow, %), arrhythmicFraction (fraction of the paced time in windows whose CV exceeds
 arrhythmicMinVariability), pacedSeconds (paced time of these windows: >= 5 intervals, no overlap with exclude =
-[from to] of the stimulation protocols; 2026-10-13; analysis adds arrhythmicPacing), detectionThreshold (uN), zeroForce (uN), then <parameter>_mean,
+[from to] of the stimulation protocols; 2026-10-13; analysis adds arrhythmicPacing), detectionThreshold (uN), zeroForce
+(uN), sensorRate_inferred (Hz) and repeatedSamples_percent (sensor rate of the channel inferred from repeated raw values
+in the window read, see read_mdd; 2026-10-21), then <parameter>_mean,
 <parameter>_SD and <parameter>_n for every parameter; amplitude_CV after amplitude_n (population SD / mean of the
 included amplitudes, NaN with < 2; 2026-10-10);
 with a reference beat <parameter>_pctRef / _dRef _mean / _SD; with AP columns (analyze_ap) _mean / _SD / _n.
@@ -140,6 +142,9 @@ def summarize(B, C, range_, opts=None, exclude=None):
         ST[J], R, opts.get("arrhythmicWindow", 60.0), opts.get("arrhythmicMinVariability", 0.1), exclude)
     row["detectionThreshold"] = C.threshold
     row["zeroForce"] = zeroF
+    # 2026-10-21: sensor rate of the channel inferred from repeated raw values (read_mdd)
+    row["sensorRate_inferred"] = float(C.get("sensorRate", math.nan))
+    row["repeatedSamples_percent"] = float(C.get("repeatedSamples_percent", math.nan))
     for p in params:
         v = B[p].to_numpy(dtype=float)[I]
         row[p + "_mean"] = nanmean(v)
