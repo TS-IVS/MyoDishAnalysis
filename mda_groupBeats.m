@@ -56,7 +56,9 @@ function [B, G, Z, notes] = mda_groupBeats(H, B, C, range, by, opts, steadyN)
 %          its peak; rockerSpeed: rocker speed at the peak). Extra pulses (status channel bit 16) are no stimuli of
 %          the protocol; an extra pulse belongs to the group of the nearest regular pulse.
 %   G      one row per group (order: role, value): group, groupValue, groupRole, groupStep, groupBy, then the columns of
-%          mda_summarize for the contractions and stimuli of the group, capture_percent (stimuli followed by a
+%          mda_summarize for the contractions and stimuli of the group, S2response_pct and separatePeak_percent
+%          (S2 groups, filled by MyoDishAnalysis from the S2 response of mda_protocolResults: median response in % of
+%          the S1 amplitude, % of the S2 with a separate peak; 2026-10-21), capture_percent (stimuli followed by a
 %          contraction), currentReached_percent (stimuli with the set current reached; stimuli with an unknown result,
 %          e.g. the last one of the file, left out, see mda_readMdd) and amplitude_pctOfRef
 %          (mean amplitude in % of the group 'S1' / 'steady'; NaN for the other quantities). stimFrequency of a group =
@@ -369,7 +371,8 @@ for q = 1:numel(keys)
     if ~any(js), T.stimFrequency = nan; end
     capt = nan; reach = nan;
     if any(js), capt = 100 * mean(captured(js)); reach = 100 * mean(reached(js), 'omitnan'); end   %NaN: unknown
-    T = addvars(T, capt, reach, 'After', 'missedBeats_percent', 'NewVariableNames', {'capture_percent', 'currentReached_percent'});
+    T = addvars(T, capt, reach, nan, nan, 'After', 'missedBeats_percent', ...
+        'NewVariableNames', {'capture_percent', 'currentReached_percent', 'S2response_pct', 'separatePeak_percent'});   %S2 groups: filled by MyoDishAnalysis (2026-10-21)
     T = [table(keys(q), kv(q), roleOrder(kr(q)), ks(q), {by}, 'VariableNames', {'group','groupValue','groupRole','groupStep','groupBy'}), T]; %#ok<AGROW>
     parts{q} = T;
 end

@@ -187,6 +187,7 @@ def analyze_channel(S, channel, range_=None, opts=None):
     if not isinstance(opts.threshold, str) and np.size(opts.threshold) > 1:
         raise ValueError("analyze_channel: one threshold per channel (several channels: myodish_analysis).")
     nArt = 0  # peaks removed as rocker artifacts
+    nLocked = 0  # small stimulus-locked peaks below the threshold kept (option lockedThreshold)
     keepLow = np.zeros(prom.size, bool)  # small peaks below a raised threshold that are kept (locked to a stimulus)
     drop = np.zeros(prom.size, bool)  # peaks removed by the rocker / noise level
     noBeats = False  # no contractions (peaks at the rocker / noise level)
@@ -212,6 +213,24 @@ def analyze_channel(S, channel, range_=None, opts=None):
                 drop, noBeats = rocker_noise_rule(t[cand], prom, thr, keepLow, typAmp, ST, noiseLvl, rockerOn[cand],
                                                   np.count_nonzero(rockerOn) * dt, fR, STall, opts)
                 nArt += int(np.count_nonzero(drop))
+        # small stimulus-locked peaks with the rocker at rest (option lockedThreshold, 2026-10-21): peaks below the
+        # threshold are contractions if they are locked to a stimulus, the rocker is at rest and they are >=
+        # lockedThreshold x the typical amplitude and >= lockedNoiseRel x the median rise before the stimuli (e.g.
+        # the small response to a premature S2 near the refractory period, 9 % of S1 in a rat slice)
+        if (float(opts.get("lockedThreshold", 0)) > 0 and ST.size >= opts.pacedMinStimuli and not math.isnan(typAmp)
+                and not math.isnan(noiseMed)):
+            rockerOn = np.asarray(S.rockerOn, bool).ravel()
+            lowThr = max(float(opts.lockedThreshold) * typAmp, float(opts.get("lockedNoiseRel", 3)) * noiseMed)
+            if lowThr < thr:
+                lat = _stim_latency(t[cand], STall)
+                o = np.argsort(-prom, kind="stable")
+                top = o[:min(o.size, ST.size)]
+                hw = min(opts.lockWindow, opts.lockWindowRel * CL) if not math.isnan(CL) else opts.lockWindow
+                lk = latency_lock(lat, top, hw)
+                with np.errstate(invalid="ignore"):
+                    lowKeep = (prom < thr) & (prom >= lowThr) & lk & ~rockerOn[cand] & ~drop
+                nLocked = int(np.count_nonzero(lowKeep))
+                keepLow |= lowKeep
     keep = ((prom >= thr) | keepLow) & ~drop
     cand = cand[keep]
     prom = prom[keep]
@@ -496,6 +515,7 @@ def analyze_channel(S, channel, range_=None, opts=None):
     C.thresholdMode = thrMode
     C.typicalAmplitude = typAmp
     C.thresholdArtifacts = nArt
+    C.lockedLowPeaks = nLocked
     C.noContractions = bool(noBeats)
     C.noiseLevel = noiseLvl
     C.noiseMedian = noiseMed

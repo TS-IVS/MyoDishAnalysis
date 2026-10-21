@@ -148,6 +148,37 @@ def test_analyze_channel_units_and_columns(synthetic_beats):
     assert np.all(np.abs(B["amplitude"] - 1000) < 100)
 
 
+def test_locked_threshold_small_locked_peaks():
+    # 2026-10-21 (as lockedThresholdTest of mda_test.m): 1-Hz pacing, large contractions 1000 uN after 3 of 4 stimuli
+    # and a small one (60 uN, same latency) after every 4th; a small unlocked peak (60 uN, 0.5 s after a stimulus)
+    # and a small locked one while the rocker moves. Auto threshold ~290 uN: the small peaks are not contractions.
+    # Option lockedThreshold 0.05 (>= 50 uN and >= 3 x the median rise before the stimuli): the small locked peaks
+    # with the rocker at rest are contractions (the small response to a premature S2 near the refractory period, a
+    # 2:1 alternans at high rates), the unlocked one and the one with the rocker moving are not
+    rng = np.random.default_rng(11)
+    dt = 0.005
+    t = M.colon(0, dt, 41)
+    onset = np.arange(1, 40, dtype=float)
+    amp = np.where(np.arange(onset.size) % 4 == 3, 60.0, 1000.0)
+    F = synthetic_signal(t, onset, amp=amp, noise=2 * rng.standard_normal(t.size))
+    F += synthetic_signal(t, np.array([10.6]), amp=np.array([60.0]), rel=np.array([0.1])) - 100  # unlocked, 10.6 s
+    on = np.zeros(t.size, bool)
+    on[(t >= 30.5) & (t <= 32.5)] = True  # rocker moving around the small beat at 31 s (onset 32 is the 32nd)
+    S = _S(t, F, onset, on=on)
+    S.rockerOn = on
+    B0, C0 = mda.analyze_channel(S, 1, [0.5, 40.5], mda.options(zeroForce=40))
+    B1, C1 = mda.analyze_channel(S, 1, [0.5, 40.5], mda.options(zeroForce=40, lockedThreshold=0.05))
+    small = np.flatnonzero(amp == 60) + 1  # onsets 4, 8, ..., 36 (the 4th, 8th, ... stimulus)
+    assert len(B0) == 39 - small.size and C0.lockedLowPeaks == 0
+    assert C1.threshold == C0.threshold and C1.lockedLowPeaks == small.size - 1  # 31 s: rocker moving
+    assert len(B1) == len(B0) + small.size - 1
+    tp = B1["t_peak"].to_numpy(float)
+    assert not np.any(np.abs(tp - 10.8) < 0.1) and not np.any(np.abs(tp - 32.2) < 0.1)
+    assert np.all(np.abs(B1["stimToPeak"].to_numpy(float) - 0.3) < 0.02)
+    assert np.all(np.abs(np.sort(B1.loc[B1["amplitude"] < 200, "t_peak"].to_numpy(float)) -
+                         (np.array([x for x in small if x != 32]) + 0.2)) < 0.02)
+
+
 def test_reference_beat_mat_round_trip(tmp_path, synthetic_beats):
     S, B, C = synthetic_beats
     R = rb.create(C, B, np.arange(2, 20))

@@ -60,6 +60,17 @@ Sr = mda_readMdd(f, 0, 600);                           %sensor rate inferred fro
 ok = check(ok, 'sensor rate inferred: ch6 200 Hz (every value twice), ch2 no signal, others 400 Hz', ...
     isequaln(Sr.sensorRate, [400 NaN 400 400 400 200 400 400]) && abs(Sr.repeatedSamples_percent(6) - 50) < 2 && ...
     all(Sr.repeatedSamples_percent([1 3:5 7 8]) < 10) && isnan(Sr.repeatedSamples_percent(2)));
+% half-rate interpolation (2026-10-21): the pairs of ch6 are replaced by the interpolation between the first samples of
+% the pairs (option 'halfRateInterpolation', default on); read at 400 Hz (downsampling 1) to see the raw grid
+S1 = mda_readMdd(f, 0, 90, mda_options('downsampling', 1));
+S0 = mda_readMdd(f, 0, 90, mda_options('downsampling', 1, 'halfRateInterpolation', false));
+rep = @(y) mean(diff(y) == 0);
+ok = check(ok, 'half-rate interpolation: ch6 pairs replaced (first sample kept, midpoints), ch1 unchanged, option off', ...
+    isequal(S1.halfRateInterpolated, [false(1, 5) true false(1, 2)]) && ~any(S0.halfRateInterpolated) && ...
+    rep(S0.force(6,:)) > 0.45 && rep(S1.force(6,:)) < 0.1 && rep(S1.force(1,:)) < 0.1 && ...
+    max(abs(S1.force(6, [true, diff(S0.force(6,:)) ~= 0]) - S0.force(6, [true, diff(S0.force(6,:)) ~= 0]))) < 1e-9 && ...
+    pairMidpoints(S0.force(6,:), S1.force(6,:)) && ...
+    isequal(S1.force(1,:), S0.force(1,:)));
 
 % watcher: sheets gaps, channels and summary of <name>.xlsx
 res = fullfile(folder, 'res');
@@ -158,4 +169,15 @@ end
 
 function s = passStr(pass)
 if pass, s = 'ok'; else, s = 'FAILED'; end
+end
+
+
+function tf = pairMidpoints(y0, y1)
+% the second sample of every pair of identical values (run of 2 with a next run) is the midpoint between the first
+% samples of this and the next run (half-rate interpolation, 2026-10-21); two equal pairs form one run of 4
+st = find([true, diff(y0) ~= 0]);
+L = diff([st, numel(y0) + 1]);
+k = find(L(1:end-1) == 2);
+a = y0(st(k)); b = y0(st(k + 1)); v = y1(st(k) + 1);
+tf = numel(k) > 0.9 * numel(st) && max(abs(v - (a + b) / 2)) < 1e-9;
 end

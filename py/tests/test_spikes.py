@@ -96,17 +96,20 @@ def test_read_mdd_spike_removal(tmp_path):
     with open(f[:-4] + "_log.log", "w") as fh:
         fh.write("\n".join(lines) + "\n")
     H = mda.read_mdd(f)
-    S = mda.read_mdd(H, 0, 20)
-    assert S.spikes.shape == (6, 4)
+    # the quiet synthetic step channel 3 (integer noise) repeats 54 % of its values and would count as a half-rate
+    # channel (2026-10-21): the interpolation would move the start of its spike by one sample, so it is off here
+    hr = dict(halfRateInterpolation=False)
+    S = mda.read_mdd(H, 0, 20, mda.options(**hr))
+    assert S.sensorRate[2] == 200 and S.spikes.shape == (6, 4)
     np.testing.assert_array_equal(S.spikes[:, 0], [1, 2, 1, 3, 1, 2])
     np.testing.assert_allclose(S.spikes[:, 1], np.array([920, 1324, 1840, 4000, 6400, 6401]) / FS)
-    S0 = mda.read_mdd(H, 0, 20, mda.options(spikeRemoval=False))
+    S0 = mda.read_mdd(H, 0, 20, mda.options(spikeRemoval=False, **hr))
     assert S0.spikes.shape[0] == 0
     np.testing.assert_allclose(S0.force[0], (X[0, 0::2] + X[0, 1::2]) / 2)  # raw: unchanged
-    C, _, info = mda.myodish_analysis(f, [1, 2, 3], 0, 20, quiet=True)
+    C, _, info = mda.myodish_analysis(f, [1, 2, 3], 0, 20, quiet=True, **hr)
     assert "Spike artifacts removed (option spikeRemoval): 6 (channel 1: 3, channel 2: 2, channel 3: 1), largest " \
         "24997 AU." in info["notes"]
-    C0, _, _ = mda.myodish_analysis(f, [1, 2, 3], 0, 20, quiet=True, spikeRemoval=False)
+    C0, _, _ = mda.myodish_analysis(f, [1, 2, 3], 0, 20, quiet=True, spikeRemoval=False, **hr)
     a3, a03 = C.loc[C["channel"] == 3, "amplitude"], C0.loc[C0["channel"] == 3, "amplitude"]
     assert a03.max() > 20000 and a3.max() < 5000  # the spike of the chamber put in is no 'contraction' any more
     assert (C["channel"] == 1).sum() == (C0["channel"] == 1).sum() == 20  # short spikes: median filter anyway

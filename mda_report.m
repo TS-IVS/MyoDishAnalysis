@@ -8,7 +8,10 @@ function varargout = mda_report(varargin)
 %                                       first page (overview image of an experiment)
 %   R = mda_report('analysis', pdfFile, mddFile, C, S, info, resultsFile, fl)   report of one analysis (MyoDishAnalysis,
 %                                       GUI); the GUI commands open resultsFile (or the recording if it is empty)
-%   R = mda_report('flags', S, C, status, fl)   flags per channel (table), no PDF
+%   R = mda_report('flags', S, C, status, fl, E)   flags per channel (table), no PDF; E (optional, 2026-10-21): events
+%                                       table of the recording (mda_logEntries / <name>_events.csv): red flag R
+%                                       'controller restart suspected' (warning of the control software 2.2, code
+%                                       warning: after it the controller may have run with its power-on settings)
 %   f = mda_report('path', outputFile, report)  file of the report of an analysis: report [] / true / 'on' ->
 %                                       <outputFile without extension>_report.pdf ('' without outputFile), false /
 %                                       'off' -> '', a file name -> this file
@@ -91,8 +94,8 @@ if ischar(varargin{1}) || isstring(varargin{1})
         case 'defaults'
             varargout{1} = defaults();
         case 'flags'
-            a = [varargin(2:end), cell(1, 4)];
-            varargout{1} = reportFlags(a{1}, a{2}, a{3}, flagsOf(a{4}));
+            a = [varargin(2:end), cell(1, 5)];
+            varargout{1} = reportFlags(a{1}, a{2}, a{3}, flagsOf(a{4}), a{5});
         case 'window'
             [varargout{1}, varargout{2}] = reportWindow(varargin{2:5});
         case 'commands'
@@ -135,6 +138,22 @@ end
 function fl = defaults()
 fl = struct('uncertain', 25, 'irregular', 15, 'artifactShare', 5, 'artifactRatio', 3, 'extra', 10, 'capture', 90, ...
     'amplitudeChange', 30, 'amplitude', 75, 'amplitudeCV', 30, 'delay', 0.15, 'minBeats', 50, 'stimFrequency', 10);
+end
+
+
+function s = restartWarnings(E)
+% 'controller restart suspected ...' from the events table E of a recording (lines of code warning whose text starts
+% with 'Controller restart suspected', control software 2.2, F-90): '' if none, otherwise the description of the red
+% flag R (number and time of the first one, s in the file), 2026-10-21
+s = '';
+if isempty(E) || ~istable(E) || ~all(ismember({'code', 'text'}, E.Properties.VariableNames)), return; end
+k = find(strcmpi(cellstr(string(E.code)), 'warning') & startsWith(lower(cellstr(string(E.text))), 'controller restart suspected'));
+if isempty(k), return; end
+t = nan;
+if ismember('t_file', E.Properties.VariableNames), t = double(E.t_file(k(1))); end
+if isnan(t), s = sprintf('controller restart suspected (%d)', numel(k));
+else, s = sprintf('controller restart suspected (%d, first at %.0f s)', numel(k), t);
+end
 end
 
 
@@ -229,8 +248,10 @@ if ismember('label', R.Properties.VariableNames) && ~isempty(R.label{r}), s = ['
 end
 
 
-function R = reportFlags(S, C, status, fl)
+function R = reportFlags(S, C, status, fl, E)
 % one row per channel: counts, values and flags (flags = codes, red / yellow = descriptions)
+if nargin < 5, E = []; end
+restart = restartWarnings(E);                       %controller restart suspected (red flag R, 2026-10-21)
 chans = [];
 if ~isempty(S) && height(S) > 0, chans = double(S.channel(:)); end
 st = containers.Map('KeyType', 'double', 'ValueType', 'any');
@@ -349,6 +370,9 @@ for k = 1:n
         end
         if R.stimFrequency_Hz(k) > fl.stimFrequency
             red{end+1} = sprintf('stimulus frequency %.0f Hz', R.stimFrequency_Hz(k)); codes(end+1) = 'F'; %#ok<AGROW>
+        end
+        if ~isempty(restart)
+            red{end+1} = restart; codes(end+1) = 'R'; %#ok<AGROW>
         end
         if R.capture_percent(k) < fl.capture && ~arr
             yel{end+1} = sprintf('capture %.0f %%', R.capture_percent(k)); ycodes(end+1) = 'C'; %#ok<AGROW>
@@ -509,7 +533,7 @@ for i = 1:nR
 end
 if nR, Rall = vertcat(Rs{:}); else, Rall = reportFlags([], [], [], fl); end
 isCheck = cellfun(@(R) any(strcmp(R.level, 'check')), Rs);
-nRed = cellfun(@(R) sum(cellfun(@(x) sum(ismember(x, 'INSDF')), R.flags(strcmp(R.level, 'check')))), Rs);
+nRed = cellfun(@(R) sum(cellfun(@(x) sum(ismember(x, 'INSDFR')), R.flags(strcmp(R.level, 'check')))), Rs);
 maxNI = cellfun(@(R) max([0; R.noiseIndex(strcmp(R.level, 'check') & ~isnan(R.noiseIndex))]), Rs);
 check = find(isCheck | arrayfun(@(r) ~isempty(r.notes), recs(:)));
 det = find(isCheck);
@@ -689,6 +713,8 @@ L = {'', ['Each cell: capture (% of the stimuli followed by a contraction; ~ arr
     '#f8c9c4', sprintf(['Red = check the analysis:  I inverted signal,  N noise (uncertain %s %g %%, ' ...
         'extra+missed %s %g %%),  S large extra beats (> %g x paced),  D delay > %g ms,  F pacing > %g Hz'], ...
         char(8805), fl.uncertain, char(8805), fl.irregular, fl.artifactRatio, 1000 * fl.delay, fl.stimFrequency)
+    '#f8c9c4', ['R controller restart suspected (warning of the control software: after it the controller may have ' ...
+        'run with its power-on settings instead of those in the log)']
     '#fbe8a6', sprintf(['Yellow = slice quality:  C capture < %g %%,  X extra beats > %g %%,  A amplitude < %g %sN,  ' ...
         'T amplitude changes by > %g %% during the recording,  V amplitude CV > %g %%'], fl.capture, fl.extra, ...
         fl.amplitude, mu, fl.amplitudeChange, fl.amplitudeCV)

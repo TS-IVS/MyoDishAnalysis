@@ -64,8 +64,11 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               (about 50 % repeated samples), boards at the recording rate a few %. Runs of more than 4 identical values
 %               (chamber out, sensor gone, saturation) are left out. sensorRate = samplingRate (< 20 %),
 %               samplingRate / 2 (> 35 %), NaN in between or with less than 1 s of samples. Inferred, not logged.
-%               The timing parameters of a channel at 200 Hz have a resolution of 5 ms, and a sample can be up to one
-%               sensor period older than its row.
+%               The timing parameters of a channel at 200 Hz have a resolution of 5 ms. halfRateInterpolated
+%               (1 x nData, logical): channels at samplingRate / 2 whose repeated values were replaced by a linear
+%               interpolation between the first samples of each run (the measurement times; option
+%               'halfRateInterpolation', default true; 2026-10-21), so that the timing does not depend on the phase of
+%               the pairs (before: up to 2.5 ms).
 %               stim (struct with fields time, channel, current, currentReached, external, isExtraPulse,
 %               rockerOn; one entry per stimulus pulse of any channel; channel 0 = external trigger pulse)
 %               currentReached (2026-10-20): 1 = the current of the pulse was reached, 0 = not reached, NaN = unknown.
@@ -312,17 +315,29 @@ S.repeatedSamples_percent = nan(1, nData);
 for c = 1:min(nData, size(raw, 1))
     [S.sensorRate(c), S.repeatedSamples_percent(c)] = inferSensorRate(raw(c, :), fs);
 end
+% channels at half the recording rate (sensor rate fs / 2, unambiguous): the repeated values are replaced by a linear
+% interpolation between the first samples of each run (the measurement times), option 'halfRateInterpolation'
+% (2026-10-21); the rows of runs longer than 4 samples (held values, chamber out) stay
+S.halfRateInterpolated = false(1, nData);
+rawD = raw(1:min(nData, size(raw, 1)), :);          %data channels (int16; double with the interpolation)
+if (~isfield(opts, 'halfRateInterpolation') || opts.halfRateInterpolation) && any(S.sensorRate == fs / 2)
+    rawD = double(rawD);
+    for c = find(S.sensorRate == fs / 2)
+        rawD(c, :) = halfRateInterpolation(rawD(c, :));
+        S.halfRateInterpolated(c) = true;
+    end
+end
 S.spikes = zeros(0, 4);                            %channel, from, to (s, time in the file), size (AU)
 Xr = [];
 if spikeRemoval && nRaw > 0
-    [Xr, sp] = mda_removeSpikes(raw(1:nData, :), fs, opts);
+    [Xr, sp] = mda_removeSpikes(rawD, fs, opts);
     if ~isempty(sp)
         dc = S.dataChannels(:);
         S.spikes = [dc(sp(:,1)), (i0 + sp(:,2) - 1) / fs, (i0 + sp(:,3) - 1) / fs, sp(:,4)];
     end
 end
 for c = 1:nData
-    if isempty(Xr), x = double(raw(c,:)); else, x = Xr(c,:); end
+    if isempty(Xr), x = double(rawD(c,:)); else, x = Xr(c,:); end
     if nDS == 2
         x = (x(1:2:end) + x(2:2:end)) / 2;
     elseif nDS > 2
@@ -387,6 +402,24 @@ end
 
 
 % =====================================================================================================
+function y = halfRateInterpolation(x)
+% a channel whose sensor measures at half the recording rate delivers every value twice (runs of 2 identical values;
+% 1 or 3 where the two clocks drift apart): the samples of every run of at most 4 values are replaced by a linear
+% interpolation from the first sample of the run (the measurement time) to the first sample of the next run, so that
+% the pairs no longer depend on the phase of the sampling; runs longer than 4 values (held values, chamber out) and the
+% last run stay. x: raw values of the channel (row), 2026-10-21 (Python: half_rate_interpolation in read_mdd.py)
+y = double(x);
+if numel(y) < 3, return; end
+st = find([true, diff(y) ~= 0]);
+L = diff([st, numel(y) + 1]);
+k = find(L <= 4 & (1:numel(st)) < numel(st));                    %runs with a next run
+for q = k
+    a = y(st(q)); b = y(st(q+1)); n = L(q);
+    y(st(q):st(q) + n - 1) = a + (b - a) * (0:n-1) / n;
+end
+end
+
+
 function [rate, pct] = inferSensorRate(x, fs)
 % sensor rate of a data channel inferred from repeated raw values (2026-10-21). Sensor boards that measure at half the
 % recording rate (MMC5983 at 200 Hz in a 400-Hz recording, firmware V19C) deliver every value twice. Runs of more than 4

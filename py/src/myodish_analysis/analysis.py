@@ -73,7 +73,7 @@ from .analyze_channel import analyze_channel
 from .labels import labels as make_labels
 from .options import options as make_options
 from .protocol_results import RESULT_COLUMNS, protocol_results
-from .protocols import add_empty_group_columns, find_protocols, group_beats
+from .protocols import add_empty_group_columns, fill_s2_group_columns, find_protocols, group_beats
 from .read_mdd import read_mdd
 from .report import analysis_report, report_path
 from .rocker_filter import rocker_filter
@@ -310,6 +310,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
                             _, Cx = analyze_channel(Sres, ch, ranges[r], optsC)
                             trace = dict(t=Cx.t, f=Cx.f, tR=Sres.t, rockerOn=Sres.rockerOn)
                         Rr = protocol_results(groupByR[r], T, Z, trace, opts)
+                        T = fill_s2_group_columns(T, Rr.pop("_s2groups", None))
                         pNote = str(protocols["note"].iloc[r]) if protocols is not None and "note" in protocols else ""
                         resRows.append(dict({"range": labels[r], "channel": ch, "from": float(ranges[r, 0]),
                                              "to": float(ranges[r, 1]), "groupBy": groupByR[r]}, **Rr,

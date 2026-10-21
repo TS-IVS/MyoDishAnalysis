@@ -175,8 +175,18 @@ def test_report_label_and_amplitude_change():
             "nExtraBeats": 0, "nUncertain": 0, "nContractions": n, "amplitude_mean": a, "amplitude_CV": 0.1,
             "invertedSignal": k == 0} for k, n, a in ((0, 60, math.nan), (1, 9940, 300.0))]
     assert report_flags(pd.DataFrame(inv)).loc[0, "red"] == "inverted signal (< 1 % of the contractions)"
+    # red flag R: 'Controller restart suspected' warning of the control software 2.2 in the events table (2026-10-21)
+    E = pd.DataFrame({"code": ["comment", "warning", "Warning", "warning"],
+                      "text": ["start FFR protocol", "Controller restart suspected: no data for 6.2 s, frame counter 1 after it",
+                               "controller restart suspected: no data for 5.0 s, 20 ms blocks although 2.5 ms was set",
+                               "something else"], "t_file": [10.0, 1234.5, 2000.0, 3000.0]})
+    RR = report_flags(pd.DataFrame(rows), events=E)
+    assert list(RR["flags"]) == ["RT", "RX", "R"] and list(RR["level"]) == ["check"] * 3
+    assert RR.loc[2, "red"] == "controller restart suspected (2, first at 1234 s)"
+    assert report_flags(pd.DataFrame(rows), events=E.iloc[[0, 3]])["flags"].tolist() == ["T", "X", ""]
     L = legend_lines(FLAG_DEFAULTS)
-    assert len(L) == 5 and all(len(t) <= 170 for _, t in L) and "T amplitude changes by > 30 %" in L[2][1]
+    assert len(L) == 6 and all(len(t) <= 170 for _, t in L) and "T amplitude changes by > 30 %" in L[3][1]
+    assert L[2][0] == "check" and L[2][1].startswith("R controller restart suspected")
 
 
 def test_report_noise_index_and_large_extra_beats():

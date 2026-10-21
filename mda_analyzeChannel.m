@@ -205,6 +205,7 @@ if isnumeric(opts.threshold) && numel(opts.threshold) > 1
     error('mda_analyzeChannel: one threshold per channel (several channels: MyoDishAnalysis).');
 end
 nArt = 0;                                           %peaks removed as rocker artifacts
+nLocked = 0;                                        %small stimulus-locked peaks below the threshold kept (lockedThreshold)
 keepLow = false(size(prom));                        %small peaks below a raised threshold that are kept (locked)
 drop = false(size(prom));                           %peaks removed by the rocker / noise level
 noBeats = false;                                    %no contractions (peaks at the rocker / noise level)
@@ -228,6 +229,24 @@ else
             [drop, noBeats] = rockerNoiseRule(t(cand), prom, thr, keepLow, typAmp, ST, noiseLvl, ...
                 S.rockerOn(cand), nnz(S.rockerOn) * dt, fR, STall, opts);
             nArt = nArt + nnz(drop);
+        end
+    end
+    % small stimulus-locked peaks with the rocker at rest (option lockedThreshold, 2026-10-21): peaks below the
+    % threshold are contractions if they are locked to a stimulus, the rocker is at rest and they are >=
+    % lockedThreshold x the typical amplitude and >= lockedNoiseRel x the median rise before the stimuli (e.g. the
+    % small response to a premature S2 near the refractory period, 9 % of S1 in a rat slice)
+    if isfield(opts, 'lockedThreshold') && opts.lockedThreshold > 0 && numel(ST) >= opts.pacedMinStimuli && ...
+            ~isnan(typAmp) && ~isnan(noiseMed)
+        lowThr = max(opts.lockedThreshold * typAmp, opts.lockedNoiseRel * noiseMed);
+        if lowThr < thr
+            lat = stimLatency(t(cand), STall);
+            [~, o] = sort(prom, 'descend');
+            top = o(1:min(numel(o), numel(ST)));
+            if isnan(CL), hw = opts.lockWindow; else, hw = min(opts.lockWindow, opts.lockWindowRel * CL); end
+            lk = latencyLock(lat, top, hw);
+            lowKeep = reshape(prom(:) < thr & prom(:) >= lowThr & lk(:) & ~S.rockerOn(cand(:)) & ~drop(:), size(prom));
+            nLocked = nnz(lowKeep);
+            keepLow = keepLow | lowKeep;
         end
     end
 end
@@ -504,6 +523,7 @@ C.threshold = thr;
 C.thresholdMode = thrMode;
 C.typicalAmplitude = typAmp;
 C.thresholdArtifacts = nArt;
+C.lockedLowPeaks = nLocked;                         %option lockedThreshold (2026-10-21)
 C.noContractions = noBeats;
 C.noiseLevel = noiseLvl;
 C.noiseMedian = noiseMed;

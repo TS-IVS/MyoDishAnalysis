@@ -877,7 +877,9 @@ P = mda_protocols(file)                                              % protocols
   | `log:<code>` | any numeric entry of the log file for the stimulated channel (or channel 0), e.g. `log:pauseDuration` | – |
 * **Summary**: one row per protocol, channel and group with `group`, `groupValue`, `groupRole`, `groupStep`, `groupBy`, `nStimuli`,
   `nContractions`, `capture_percent` (stimuli followed by a contraction, independent of the rocker filter),
-  `amplitude_pctOfRef` (mean amplitude in % of the group `S1` / `steady`; post-rest groups: see PRP reference below),
+  `S2response_pct` and `separatePeak_percent` (S2 groups: median S2 response in % of the S1 amplitude and % of the
+  S2 with a separate peak, from the template subtraction of the RP results below; an S2 response too small for the
+  detection threshold still shows here), `amplitude_pctOfRef` (mean amplitude in % of the group `S1` / `steady`; post-rest groups: see PRP reference below),
   `amplitude_CV` (coefficient of variation of the amplitudes, population SD / mean), `irregular` (1 if
   `amplitude_CV` > `irregularCV`, 0.15: conduction block, alternans or extra beats) and mean, SD and n of all
   parameters. FFR frequencies summarized from fewer than `minGroupBeats` (5) included contractions are listed in the
@@ -904,8 +906,9 @@ P = mda_protocols(file)                                              % protocols
   scaled to the S1 contraction of each S1-S2 pair (S1 … S2 + 20 ms) and subtracted; response = maximum of the
   residual (30-ms mean) S2 + 30 … 600 ms in % of S1; separate peak = local maximum of the force after the S2 with a
   prominence ≥ max(noise level, 2 %); noise level = 99th percentile of the response at pseudo-S2 on the S1 beats. A
-  transition is the first S2 interval (from long to short) below the level whose next shorter interval is also
-  below it, interpolated linearly; tested intervals in 0.5-ms steps (the 400-Hz status channel records a pulse on a
+  transition is the first S2 interval (from long to short) below the level that stays below it (at the next shorter
+  interval, or in the median of this and all shorter intervals: a single value just above the level among the
+  shortest intervals does not undo a transition), interpolated linearly; tested intervals in 0.5-ms steps (the 400-Hz status channel records a pulse on a
   2.5-ms grid). Example 8 (rabbit, ERP 460 ms in the lab table): no peak 477.5 ms, no response 464 ms (step 30 ms).
   The three values do not depend on the contraction detection: an S2 response too small for the detection
   threshold (e.g. 9 % of S1 at 150 ms in a rat slice, threshold 30 % of the typical amplitude) still counts as a
@@ -994,6 +997,14 @@ number of the eliciting pulse in the file, from 0; the key of the pulse table), 
   of removed peaks. The threshold is computed per channel from the analysed window; check it in the GUI or with
   `'showFigures',true`, and set it manually if necessary (`'threshold',µN`; a manual threshold switches the rocker
   rules off).
+* Small stimulus-locked contractions (option `'lockedThreshold'`, default 0 = off; 2026-10-21): with a value such as
+  0.05, a peak below the automatic threshold is also a contraction if it is locked to a stimulus (latency within the
+  lock window of the typical latency of the largest peaks), the rocker is at rest and its prominence is ≥ that
+  fraction of the typical amplitude and ≥ `'lockedNoiseRel'` (3) × the median rise before the stimuli. Meant for
+  responses the 30 % threshold cuts off: the small response to a premature S2 near the refractory period (9 % of S1
+  in a rat slice), 2:1 alternans at high rates (human atrium, example 4: 96 small beats of 8–28 % of the typical
+  amplitude). It changes the group statistics of such ranges, so it is off by default; the GUI has it under Advanced
+  settings. `C.lockedLowPeaks` = number of peaks kept this way.
 * Uncertain contractions (auto threshold; option `'detection'`): near the noise level, more real contractions mean
   more false positives and vice versa. A contraction is *certain* if it is locked to the stimuli (latency within
   ±min(0.1 s, 0.2 × stimulus interval) of the typical latency) and ≥ 2 × the median rise of the signal in the 0.5 s
@@ -1099,9 +1110,13 @@ channel 10k + c = extra pulse #k of channel c).
   50 % for new boards, 1–8 % for old boards in lab recordings of 2026-10), `sensorRate` = sampling rate (< 20 %), half
   the sampling rate (> 35 %) or NaN (in between, or less than 1 s of samples). Both are columns of the summary
   (`sensorRate_inferred`, `repeatedSamples_percent`). On a channel at 200 Hz the timing parameters (stimToOnset,
-  TTP, TTR50/90, CD50 …) have a resolution of 5 ms, and a sample can be up to 5 ms older than its row; compare such
-  values only between channels and windows of the same rate. Later software versions log the rate of every port;
-  MDA will then read it from the log.
+  TTP, TTR50/90, CD50 …) have a resolution of 5 ms; compare such values only between channels and windows of the
+  same rate. Where the rate is unambiguously half the sampling rate, the repeated values are replaced by a linear
+  interpolation between the first samples of each pair (the measurement times) before the averaging of the raw
+  samples (option `'halfRateInterpolation'`, default on; `S.halfRateInterpolated`), so that the timing does not
+  depend on the phase of the pairs (before: a sample could be up to 2.5 ms older than its row); runs of more than 4
+  identical values (held values, chamber out) stay. Later software versions log the rate of every port; MDA will then
+  read it from the log.
 * `'stimAssignment','peak'`: as in versions ≤ 1.0.0-beta.3 (peak `minStimToPeak` … min(stimulus interval, 1 s) after
   a pulse, the most prominent peak after it; extra pulses count as regular pulses). Results files of these versions
   are opened with `'peak'` (`mda_readResults`).
@@ -1172,7 +1187,10 @@ thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
   25 %); **S** large extra beats (certain extra beats ≥ 5 % with > 3 × the amplitude of the paced ones: spikes,
   saturation); **D** median delay pulse → onset > 150 ms; **F** stimulus frequency > 10 Hz in a range (1 / median
   stimulus interval; 2026-10-13): pulse pairs or groups (e.g. CCM pulses without the extra-pulse bit), bursts, pulses
-  over consecutive samples or a misread status channel; the contractions are analysed as usual. Noise index =
+  over consecutive samples or a misread status channel; the contractions are analysed as usual; **R** controller
+  restart suspected (2026-10-21; the warning `Controller restart suspected: no data for … s, …` of the control
+  software 2.2 in the log, read from the events table: after it the controller may have run with its power-on
+  settings instead of those in the log; all channels of the recording). Noise index =
   uncertain % × (extra % + missed %) / 100; it is listed (e.g. `noise index 54 (uncertain 98 %, extra 0 %, missed
   55 %)`) and orders the trace pages. Arrhythmically paced channels (see "Arrhythmic pacing"): missed beats not counted,
   no C and V flags, capture shown with `~`.

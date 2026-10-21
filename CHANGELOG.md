@@ -55,6 +55,11 @@ MATLAB and Python versions have the same version number and give the same result
   lab logs: start 12 h off). The copy of the `.mdd` file also had the time of copying, which decides AM/PM in logs
   that cannot tell (64 of 1,880 such logs on the hard disk). Now these builds are written as `2.0.7717`, and the copy
   keeps the time of last change of the recording, shifted by the same number of days.
+- **RP results `refPeriodNoResponse_ms` / `refPeriodNoPeak_ms`: transition rule relaxed.** The transition is the
+  first interval (from long to short) below the level that stays below it at the next shorter interval *or* in the
+  median of this and all shorter intervals; before, a single value just above the level at the shortest interval
+  (5.3 % against a noise level of 4.6 %) made the result NaN ("not reached") although the two intervals before were
+  below it (rat slice: now 132 ms; example 8 unchanged).
 - **S2 groups of refractory-period protocols** (`mda_groupBeats` / `group_beats`, `S2interval`; found with a lab
   recording of a rat slice, RP schedule 250 → 120 ms in 10-ms steps): 1) the last stimulus of a channel at the basic
   S1 interval after a post-S2 stimulus (1-Hz pacing resumed after the last S1-S2 pair, file or range ending there)
@@ -66,6 +71,25 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
+- **Channels at half the recording rate: half-rate interpolation** (option `halfRateInterpolation`, default on;
+  `S.halfRateInterpolated`): where the inferred sensor rate is unambiguously samplingRate / 2 (new boards at 200 Hz in
+  a 400-Hz recording, see "Sensor rate" below), the repeated raw values are replaced by a linear interpolation between
+  the first samples of each pair (the measurement times) before the averaging of the raw samples, so that the timing of
+  such channels no longer depends on the phase of the pairs (before: up to 2.5 ms). Runs of more than 4 identical
+  values (held values, chamber out) stay. Other channels unchanged.
+- **Red flag `R` (controller restart suspected)** in the analysis report, the GUI flag line and the watcher's flag
+  tables: the warning `Controller restart suspected: no data for … s, …` of the control software 2.2 (F-90) in the
+  events table of the recording (`mda_report('flags', ..., E)` / `report_flags(..., events=E)`); after it the
+  controller may have run with its power-on settings instead of those in the log. All channels of the recording.
+- **Option `lockedThreshold`** (default 0 = off; `lockedNoiseRel` 3): paced channels, auto threshold: a peak below
+  the threshold is also a contraction if it is locked to a stimulus, the rocker is at rest and it is ≥ this fraction of
+  the typical amplitude and ≥ 3 × the median rise before the stimuli. With 0.05 the small S2 response (29 µN, 9 % of
+  S1) of a rat slice at 150 ms is counted and the 2:1 alternans of example 4 (human atrium, 4–5 Hz) becomes 1:1 (96
+  small beats); the other examples change by 0–19 contractions. `C.lockedLowPeaks`; advanced settings of the GUI.
+- **Group summary of RP protocols: `S2response_pct` and `separatePeak_percent`** for the S2 groups (median S2
+  response in % of the S1 amplitude from the template subtraction, % of the S2 with a separate peak), so that an S2
+  response too small for the detection threshold is visible in the group table (columns after
+  `currentReached_percent`, NaN for the other groups and protocols; `mda_protocolResults` second output `G2`).
 - **GUI: column `median`** in the parameter table (and in the copied summary) next to mean, SD and n: the median of
   the selected contractions is less affected by post-rest or partly refractory contractions (a user's request).
 - **Sensor rate per channel, inferred** (summary columns `sensorRate_inferred`, `repeatedSamples_percent`;

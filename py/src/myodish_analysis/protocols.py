@@ -797,6 +797,8 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
         pos = list(T.columns).index("missedBeats_percent") + 1
         T.insert(pos, "capture_percent", capt)
         T.insert(pos + 1, "currentReached_percent", reach)
+        T.insert(pos + 2, "S2response_pct", np.nan)  # S2 groups: filled from the S2 response (2026-10-21)
+        T.insert(pos + 3, "separatePeak_percent", np.nan)
         T.insert(0, "groupBy", by)
         T.insert(0, "groupStep", float(ks[q]))
         T.insert(0, "groupRole", roleOrder[kr[q]])
@@ -875,6 +877,20 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
     return _out(B, G)
 
 
+def fill_s2_group_columns(T, s2groups):
+    """columns S2response_pct / separatePeak_percent of the S2 groups of T from the S2 response of protocol_results
+    ('_s2groups': group value (s) -> (median response in % of S1, % of the S2 with a separate peak)), 2026-10-21"""
+    if not s2groups or "groupRole" not in T.columns:
+        return T
+    T = T.copy()
+    for i in np.flatnonzero((T["groupRole"].astype(str) == "S2").to_numpy()):
+        key = mround(2000 * float(T["groupValue"].iloc[i])) / 2
+        if key in s2groups:
+            T.iloc[i, T.columns.get_loc("S2response_pct")] = s2groups[key][0]
+            T.iloc[i, T.columns.get_loc("separatePeak_percent")] = s2groups[key][1]
+    return T
+
+
 def add_empty_group_columns(B, T):
     """the group columns for a range without grouping (group 'all'), so that the tables can be concatenated."""
     B = B.copy()
@@ -886,6 +902,8 @@ def add_empty_group_columns(B, T):
     pos = list(T.columns).index("missedBeats_percent") + 1
     T.insert(pos, "capture_percent", np.nan)
     T.insert(pos + 1, "currentReached_percent", np.nan)
+    T.insert(pos + 2, "S2response_pct", np.nan)
+    T.insert(pos + 3, "separatePeak_percent", np.nan)
     T.insert(list(T.columns).index("amplitude_SD") + 1, "amplitude_pctOfRef", np.nan)
     T.insert(list(T.columns).index("amplitude_CV") + 1, "irregular", np.nan)
     T.insert(0, "groupBy", "none")

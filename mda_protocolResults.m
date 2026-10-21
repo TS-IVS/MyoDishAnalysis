@@ -1,7 +1,7 @@
-function R = mda_protocolResults(by, G, Z, trace, opts)
+function [R, G2] = mda_protocolResults(by, G, Z, trace, opts)
 %MDA_PROTOCOLRESULTS  Characteristic values of a stimulation protocol (one channel, one range) from the grouped summary.
 %
-%   R = mda_protocolResults(by, G, Z, trace, opts)
+%   [R, G2] = mda_protocolResults(by, G, Z, trace, opts)
 %
 %   by     grouping of the range ('pacingFrequency', 'stimCurrent', 'S2interval', 'pauseLength'; others: note only)
 %   G      group summary of the channel and range ([B, G, Z] = mda_groupBeats(...))
@@ -53,6 +53,9 @@ function R = mda_protocolResults(by, G, Z, trace, opts)
 %                               10 %; several pauses: their mean, resultNote)
 %     PRP15_pause_s, ...        the pause (mean of these pauses)
 %   resultNote
+%   G2 (S2interval, 2026-10-21): table groupValue_ms, S2response_pct (median S2 response of the group, % of the S1
+%   amplitude), separatePeak_percent (% of its S2 with a separate peak) for the columns of the group summary;
+%   otherwise empty
 %
 % TS 2026-10-07 (tolerances frequencyResolution / pauseTolerance 2026-10-10: FFR groups at 0.1 Hz (below 1 Hz
 % 0.05 Hz), before +-5 %;
@@ -69,6 +72,7 @@ fResLow = 0.05; if isfield(opts, 'frequencyResolutionLow'), fResLow = opts.frequ
 pTol = 0.1; if isfield(opts, 'pauseTolerance'), pTol = opts.pauseTolerance; end
 cols = resultColumns();
 R = cell2table([num2cell(nan(1, numel(cols) - 1)), {''}], 'VariableNames', cols);
+G2 = [];                                               %S2 groups (S2interval only)
 notes = {};
 if isempty(G) || height(G) == 0
     R.resultNote = {'no groups'};
@@ -123,7 +127,7 @@ switch lower(char(by))
         if isempty(Z) || isempty(trace)
             notes{end+1} = 'S2 response: no data';
         else
-            [R, n2] = s2Results(R, Z, trace, opts);
+            [R, n2, G2] = s2Results(R, Z, trace, opts);
             notes = [notes, n2];
         end
 end
@@ -175,13 +179,16 @@ end
 
 
 function [est, step, notes] = transition(ci, v, level, name, notes)
-% first interval (from long to short) at which v falls below level and stays below at the next shorter interval;
+% first interval (from long to short) at which v falls below level and stays below: at the next shorter interval, or
+% (2026-10-21) in the median of this and all shorter intervals (a single value just above the level among the
+% shortest intervals, e.g. 5.3 % against a noise level of 4.6 % at the last interval, does not undo a transition);
 % linear interpolation with the previous interval (GetRefractoryPeriod)
 est = nan; step = nan;
 keep = ~isnan(v); ci = ci(keep); v = v(keep);
 if isempty(v) || isnan(level), notes{end+1} = [name ': not determined']; return; end
-below = v < level;
-k = find(below & [below(2:end); true], 1, 'first');
+below = v(:) < level;
+rest = arrayfun(@(i) median(v(i:end)) < level, (1:numel(v))');
+k = find(below & ([below(2:end); true] | rest), 1, 'first');
 if isempty(k)
     notes{end+1} = sprintf('%s: not reached (< %g ms)', name, ci(end));
 elseif k == 1
@@ -193,8 +200,8 @@ end
 end
 
 
-function [R, notes] = s2Results(R, Z, trace, opts)
-notes = {};
+function [R, notes, G2] = s2Results(R, Z, trace, opts)
+notes = {}; G2 = [];
 t = double(trace.t(:)); f = double(trace.f(:));
 tR = double(trace.tR(:)); rock = logical(trace.rockerOn(:));
 stopped = isstruct(opts) && isfield(opts, 'rocker') && strcmp(opts.rocker, 'stopped');
@@ -285,6 +292,7 @@ for i = 1:numel(ciU)
     medResp(i) = median(rv(g == ciU(i)));
 end
 ciU = round(2000 * ciU) / 2;                              %0.5-ms steps (2.5-ms grid of the status channel), 2026-10-21
+G2 = table(ciU(:), medResp(:), 100 * fracSep(:), 'VariableNames', {'groupValue_ms', 'S2response_pct', 'separatePeak_percent'});
 if ~isempty(ciU), R.S2shortest_ms = ciU(end); R.S2longest_ms = ciU(1); end
 [R.refPeriodNoPeak_ms, R.refPeriodNoPeakStep_ms, notes] = transition(ciU, 100 * fracSep, 50, 'no peak', notes);
 [R.refPeriodNoResponse_ms, R.refPeriodNoResponseStep_ms, notes] = transition(ciU, medResp, noise, 'no response', notes);

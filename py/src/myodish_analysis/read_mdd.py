@@ -51,7 +51,10 @@ OUTPUT (S, a Struct with the field names of the MATLAB version)
               samples), boards at the recording rate a few %. Runs of more than 4 identical values (chamber out, sensor
               gone, saturation) are left out. sensorRate = samplingRate (< 20 %), samplingRate / 2 (> 35 %), NaN in
               between or with less than 1 s of samples. Inferred, not logged. The timing parameters of a channel at
-              200 Hz have a resolution of 5 ms, and a sample can be up to one sensor period older than its row.
+              200 Hz have a resolution of 5 ms. halfRateInterpolated (nData, bool): channels at samplingRate / 2 whose
+              repeated values were replaced by a linear interpolation between the first samples of each run (the
+              measurement times; option halfRateInterpolation, default True; 2026-10-21), so that the timing does not
+              depend on the phase of the pairs (before: up to 2.5 ms).
               rockerOn (bool, n), stim (Struct of arrays: time, channel, current, currentReached, external,
               isExtraPulse, rockerOn; one entry per stimulus pulse of any channel)
               currentReached (2026-10-20): 1 = the current of the pulse was reached, 0 = not reached, NaN = unknown.
@@ -319,15 +322,26 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False, opts
     S.repeatedSamples_percent = np.full(nData, np.nan)
     for c in range(0 if stim_only else min(nData, raw.shape[0])):
         S.sensorRate[c], S.repeatedSamples_percent[c] = infer_sensor_rate(raw[c], fs)
+    # channels at half the recording rate (sensor rate fs / 2, unambiguous): the repeated values are replaced by a
+    # linear interpolation between the first samples of each run (the measurement times), option halfRateInterpolation
+    # (2026-10-21); the rows of runs longer than 4 samples (held values, chamber out) stay
+    S.halfRateInterpolated = np.zeros(nData, bool)
+    halfRate = opts is None or bool(opts.get("halfRateInterpolation", True))
+    rawD = raw[:nData]  # data channels (int16; float copy with the interpolation)
+    if halfRate and not stim_only and np.any(S.sensorRate == fs / 2):
+        rawD = rawD.astype(float)
+        for c in np.flatnonzero(S.sensorRate == fs / 2):
+            rawD[c] = half_rate_interpolation(rawD[c])
+            S.halfRateInterpolated[c] = True
     S.spikes = np.zeros((0, 4))  # channel, from, to (s, time in the file), size (AU)
     Xr = None
     if spike_removal and not stim_only and nRaw > 0:
-        Xr, sp = remove_spikes(raw[:nData], fs, opts)
+        Xr, sp = remove_spikes(rawD, fs, opts)
         if sp.size:
             S.spikes = np.c_[np.asarray(S.dataChannels, float).ravel()[sp[:, 0].astype(int)], (i0 + sp[:, 1]) / fs,
                              (i0 + sp[:, 2]) / fs, sp[:, 3]]
     for c in range(0 if stim_only else nData):
-        x = raw[c].astype(float) if Xr is None else Xr[c]
+        x = rawD[c].astype(float) if Xr is None else Xr[c]
         if nDS == 2:
             x = (x[0::2] + x[1::2]) / 2
         elif nDS > 2:
@@ -381,6 +395,29 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False, opts
         S.rockerOn = state.reshape(n, nDS).any(axis=1)
         S.stim.rockerOn = state[np.round(S.stim.time * fs).astype(int) - i0]
     return S
+
+
+def half_rate_interpolation(x):
+    """a channel whose sensor measures at half the recording rate delivers every value twice (runs of 2 identical
+    values; 1 or 3 where the two clocks drift apart): the samples of every run of at most 4 values are replaced by a
+    linear interpolation from the first sample of the run (the measurement time) to the first sample of the next run,
+    so that the pairs no longer depend on the phase of the sampling; runs longer than 4 values (held values, chamber
+    out) and the last run stay. x: raw values of the channel (float), returns a copy. MATLAB: halfRateInterpolation
+    in mda_readMdd.m (2026-10-21)"""
+    x = np.array(x, float).ravel()
+    if x.size < 3:
+        return x
+    st = np.flatnonzero(np.r_[True, np.diff(x) != 0])
+    L = np.diff(np.r_[st, x.size])
+    k = np.flatnonzero((L <= 4) & (np.arange(st.size) < st.size - 1))  # runs with a next run
+    if not k.size:
+        return x
+    starts, lens = st[k], L[k]
+    nxt = x[st[k + 1]]
+    idx = np.repeat(starts, lens) + (np.arange(lens.sum()) - np.repeat(np.cumsum(lens) - lens, lens))  # sample rows
+    off = (np.arange(lens.sum()) - np.repeat(np.cumsum(lens) - lens, lens)) / np.repeat(lens, lens)
+    x[idx] = np.repeat(x[starts], lens) + (np.repeat(nxt, lens) - np.repeat(x[starts], lens)) * off
+    return x
 
 
 def infer_sensor_rate(x, fs):

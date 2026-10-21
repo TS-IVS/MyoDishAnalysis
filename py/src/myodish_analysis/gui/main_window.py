@@ -2104,7 +2104,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 Sm["channel"] = self.ch
             if "channel" not in Tc.columns:
                 Tc["channel"] = self.ch
-            R = report_flags(Sm, Tc)
+            R = report_flags(Sm, Tc, events=self.LE)
             R = R[R["channel"] == self.ch]
             if not len(R):
                 return

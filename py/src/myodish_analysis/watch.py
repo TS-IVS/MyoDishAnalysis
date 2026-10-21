@@ -782,7 +782,8 @@ def _report_records(raw, res, rows, fl):
         if CH is not None:
             rec["status"] = {int(c): str(st) for c, st in zip(CH["channel"], CH["status"])}
         rec["notes"] = [m for m in str(row["message"]).split(" | ") if m.startswith("protocols:")]
-        R = report_flags(rec["S"], C, rec["status"], **fl)
+        R = report_flags(rec["S"], C, rec["status"], events=result_table(d, n, "events", usecols=lambda c: c in (
+            "code", "text", "t_file")), **fl)  # events: red flag R (controller restart suspected, 2026-10-21)
         R["window_from"], R["window_to"] = math.nan, math.nan
         for i in np.flatnonzero((R["level"] == "check").to_numpy()):
             R.at[i, "window_from"], R.at[i, "window_to"] = report_window(C, int(R.at[i, "channel"]), R.at[i, "flags"])
@@ -949,7 +950,8 @@ def flags_of(results_folder, rel, analyzed="", **flags):
         "channel", "t_peak", "beatType", "uncertain", "included", "amplitude", "stimToOnset"})
     CH = result_table(d, n, "channels", usecols=lambda c: c in ("channel", "status"))
     st = {int(c): str(s) for c, s in zip(CH["channel"], CH["status"])} if CH is not None else None
-    R = report_flags(S, C, st, **flags)
+    E = result_table(d, n, "events", usecols=lambda c: c in ("code", "text", "t_file"))
+    R = report_flags(S, C, st, events=E, **flags)
     R.insert(0, "recording", rel)
     R["window_from"], R["window_to"] = math.nan, math.nan
     for i in np.flatnonzero((R["level"] == "check").to_numpy()):

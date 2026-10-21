@@ -102,6 +102,25 @@ def test_signal_gaps_and_watcher(tmp_path):
     np.testing.assert_array_equal(Sr.sensorRate, [400, np.nan, 400, 400, 400, 200, 400, 400])
     rp = np.asarray(Sr.repeatedSamples_percent)
     assert abs(rp[5] - 50) < 2 and (rp[[0, 2, 3, 4, 6, 7]] < 10).all() and np.isnan(rp[1])
+    # half-rate interpolation (2026-10-21): the pairs of ch6 are replaced by the interpolation between the first samples
+    # of the pairs (option halfRateInterpolation, default on); read at 400 Hz (downsampling 1) to see the raw grid
+    from myodish_analysis import options
+    S1 = read_mdd(f, 0, 90, options(downsampling=1))
+    S0 = read_mdd(f, 0, 90, options(downsampling=1, halfRateInterpolation=False))
+    assert S1.halfRateInterpolated.tolist() == [False] * 5 + [True] + [False] * 2 and not S0.halfRateInterpolated.any()
+    rep = lambda y: float(np.mean(np.diff(y) == 0))  # noqa: E731
+    assert rep(S0.force[5]) > 0.45 and rep(S1.force[5]) < 0.1 and rep(S1.force[0]) < 0.1
+    y0, y1 = S0.force[5], S1.force[5]
+    st = np.flatnonzero(np.r_[True, np.diff(y0) != 0])  # first sample of each run: unchanged
+    np.testing.assert_allclose(y1[st], y0[st])
+    L = np.diff(np.r_[st, y0.size])  # the other samples of a run: between the first samples of this and the next run
+    k = np.flatnonzero(L[:-1] == 2)  # (mostly pairs; two equal pairs form one run of 4)
+    a, b = y0[st[k]], y0[st[k + 1]]
+    v = y1[st[k] + 1]
+    assert np.all(v >= np.minimum(a, b) - 1e-9) and np.all(v <= np.maximum(a, b) + 1e-9)
+    np.testing.assert_allclose(v, (a + b) / 2)
+    assert k.size > 0.9 * st.size
+    np.testing.assert_allclose(S1.force[0], S0.force[0])  # 400-Hz channel unchanged
 
     # watcher: sheets gaps, channels of <name>.xlsx (2026-10-14; before _gaps.csv, _channels.csv) in the folder of the
     # recording (name without a number: <name>/, 2026-10-15), summary columns

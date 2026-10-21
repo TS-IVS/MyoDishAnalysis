@@ -350,7 +350,13 @@ for r = 1:nR
                         [~, Cx] = mda_analyzeChannel(Sres, channels(c), ranges(r,:), optsC);
                         trace = struct('t', Cx.t, 'f', Cx.f, 'tR', Sres.t, 'rockerOn', Sres.rockerOn);
                     end
-                    Rr = mda_protocolResults(groupByR{r}, T, Z, trace, opts);
+                    [Rr, G2] = mda_protocolResults(groupByR{r}, T, Z, trace, opts);
+                    if ~isempty(G2)                    %S2 groups: S2response_pct / separatePeak_percent (2026-10-21)
+                        for q = find(strcmp(T.groupRole, 'S2'))'
+                            m = find(abs(G2.groupValue_ms - round(2000 * T.groupValue(q)) / 2) < 1e-9, 1);
+                            if ~isempty(m), T.S2response_pct(q) = G2.S2response_pct(m); T.separatePeak_percent(q) = G2.separatePeak_percent(m); end
+                        end
+                    end
                     pNote = {''};                      %note of the protocol (e.g. 'no end comment: end estimated ...')
                     if istable(protocols) && ismember('note', protocols.Properties.VariableNames)
                         pNote = protocols.note(r);
@@ -365,7 +371,8 @@ for r = 1:nR
                 if grouping                            %same columns as the grouped ranges
                     B.group = repmat({'all'}, height(B), 1); B.groupValue = nan(height(B), 1); B.groupRole = repmat({''}, height(B), 1);
                     B.groupStep = nan(height(B), 1);
-                    T = addvars(T, nan, nan, 'After', 'missedBeats_percent', 'NewVariableNames', {'capture_percent', 'currentReached_percent'});
+                    T = addvars(T, nan, nan, nan, nan, 'After', 'missedBeats_percent', ...
+                        'NewVariableNames', {'capture_percent', 'currentReached_percent', 'S2response_pct', 'separatePeak_percent'});
                     T = addvars(T, nan(height(T), 1), 'After', 'amplitude_SD', 'NewVariableNames', 'amplitude_pctOfRef');
                     T = addvars(T, nan(height(T), 1), 'After', 'amplitude_CV', 'NewVariableNames', 'irregular');
                     T = [table({'all'}, nan, {''}, nan, {'none'}, 'VariableNames', {'group','groupValue','groupRole','groupStep','groupBy'}), T]; %#ok<AGROW>

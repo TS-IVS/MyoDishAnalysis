@@ -48,6 +48,8 @@ def captured_groups(G):
 
 
 def protocol_results(by, G, Z=None, trace=None, opts=None):
+    """R: dict with RESULT_COLUMNS; S2interval also '_s2groups' {groupValue (s): (median S2 response %, % of S2 with a
+    separate peak)} for the group summary (removed by the caller before the results table)."""
     R = {c: math.nan for c in RESULT_COLUMNS}
     R["resultNote"] = ""
     notes = []
@@ -138,7 +140,9 @@ def _prctile(x, p):
 
 
 def _transition(ci, v, level, name, notes):
-    """first interval (from long to short) at which v falls below level and stays below at the next shorter interval;
+    """first interval (from long to short) at which v falls below level and stays below: at the next shorter interval,
+    or (2026-10-21) in the median of this and all shorter intervals (a single value just above the level among the
+    shortest intervals, e.g. 5.3 % against a noise level of 4.6 % at the last interval, does not undo a transition);
     linear interpolation with the previous interval (GetRefractoryPeriod)"""
     keep = ~np.isnan(v)
     ci, v = ci[keep], v[keep]
@@ -147,7 +151,8 @@ def _transition(ci, v, level, name, notes):
         return math.nan, math.nan
     below = v < level
     nxt = np.r_[below[1:], True]
-    k = np.flatnonzero(below & nxt)
+    rest = np.array([np.median(v[i:]) < level for i in range(v.size)])
+    k = np.flatnonzero(below & (nxt | rest))
     if not k.size:
         notes.append(f"{name}: not reached (< {ci[-1]:g} ms)")
         return math.nan, math.nan
@@ -296,6 +301,8 @@ def _s2_results(R, Z, trace, opts):
     ciU = np.unique(g)[::-1]
     fracSep = np.array([np.mean(sep[v][g == x]) for x in ciU])
     medResp = np.array([np.median(resp[v][g == x]) for x in ciU])
+    # per S2 group (columns S2response_pct / separatePeak_percent of the group summary, 2026-10-21)
+    R["_s2groups"] = {mround(2000 * float(x)) / 2: (float(m), 100 * float(f)) for x, m, f in zip(ciU, medResp, fracSep)}
     ciU = np.array([mround(2000 * x) / 2 for x in ciU], float)  # 0.5-ms steps (2.5-ms grid), 2026-10-21
     if ciU.size:
         R["S2shortest_ms"], R["S2longest_ms"] = float(ciU[-1]), float(ciU[0])

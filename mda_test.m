@@ -266,6 +266,9 @@ ok = ok && okG;
 % S2 groups (2026-10-21): the last stimulus at the basic interval is an S1, 10-ms S2 steps on the 2.5-ms grid stay apart
 okS = s2GroupTest();
 ok = ok && okS;
+% option lockedThreshold (2026-10-21): small stimulus-locked peaks with the rocker at rest are contractions
+okL = lockedThresholdTest();
+ok = ok && okL;
 % FFR steady state and PRP reference per pause (2026-10-10)
 okP = protocolSelectionTest();
 ok = ok && okP;
@@ -317,6 +320,46 @@ catch ME
 end
 delete(mdd); delete(lg);
 end
+
+function okL = lockedThresholdTest()
+% as test_locked_threshold_small_locked_peaks in py/tests/test_mda.py: 1-Hz pacing, contractions of 1000 uN after 3 of
+% 4 stimuli and a small one (60 uN, same latency) after every 4th; a small unlocked peak (60 uN, 10.6 s) and a small
+% locked one while the rocker moves (31 s). Auto threshold ~290 uN: the small peaks are not contractions. Option
+% lockedThreshold 0.05 (>= 50 uN and >= 3 x the median rise before the stimuli): the small locked peaks with the rocker
+% at rest are contractions, the unlocked one and the one with the rocker moving are not
+rng(11);
+dt = 0.005;
+t = 0:dt:41;
+onset = 1:39;
+amp = 1000 * ones(size(onset)); amp(4:4:end) = 60;
+F = 100 + 2 * randn(size(t));
+for k = 1:numel(onset)
+    I = t >= onset(k) & t < onset(k) + 0.2; F(I) = F(I) + amp(k) * (t(I) - onset(k)) / 0.2;
+    I = t >= onset(k) + 0.2 & t < onset(k) + 0.6; F(I) = F(I) + amp(k) - amp(k) * (t(I) - onset(k) - 0.2) / 0.4;
+end
+I = t >= 10.6 & t < 10.8; F(I) = F(I) + 60 * (t(I) - 10.6) / 0.2;           %unlocked small peak
+I = t >= 10.8 & t < 10.9; F(I) = F(I) + 60 - 60 * (t(I) - 10.8) / 0.1;
+on = t >= 30.5 & t <= 32.5;                                                   %rocker moving around 31 s
+S = struct('dataChannels', 1, 'dt', dt, 't', t, 'force', F, 'rockerOn', on, 'fromSeconds', 0, 'toSeconds', 41);
+S.stim = struct('time', (onset - 0.1)', 'channel', ones(numel(onset), 1));
+okL = false;
+try
+    [B0, C0] = mda_analyzeChannel(S, 1, [0.5 40.5], mda_options('zeroForce', 40));
+    [B1, C1] = mda_analyzeChannel(S, 1, [0.5 40.5], mda_options('zeroForce', 40, 'lockedThreshold', 0.05));
+    small = find(amp == 60);                        %onsets 4, 8, ..., 36
+    tp = B1.t_peak;
+    ts = sort(B1.t_peak(B1.amplitude < 200));
+    okL = height(B0) == 39 - numel(small) && C0.lockedLowPeaks == 0 && C1.threshold == C0.threshold && ...
+        C1.lockedLowPeaks == numel(small) - 1 && height(B1) == height(B0) + numel(small) - 1 && ...
+        ~any(abs(tp - 10.8) < 0.1) && ~any(abs(tp - 32.2) < 0.1) && all(abs(B1.stimToPeak - 0.3) < 0.02) && ...
+        numel(ts) == numel(small) - 1 && all(abs(ts(:) - (small(small ~= 32)' + 0.2)) < 0.02);
+    fprintf('lockedThreshold: without %d contractions, with %d (expected %d), small locked kept %d (expected %d), threshold %.0f uN   %s\n', ...
+        height(B0), height(B1), height(B0) + numel(small) - 1, C1.lockedLowPeaks, numel(small) - 1, C1.threshold, passStr(okL));
+catch ME
+    fprintf('lockedThreshold: %s   FAILED\n', ME.message);
+end
+end
+
 
 function okS = s2GroupTest()
 % as test_s2_groups_last_pulse_and_grid in py/tests/test_mda.py (a lab recording of a rat slice, RP schedule 250 -> 120

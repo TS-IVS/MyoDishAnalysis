@@ -132,6 +132,14 @@ ROWS = (
     ("lockWindowRel", "lockWindowRel", "num", None,
      "at high rates the lock window is at most this fraction of the stimulus interval (certainty; rocker-only rule)",
      1, "x stimulus interval", "Detection", False),
+    ("lockedThreshold", "lockedThreshold: small locked peaks", "num", None,
+     "0 = off. Otherwise a peak below the threshold is also a contraction if it is locked to a stimulus, the rocker "
+     "is at rest and it is >= this fraction of the typical amplitude (and >= lockedNoiseRel x the median rise "
+     "before the stimuli): small responses, e.g. to a premature S2 near the refractory period (e.g. 0.1)",
+     1, "x typical", "Detection", False),
+    ("lockedNoiseRel", "lockedNoiseRel", "num", None,
+     "small locked peaks (lockedThreshold): ... and >= this multiple of the median rise before the stimuli",
+     1, "x median rise", "Detection", False),
     ("certainNoiseRel", "certainNoiseRel", "num", None,
      "certainty, paced: a locked contraction is certain if its prominence is >= this multiple of the median "
      "rise of the signal before the stimuli",
@@ -468,7 +476,7 @@ ROWS = (
 NAMES = tuple(r[0] for r in ROWS)
 NEW = ("risePhaseLevel", "steepRiseMargin", "contractionEnd", "offsetSnap", "pacedMinStimuli", "pauseMinInterval",
        "pauseIntervalRatio", "diastoleWindowStart", "diastoleWindowEnd", "lockWindow", "lockWindowRel",
-       "certainNoiseRel", "certainLargeRel", "certainLargeNoiseRel", "certainUnpacedRel", "noiseMinInterval",
+       "lockedThreshold", "lockedNoiseRel", "certainNoiseRel", "certainLargeRel", "certainLargeNoiseRel", "certainUnpacedRel", "noiseMinInterval",
        "noiseWindow", "noiseWindowRel", "noisePercentile", "noiseMinWindows", "artifactMinCandidates",
        "artifactGapRatio", "artifactMaxRel", "artifactMinPeaks", "artifactRockerFraction", "chanceMargin",
        "chanceMax", "rockerRuleMinFraction", "noiseLockedMax", "noiseAbsMax", "noiseRelMax", "rhythmMinPerCycle",

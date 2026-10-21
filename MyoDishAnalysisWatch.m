@@ -657,7 +657,8 @@ for i = 1:numel(rows)
     if isfile(fullfile(d, [n '.xlsx'])), rec.open = fullfile(d, [n '.xlsx']); end   %results as .xlsx (2026-10-14)
     m = strtrim(strsplit(row.message, ' | '));
     rec.notes = m(startsWith(m, 'protocols:'));
-    R = mda_report('flags', rec.S, C, rec.status, fl);
+    E = resultTable(d, n, 'events', {'code', 'text', 't_file'});   %red flag R: controller restart suspected (2026-10-21)
+    R = mda_report('flags', rec.S, C, rec.status, fl, E);
     R.window_from = nan(height(R), 1); R.window_to = nan(height(R), 1);
     for j = find(strcmp(R.level, 'check'))'
         [R.window_from(j), R.window_to(j)] = mda_report('window', C, R.channel(j), R.flags{j}, 20);
@@ -2160,7 +2161,8 @@ if isempty(S), return; end
 C = readResult(fullfile(d, [n '_contractions.csv']), {'channel', 't_peak', 'beatType', 'uncertain', 'included', ...
     'amplitude', 'stimToOnset'});
 st = resultTable(d, n, 'channels', {'channel', 'status'});
-R = mda_report('flags', S, C, st, mda_report('defaults'));
+E = resultTable(d, n, 'events', {'code', 'text', 't_file'});
+R = mda_report('flags', S, C, st, mda_report('defaults'), E);
 R = addvars(R, repmat({rel}, height(R), 1), 'Before', 1, 'NewVariableNames', 'recording');
 R.window_from = nan(height(R), 1); R.window_to = nan(height(R), 1);
 for j = find(strcmp(R.level, 'check'))'

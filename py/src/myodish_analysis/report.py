@@ -81,7 +81,8 @@ import pandas as pd
 FLAG_DEFAULTS = dict(uncertain=25.0, irregular=15.0, artifact_share=5.0, artifact_ratio=3.0, extra=10.0, capture=90.0,
                      amplitude_change=30.0, amplitude=75.0, amplitude_cv=30.0, delay=0.15, min_beats=50,
                      stim_frequency=10.0)
-RED_CODES = (("inverted", "I"), ("noise", "N"), ("large", "S"), ("delay", "D"), ("frequency", "F"))
+RED_CODES = (("inverted", "I"), ("noise", "N"), ("large", "S"), ("delay", "D"), ("frequency", "F"),
+             ("restart", "R"))
 YELLOW_CODES = (("capture", "C"), ("extra", "X"), ("amplitude", "A"), ("change", "T"), ("cv", "V"))
 RED_LETTERS = "".join(c for _, c in RED_CODES)
 _CELL_RED, _CELL_YELLOW, _CELL_GREY = "#f8c9c4", "#fbe8a6", "#eeeeee"
@@ -165,10 +166,29 @@ def _label(r):
     return f" ({lb})" if isinstance(lb, str) and lb else ""
 
 
-def report_flags(S, C=None, status=None, **flags):
-    """one row per channel: counts, values and flags (columns flags = codes, red / yellow = descriptions)."""
+def restart_warnings(E):
+    """'controller restart suspected ...' from the events table E of a recording (lines of code warning whose text
+    starts with 'Controller restart suspected', control software 2.2, F-90): '' if none, otherwise the description of
+    the red flag R (number and time of the first one, s in the file), 2026-10-21"""
+    if E is None or not len(E) or not {"code", "text"}.issubset(E.columns):
+        return ""
+    k = np.flatnonzero((E["code"].astype(str).str.lower() == "warning").to_numpy()
+                       & E["text"].astype(str).str.lower().str.startswith("controller restart suspected").to_numpy())
+    if not k.size:
+        return ""
+    t = float(E["t_file"].iloc[k[0]]) if "t_file" in E.columns else math.nan
+    if math.isnan(t):
+        return f"controller restart suspected ({k.size})"
+    return f"controller restart suspected ({k.size}, first at {t:.0f} s)"
+
+
+def report_flags(S, C=None, status=None, events=None, **flags):
+    """one row per channel: counts, values and flags (columns flags = codes, red / yellow = descriptions). events
+    (2026-10-21): events table of the recording (log_entries / <name>_events.csv) for the red flag R (controller
+    restart suspected)."""
     fl = _flags(flags)
     status = dict(status or {})
+    restart = restart_warnings(events)
     chans = sorted(({int(c) for c in S["channel"]} if S is not None and len(S) else set())
                    | {int(c) for c in status})
     rows = []
@@ -252,6 +272,8 @@ def report_flags(S, C=None, status=None, **flags):
                 red.append(("delay", "delay %.0f ms" % r["delay_ms"]))
             if r["stimFrequency_Hz"] > fl["stim_frequency"]:
                 red.append(("frequency", "stimulus frequency %.0f Hz" % r["stimFrequency_Hz"]))
+            if restart:
+                red.append(("restart", restart))
             if r["capture_percent"] < fl["capture"] and not arr:
                 yellow.append(("capture", "capture %.0f %%" % r["capture_percent"]))
             if not noise and r["extra_percent"] > fl["extra"]:
@@ -529,6 +551,8 @@ def legend_lines(fl):
         ("check", f"Red = check the analysis:  I inverted signal,  N noise (uncertain \u2265 {fl['uncertain']:g} %, "
                   f"extra+missed \u2265 {fl['irregular']:g} %),  S large extra beats (> {fl['artifact_ratio']:g} x "
                   f"paced),  D delay > {1000 * fl['delay']:g} ms,  F pacing > {fl['stim_frequency']:g} Hz"),
+        ("check", "R controller restart suspected (warning of the control software: after it the controller may have "
+                  "run with its power-on settings instead of those in the log)"),
         ("quality", f"Yellow = slice quality:  C capture < {fl['capture']:g} %,  X extra beats > {fl['extra']:g} %,  "
                     f"A amplitude < {fl['amplitude']:g} {mu}N,  T amplitude changes by > {fl['amplitude_change']:g} % "
                     f"during the recording,  V amplitude CV > {fl['amplitude_cv']:g} %"),

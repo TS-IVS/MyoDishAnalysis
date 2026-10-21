@@ -23,6 +23,13 @@ DETECTION OF CONTRACTIONS
                    the stimuli that are not locked to the stimuli are dropped (no contractions at all if the largest
                    peaks are not locked and their typical amplitude is <= 50 uN, or <= 2 x that level at the
                    rhythm of the rocker)
+  lockedThreshold  0 (default, off) or a fraction of the typical contraction amplitude (e.g. 0.1): paced channels,
+                   auto threshold: a peak below the threshold is also a contraction if it is locked to a stimulus
+                   (latency within the lock window of the typical latency of the largest peaks), the rocker is at
+                   rest and its prominence is >= this fraction of the typical amplitude and >= lockedNoiseRel x the
+                   median rise before the stimuli (small responses, e.g. to a premature S2 near the refractory
+                   period; 2026-10-21)
+  lockedNoiseRel   ... and >= this multiple of the median rise before the stimuli (default 3)
   detection        'sensitive' (default, high sensitivity) | 'specific' (high specificity): auto threshold; a
                    contraction is uncertain if it is neither locked to the stimuli (and >= 2 x the median rise of
                    the signal before the stimuli) nor large (>= 0.7 x typical amplitude and >= 3 x that rise;
@@ -46,6 +53,10 @@ SIGNAL PROCESSING (defaults = GetContractionParameters / analyzeMyoDish of the S
   spikeRemoval     True (default) | False: spike artifacts of the force channels (e.g. when chambers are taken out
                    or put in, often in several channels) are replaced by a line before the averaging of the raw
                    samples; level changes (steps) stay (see spikes.remove_spikes)
+  halfRateInterpolation  True (default) | False: channels whose sensor measures at half the recording rate (inferred
+                   from repeated raw values, about 50 %; new boards at 200 Hz in a 400-Hz recording): the repeated
+                   values are replaced by a linear interpolation between the first samples of each pair (the
+                   measurement times), so that the timing does not depend on the phase of the pairs (2026-10-21)
   downsampling     n raw samples are combined (default 2: mean, 400 Hz --> 200 Hz; n > 2: median)
   medianFilterMs   moving median [ms] (default 50; 0 = off)
   meanFilterMs     moving mean [ms] (default 25; 0 = off)
@@ -335,6 +346,8 @@ _DEFAULTS = dict(
     minThreshold=30,
     minBeatInterval=0.15,
     rockerArtifacts=True,
+    lockedThreshold=0,
+    lockedNoiseRel=3,
     invertedCheck=True,
     invertedRatio=2.0,
     invertedMinAmplitude=50.0,
@@ -345,6 +358,7 @@ _DEFAULTS = dict(
     beats="all",
     rocker="any",
     spikeRemoval=True,
+    halfRateInterpolation=True,
     downsampling=2,
     medianFilterMs=50,
     meanFilterMs=25,
@@ -558,6 +572,9 @@ def options(base=None, **changes):
     ic = opts.invertedCheck
     opts.invertedCheck = (ic is True) or (not isinstance(ic, str) and ic is not None and not _is_empty(ic)
                                           and bool(ic == 1)) or (isinstance(ic, str) and ic.lower() in ("on", "true"))
+    hr = opts.halfRateInterpolation
+    opts.halfRateInterpolation = (hr is True) or (not isinstance(hr, str) and hr is not None and not _is_empty(hr)
+                                                  and bool(hr == 1)) or (isinstance(hr, str) and hr.lower() in ("on", "true"))
     if _is_empty(opts.referenceBeat):
         opts.referenceBeat = None
     elif isinstance(opts.referenceBeat, dict):
@@ -588,13 +605,13 @@ def options(base=None, **changes):
     for k in ("risePhaseLevel", "artifactRockerFraction", "chanceMargin", "chanceMax",
               "rockerRuleMinFraction", "noiseLockedMax", "rhythmTolerance", "keepMinFraction", "rockerOnlyFraction",
               "rockerOnlyTolerance", "captureTolerance", "spikeJumpFraction", "rfBandRel", "rfMinCover", "rfMinR2",
-              "rfF0Clear", "pauseTolerance"):
+              "rfF0Clear", "pauseTolerance", "lockedThreshold"):
         v = _number(opts[k])
         if not (0 <= v <= 1):
             raise ValueError(f"options: '{k}' must be a number from 0 to 1.")
         opts[k] = v
     for k in ("steepRiseMargin", "offsetSnap", "pauseMinInterval", "pauseIntervalRatio",
-              "diastoleWindowEnd", "certainNoiseRel", "certainLargeRel", "certainLargeNoiseRel", "certainUnpacedRel",
+              "diastoleWindowEnd", "lockedNoiseRel", "certainNoiseRel", "certainLargeRel", "certainLargeNoiseRel", "certainUnpacedRel",
               "noiseMinInterval", "artifactMaxRel", "noiseAbsMax", "noiseRelMax", "rhythmMinPerCycle", "keepNoiseRel",
               "keepNoiseAbs", "dropRel", "smallNoiseRel", "smallTypicalRel", "smallRhythmMinPerCycle",
               "smallRhythmTypicalRel", "spikeJumpFactor", "spikeGroupGap", "spikeCoincidence", "rfMinRun",
