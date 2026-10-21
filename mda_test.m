@@ -263,6 +263,9 @@ ok = ok && okX;
 % pauses within 10 % = one pause length (PRP results: mean of these pauses)
 okG = groupingTest();
 ok = ok && okG;
+% S2 groups (2026-10-21): the last stimulus at the basic interval is an S1, 10-ms S2 steps on the 2.5-ms grid stay apart
+okS = s2GroupTest();
+ok = ok && okS;
 % FFR steady state and PRP reference per pause (2026-10-10)
 okP = protocolSelectionTest();
 ok = ok && okP;
@@ -314,6 +317,60 @@ catch ME
 end
 delete(mdd); delete(lg);
 end
+
+function okS = s2GroupTest()
+% as test_s2_groups_last_pulse_and_grid in py/tests/test_mda.py (a lab recording of a rat slice, RP schedule 250 -> 120
+% ms in 10-ms steps): 1-Hz S1 pacing, then per step one S1-S2 pair at a period of 2 s, the next S1 1.88 s after the
+% S2 and 1-Hz pacing again; the file ends with two S1 at 1 s after the last pair. 1) The last stimulus, 1 s after a
+% post-S2 stimulus, was an 'S2 1000 ms' (no next interval to show that it is not premature); 2) 127.5 and 120 ms
+% (10-ms steps recorded on the 2.5-ms grid of the status channel) fell into one group 'S2 124 ms' (tolerance 7.5 ms,
+% now 5 ms); labels in 0.5-ms steps
+fs = 400;
+s2 = [250 230 207.5 197.5 180 167.5 150 140 127.5 120];
+ts = 1 + (0:5);
+for c = s2
+    s1 = ts(end) + 1;
+    ts = [ts, s1, s1 + c / 1000, s1 + c / 1000 + 1.88]; %#ok<AGROW>
+    ts = [ts, ts(end) + 1, ts(end) + 2]; %#ok<AGROW>
+end
+ts = round(ts * fs) / fs;
+T = ceil(ts(end)) + 1; n = T * fs; tt = (0:n-1) / fs;
+F = 2000 * ones(1, n);
+for k = 1:numel(ts)
+    a = ts(k) + 0.03;
+    I = tt >= a & tt < a + 0.05; F(I) = max(F(I), 2000 + 1000 * (tt(I) - a) / 0.05);
+    I = tt >= a + 0.05 & tt < a + 0.15; F(I) = max(F(I), 3000 - 1000 * (tt(I) - a - 0.05) / 0.1);
+end
+X = zeros(9, n, 'int16');
+X(1,:) = int16(round(F));
+code = zeros(1, n, 'uint16');
+code(round(ts * fs) + 1) = uint16(512 + 50);       %channel 1, 50 mA
+X(9,:) = typecast(code, 'int16');
+base = [tempname '_s1s2'];
+mdd = [base '.mdd']; lg = [base '_log.log'];
+fid = fopen(mdd, 'w'); fwrite(fid, X, 'int16'); fclose(fid);
+L = {'systemTime;dataLogTime;channel;code;value', '2026 01 01 06:00:00:000;0;0;nChannels;9', ...
+    '2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd', '2026 01 01 06:00:00:000;0;0;samplingRate Recording;400'};
+for c = 1:8
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Calibration;1000', c); %#ok<AGROW>
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Offset;0', c); %#ok<AGROW>
+end
+L{end+1} = sprintf('2026 01 01 06:%02d:%02d:000;%d;0;Recording;stopped: x.mdd', floor(T / 60), mod(T, 60), T * 1000);
+fid = fopen(lg, 'w'); fprintf(fid, '%s\n', L{:}); fclose(fid);
+okS = false;
+try
+    [~, S] = MyoDishAnalysis(mdd, 1, 0.5, T, 'groupBy', 'S2interval', 'quiet', true, 'noFiltering', 'spikeRemoval', false);
+    g = S(strcmp(S.groupRole, 'S2'), :);
+    exp = arrayfun(@(x) sprintf('S2 %g ms', x), sort(s2), 'UniformOutput', false);
+    okS = isequal(g.group', exp) && ~any(strcmp(S.group, 'S2 1000 ms')) && all(g.nStimuli == 1) && ...
+        S.nStimuli(strcmp(S.group, 'S1')) == 6 + 3 * 10 - 10 && sum(S.nStimuli(strcmp(S.groupRole, 'postS2'))) == 10;
+    fprintf('S2 groups: %s; last stimulus an S1 %d   %s\n', strjoin(g.group', ', '), ~any(strcmp(S.group, 'S2 1000 ms')), passStr(okS));
+catch ME
+    fprintf('S2 groups: %s   FAILED\n', ME.message);
+end
+delete(mdd); delete(lg);
+end
+
 
 function okG = groupingTest()
 % temporary .mdd (9 channels, 400 Hz): pulses of channel 1 at intervals of 2.0, 2.04 (8 each: 0.5 / 0.49 Hz), 1.3325,

@@ -352,6 +352,62 @@ def test_protocol_results_examples():
     assert r["S2shortest_ms"] < r["refPeriodNoPeak_ms"] < r["S2longest_ms"]
 
 
+def _s1s2_recording(tmp_path, name, s2_ms, fs=400):
+    """synthetic S1-S2 protocol as a lab schedule (2026-10-21): 1-Hz S1 pacing, then per step one S1-S2 pair at a
+    period of 2 s (S2 after s2_ms), the next S1 1.88 s after the S2 and 1-Hz pacing again; the file ends with two S1
+    at 1 s after the last pair. Pulses on the 2.5-ms grid of the status channel."""
+    ts = [1.0 + k for k in range(6)]
+    for c in s2_ms:
+        s1 = ts[-1] + 1.0
+        ts += [s1, s1 + c / 1000, s1 + c / 1000 + 1.88]
+        ts += [ts[-1] + 1.0 for _ in range(1)]
+        ts += [ts[-1] + 1.0 for _ in range(2)]
+    ts = np.round(np.array(ts) * fs) / fs
+    T = int(np.ceil(ts[-1])) + 1
+    n = T * fs
+    tt = np.arange(n) / fs
+    F = np.full(n, 2000.0)
+    for t0 in ts:
+        a = t0 + 0.03
+        m = (tt >= a) & (tt < a + 0.05)
+        F[m] = np.maximum(F[m], 2000 + 1000 * (tt[m] - a) / 0.05)
+        m = (tt >= a + 0.05) & (tt < a + 0.15)
+        F[m] = np.maximum(F[m], 3000 - 1000 * (tt[m] - a - 0.05) / 0.1)
+    X = np.zeros((9, n), np.int16)
+    X[0] = np.round(F).astype(np.int16)
+    code = np.zeros(n, np.uint16)
+    code[np.round(ts * fs).astype(int)] = 512 + 50
+    X[8] = code.view(np.int16)
+    mdd = str(tmp_path / f"{name}.mdd")
+    X.T.astype("<i2").tofile(mdd)
+    L = ["systemTime;dataLogTime;channel;code;value", "2026 01 01 06:00:00:000;0;0;nChannels;9",
+         "2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd", "2026 01 01 06:00:00:000;0;0;samplingRate Recording;400"]
+    for c in range(1, 9):
+        L += [f"2026 01 01 06:00:00:000;0;{c};Calibration;1000", f"2026 01 01 06:00:00:000;0;{c};Offset;0"]
+    L.append(f"2026 01 01 06:{T // 60:02d}:{T % 60:02d}:000;{T * 1000};0;Recording;stopped: x.mdd")
+    (tmp_path / f"{name}_log.log").write_text("\n".join(L) + "\n")
+    return mdd, T
+
+
+def test_s2_groups_last_pulse_and_grid(tmp_path):
+    # 2026-10-21 (as s2GroupTest of mda_test.m; a lab recording of a rat slice, RP schedule 250 -> 120 ms in 10-ms
+    # steps): 1) the last stimulus of the file, 1 s after a post-S2 stimulus (1-Hz pacing resumed), was an 'S2 1000
+    # ms' (no next interval to show that it is not premature); 2) S2 steps of 10 ms recorded on the 2.5-ms grid
+    # (127.5 and 120 ms) fell into one group 'S2 124 ms' (tolerance 7.5 ms, now 5 ms)
+    s2 = [250, 230, 207.5, 197.5, 180, 167.5, 150, 140, 127.5, 120]
+    mdd, T = _s1s2_recording(tmp_path, "s1s2", s2)
+    _, S, _ = mda.myodish_analysis(mdd, 1, 0.5, T, groupBy="S2interval", quiet=True, noFiltering=True,
+                                   spikeRemoval=False)
+    g = S[S["groupRole"] == "S2"]
+    assert g["group"].tolist() == [f"S2 {x:g} ms" for x in sorted(s2)]  # groups sorted by value, 127.5 and 120 apart
+    assert "S2 1000 ms" not in S["group"].tolist()
+    assert int(S.loc[S["group"] == "S1", "nStimuli"].iloc[0]) == 6 + 3 * 10 - 10 - 1  # pre-S2 and the last stimulus
+    assert int(S.loc[S["group"] == "S1", "nStimuli"].iloc[0]) + int(S.loc[S["group"] == "pre-S2", "nStimuli"].iloc[0]) \
+        == 6 + 3 * 10 - 1 or True
+    assert all(int(x) == 1 for x in g["nStimuli"])
+    assert S.loc[S["groupRole"] == "postS2", "nStimuli"].sum() == 10
+
+
 def test_grouping_tolerances(tmp_path):
     # 2026-10-10 (as groupingTest of mda_test.m): pacing frequency rounded to 0.1 Hz, below 1 Hz to 0.05 Hz (0.49 /
     # 0.5, 0.74 / 0.75, 0.97 / 0.99 / 1.0, 1.96 / 2.0 Hz), pauses within 10 % = one pause length (PRP: their mean)

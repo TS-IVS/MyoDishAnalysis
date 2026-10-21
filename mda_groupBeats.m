@@ -15,8 +15,11 @@ function [B, G, Z, notes] = mda_groupBeats(H, B, C, range, by, opts, steadyN)
 %                             frequency are one group (0.99, 1.0, 1.001 Hz = '1 Hz'; 0.74, 0.75 Hz = '0.75 Hz').
 %                             stimFrequency of the group summary: 1 / median interval (measured)
 %          'S2interval'       S1-S2 protocols: S2 = premature stimulus (interval < 95 % of the previous one, next
-%                             interval longer, previous stimulus not premature); groups 'S1', 'S2 <interval>' and
-%                             'post-S2 <interval>' (the stimulus after an S2); S2 intervals within 7.5 ms = one group.
+%                             interval longer or unknown, previous stimulus not premature; the last stimulus of the
+%                             channel at the basic interval, +-5 %, is an S1); groups 'S1', 'S2 <interval>' and
+%                             'post-S2 <interval>' (the stimulus after an S2); S2 intervals within 5 ms = one group
+%                             (2026-10-21; before 7.5 ms: 10-ms steps of a schedule, recorded on the 2.5-ms grid of
+%                             the 400-Hz status channel, could fall into one group, e.g. 127.5 and 120 ms).
 %                             'S1' = the other stimuli at the basic interval (median, +-5 %) that are not followed by an
 %                             S2 ('pre-S2': relaxation cut off by the S2); stimuli at other intervals (e.g. trains at a
 %                             higher rate between the S1-S2 steps): group 'other'
@@ -137,10 +140,18 @@ switch lower(by)
         cand = ~isS2 & ~post;                      %S1 = basic interval; other intervals: 'other'
         inR = tt >= range(1) & tt <= range(2);
         base = median(prevInt(cand & inR), 'omitnan');
+        % last stimulus of the channel (no next interval) at the basic interval after a post-S2 stimulus: an S1, not
+        % an S2 (e.g. 1-Hz pacing resumed after the last S1-S2 pair; a true S2 at the end is shorter than the basic
+        % interval), 2026-10-21
+        late = isS2 & isnan(nextInt) & abs(prevInt - base) <= 0.05 * base;
+        if any(late)
+            isS2(late) = false; premature(late) = false; role(late) = {'S1'};
+            post = [false; isS2(1:end-1)]; cand = ~isS2 & ~post;
+        end
         role(cand & abs(prevInt - base) > 0.05 * base) = {'other'};
         role(strcmp(role, 'S1') & [isS2(2:end); false]) = {'preS2'};   %relaxation cut off by the S2
         s2 = nan(nS, 1); s2(isS2) = prevInt(isS2);
-        gid = clusterValues(s2, 0.0075, 0);
+        gid = clusterValues(s2, 0.005, 0);
         v2 = groupMedian(s2, gid);
         val(isS2) = v2(isS2);
         ip = find(post);
@@ -497,8 +508,8 @@ for i = 1:n
                 case 'S1', s = 'S1';
                 case 'preS2', s = 'pre-S2';
                 case 'other', s = 'other';
-                case 'S2', s = sprintf('S2 %d ms', round(1000 * v));
-                otherwise, s = sprintf('post-S2 %d ms', round(1000 * v));
+                case 'S2', s = sprintf('S2 %g ms', round(2000 * v) / 2);       %0.5-ms steps (2.5-ms grid), 2026-10-21
+                otherwise, s = sprintf('post-S2 %g ms', round(2000 * v) / 2);
             end
         case 'stimcurrent', s = sprintf('%g mA', v);
         case 'pauselength'

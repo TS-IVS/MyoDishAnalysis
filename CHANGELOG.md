@@ -55,6 +55,15 @@ MATLAB and Python versions have the same version number and give the same result
   lab logs: start 12 h off). The copy of the `.mdd` file also had the time of copying, which decides AM/PM in logs
   that cannot tell (64 of 1,880 such logs on the hard disk). Now these builds are written as `2.0.7717`, and the copy
   keeps the time of last change of the recording, shifted by the same number of days.
+- **S2 groups of refractory-period protocols** (`mda_groupBeats` / `group_beats`, `S2interval`; found with a lab
+  recording of a rat slice, RP schedule 250 → 120 ms in 10-ms steps): 1) the last stimulus of a channel at the basic
+  S1 interval after a post-S2 stimulus (1-Hz pacing resumed after the last S1-S2 pair, file or range ending there)
+  was an S2 of its own (`S2 1000 ms`; no next interval to show that it is not premature; 16 of 1,510 RP ranges of
+  human recordings of 2024–2025): now an S1. 2) S2 intervals within 7.5 ms were one group, but the 400-Hz status
+  channel records a pulse on a 2.5-ms grid, so 10-ms steps of a schedule could fall into one group (127.5 and
+  120 ms → `S2 124 ms`, 2 stimuli): now 5 ms (the same interval ±2.5 ms stays one group). Group labels and the
+  tested intervals of the RP results (`S2shortest_ms`, `refPeriod...`) in 0.5-ms steps (`S2 207.5 ms` instead of
+  `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
 - **Sensor rate per channel, inferred** (summary columns `sensorRate_inferred`, `repeatedSamples_percent`;

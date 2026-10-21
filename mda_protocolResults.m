@@ -284,7 +284,7 @@ for i = 1:numel(ciU)
     fracSep(i) = mean(sv(g == ciU(i)));
     medResp(i) = median(rv(g == ciU(i)));
 end
-ciU = round(1000 * ciU);
+ciU = round(2000 * ciU) / 2;                              %0.5-ms steps (2.5-ms grid of the status channel), 2026-10-21
 if ~isempty(ciU), R.S2shortest_ms = ciU(end); R.S2longest_ms = ciU(1); end
 [R.refPeriodNoPeak_ms, R.refPeriodNoPeakStep_ms, notes] = transition(ciU, 100 * fracSep, 50, 'no peak', notes);
 [R.refPeriodNoResponse_ms, R.refPeriodNoResponseStep_ms, notes] = transition(ciU, medResp, noise, 'no response', notes);

@@ -296,7 +296,7 @@ def _s2_results(R, Z, trace, opts):
     ciU = np.unique(g)[::-1]
     fracSep = np.array([np.mean(sep[v][g == x]) for x in ciU])
     medResp = np.array([np.median(resp[v][g == x]) for x in ciU])
-    ciU = np.array([mround(1000 * x) for x in ciU], float)
+    ciU = np.array([mround(2000 * x) / 2 for x in ciU], float)  # 0.5-ms steps (2.5-ms grid), 2026-10-21
     if ciU.size:
         R["S2shortest_ms"], R["S2longest_ms"] = float(ciU[-1]), float(ciU[0])
     R["refPeriodNoPeak_ms"], R["refPeriodNoPeakStep_ms"] = _transition(ciU, 100 * fracSep, 50, "no peak", notes)

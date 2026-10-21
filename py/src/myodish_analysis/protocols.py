@@ -561,12 +561,22 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
         inR = (tt >= r0) & (tt <= r1)
         p = prevInt[cand & inR]
         base = float(np.median(p[~np.isnan(p)])) if np.any(~np.isnan(p)) else math.nan
+        # last stimulus of the channel (no next interval) at the basic interval after a post-S2 stimulus: an S1, not
+        # an S2 (e.g. 1-Hz pacing resumed after the last S1-S2 pair; a true S2 at the end is shorter than the basic
+        # interval), 2026-10-21
+        with np.errstate(invalid="ignore"):
+            late = isS2 & np.isnan(nextInt) & (np.abs(prevInt - base) <= 0.05 * base)
+        if late.any():
+            isS2[late] = False
+            role[late] = "S1"
+            post = np.r_[False, isS2[:-1]][:nS]
+            cand = ~isS2 & ~post
         with np.errstate(invalid="ignore"):
             role[cand & (np.abs(prevInt - base) > 0.05 * base)] = "other"
         role[(role == "S1") & np.r_[isS2[1:], False][:nS]] = "preS2"  # relaxation cut off by the S2
         s2 = np.full(nS, np.nan)
         s2[isS2] = prevInt[isS2]
-        v2 = _group_median(s2, _cluster_values(s2, 0.0075, 0.0))
+        v2 = _group_median(s2, _cluster_values(s2, 0.005, 0.0))  # within 5 ms = one group (2026-10-21; before 7.5)
         val[isS2] = v2[isS2]
         ip = np.flatnonzero(post)
         val[ip] = v2[ip - 1]
@@ -965,9 +975,9 @@ def _group_labels(byl, val, role, byName):
             elif r == "other":
                 s = "other"
             elif r == "S2":
-                s = "S2 %d ms" % mround(1000 * v) if not math.isnan(v) else ""
+                s = "S2 %g ms" % (mround(2000 * v) / 2) if not math.isnan(v) else ""  # 0.5-ms steps, 2026-10-21
             else:
-                s = "post-S2 %d ms" % mround(1000 * v) if not math.isnan(v) else ""
+                s = "post-S2 %g ms" % (mround(2000 * v) / 2) if not math.isnan(v) else ""
         elif byl == "stimcurrent":
             s = "%g mA" % v
         elif byl == "pauselength":
