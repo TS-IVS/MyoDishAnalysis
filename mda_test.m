@@ -368,12 +368,13 @@ end
 end
 
 
-function [mdd, T, t0] = pairedRecording(name, stepsMs, s2Amp, sequences)
+function [mdd, T, t0] = pairedRecording(name, stepsMs, s2Amp, sequences, rocker)
 % S1-S2 pairs in every period (human standard schedule, 2026-10-23; as _paired_recording in py/tests/test_mda.py): S1
 % pacing at the period of 1.2 s (4 pulses from 1 s), then per step 8 periods with the S1 at 0 and the S2 at the step
 % interval; a contraction after every S1 (1000 uN, rise 50 ms, fall 150 ms) and after every S2 (s2Amp(step) uN; 0 = no
 % response); a little noise. With sequences, the log file has the 'Sequence' lines of software 2023 ('StimPeriod' /
-% 'StimTimes' per channel) 0.5 s before the first S1 of every step (and of the pacing). t0 = 0.5 s before the first pair
+% 'StimTimes' per channel) 0.5 s before the first S1 of every step (and of the pacing). rocker: bit 15 set in every
+% sample (rocker moving throughout). t0 = 0.5 s before the first pair
 fs = 400; period = 1.2; nPairs = 8; pre = 4;
 ts = 1 + (0:pre-1) * period;
 s1 = ts(end);
@@ -401,7 +402,8 @@ rng(3); F = F + 2 * randn(size(F));
 X = zeros(9, n, 'int16');
 X(1,:) = int16(round(F));
 code = zeros(1, n, 'uint16');
-code(round(ts * fs) + 1) = uint16(512 + 50);
+if rocker, code(:) = 16384; end
+code(round(ts * fs) + 1) = code(round(ts * fs) + 1) + uint16(512 + 50);
 X(9,:) = typecast(code, 'int16');
 base = [tempname '_' name];
 mdd = [base '.mdd']; lg = [base '_log.log'];
@@ -436,8 +438,9 @@ function okQ = s2PairsTest()
 % (later than half the period) is the next S1 and 560 ms its interval, and at 600 ms (equal intervals) there is no S2;
 % 2) without steady-state S1 beats the S2 response uses the S1 of the pairs at the longest interval as template
 steps = [640 600 560 400];
-[mdd, T, t0] = pairedRecording('pairs', steps, [800 800 800 0], true);
-[mdd2, T2, t02] = pairedRecording('pairs2', steps, [800 800 800 0], false);
+[mdd, T, t0] = pairedRecording('pairs', steps, [800 800 800 0], true, false);
+[mdd2, T2, t02] = pairedRecording('pairs2', steps, [800 800 800 0], false, false);
+[mdd3, T3, t03] = pairedRecording('pairs3', steps, [800 800 800 0], true, true);   %rocker moving throughout
 okQ = false;
 try
     o = {'groupBy', 'S2interval', 'quiet', true, 'noFiltering', 'spikeRemoval', false};
@@ -447,7 +450,15 @@ try
     resp = containers.Map(round(g.groupValue * 1000), g.S2response_pct);
     sep = containers.Map(round(g.groupValue * 1000), g.separatePeak_percent);
     [~, S2] = MyoDishAnalysis(mdd2, 1, t02, T2, o{:});
+    % rocker moving throughout (no pair at rest): option rockerFallback (default) uses all pairs (note); off: NaN
+    [~, S3, I3] = MyoDishAnalysis(mdd3, 1, t03, T3, o{:}, 'rocker', 'stopped');
+    r3 = I3.protocolResults;
+    [~, ~, I4] = MyoDishAnalysis(mdd3, 1, t03, T3, o{:}, 'rocker', 'stopped', 'rockerFallback', false);
     okQ = isequal(g.group', arrayfun(@(x) sprintf('S2 %d ms', x), sort(steps), 'UniformOutput', false)) && ...
+        strcmp(r.variant{1}, 'S1-S2 pairs in every period, S2 640-400 ms (4 steps)') && ...
+        r3.nTemplateBeats == 8 && abs(r3.refPeriodNoPeak_ms - 480) < 1e-6 && ...
+        contains(r3.resultNote{1}, 'no S1-S2 pairs with the rocker at rest: all pairs used') && ...
+        S3.nContractions(strcmp(S3.group, 'S2 560 ms')) == 8 && isnan(I4.protocolResults.refPeriodNoPeak_ms) && ...
         isequal(g.nStimuli', [8 8 8 8]) && sum(S.nStimuli(strcmp(S.groupRole, 'postS2'))) == 4 * 8 - 1 && ...
         ~any(strcmp(S.group, 'other')) && r.nTemplateBeats == 8 && ...
         contains(r.resultNote{1}, 'template: S1 of the 8 pairs at 640 ms') && ...
@@ -463,14 +474,14 @@ try
 catch ME
     fprintf('S1-S2 pairs in every period: %s   FAILED\n', ME.message);
 end
-delete(mdd); delete(strrep(mdd, '.mdd', '_log.log')); delete(mdd2); delete(strrep(mdd2, '.mdd', '_log.log'));
+for m = {mdd, mdd2, mdd3}, delete(m{1}); delete(strrep(m{1}, '.mdd', '_log.log')); end
 end
 
 
 function okF = stRockerFallbackTest()
 % as test_st_prp_rocker_fallback in py/tests/test_mda.py: stimulation threshold (10, 20, 30, 40 mA, 6 pulses each at
 % 1 Hz; contractions 0 / 500 / 1000 / 1000 uN) with the rocker bit set in every sample. With rocker 'stopped' no
-% contraction is at rest; option ffrRockerFallback (default) includes the contractions with the rocker moving (note),
+% contraction is at rest; option rockerFallback (default) includes the contractions with the rocker moving (note),
 % off: no amplitude thresholds
 fs = 400;
 cur = [10 * ones(1, 6), 20 * ones(1, 6), 30 * ones(1, 6), 40 * ones(1, 6)];
@@ -505,11 +516,12 @@ try
     o = {'groupBy', 'stimCurrent', 'quiet', true, 'noFiltering', 'spikeRemoval', false, 'rocker', 'stopped'};
     [~, S, I] = MyoDishAnalysis(mdd, 1, 0.5, T, o{:});
     r = I.protocolResults;
-    [~, S0, I0] = MyoDishAnalysis(mdd, 1, 0.5, T, o{:}, 'ffrRockerFallback', false);
+    [~, S0, I0] = MyoDishAnalysis(mdd, 1, 0.5, T, o{:}, 'rockerFallback', false);
     r0 = I0.protocolResults;
+    [~, S5] = MyoDishAnalysis(mdd, 1, 0.5, T, o{:}, 'ffrRockerFallback', false);   %older option name
     okF = S.nContractions(strcmp(S.group, '30 mA')) == 6 && r.captureThreshold_mA == 20 && r.stimThreshold50_mA == 20 && ...
         r.stimThreshold95_mA == 30 && any(contains(I.notes, 'rocker moving used')) && sum(S0.nContractions) == 0 && ...
-        isnan(r0.stimThreshold50_mA);
+        isnan(r0.stimThreshold50_mA) && strcmp(r.variant{1}, '10-40 mA (4 steps)') && sum(S5.nContractions) == 0;
     fprintf(['ST with the rocker moving: included at 30 mA %d (expected 6), thresholds 50 / 95 %% %g / %g mA (expected 20 / 30), ' ...
         'note %d; fallback off: included %d, threshold 50 %% %g   %s\n'], S.nContractions(strcmp(S.group, '30 mA')), ...
         r.stimThreshold50_mA, r.stimThreshold95_mA, any(contains(I.notes, 'rocker moving used')), sum(S0.nContractions), ...
@@ -628,6 +640,8 @@ try
         height(rest) == 4 && ...
         isequal(rest.group', {'rest 15.8 s #1', 'rest 15.8 s #2', 'rest 31.8 s #3', 'rest 31.8 s #4'}) && ...
         abs(R.PRP15_pause_s - 14.75) < 1e-6 && abs(R.PRP30_pause_s - 30.75) < 1e-6 && isnan(R.PRP60_pct) && ...
+        abs(R.PRP1_pause_s - 14.75) < 1e-6 && abs(R.PRP2_pause_s - 30.75) < 1e-6 && isnan(R.PRP3_pct) && ...
+        strcmp(R.variant{1}, 'pauses 14.8/30.8 s') && strcmp(If.protocolResults.variant{1}, '0.5-2 Hz (4 steps)') && ...
         contains(R.resultNote{1}, 'PRP15: mean of 2 pauses') && any(strcmp(Sf2.group, '1.03 Hz'));
     fprintf(['grouping tolerances: frequency groups %s (expected 0.5, 0.75, 1, 2 Hz), pauses %s, PRP15 / 30 pause %.2f / %.2f s ' ...
         '(expected 14.75 / 30.75)   %s\n'], strjoin(Sf.group', ', '), strjoin(rest.group', ', '), R.PRP15_pause_s, ...

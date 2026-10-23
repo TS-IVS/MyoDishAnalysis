@@ -79,7 +79,7 @@ fRes = 0.1; if isfield(opts, 'frequencyResolution'), fRes = opts.frequencyResolu
 fResLow = 0.05; if isfield(opts, 'frequencyResolutionLow'), fResLow = opts.frequencyResolutionLow; end
 pTol = 0.1; if isfield(opts, 'pauseTolerance'), pTol = opts.pauseTolerance; end
 cols = resultColumns();
-R = cell2table([num2cell(nan(1, numel(cols) - 1)), {''}], 'VariableNames', cols);
+R = cell2table([num2cell(nan(1, numel(cols) - 2)), {'', ''}], 'VariableNames', cols);   %variant, resultNote: text
 G2 = [];                                               %S2 groups (S2interval only)
 notes = {};
 if isempty(G) || height(G) == 0
@@ -93,6 +93,7 @@ cap = capturedGroups(G);
 switch lower(char(by))
     case 'pacingfrequency'
         ok = cap & ~isnan(val);
+        R.variant = {variantText('%g-%g Hz (%d steps)', val)};
         if any(ok), R.maxCapturedFrequency_Hz = max(val(ok)); end
         a05 = ampAt(val, amp, cap, 0.5, fResLow);
         R.amplitude_0p5Hz_uN = a05;
@@ -102,6 +103,7 @@ switch lower(char(by))
         if isnan(a05), notes{end+1} = 'no captured 0.5 Hz group'; end
     case 'stimcurrent'
         ok = cap & ~isnan(val);
+        R.variant = {variantText('%g-%g mA (%d steps)', val)};
         if any(ok), R.captureThreshold_mA = min(val(ok)); end
         oka = ok & ~isnan(amp);
         if any(oka)
@@ -120,6 +122,17 @@ switch lower(char(by))
         pr = find(strcmp(role, 'postRest') & ~isnan(val));
         pause = val(pr) - cl;
         pct = G.amplitude_pctOfRef(pr);
+        % pauses of the protocol in ascending order (2026-10-23): PRP1 ... PRP6 (pauses within pauseTolerance have one
+        % group value, mda_groupBeats; several pauses of one length: their mean); variant = the list of pauses
+        pv = unique(val(pr));
+        for q = 1:min(6, numel(pv))
+            k = find(val(pr) == pv(q));
+            R.(sprintf('PRP%d_pct', q)) = mean(pct(k), 'omitnan');
+            R.(sprintf('PRP%d_pause_s', q)) = mean(pause(k));
+        end
+        if ~isempty(pv) && ~isnan(cl)
+            R.variant = {sprintf('pauses %s s', strjoin(arrayfun(@(x) sprintf('%.3g', x), pv' - cl, 'UniformOutput', false), '/'))};
+        end
         for x = [15 30 60]
             if ~isempty(pr) && ~isnan(cl)
                 k = find(abs(pause - x) <= pTol * x + 1e-9);
@@ -152,7 +165,17 @@ c = {'maxCapturedFrequency_Hz', 'amplitude_0p5Hz_uN', 'FFR_1Hz_pct', 'FFR_2Hz_pc
     'refPeriodAllCaptured_ms', ...
     'S2shortest_ms', 'S2longest_ms', 'S2noiseLevel_pct', 'amplitudeS1_uN', 'nS2', 'nTemplateBeats', ...
     'PRP15_pct', 'PRP15_pause_s', 'PRP30_pct', 'PRP30_pause_s', 'PRP60_pct', 'PRP60_pause_s', ...
-    'resultNote'};
+    'PRP1_pct', 'PRP1_pause_s', 'PRP2_pct', 'PRP2_pause_s', 'PRP3_pct', 'PRP3_pause_s', ...
+    'PRP4_pct', 'PRP4_pause_s', 'PRP5_pct', 'PRP5_pause_s', 'PRP6_pct', 'PRP6_pause_s', ...
+    'variant', 'resultNote'};
+end
+
+
+function s = variantText(fmt, val)
+% '<min>-<max> <unit> (<n> steps)' of the group values (protocol variant, 2026-10-23)
+v = unique(val(~isnan(val)));
+s = '';
+if ~isempty(v), s = sprintf(fmt, min(v), max(v), numel(v)); end
 end
 
 
@@ -229,68 +252,88 @@ end
 S1 = median(p);
 dt = median(diff(t));
 tol = max(0.03, 0.02 * S1);
-if issorted(tR)   %binary search + cumulative sum: O(log N) per call (long protocols: >= 10^4 stimuli), 2026-10-10
-    nRock = [0; cumsum(double(rock))];
-    atRest = @(a, b) ~stopped || restSorted(tR, nRock, a, b);
-else
-    atRest = @(a, b) ~stopped || (any(tR >= a & tR <= b) && ~any(rock(tR >= a & tR <= b)));
-end
+fallback = ~(isstruct(opts) && isfield(opts, 'rockerFallback') && ~opts.rockerFallback);
+sortedR = issorted(tR);
+if sortedR, nRock = [0; cumsum(double(rock))]; end   %binary search + cumulative sum: O(log N) per call, 2026-10-10
 inData = @(a, b) t(1) <= a && t(end) >= b;
 tg = (round(-0.05 / dt):round((S1 - 0.1) / dt))' * dt;
 nTg = numel(tg);
 w = max(1, round(0.03 / dt));
-
-isSS = strcmp(role, 'S1') & inR & abs(prevI - S1) < tol & abs(ni - S1) < tol;
-jSS = find(isSS);
-keep = false(size(jSS));
-for k = 1:numel(jSS)
-    keep(k) = inData(st(jSS(k)) - 0.05, st(jSS(k)) + S1 - 0.1) && atRest(st(jSS(k)), st(jSS(k)) + S1 - 0.1);
-end
-jSS = jSS(keep);
-Y = nan(nTg, numel(jSS));
-for k = 1:numel(jSS), Y(:,k) = getTrace(st(jSS(k)), tg); end
-Y = Y(:, all(~isnan(Y), 1));
-nT = size(Y, 2);
-R.nTemplateBeats = nT;
 R.nS2 = numel(jS2);
 if isempty(jS2), notes = {'no S2 stimuli'}; return; end
-cutT = inf;                                          %end of the template (pairs template: 20 ms before their S2)
-if nT < 3
-    % S1-S2 pairs in every period (no steady-state S1 beats; 2026-10-23): template from the S1 of the pairs with
-    % the longest S2 interval, cut 20 ms before the S2 and held at the mean of the 50 ms before the cut
-    vS2 = val(jS2);
-    jL = jS2(vS2 == max(vS2) & jS2 > 1);
-    cL = st(jL) - st(jL - 1);
-    keep = false(size(jL));
-    for k = 1:numel(jL)
-        keep(k) = inData(st(jL(k) - 1) - 0.05, st(jL(k)) - 0.02) && atRest(st(jL(k) - 1), st(jL(k)) - 0.02);
-    end
-    jL = jL(keep); cL = cL(keep);
-    if numel(jL) >= 3
-        cutT = min(cL) - 0.02;
-        Y = nan(nTg, numel(jL));
-        for k = 1:numel(jL)
-            y = getTrace(st(jL(k) - 1), tg);
-            y(tg > cutT) = mean(y(tg > cutT - 0.05 & tg <= cutT));
-            Y(:,k) = y;
-        end
-        Y = Y(:, all(~isnan(Y), 1));
-        nT = size(Y, 2);
-        mT = mean(Y, 2);
-        tail = mean(mT(tg > cutT - 0.05 & tg <= cutT)) / max(mT);
-        if nT >= 3 && tail > 0.1
-            notes = {sprintf(['template: S1 of the %d pairs at %g ms not relaxed before the S2 (%d %% of the peak), ' ...
-                'no steady-state S1 beats - no estimates'], nT, round(2000 * max(vS2)) / 2, round(100 * tail))};
-            return;
-        end
-        if nT >= 3
-            notes{end+1} = sprintf('template: S1 of the %d pairs at %g ms (no steady-state S1 beats)', nT, ...
-                round(2000 * max(vS2)) / 2);
-            R.nTemplateBeats = nT;
-        end
-    end
+isSS = strcmp(role, 'S1') & inR & abs(prevI - S1) < tol & abs(ni - S1) < tol;
+vS2 = val(jS2);
+% protocol variant (2026-10-23): S1 train + S2 pairs (steady-state S1 stimuli: S1 interval before and after) or
+% S1-S2 pairs in every period
+if nnz(isSS) >= 3, R.variant = {'S1 train + S2 pairs'}; else, R.variant = {'S1-S2 pairs in every period'}; end
+if ~isempty(vS2) && any(~isnan(vS2))
+    R.variant = {sprintf('%s, S2 %g-%g ms (%d steps)', R.variant{1}, round(2000 * max(vS2)) / 2, ...
+        round(2000 * min(vS2)) / 2, numel(unique(vS2(~isnan(vS2)))))};
 end
-if nT < 3, notes = {sprintf('only %d steady-state S1 beats with the rocker at rest (>= 3 needed)', nT)}; return; end
+
+% template: mean steady-state S1 contraction (rocker at rest with 'stopped'); fewer than 3: the S1 of the pairs with
+% the longest S2 interval (2026-10-23); with 'stopped' and fewer than 3 such pairs at rest: all pairs (option
+% rockerFallback, note), the S2 are then evaluated with the rocker moving, too
+cutT = inf;                                          %end of the template (pairs template: 20 ms before their S2)
+nT = 0; pairsNote = ''; relaxNote = '';
+for pass = 1:2
+    if sortedR
+        atRest = @(a, b) ~stopped || restSorted(tR, nRock, a, b);
+    else
+        atRest = @(a, b) ~stopped || (any(tR >= a & tR <= b) && ~any(rock(tR >= a & tR <= b)));
+    end
+    jSS = find(isSS);
+    keep = false(size(jSS));
+    for k = 1:numel(jSS)
+        keep(k) = inData(st(jSS(k)) - 0.05, st(jSS(k)) + S1 - 0.1) && atRest(st(jSS(k)), st(jSS(k)) + S1 - 0.1);
+    end
+    jSS = jSS(keep);
+    Y = nan(nTg, numel(jSS));
+    for k = 1:numel(jSS), Y(:,k) = getTrace(st(jSS(k)), tg); end
+    Y = Y(:, all(~isnan(Y), 1));
+    nT = size(Y, 2);
+    cutT = inf; pairsNote = ''; relaxNote = '';
+    if nT < 3
+        % S1-S2 pairs in every period (no steady-state S1 beats): template from the S1 of the pairs with the
+        % longest S2 interval, cut 20 ms before the S2 and held at the mean of the 50 ms before the cut
+        jL = jS2(vS2 == max(vS2) & jS2 > 1);
+        cL = st(jL) - st(jL - 1);
+        keep = false(size(jL));
+        for k = 1:numel(jL)
+            keep(k) = inData(st(jL(k) - 1) - 0.05, st(jL(k)) - 0.02) && atRest(st(jL(k) - 1), st(jL(k)) - 0.02);
+        end
+        jL = jL(keep); cL = cL(keep);
+        if numel(jL) >= 3
+            cutT = min(cL) - 0.02;
+            Y = nan(nTg, numel(jL));
+            for k = 1:numel(jL)
+                y = getTrace(st(jL(k) - 1), tg);
+                y(tg > cutT) = mean(y(tg > cutT - 0.05 & tg <= cutT));
+                Y(:,k) = y;
+            end
+            Y = Y(:, all(~isnan(Y), 1));
+            nT = size(Y, 2);
+            if nT >= 3
+                mT = mean(Y, 2);
+                tail = mean(mT(tg > cutT - 0.05 & tg <= cutT)) / max(mT);
+                lab = round(2000 * max(vS2)) / 2;
+                if tail > 0.1
+                    relaxNote = sprintf(['template: S1 of the %d pairs at %g ms not relaxed before the S2 (%d %% of ' ...
+                        'the peak), no steady-state S1 beats - no estimates'], nT, lab, round(100 * tail));
+                else
+                    pairsNote = sprintf('template: S1 of the %d pairs at %g ms (no steady-state S1 beats)', nT, lab);
+                end
+            end
+        end
+    end
+    if nT >= 3 || ~stopped || ~fallback, break; end
+    stopped = false;                                 %second pass: all pairs, S2 with the rocker moving, too
+    notes{end+1} = 'no S1-S2 pairs with the rocker at rest: all pairs used'; %#ok<AGROW>
+end
+R.nTemplateBeats = nT;
+if ~isempty(relaxNote), notes{end+1} = relaxNote; return; end
+if ~isempty(pairsNote), notes{end+1} = pairsNote; end
+if nT < 3, notes{end+1} = sprintf('only %d steady-state S1 beats with the rocker at rest (>= 3 needed)', nT); return; end
 m = mean(Y, 2);
 [A1, iPk] = max(m);
 tPk = tg(iPk);                                       %peak time of the S1 template

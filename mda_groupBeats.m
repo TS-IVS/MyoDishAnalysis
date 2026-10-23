@@ -47,13 +47,13 @@ function [B, G, Z, notes] = mda_groupBeats(H, B, C, range, by, opts, steadyN)
 %          'log:<code>'       any numeric entry of the log file for the stimulated channel (or channel 0), e.g.
 %                             'log:pauseDuration', 'log:stimCurrent'
 %   opts   options (mda_options; minStimToPeak, rockerLogDelay, frequencyResolution(Low), pauseTolerance, rocker,
-%          ffrRockerFallback, prpReference, prpReferenceBeats, irregularCV, minGroupBeats)
+%          rockerFallback, prpReference, prpReferenceBeats, irregularCV, minGroupBeats)
 %   steadyN  pacingFrequency (FFR protocols, MyoDishAnalysis: opts.steadyStateBeats; default 0 = all contractions):
 %          steady state per frequency (2026-10-10). Runs = consecutive stimuli at the same frequency (groupStep = number
 %          of the run of this frequency). In the longest run (the protocol step; not the basic pacing before or after
 %          the protocol), the longest sequence of consecutive captured stimuli whose previous and next stimuli are
 %          captured, too (partial capture, e.g. 2:1, gives no candidates and a note); its contractions are candidates;
-%          with rocker 'stopped' those with the rocker at rest (none: with opts.ffrRockerFallback all candidates,
+%          with rocker 'stopped' those with the rocker at rest (none: with opts.rockerFallback all candidates,
 %          note); of these the last steadyN are included, all other
 %          contractions of the group are not. Groups with fewer than opts.minGroupBeats included contractions: note.
 %
@@ -95,8 +95,9 @@ function [B, G, Z, notes] = mda_groupBeats(H, B, C, range, by, opts, steadyN)
 if nargin < 6 || isempty(opts), opts = mda_options(); end
 if nargin < 7 || isempty(steadyN), steadyN = 0; end
 notes = {};
-dflt = struct('ffrRockerFallback', true, 'prpReference', 'steady', 'prpReferenceBeats', 6, 'irregularCV', 0.15, ...
+dflt = struct('rockerFallback', true, 'prpReference', 'steady', 'prpReferenceBeats', 6, 'irregularCV', 0.15, ...
     'minGroupBeats', 5, 'rocker', 'any', 'beats', 'all');   %options structs of older versions
+if isfield(opts, 'ffrRockerFallback') && ~isfield(opts, 'rockerFallback'), opts.rockerFallback = opts.ffrRockerFallback; end   %older name
 fn = fieldnames(dflt);
 for i = 1:numel(fn), if ~isfield(opts, fn{i}), opts.(fn{i}) = dflt.(fn{i}); end, end
 if ~isfield(opts, 'frequencyResolution'), opts.frequencyResolution = 0.1; end
@@ -274,17 +275,28 @@ B.groupValue = bVal;
 B.groupRole = bRole;
 B.groupStep = bStep;
 
-% ------------------------------------------------------------------ PRP / ST with the rocker moving (2026-10-23)
-% rocker 'stopped' and no contraction of the range with the rocker at rest (schedules that keep the rocker running
-% during the post-rest potentiation and stimulation threshold steps, e.g. the human standard schedule): with
-% opts.ffrRockerFallback the contractions with the rocker moving are included (as for the FFR steady state), note
-if any(strcmpi(by, {'pauseLength', 'stimCurrent'})) && strcmp(opts.rocker, 'stopped') && opts.ffrRockerFallback && height(B) > 0
+% ------------------------------------------------------------------ groups without rocker stop (2026-10-23)
+% rocker 'stopped' and a group without any contraction with the rocker at rest (schedules do not always stop the
+% rocker, e.g. during the post-rest potentiation and stimulation threshold steps of the human standard schedule):
+% with opts.rockerFallback the contractions of the group with the rocker moving are included (note). FFR
+% frequencies: the steady-state selection below
+if ~strcmpi(by, 'pacingFrequency') && strcmp(opts.rocker, 'stopped') && opts.rockerFallback && height(B) > 0
     inB = B.t_peak >= range(1) & B.t_peak <= range(2);
     elig = inB & ~isnan(B.amplitude);
     if strcmp(opts.beats, 'stimulated'), elig = elig & strcmp(B.beatType, 'stimulated'); end
-    if any(elig) && ~any(elig & ~B.rockerMoving)
-        B.included(elig) = true;
+    keysB = unique(B.group(elig), 'stable');
+    fb = {};
+    for key = keysB'
+        g = elig & strcmp(B.group, key{1});
+        if ~any(g & ~B.rockerMoving)
+            B.included(g) = true;
+            fb{end+1} = key{1}; %#ok<AGROW>
+        end
+    end
+    if ~isempty(fb) && numel(fb) == numel(keysB)
         notes{end+1} = 'no contraction with the rocker at rest in the range: contractions with the rocker moving used';
+    elseif ~isempty(fb)
+        notes{end+1} = sprintf('no contraction with the rocker at rest at %s: contractions with the rocker moving used', strjoin(fb, ', '));
     end
 end
 
@@ -324,7 +336,7 @@ if strcmpi(by, 'pacingFrequency') && steadyN > 0 && height(B) > 0 && nS > 0
         switch opts.rocker
             case 'stopped'
                 use = cand & ~B.rockerMoving;
-                if ~any(use) && any(cand) && opts.ffrRockerFallback
+                if ~any(use) && any(cand) && opts.rockerFallback
                     use = cand;
                     fb{end+1} = key{1}; %#ok<AGROW>
                 end
@@ -493,8 +505,10 @@ function [isS2, nomCI, perQ, inQ] = s2FromSequences(Q, ch, tt, prevInt, nextInt)
 % that fits both (every pulse when c = half the period; the first S1 after a switch when old period - old interval
 % = c) is classified by the phase of the unambiguous S1 pulses of the sequence or, with equal intervals, of the
 % previous / next S1-S2 sequence with the same period (the controller keeps the period, so the S1 grid continues;
-% equal intervals without such a neighbour = plain pacing, not S1-S2). Outputs for every pulse: isS2, nomCI (s; the
-% S2 pulses), perQ (period, s) and inQ (true: pulse of an S1-S2 sequence; isS2 overrides the interval rule).
+% equal intervals without such a neighbour = plain pacing, not S1-S2). The log says what was sent, the status
+% channel what the controller did: a sequence is used only where >= 90 % of its recorded pulses fit it as S1 or
+% S2 (otherwise, e.g. after a dropped command, the interval rule applies). Outputs for every pulse: isS2, nomCI
+% (s; the S2 pulses), perQ (period, s) and inQ (true: pulse of an S1-S2 sequence; isS2 overrides the interval rule).
 % TS 2026-10-23
 nS = numel(tt);
 isS2 = false(nS, 1); nomCI = nan(nS, 1); perQ = nan(nS, 1); inQ = false(nS, 1);
@@ -545,9 +559,15 @@ for k = order'
     onGrid = false(size(I));
     if ~isnan(t0), onGrid = abs(mod(tt(I) - t0 + P(k) / 2, P(k)) - P(k) / 2) <= tol; end
     a1 = (s1 & ~s2) | (s1 & s2 & onGrid);
-    isS1(I(a1)) = true;
     a2 = (s2 & ~s1) | (s1 & s2 & ~onGrid);
     a2 = a2 & [false; a1(1:end-1)] & [true; diff(I) == 1];   %the pulse after an S1 of this sequence
+    % the recorded pulses must confirm the sequence (the log says what was sent, the status channel what the
+    % controller did): fewer than 90 % of its pulses S1 or S2 (e.g. a dropped command) - not used
+    if mean(a1 | a2) < 0.9
+        inQ(I) = false; perQ(I) = nan;
+        continue;
+    end
+    isS1(I(a1)) = true;
     isS2(I(a2)) = true;
     nomCI(I(a2)) = ci(k);
 end

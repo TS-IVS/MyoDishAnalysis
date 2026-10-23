@@ -372,6 +372,7 @@ def test_protocol_results_examples():
     # (programmed intervals of the 'Sequence' lines, 2026-10-23; before: 462.5 / 492.5 ms measured on the 2.5-ms grid)
     assert 460 < r["refPeriodNoPeak_ms"] < 490 and r["refPeriodNoPeakStep_ms"] == 30
     assert 460 <= r["refPeriodNoResponse_ms"] < 490 and r["S2noiseLevel_pct"] < 10
+    assert r["variant"].startswith("S1 train + S2 pairs, S2 800-320 ms")
     r = res("example3_humanVentricle.mdd", 6, protocol="FFR")
     assert r["maxCapturedFrequency_Hz"] == 4 and 90 < r["FFR_1Hz_pct"] < 115 and 60 < r["FFR_3Hz_pct"] < 90
     r = res("example2_rabbitVentricle.mdd", 5, protocol="ST", rocker="any")
@@ -379,6 +380,7 @@ def test_protocol_results_examples():
         <= r["stimThreshold99_mA"]
     r = res("example7_pigVentricle.mdd", 1, protocol="PRP")
     assert (r["PRP15_pause_s"], r["PRP30_pause_s"], r["PRP60_pause_s"]) == (15, 30, 60)
+    assert (r["PRP1_pause_s"], r["PRP6_pause_s"]) == (1, 30) and r["variant"] == "pauses 1/2/4/8/15/30/60 s"  # 7 pauses, 6 columns
     assert 120 < r["PRP15_pct"] < 130 and np.isnan(r["FFR_1Hz_pct"])  # reference 'steady' (<= 1.0.0-beta.3): 115-125
     r = res("example8_rabbitVentricle_EP.mdd", 1, protocol="RP", rocker="any")
     assert r["S2shortest_ms"] < r["refPeriodNoPeak_ms"] < r["S2longest_ms"]
@@ -522,11 +524,22 @@ def test_s2_pairs_in_every_period_sequences_and_template(tmp_path):
     _, S2, _ = mda.myodish_analysis(mdd2, 1, t02, T2, groupBy="S2interval", quiet=True, noFiltering=True, spikeRemoval=False)
     assert "S2 640 ms" not in S2["group"].tolist() and "other" in S2["group"].tolist()
     assert int(S2.loc[S2["group"] == "S2 560 ms", "nStimuli"].iloc[0]) == 16
+    assert r["variant"] == "S1-S2 pairs in every period, S2 640-400 ms (4 steps)"
+    # rocker moving throughout (no pair at rest): option rockerFallback (default) uses all pairs (note); off: NaN
+    mdd3, T3, t03 = _paired_recording(tmp_path, "pairs3", steps, [800, 800, 800, 0], rocker=True)
+    kw3 = dict(groupBy="S2interval", quiet=True, noFiltering=True, spikeRemoval=False, rocker="stopped")
+    _, S3, I3 = mda.myodish_analysis(mdd3, 1, t03, T3, **kw3)
+    r3 = I3["protocolResults"].iloc[0]
+    assert r3["nTemplateBeats"] == 8 and abs(r3["refPeriodNoPeak_ms"] - 480) < 1e-6
+    assert "no S1-S2 pairs with the rocker at rest: all pairs used" in r3["resultNote"]
+    assert S3.loc[S3["group"] == "S2 560 ms", "nContractions"].iloc[0] == 8  # groups without rocker stop: included
+    _, _, I4 = mda.myodish_analysis(mdd3, 1, t03, T3, rockerFallback=False, **kw3)
+    assert np.isnan(I4["protocolResults"].iloc[0]["refPeriodNoPeak_ms"])
 
 
 def test_st_prp_rocker_fallback(tmp_path):
     # 2026-10-23: stimulation threshold with the rocker moving throughout (schedules that keep the rocker running):
-    # with rocker 'stopped' no contraction is at rest; option ffrRockerFallback (default) includes the contractions
+    # with rocker 'stopped' no contraction is at rest; option rockerFallback (default) includes the contractions
     # with the rocker moving (note), off: no amplitude thresholds
     fs = 400
     cur = [10] * 6 + [20] * 6 + [30] * 6 + [40] * 6
@@ -563,8 +576,11 @@ def test_st_prp_rocker_fallback(tmp_path):
     assert S.loc[S["group"] == "30 mA", "nContractions"].iloc[0] == 6
     assert r["captureThreshold_mA"] == 20 and r["stimThreshold50_mA"] == 20 and r["stimThreshold95_mA"] == 30
     assert any("rocker moving used" in str(x) for x in I["notes"])
-    _, S0, I0 = mda.myodish_analysis(mdd, 1, 0.5, T, ffrRockerFallback=False, **kw)
+    assert r["variant"] == "10-40 mA (4 steps)"
+    _, S0, I0 = mda.myodish_analysis(mdd, 1, 0.5, T, rockerFallback=False, **kw)
     assert S0["nContractions"].sum() == 0 and np.isnan(I0["protocolResults"].iloc[0]["stimThreshold50_mA"])
+    _, S5, _ = mda.myodish_analysis(mdd, 1, 0.5, T, ffrRockerFallback=False, **kw)  # older option name
+    assert S5["nContractions"].sum() == 0
 
 
 def test_grouping_tolerances(tmp_path):
@@ -614,6 +630,9 @@ def test_grouping_tolerances(tmp_path):
     rp = Ip["protocolResults"].iloc[0]
     assert abs(rp["PRP15_pause_s"] - 14.75) < 1e-6 and abs(rp["PRP30_pause_s"] - 30.75) < 1e-6
     assert np.isnan(rp["PRP60_pct"]) and "PRP15: mean of 2 pauses" in rp["resultNote"]
+    # pauses of the protocol by rank (2026-10-23): two lengths (15.5 / 16 and 31 / 32.5 s intervals)
+    assert abs(rp["PRP1_pause_s"] - 14.75) < 1e-6 and abs(rp["PRP2_pause_s"] - 30.75) < 1e-6 and np.isnan(rp["PRP3_pct"])
+    assert rp["variant"] == "pauses 14.8/30.8 s" and rf["variant"] == "0.5-2 Hz (4 steps)"
     _, Sf2, _ = mda.myodish_analysis(mdd, 1, 0.5, ffr_end, groupBy="pacingFrequency", frequencyResolution=0.01, **kw)
     assert "1.03 Hz" in set(Sf2["group"])  # 0.97 s: a group of its own at 0.01 Hz
 

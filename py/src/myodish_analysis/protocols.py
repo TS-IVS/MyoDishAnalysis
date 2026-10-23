@@ -51,7 +51,7 @@ stimuli of the channel with role, value and capture, input of protocol_results):
 
 steady_n (FFR protocols: opts.steadyStateBeats): steady state per frequency (the last steady_n contractions of the
 longest run, within it of the longest sequence of consecutive captured stimuli with captured neighbours; rocker at rest
-if any, see ffrRockerFallback); pauseLength: reference of each pause (prpReference); amplitude_CV, irregular;
+if any, see rockerFallback); pauseLength: reference of each pause (prpReference); amplitude_CV, irregular;
 return_notes=True: also the notes (2026-10-10).
 
 TS 2026-10-07 (port of mda_protocols.m and mda_groupBeats.m; schedule files 2026-10-07; uncertain contractions
@@ -504,7 +504,7 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
         opts = make_options()
     steadyN = int(steady_n or 0)
     notes = []
-    ffrFallback = bool(opts.get("ffrRockerFallback", True))  # options of older versions: defaults
+    ffrFallback = bool(opts.get("rockerFallback", opts.get("ffrRockerFallback", True)))  # older versions: defaults
     prpRef = opts.get("prpReference", "steady")
     prpN = int(opts.get("prpReferenceBeats", 6))
     irrCV = float(opts.get("irregularCV", 0.15))
@@ -680,20 +680,30 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
     B["groupRole"] = list(bRole)
     B["groupStep"] = bStep
 
-    # PRP / ST with the rocker moving (2026-10-23): rocker 'stopped' and no contraction of the range with the rocker at
-    # rest (schedules that keep the rocker running during the post-rest potentiation and stimulation threshold steps,
-    # e.g. the human standard schedule): with ffrRockerFallback the contractions with the rocker moving are included
-    # (as for the FFR steady state), note
-    if byl in ("pauselength", "stimcurrent") and rockerSel == "stopped" and ffrFallback and nB > 0:
+    # groups without rocker stop (2026-10-23): rocker 'stopped' and a group without any contraction with the rocker at
+    # rest (schedules do not always stop the rocker, e.g. during the post-rest potentiation and stimulation threshold
+    # steps of the human standard schedule): with rockerFallback the contractions of the group with the rocker moving
+    # are included (note). FFR frequencies: the steady-state selection below
+    if byl != "pacingfrequency" and rockerSel == "stopped" and ffrFallback and nB > 0:
         inB = (tPeak >= r0) & (tPeak <= r1)
         elig = inB & ~np.isnan(B["amplitude"].to_numpy(float))
         if beatsSel == "stimulated":
             elig &= B["beatType"].to_numpy() == "stimulated"
-        if elig.any() and not (elig & ~B["rockerMoving"].to_numpy(bool)).any():
-            inc = B["included"].to_numpy(bool).copy()
-            inc[elig] = True
-            B["included"] = inc
+        grp = B["group"].to_numpy()
+        moving = B["rockerMoving"].to_numpy(bool)
+        inc = B["included"].to_numpy(bool).copy()
+        keysB = list(dict.fromkeys(grp[elig].tolist()))
+        fb = []
+        for key in keysB:
+            g = elig & (grp == key)
+            if not (g & ~moving).any():
+                inc[g] = True
+                fb.append(key)
+        B["included"] = inc
+        if fb and len(fb) == len(keysB):
             notes.append("no contraction with the rocker at rest in the range: contractions with the rocker moving used")
+        elif fb:
+            notes.append("no contraction with the rocker at rest at %s: contractions with the rocker moving used" % ", ".join(fb))
 
     # FFR: steady state per frequency (2026-10-10)
     selStep = {}
@@ -956,7 +966,9 @@ def _s2_from_sequences(Q, ch, tt, prevInt, nextInt):
     switch). A pulse that fits both (every pulse when c = half the period; the first S1 after a switch when old
     period - old interval = c) is classified by the phase of the unambiguous S1 pulses of the sequence or, with equal
     intervals, of the previous / next S1-S2 sequence with the same period (the controller keeps the period, so the S1
-    grid continues; equal intervals without such a neighbour = plain pacing, not S1-S2). Returns for every pulse:
+    grid continues; equal intervals without such a neighbour = plain pacing, not S1-S2). The log says what was sent,
+    the status channel what the controller did: a sequence is used only where >= 90 % of its recorded pulses fit it
+    as S1 or S2 (otherwise, e.g. after a dropped command, the interval rule applies). Returns for every pulse:
     isS2, nomCI (s; the S2 pulses), perQ (period, s) and inQ (True: pulse of an S1-S2 sequence; isS2 overrides the
     interval rule). TS 2026-10-23 (port of mda_groupBeats.m)"""
     nS = tt.size
@@ -1021,9 +1033,14 @@ def _s2_from_sequences(Q, ch, tt, prevInt, nextInt):
         if not math.isnan(t0):
             onGrid = np.abs(np.mod(tt[I] - t0 + P[k] / 2, P[k]) - P[k] / 2) <= tol
         a1 = (s1 & ~s2) | (s1 & s2 & onGrid)
-        isS1[I[a1]] = True
         a2 = (s2 & ~s1) | (s1 & s2 & ~onGrid)
         a2 &= np.r_[False, a1[:-1]] & np.r_[True, np.diff(I) == 1]  # the pulse after an S1 of this sequence
+        # the recorded pulses must confirm the sequence (the log says what was sent, the status channel what the
+        # controller did): fewer than 90 % of its pulses S1 or S2 (e.g. a dropped command) - not used
+        if np.mean(a1 | a2) < 0.9:
+            inQ[I] = False; perQ[I] = np.nan
+            continue
+        isS1[I[a1]] = True
         isS2[I[a2]] = True
         nomCI[I[a2]] = ci[k]
     return isS2, nomCI, perQ, inQ

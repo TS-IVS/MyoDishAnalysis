@@ -133,8 +133,11 @@ DIASTOLIC FORCE
                    the rocker state then do not depend on drift or rocker movement during the pause
 
 PROTOCOLS (see myodish_analysis(protocol=...) and protocols.group_beats)
-  ffrRockerFallback  True (default) | False: FFR protocols with rocker 'stopped': a pacing frequency (step) without
-                   contractions with the rocker at rest is summarized from its contractions with the rocker moving
+  rockerFallback   True (default) | False: protocols with rocker 'stopped': a group (FFR frequency, current step,
+                   pause, S2 interval ...) without contractions with the rocker at rest is summarized from its
+                   contractions with the rocker moving, and the S2 response of RP protocols without S1-S2 pairs at
+                   rest uses all pairs (note). Schedules do not always stop the rocker. Older name
+                   'ffrRockerFallback' (FFR only, versions <= 1.0.0-beta.5) is accepted; 2026-10-23.
   prpReference     post-rest potentiation, reference amplitude of each post-rest contraction: 'preceding' (default):
                    median of the last prpReferenceBeats (6) contractions of the pacing before the pause; 'firstTrain':
                    mean of the contractions of the pacing before the first pause of the protocol; 'steady': mean of the
@@ -382,7 +385,7 @@ _DEFAULTS = dict(
     arrhythmicChannels=(),
     arrhythmicDetection=True,
     diastolicLevel="preStimulusMedian",
-    ffrRockerFallback=True,
+    rockerFallback=True,
     prpReference="preceding",
     zeroForce=None,
     samplingRate=None,
@@ -512,11 +515,17 @@ def options(base=None, **changes):
         for k, v in dict(base).items():
             opts[k] = v
     lower = {n.lower(): n for n in NAMES}
+    alias = {"ffrrockerfallback": "rockerFallback"}  # older option names (2026-10-23)
+    if base is not None:
+        for k in list(dict(opts).keys()):
+            if k.lower() in alias and k != alias[k.lower()]:
+                opts[alias[k.lower()]] = opts.pop(k)
     for key in [k for k in changes if k.lower() == "settings"]:  # settings file (settings.py): first, the other
         val = changes.pop(key)                                        # keywords override it
         if val:
             from .settings import load_settings
             for k, v in load_settings(val).items():
+                k = alias.get(k.lower(), k)
                 if k != "referenceBeat":
                     opts[k] = v
     for key, val in changes.items():
@@ -525,7 +534,7 @@ def options(base=None, **changes):
                 opts.medianFilterMs = 0
                 opts.meanFilterMs = 0
             continue
-        name = lower.get(key.lower())
+        name = lower.get(alias.get(key.lower(), key).lower())
         if name is None:
             raise ValueError(f"options: unknown option '{key}'. Valid options: {', '.join(NAMES)}, noFiltering.")
         opts[name] = val
@@ -681,8 +690,8 @@ def options(base=None, **changes):
     opts.diastolicLevel = vals[str(opts.diastolicLevel).lower()]
     if opts.diastoleWindowEnd >= opts.diastoleWindowStart:
         raise ValueError("options: 'diastoleWindowEnd' must be smaller than 'diastoleWindowStart'.")
-    fb = opts.ffrRockerFallback
-    opts.ffrRockerFallback = (fb is True) or (not isinstance(fb, str) and fb is not None and not _is_empty(fb)
+    fb = opts.rockerFallback
+    opts.rockerFallback = (fb is True) or (not isinstance(fb, str) and fb is not None and not _is_empty(fb)
                                               and bool(fb == 1)) or (isinstance(fb, str) and fb.lower() in ("on", "true"))
     vals = {"preceding": "preceding", "firsttrain": "firstTrain", "steady": "steady"}
     if str(opts.prpReference).lower() not in vals:

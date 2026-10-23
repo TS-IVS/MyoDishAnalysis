@@ -74,6 +74,7 @@ given = struct();
 known = fieldnames(defaults);
 for k = find(startsWith(I.key, 'option_'))'
     name = I.key{k}(8:end);
+    if strcmp(name, 'ffrRockerFallback'), name = 'rockerFallback'; end   %older name (versions <= 1.0.0-beta.5)
     v = I.value{k};
     if ~ismember(name, known)
         R.notes{end+1} = sprintf('option %s of the results is unknown in this version (ignored)', name);

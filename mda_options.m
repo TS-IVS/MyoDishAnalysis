@@ -139,11 +139,11 @@ function opts = mda_options(varargin)
 %                      The minimum and the rocker state then do not depend on drift or rocker movement during the pause
 %
 % PROTOCOLS (see MyoDishAnalysis 'protocol' and mda_groupBeats)
-%   'ffrRockerFallback' true (default) | false: FFR protocols with rocker 'stopped': a pacing frequency (step) without
-%                      contractions with the rocker at rest is summarized from its contractions with the rocker moving;
-%                      PRP and ST protocols (2026-10-23): a protocol range without any contraction with the rocker at
-%                      rest (schedules that keep the rocker running during these steps) is summarized from the
-%                      contractions with the rocker moving (note)
+%   'rockerFallback'   true (default) | false: protocols with rocker 'stopped': a group (FFR frequency, current
+%                      step, pause, S2 interval ...) without contractions with the rocker at rest is summarized from
+%                      its contractions with the rocker moving, and the S2 response of RP protocols without S1-S2
+%                      pairs at rest uses all pairs (note). Schedules do not always stop the rocker. Older name
+%                      'ffrRockerFallback' (FFR only, versions <= 1.0.0-beta.5) is accepted; 2026-10-23
 %   'prpReference'     post-rest potentiation, reference amplitude of each post-rest contraction: 'preceding'
 %                      (default): median of the last prpReferenceBeats (6) contractions of the pacing before the pause;
 %                      'firstTrain': mean of the contractions of the pacing before the first pause of the protocol;
@@ -391,7 +391,7 @@ opts = struct( ...
     'arrhythmicChannels', [], ...
     'arrhythmicDetection', true, ...
     'diastolicLevel', 'preStimulusMedian', ...
-    'ffrRockerFallback', true, ...
+    'rockerFallback', true, ...
     'prpReference', 'preceding', ...
     'zeroForce', [], ...
     'samplingRate', [], ...
@@ -491,11 +491,14 @@ opts = struct( ...
     'pulseTextMax', 10);
 
 args = varargin;
+alias = struct('ffrRockerFallback', 'rockerFallback');   %older option names (2026-10-23)
 if ~isempty(args) && isstruct(args{1})
     given = args{1};
     f = fieldnames(given);
     for k = 1:numel(f)
-        opts.(f{k}) = given.(f{k});
+        name = f{k};
+        if isfield(alias, name), name = alias.(name); end
+        opts.(name) = given.(f{k});
     end
     args = args(2:end);
 end
@@ -518,11 +521,15 @@ while i <= numel(args)
         if i == numel(args), error('mda_options: no file given for ''settings''.'); end
         St = mda_settings('load', args{i+1});
         for f2 = fieldnames(St)'
-            if ~strcmp(f2{1}, 'referenceBeat'), opts.(f2{1}) = St.(f2{1}); end
+            name = f2{1};
+            if isfield(alias, name), name = alias.(name); end
+            if ~strcmp(name, 'referenceBeat'), opts.(name) = St.(f2{1}); end
         end
         i = i + 2;
         continue;
     end
+    ka = find(strcmpi(key, fieldnames(alias)), 1);
+    if ~isempty(ka), fa = fieldnames(alias); key = alias.(fa{ka}); end
     k = find(strcmpi(key,names),1);
     if isempty(k)
         error('mda_options: unknown option ''%s''. Valid options: %s, noFiltering.', key, strjoin(names',', '));
@@ -679,8 +686,8 @@ opts.diastolicLevel = vals{k};
 if opts.diastoleWindowEnd >= opts.diastoleWindowStart
     error('mda_options: ''diastoleWindowEnd'' must be smaller than ''diastoleWindowStart''.');
 end
-opts.ffrRockerFallback = isequal(opts.ffrRockerFallback, true) || isequal(opts.ffrRockerFallback, 1) || ...
-    ((ischar(opts.ffrRockerFallback) || isstring(opts.ffrRockerFallback)) && any(strcmpi(opts.ffrRockerFallback, {'on','true'})));
+opts.rockerFallback = isequal(opts.rockerFallback, true) || isequal(opts.rockerFallback, 1) || ...
+    ((ischar(opts.rockerFallback) || isstring(opts.rockerFallback)) && any(strcmpi(opts.rockerFallback, {'on','true'})));
 vals = {'preceding', 'firstTrain', 'steady'};
 k = find(strcmpi(char(opts.prpReference), vals), 1);
 if isempty(k), error('mda_options: ''prpReference'' must be ''preceding'', ''firstTrain'' or ''steady''.'); end

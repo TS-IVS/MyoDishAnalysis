@@ -83,7 +83,9 @@ MATLAB and Python versions have the same version number and give the same result
      ms`, two steps in one group) and an S2 at half the period no S2 at all (`other`). Pulses that fit both roles
      (equal intervals; the first S1 after a switch when old period − old interval = new interval) are placed on the
      S1 grid of the sequence (the controller keeps the period when it switches sequences); equal intervals without
-     an unambiguous S1-S2 neighbour stay plain pacing. Without `Sequence` entries: as before.
+     an unambiguous S1-S2 neighbour stay plain pacing. The log says what was sent, the status channel what the
+     controller did: a sequence is used only where ≥ 90 % of its recorded pulses fit it (otherwise, e.g. after a
+     dropped command, the interval rule applies). Without `Sequence` entries: as before.
   2. **S1 template from the pairs** (`mda_protocolResults` / `protocol_results`): the S2 response needs a mean
      steady-state S1 contraction (S1 interval before and after, rocker at rest); with pairs in every period there is
      none (*only 1 steady-state S1 beats*, all RP results NaN). Now, with fewer than 3 such beats, the template is the
@@ -97,13 +99,22 @@ MATLAB and Python versions have the same version number and give the same result
   3. **Separate peak not before the S1 peak**: at S2 intervals shorter than the time to peak (80–100 ms) the S1 peak
      itself lay in the search window and counted as a separate S2 peak (100 % at 80 ms). The window now starts at
      the later of S2 + 25 ms and the template peak + 10 ms.
-- **PRP and ST protocols with the rocker running** (option `ffrRockerFallback`, default on, as for FFR steps): a
-  protocol range without any contraction with the rocker at rest (the human standard schedule keeps the rocker
-  running during the post-rest potentiation and stimulation threshold steps) is summarized from the contractions with
-  the rocker moving (note *no contraction with the rocker at rest in the range: contractions with the rocker moving
-  used*); before, these ranges had no included contraction and no PRP / amplitude-threshold results. The schedule's
-  pauses of 3, 12, 50 and 120 s are not within ±10 % of 15, 30 or 60 s, so `PRP15/30/60_pct` stay empty and the
-  potentiation is in the group summary (`rest 14 s`, `rest 52 s`, `rest 122 s`).
+- **Protocols without rocker stops: option `rockerFallback`** (default on; replaces `ffrRockerFallback`, which is
+  still accepted in options, settings files and the GUI). Schedules do not always stop the rocker (the human standard
+  schedule keeps it running during the post-rest potentiation and stimulation threshold steps): with rocker
+  `'stopped'` a group (FFR frequency as before, now also current step, pause, S2 interval …) without any contraction
+  with the rocker at rest is summarized from its contractions with the rocker moving (note), and the S2 response of
+  an RP protocol without S1-S2 pairs at rest uses all pairs (note *no S1-S2 pairs with the rocker at rest: all pairs
+  used*). Before, such groups had no included contraction and no PRP / amplitude-threshold / RP results.
+- **Protocol results: column `variant`** — the protocol as recorded, from the pulse pattern: FFR `0.2-4 Hz (12
+  steps)`, ST `8-95 mA (30 steps)`, PRP `pauses 3/12/50/120 s`, RP `S1 train + S2 pairs, S2 800-320 ms (16 steps)` or
+  `S1-S2 pairs in every period, S2 960-80 ms (34 steps)`. It tells schedules with other pauses, steps or structure
+  apart (e.g. when pooling), without further rules in the analysis.
+- **PRP results by rank: `PRP1_pct` … `PRP6_pct` (+ `_pause_s`)** for the pauses of the protocol in ascending order
+  (pauses within `pauseTolerance` are one length, several pauses of one length: their mean), so that schedules with
+  other pauses get results (the human standard schedule: 3, 12, 50 and 120 s, not within ±10 % of 15 / 30 / 60 s);
+  `PRP15/30/60_pct` stay as the lab's standard columns. The `_pause_s` column shows the pause, so that recordings
+  with different schedules are not pooled unnoticed.
 - **MATLAB GUI: guarded callbacks and an error log.** Every callback (buttons, lists, mouse, keys) and the plotting
   after the detection run guarded: an error is shown in the status line in red (`Error in …: …`) instead of only in
   the command window, and appended with version, file, window, channel and stack to

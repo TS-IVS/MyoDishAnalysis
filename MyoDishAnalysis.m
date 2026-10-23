@@ -77,7 +77,7 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %                       (columns group, groupValue, groupRole, groupStep, groupBy, capture_percent,
 %                       amplitude_pctOfRef, amplitude_CV, irregular, ...). FFR protocols (2026-10-10): each frequency
 %                       from its steady state (the last steadyStateBeats contractions of its longest run; rocker at
-%                       rest if there are such contractions, see ffrRockerFallback); post-rest potentiation: reference
+%                       rest if there are such contractions, see rockerFallback); post-rest potentiation: reference
 %                       per pause (prpReference); see mda_groupBeats.
 %   further options: see mda_options (filters, stimulus assignment, file format)
 %

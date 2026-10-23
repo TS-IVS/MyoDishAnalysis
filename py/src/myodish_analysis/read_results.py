@@ -152,6 +152,8 @@ def read_results(results_file):
         if not k.startswith("option_"):
             continue
         name = k[7:]
+        if name == "ffrRockerFallback":  # older name (versions <= 1.0.0-beta.5)
+            name = "rockerFallback"
         if name not in OPTION_NAMES:
             R["notes"].append(f"option {name} of the results is unknown in this version (ignored)")
             continue

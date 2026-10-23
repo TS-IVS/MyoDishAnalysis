@@ -35,7 +35,15 @@ RESULT_COLUMNS = [
     "refPeriodAllCaptured_ms",
     "S2shortest_ms", "S2longest_ms", "S2noiseLevel_pct", "amplitudeS1_uN", "nS2", "nTemplateBeats",
     "PRP15_pct", "PRP15_pause_s", "PRP30_pct", "PRP30_pause_s", "PRP60_pct", "PRP60_pause_s",
-    "resultNote"]
+    "PRP1_pct", "PRP1_pause_s", "PRP2_pct", "PRP2_pause_s", "PRP3_pct", "PRP3_pause_s",
+    "PRP4_pct", "PRP4_pause_s", "PRP5_pct", "PRP5_pause_s", "PRP6_pct", "PRP6_pause_s",
+    "variant", "resultNote"]
+
+
+def _variant_text(fmt, val):
+    """'<min>-<max> <unit> (<n> steps)' of the group values (protocol variant, 2026-10-23)"""
+    v = np.unique(val[~np.isnan(val)])
+    return fmt % (float(v.min()), float(v.max()), v.size) if v.size else ""
 
 
 def captured_groups(G):
@@ -52,6 +60,7 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
     separate peak)} for the group summary (removed by the caller before the results table)."""
     R = {c: math.nan for c in RESULT_COLUMNS}
     R["resultNote"] = ""
+    R["variant"] = ""
     notes = []
     byl = str(by).lower()
     fRes = float(opts.get("frequencyResolution", 0.1)) if opts is not None else 0.1
@@ -67,6 +76,7 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
 
     if byl == "pacingfrequency":
         ok = cap & ~np.isnan(val)
+        R["variant"] = _variant_text("%g-%g Hz (%d steps)", val)
         if ok.any():
             R["maxCapturedFrequency_Hz"] = float(np.max(val[ok]))
         a05 = _at(val, amp, cap, 0.5, fResLow)
@@ -78,6 +88,7 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
 
     elif byl == "stimcurrent":
         ok = cap & ~np.isnan(val)
+        R["variant"] = _variant_text("%g-%g mA (%d steps)", val)
         if ok.any():
             R["captureThreshold_mA"] = float(np.min(val[ok]))
         oka = ok & ~np.isnan(amp)
@@ -96,6 +107,16 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
         pr = np.flatnonzero((role == "postRest") & ~np.isnan(val))
         pause = val[pr] - cl
         pct = G["amplitude_pctOfRef"].to_numpy(float)[pr]
+        # pauses of the protocol in ascending order (2026-10-23): PRP1 ... PRP6 (pauses within pauseTolerance have one
+        # group value, group_beats; several pauses of one length: their mean); variant = the list of pauses
+        pv = np.unique(val[pr])
+        for q in range(min(6, pv.size)):
+            k = np.flatnonzero(val[pr] == pv[q])
+            p_ = pct[k]
+            R[f"PRP{q + 1}_pct"] = float(np.mean(p_[~np.isnan(p_)])) if np.any(~np.isnan(p_)) else math.nan
+            R[f"PRP{q + 1}_pause_s"] = float(np.mean(pause[k]))
+        if pv.size and not math.isnan(cl):
+            R["variant"] = "pauses %s s" % "/".join("%.3g" % (x - cl) for x in pv)
         for x in (15, 30, 60):  # pauses within +-pauseTolerance (2026-10-10; before: the nearest within +-50 %)
             if pr.size and not math.isnan(cl):
                 k = np.flatnonzero(np.abs(pause - x) <= pTol * x + 1e-9)
@@ -202,18 +223,9 @@ def _s2_results(R, Z, trace, opts):
     dt = float(np.median(np.diff(t)))
     tol = max(0.03, 0.02 * S1)
 
+    fallback = not (opts is not None and not bool(opts.get("rockerFallback", True)))
     sortedR = bool(np.all(np.diff(tR) >= 0))
     nRock = np.r_[0, np.cumsum(rock)] if sortedR else None
-
-    def at_rest(a, b):
-        if not stopped:
-            return True
-        if sortedR:  # binary search + cumulative sum: O(log N) per call (long protocols: >= 1e4 stimuli), 2026-10-10
-            i0 = int(np.searchsorted(tR, a, side="left"))  # first sample >= a
-            i1 = int(np.searchsorted(tR, b, side="right"))  # after the last sample <= b
-            return i1 > i0 and nRock[i1] - nRock[i0] == 0
-        k = (tR >= a) & (tR <= b)
-        return bool(k.any()) and not bool(rock[k].any())
 
     def in_data(a, b):
         return t[0] <= a and t[-1] >= b
@@ -228,46 +240,82 @@ def _s2_results(R, Z, trace, opts):
         y[(x < t[0]) | (x > t[-1])] = np.nan
         return y - np.mean(y[g < 0])
 
-    with np.errstate(invalid="ignore"):
-        isSS = (role == "S1") & inR & (np.abs(pi - S1) < tol) & (np.abs(ni - S1) < tol)
-    jSS = [j for j in np.flatnonzero(isSS) if in_data(st[j] - 0.05, st[j] + S1 - 0.1) and at_rest(st[j], st[j] + S1 - 0.1)]
-    Y = np.column_stack([get_trace(st[j]) for j in jSS]) if jSS else np.zeros((tg.size, 0))
-    ok = ~np.isnan(Y).any(axis=0) if Y.size else np.zeros(0, bool)
-    Y = Y[:, ok]
-    nT = Y.shape[1]
-    R["nTemplateBeats"] = float(nT)
     R["nS2"] = float(jS2.size)
     if not jS2.size:
         return ["no S2 stimuli"]
+    with np.errstate(invalid="ignore"):
+        isSS = (role == "S1") & inR & (np.abs(pi - S1) < tol) & (np.abs(ni - S1) < tol)
+    vS2 = val[jS2]
+    # protocol variant (2026-10-23): S1 train + S2 pairs (steady-state S1 stimuli: S1 interval before and after) or
+    # S1-S2 pairs in every period
+    R["variant"] = "S1 train + S2 pairs" if int(isSS.sum()) >= 3 else "S1-S2 pairs in every period"
+    if vS2.size and np.any(~np.isnan(vS2)):
+        R["variant"] += ", S2 %g-%g ms (%d steps)" % (mround(2000 * np.nanmax(vS2)) / 2, mround(2000 * np.nanmin(vS2)) / 2,
+                                                     np.unique(vS2[~np.isnan(vS2)]).size)
+
+    # template: mean steady-state S1 contraction (rocker at rest with 'stopped'); fewer than 3: the S1 of the pairs
+    # with the longest S2 interval (2026-10-23); with 'stopped' and fewer than 3 such pairs at rest: all pairs (option
+    # rockerFallback, note), the S2 are then evaluated with the rocker moving, too
     cutT = math.inf  # end of the template (pairs template: 20 ms before their S2)
+    nT = 0
+    pairsNote = relaxNote = ""
+    Y = np.zeros((tg.size, 0))
+    for _pass in range(2):
+        def at_rest(a, b, _stopped=stopped):
+            if not _stopped:
+                return True
+            if sortedR:  # binary search + cumulative sum: O(log N) per call (long protocols), 2026-10-10
+                i0 = int(np.searchsorted(tR, a, side="left"))  # first sample >= a
+                i1 = int(np.searchsorted(tR, b, side="right"))  # after the last sample <= b
+                return i1 > i0 and nRock[i1] - nRock[i0] == 0
+            k = (tR >= a) & (tR <= b)
+            return bool(k.any()) and not bool(rock[k].any())
+
+        jSS = [j for j in np.flatnonzero(isSS) if in_data(st[j] - 0.05, st[j] + S1 - 0.1) and at_rest(st[j], st[j] + S1 - 0.1)]
+        Y = np.column_stack([get_trace(st[j]) for j in jSS]) if jSS else np.zeros((tg.size, 0))
+        ok = ~np.isnan(Y).any(axis=0) if Y.size else np.zeros(0, bool)
+        Y = Y[:, ok]
+        nT = Y.shape[1]
+        cutT = math.inf
+        pairsNote = relaxNote = ""
+        if nT < 3:
+            # S1-S2 pairs in every period (no steady-state S1 beats): template from the S1 of the pairs with the
+            # longest S2 interval, cut 20 ms before the S2 and held at the mean of the 50 ms before the cut
+            vmax = float(np.nanmax(vS2)) if np.any(~np.isnan(vS2)) else math.nan
+            jL = [j for j in jS2[(vS2 == vmax) & (jS2 > 0)]
+                  if in_data(st[j - 1] - 0.05, st[j] - 0.02) and at_rest(st[j - 1], st[j] - 0.02)]
+            if len(jL) >= 3:
+                cutT = min(st[j] - st[j - 1] for j in jL) - 0.02
+                cols = []
+                for j in jL:
+                    y = get_trace(st[j - 1])
+                    y[tg > cutT] = np.mean(y[(tg > cutT - 0.05) & (tg <= cutT)])
+                    cols.append(y)
+                Y = np.column_stack(cols)
+                Y = Y[:, ~np.isnan(Y).any(axis=0)]
+                nT = Y.shape[1]
+                if nT >= 3:
+                    mT = Y.mean(axis=1)
+                    tail = float(np.mean(mT[(tg > cutT - 0.05) & (tg <= cutT)]) / np.max(mT))
+                    lab = mround(2000 * vmax) / 2
+                    if tail > 0.1:
+                        relaxNote = (f"template: S1 of the {nT} pairs at {lab:g} ms not relaxed before the S2 "
+                                     f"({mround(100 * tail)} % of the peak), no steady-state S1 beats - no estimates")
+                    else:
+                        pairsNote = f"template: S1 of the {nT} pairs at {lab:g} ms (no steady-state S1 beats)"
+        if nT >= 3 or not stopped or not fallback:
+            break
+        stopped = False  # second pass: all pairs, S2 with the rocker moving, too
+        notes.append("no S1-S2 pairs with the rocker at rest: all pairs used")
+    R["nTemplateBeats"] = float(nT)
+    if relaxNote:
+        notes.append(relaxNote)
+        return notes
+    if pairsNote:
+        notes.append(pairsNote)
     if nT < 3:
-        # S1-S2 pairs in every period (no steady-state S1 beats; 2026-10-23): template from the S1 of the pairs with
-        # the longest S2 interval, cut 20 ms before the S2 and held at the mean of the 50 ms before the cut
-        vS2 = val[jS2]
-        vmax = float(np.nanmax(vS2)) if np.any(~np.isnan(vS2)) else math.nan
-        jL = [j for j in jS2[(vS2 == vmax) & (jS2 > 0)]
-              if in_data(st[j - 1] - 0.05, st[j] - 0.02) and at_rest(st[j - 1], st[j] - 0.02)]
-        if len(jL) >= 3:
-            cutT = min(st[j] - st[j - 1] for j in jL) - 0.02
-            cols = []
-            for j in jL:
-                y = get_trace(st[j - 1])
-                y[tg > cutT] = np.mean(y[(tg > cutT - 0.05) & (tg <= cutT)])
-                cols.append(y)
-            Y = np.column_stack(cols)
-            Y = Y[:, ~np.isnan(Y).any(axis=0)]
-            nT = Y.shape[1]
-            if nT >= 3:
-                mT = Y.mean(axis=1)
-                tail = float(np.mean(mT[(tg > cutT - 0.05) & (tg <= cutT)]) / np.max(mT))
-                lab = mround(2000 * vmax) / 2
-                if tail > 0.1:
-                    return [f"template: S1 of the {nT} pairs at {lab:g} ms not relaxed before the S2 "
-                            f"({mround(100 * tail)} % of the peak), no steady-state S1 beats - no estimates"]
-                notes.append(f"template: S1 of the {nT} pairs at {lab:g} ms (no steady-state S1 beats)")
-                R["nTemplateBeats"] = float(nT)
-    if nT < 3:
-        return [f"only {nT} steady-state S1 beats with the rocker at rest (>= 3 needed)"]
+        notes.append(f"only {nT} steady-state S1 beats with the rocker at rest (>= 3 needed)")
+        return notes
     m = Y.mean(axis=1)
     A1 = float(np.max(m))
     tPk = float(tg[int(np.argmax(m))])  # peak time of the S1 template
