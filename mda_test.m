@@ -269,6 +269,13 @@ ok = ok && okS;
 % option lockedThreshold (2026-10-21): small stimulus-locked peaks with the rocker at rest are contractions
 okL = lockedThresholdTest();
 ok = ok && okL;
+% S1-S2 pairs in every period (2026-10-23): S1 / S2 from the 'Sequence' lines of the log file, S1 template from the
+% pairs at the longest interval
+okQ = s2PairsTest();
+ok = ok && okQ;
+% ST / PRP with the rocker moving throughout (2026-10-23): contractions with the rocker moving used (note)
+okF = stRockerFallbackTest();
+ok = ok && okF;
 % FFR steady state and PRP reference per pause (2026-10-10)
 okP = protocolSelectionTest();
 ok = ok && okP;
@@ -358,6 +365,159 @@ try
 catch ME
     fprintf('lockedThreshold: %s   FAILED\n', ME.message);
 end
+end
+
+
+function [mdd, T, t0] = pairedRecording(name, stepsMs, s2Amp, sequences)
+% S1-S2 pairs in every period (human standard schedule, 2026-10-23; as _paired_recording in py/tests/test_mda.py): S1
+% pacing at the period of 1.2 s (4 pulses from 1 s), then per step 8 periods with the S1 at 0 and the S2 at the step
+% interval; a contraction after every S1 (1000 uN, rise 50 ms, fall 150 ms) and after every S2 (s2Amp(step) uN; 0 = no
+% response); a little noise. With sequences, the log file has the 'Sequence' lines of software 2023 ('StimPeriod' /
+% 'StimTimes' per channel) 0.5 s before the first S1 of every step (and of the pacing). t0 = 0.5 s before the first pair
+fs = 400; period = 1.2; nPairs = 8; pre = 4;
+ts = 1 + (0:pre-1) * period;
+s1 = ts(end);
+s2t = []; s2a = []; seqT = 0.5; seqC = nan;
+for q = 1:numel(stepsMs)
+    seqT(end+1) = s1 + period - 0.5; seqC(end+1) = stepsMs(q); %#ok<AGROW>
+    for m = 1:nPairs
+        s1 = s1 + period;
+        ts = [ts, s1, s1 + stepsMs(q) / 1000]; %#ok<AGROW>
+        s2t(end+1) = s1 + stepsMs(q) / 1000; s2a(end+1) = s2Amp(q); %#ok<AGROW>
+    end
+end
+ts = round(ts * fs) / fs; s2t = round(s2t * fs) / fs;
+T = ceil(ts(end)) + 2; n = T * fs; tt = (0:n-1) / fs;
+F = 2000 * ones(1, n);
+for k = 1:numel(ts)
+    a = 1000; j = find(abs(s2t - ts(k)) < 1e-9, 1);
+    if ~isempty(j), a = s2a(j); end
+    if a <= 0, continue; end
+    x = ts(k) + 0.03;
+    I = tt >= x & tt < x + 0.05; F(I) = F(I) + a * (tt(I) - x) / 0.05;
+    I = tt >= x + 0.05 & tt < x + 0.2; F(I) = F(I) + a - a * (tt(I) - x - 0.05) / 0.15;
+end
+rng(3); F = F + 2 * randn(size(F));
+X = zeros(9, n, 'int16');
+X(1,:) = int16(round(F));
+code = zeros(1, n, 'uint16');
+code(round(ts * fs) + 1) = uint16(512 + 50);
+X(9,:) = typecast(code, 'int16');
+base = [tempname '_' name];
+mdd = [base '.mdd']; lg = [base '_log.log'];
+fid = fopen(mdd, 'w'); fwrite(fid, X, 'int16'); fclose(fid);
+stamp = @(t) sprintf('2026 01 01 06:%02d:%02d:%03d;%d', floor(t / 60), floor(mod(t, 60)), round(mod(t, 1) * 1000), round(t * 1000));
+L = {'systemTime;dataLogTime;channel;code;value', '2026 01 01 06:00:00:000;0;0;nChannels;9', ...
+    '2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd', '2026 01 01 06:00:00:000;0;0;samplingRate Recording;400'};
+for c = 1:8
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Calibration;1000', c); %#ok<AGROW>
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Offset;0', c); %#ok<AGROW>
+end
+if sequences
+    for q = 1:numel(seqT)
+        L{end+1} = sprintf('%s;0;Sequence;transmitted', stamp(seqT(q))); %#ok<AGROW>
+        L{end+1} = sprintf('%s;0;Sequence;StimPeriod %d', stamp(seqT(q)), round(period * 1000)); %#ok<AGROW>
+        for c = 1:8
+            if isnan(seqC(q)), tm = sprintf('%d', 10 * (c - 1)); else, tm = sprintf('%d %g', 10 * (c - 1), 10 * (c - 1) + seqC(q)); end
+            L{end+1} = sprintf('%s;%d;Sequence;StimTimes %s', stamp(seqT(q)), c, tm); %#ok<AGROW>
+        end
+    end
+end
+L{end+1} = sprintf('%s;0;Recording;stopped: x.mdd', stamp(T));
+fid = fopen(lg, 'w'); fprintf(fid, '%s\n', L{:}); fclose(fid);
+t0 = ts(pre + 1) - 0.5;
+end
+
+
+function okQ = s2PairsTest()
+% as test_s2_pairs_in_every_period_sequences_and_template in py/tests/test_mda.py (human standard schedule of the lab):
+% S1 at 0 and S2 at 640, 600, 560 and 400 ms in every period of 1.2 s, 8 pairs per step, S2 response at 640 ... 560 ms,
+% none at 400 ms. 1) The 'Sequence' lines of the log file tell the S1 from the S2: by the intervals alone the 640-ms S2
+% (later than half the period) is the next S1 and 560 ms its interval, and at 600 ms (equal intervals) there is no S2;
+% 2) without steady-state S1 beats the S2 response uses the S1 of the pairs at the longest interval as template
+steps = [640 600 560 400];
+[mdd, T, t0] = pairedRecording('pairs', steps, [800 800 800 0], true);
+[mdd2, T2, t02] = pairedRecording('pairs2', steps, [800 800 800 0], false);
+okQ = false;
+try
+    o = {'groupBy', 'S2interval', 'quiet', true, 'noFiltering', 'spikeRemoval', false};
+    [~, S, I] = MyoDishAnalysis(mdd, 1, t0, T, o{:});
+    g = S(strcmp(S.groupRole, 'S2'), :);
+    r = I.protocolResults;
+    resp = containers.Map(round(g.groupValue * 1000), g.S2response_pct);
+    sep = containers.Map(round(g.groupValue * 1000), g.separatePeak_percent);
+    [~, S2] = MyoDishAnalysis(mdd2, 1, t02, T2, o{:});
+    okQ = isequal(g.group', arrayfun(@(x) sprintf('S2 %d ms', x), sort(steps), 'UniformOutput', false)) && ...
+        isequal(g.nStimuli', [8 8 8 8]) && sum(S.nStimuli(strcmp(S.groupRole, 'postS2'))) == 4 * 8 - 1 && ...
+        ~any(strcmp(S.group, 'other')) && r.nTemplateBeats == 8 && ...
+        contains(r.resultNote{1}, 'template: S1 of the 8 pairs at 640 ms') && ...
+        resp(640) > 60 && resp(640) < 100 && resp(560) > 60 && resp(560) < 100 && resp(400) < 10 && ...
+        sep(640) == 100 && sep(560) == 100 && sep(400) == 0 && abs(r.refPeriodNoPeak_ms - 480) < 1e-6 && ...
+        r.refPeriodAllCaptured_ms == 560 && r.refPeriodNoResponse_ms > 400 && r.refPeriodNoResponse_ms < 560 && ...
+        ~any(strcmp(S2.group, 'S2 640 ms')) && any(strcmp(S2.group, 'other')) && ...
+        S2.nStimuli(strcmp(S2.group, 'S2 560 ms')) == 16;
+    fprintf(['S1-S2 pairs in every period: groups %s (expected S2 400, 560, 600, 640 ms, 8 each), template beats %d, ' ...
+        'S2 response 640 / 400 ms %.0f / %.1f %%, refPeriodNoPeak %.0f ms (expected 480); without sequences: 640 ms %d, ' ...
+        'other %d   %s\n'], strjoin(g.group', ', '), r.nTemplateBeats, resp(640), resp(400), r.refPeriodNoPeak_ms, ...
+        any(strcmp(S2.group, 'S2 640 ms')), any(strcmp(S2.group, 'other')), passStr(okQ));
+catch ME
+    fprintf('S1-S2 pairs in every period: %s   FAILED\n', ME.message);
+end
+delete(mdd); delete(strrep(mdd, '.mdd', '_log.log')); delete(mdd2); delete(strrep(mdd2, '.mdd', '_log.log'));
+end
+
+
+function okF = stRockerFallbackTest()
+% as test_st_prp_rocker_fallback in py/tests/test_mda.py: stimulation threshold (10, 20, 30, 40 mA, 6 pulses each at
+% 1 Hz; contractions 0 / 500 / 1000 / 1000 uN) with the rocker bit set in every sample. With rocker 'stopped' no
+% contraction is at rest; option ffrRockerFallback (default) includes the contractions with the rocker moving (note),
+% off: no amplitude thresholds
+fs = 400;
+cur = [10 * ones(1, 6), 20 * ones(1, 6), 30 * ones(1, 6), 40 * ones(1, 6)];
+ts = 1 + (0:numel(cur)-1);
+ampOf = containers.Map([10 20 30 40], [0 500 1000 1000]);
+T = ts(end) + 2; n = T * fs; tt = (0:n-1) / fs;
+F = 2000 * ones(1, n);
+for k = 1:numel(ts)
+    a = ampOf(cur(k)); x = ts(k) + 0.03;
+    I = tt >= x & tt < x + 0.05; F(I) = F(I) + a * (tt(I) - x) / 0.05;
+    I = tt >= x + 0.05 & tt < x + 0.2; F(I) = F(I) + a - a * (tt(I) - x - 0.05) / 0.15;
+end
+X = zeros(9, n, 'int16');
+X(1,:) = int16(round(F));
+code = 16384 * ones(1, n, 'uint16');                 %rocker bit in every sample
+code(round(ts * fs) + 1) = uint16(16384 + 512 + cur);
+X(9,:) = typecast(code, 'int16');
+base = [tempname '_strocker'];
+mdd = [base '.mdd']; lg = [base '_log.log'];
+fid = fopen(mdd, 'w'); fwrite(fid, X, 'int16'); fclose(fid);
+L = {'systemTime;dataLogTime;channel;code;value', '2026 01 01 06:00:00:000;0;0;nChannels;9', ...
+    '2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd', '2026 01 01 06:00:00:000;0;0;samplingRate Recording;400', ...
+    '2026 01 01 06:00:00:000;0;0;rockerSpeed;60'};
+for c = 1:8
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Calibration;1000', c); %#ok<AGROW>
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Offset;0', c); %#ok<AGROW>
+end
+L{end+1} = sprintf('2026 01 01 06:00:%02d:000;%d;0;Recording;stopped: x.mdd', T, T * 1000);
+fid = fopen(lg, 'w'); fprintf(fid, '%s\n', L{:}); fclose(fid);
+okF = false;
+try
+    o = {'groupBy', 'stimCurrent', 'quiet', true, 'noFiltering', 'spikeRemoval', false, 'rocker', 'stopped'};
+    [~, S, I] = MyoDishAnalysis(mdd, 1, 0.5, T, o{:});
+    r = I.protocolResults;
+    [~, S0, I0] = MyoDishAnalysis(mdd, 1, 0.5, T, o{:}, 'ffrRockerFallback', false);
+    r0 = I0.protocolResults;
+    okF = S.nContractions(strcmp(S.group, '30 mA')) == 6 && r.captureThreshold_mA == 20 && r.stimThreshold50_mA == 20 && ...
+        r.stimThreshold95_mA == 30 && any(contains(I.notes, 'rocker moving used')) && sum(S0.nContractions) == 0 && ...
+        isnan(r0.stimThreshold50_mA);
+    fprintf(['ST with the rocker moving: included at 30 mA %d (expected 6), thresholds 50 / 95 %% %g / %g mA (expected 20 / 30), ' ...
+        'note %d; fallback off: included %d, threshold 50 %% %g   %s\n'], S.nContractions(strcmp(S.group, '30 mA')), ...
+        r.stimThreshold50_mA, r.stimThreshold95_mA, any(contains(I.notes, 'rocker moving used')), sum(S0.nContractions), ...
+        r0.stimThreshold50_mA, passStr(okF));
+catch ME
+    fprintf('ST with the rocker moving: %s   FAILED\n', ME.message);
+end
+delete(mdd); delete(lg);
 end
 
 

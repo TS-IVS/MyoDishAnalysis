@@ -28,8 +28,16 @@ function [R, G2] = mda_protocolResults(by, G, Z, trace, opts)
 %     2026-10-06). Template = mean S1 contraction (S1 interval before and after, rocker at rest), scaled per S2 on
 %     S1 ... S2 + 20 ms. Response = maximum of the residual (30-ms mean) S2 + 30 ms ... min(S2 + 600 ms, S1 interval -
 %     100 ms) in % of the S1 amplitude. Separate peak = local maximum of the S1+S2 trace S2 + 25 ms ... min(S2 + 600 ms,
-%     next stimulus + 20 ms) with a prominence >= max(noise level, 2 %) of S1 (and response >= noise level). Noise
+%     next stimulus + 20 ms; not before the S1 peak of the template + 10 ms, 2026-10-23: at intervals shorter than the
+%     time to peak the S1 peak itself is no separate peak) with a prominence >= max(noise level, 2 %) of S1 (and
+%     response >= noise level). Noise
 %     level = 99th percentile of the response at pseudo-S2 on the template beats (leave-one-out template).
+%     Without steady-state S1 beats (fewer than 3; S1-S2 pairs in every period, e.g. the human standard schedule:
+%     S1 at 0, S2 at 80 ... 960 ms, period 2 s; 2026-10-23): template = mean S1 contraction of the pairs with the
+%     longest S2 interval (rocker at rest), cut 20 ms before their S2 and held at the mean of the 50 ms before the
+%     cut, which must be <= 10 % of the peak (the S1 contraction has relaxed; otherwise no template, note). The
+%     noise level then uses pseudo-S2 intervals that end >= 100 ms before the cut. Note 'template: S1 of the N pairs
+%     at <interval> ms'.
 %     refPeriodNoPeak_ms        S2 interval below which there is no separate contraction peak (fraction of S2 with
 %                               a separate peak < 50 %)
 %     refPeriodNoResponse_ms    S2 interval below which there is no response at all (median response < noise level)
@@ -209,6 +217,12 @@ st = Z.t; role = cellstr(Z.role); val = Z.value; inR = logical(Z.inRange);
 prevI = Z.prevInt; ni = Z.nextInt;
 p = prevI(strcmp(role, 'S1') & inR);
 p = p(~isnan(p));
+jS2 = find(strcmp(role, 'S2') & inR);
+if isempty(p) && ~isempty(jS2)                      %S1-S2 pairs in every period, no other S1: the period (2026-10-23)
+    q = jS2(jS2 > 1 & jS2 < numel(st));
+    p = st(q + 1) - st(q - 1);
+    p = p(~isnan(p));
+end
 if numel(t) < 10 || isempty(p)
     notes = {'S2 response: no S1 stimuli'}; return;
 end
@@ -238,12 +252,48 @@ for k = 1:numel(jSS), Y(:,k) = getTrace(st(jSS(k)), tg); end
 Y = Y(:, all(~isnan(Y), 1));
 nT = size(Y, 2);
 R.nTemplateBeats = nT;
-jS2 = find(strcmp(role, 'S2') & inR);
 R.nS2 = numel(jS2);
 if isempty(jS2), notes = {'no S2 stimuli'}; return; end
+cutT = inf;                                          %end of the template (pairs template: 20 ms before their S2)
+if nT < 3
+    % S1-S2 pairs in every period (no steady-state S1 beats; 2026-10-23): template from the S1 of the pairs with
+    % the longest S2 interval, cut 20 ms before the S2 and held at the mean of the 50 ms before the cut
+    vS2 = val(jS2);
+    jL = jS2(vS2 == max(vS2) & jS2 > 1);
+    cL = st(jL) - st(jL - 1);
+    keep = false(size(jL));
+    for k = 1:numel(jL)
+        keep(k) = inData(st(jL(k) - 1) - 0.05, st(jL(k)) - 0.02) && atRest(st(jL(k) - 1), st(jL(k)) - 0.02);
+    end
+    jL = jL(keep); cL = cL(keep);
+    if numel(jL) >= 3
+        cutT = min(cL) - 0.02;
+        Y = nan(nTg, numel(jL));
+        for k = 1:numel(jL)
+            y = getTrace(st(jL(k) - 1), tg);
+            y(tg > cutT) = mean(y(tg > cutT - 0.05 & tg <= cutT));
+            Y(:,k) = y;
+        end
+        Y = Y(:, all(~isnan(Y), 1));
+        nT = size(Y, 2);
+        mT = mean(Y, 2);
+        tail = mean(mT(tg > cutT - 0.05 & tg <= cutT)) / max(mT);
+        if nT >= 3 && tail > 0.1
+            notes = {sprintf(['template: S1 of the %d pairs at %g ms not relaxed before the S2 (%d %% of the peak), ' ...
+                'no steady-state S1 beats - no estimates'], nT, round(2000 * max(vS2)) / 2, round(100 * tail))};
+            return;
+        end
+        if nT >= 3
+            notes{end+1} = sprintf('template: S1 of the %d pairs at %g ms (no steady-state S1 beats)', nT, ...
+                round(2000 * max(vS2)) / 2);
+            R.nTemplateBeats = nT;
+        end
+    end
+end
 if nT < 3, notes = {sprintf('only %d steady-state S1 beats with the rocker at rest (>= 3 needed)', nT)}; return; end
 m = mean(Y, 2);
-A1 = max(m);
+[A1, iPk] = max(m);
+tPk = tg(iPk);                                       %peak time of the S1 template
 R.amplitudeS1_uN = A1;
 if A1 <= 1e-6, notes = {'no S1 contraction'}; return; end   %flat signal: A1 ~ +-1e-12 (rounding), 2026-10-08
 
@@ -273,7 +323,9 @@ sumY = sum(Y, 2);
 for k = 1:nT
     mk = (sumY - Y(:,k)) / (nT - 1);
     for i = 1:numel(uCI)
-        [rk, ak] = s2response(Y(:,k), mk, uCI(i), min(uCI(i) + 0.6, S1 - 0.1), [], []);
+        wr = min([uCI(i) + 0.6, S1 - 0.1, cutT]);   %pairs template: the window ends >= 100 ms before the cut
+        if wr - uCI(i) < 0.1, continue; end
+        [rk, ak] = s2response(Y(:,k), mk, uCI(i), wr, [], []);
         if ak >= 0.2 && ~isnan(rk), nullV(k,i) = 100 * rk / (ak * max(mk)); end
     end
 end
@@ -329,7 +381,9 @@ end
         rmax = nan; pmax = 0;
         if ~isempty(Kw), rmax = max(r(Kw)); end
         if ~isempty(gy)
-            Kq = find(gy >= c + 0.025 & gy <= winPeak);
+            % not before the S1 peak of the template: an S2 shortly after the S1 (interval < time to peak) would
+            % show the S1 peak itself as a separate peak (2026-10-23)
+            Kq = find(gy >= max(c + 0.025, tPk + 0.01) & gy <= winPeak);
             if numel(Kq) >= 3
                 [isMax, P] = islocalmax(movmean(y(Kq), w));
                 if any(isMax), pmax = max(P(isMax)); end

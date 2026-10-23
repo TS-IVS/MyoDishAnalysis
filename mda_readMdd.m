@@ -52,6 +52,9 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               dechargeDuration (3) entries, us; log channel 10k + c = extra pulse #k of channel c),
 %               extraPulseLog ([time channel k offset_ms line]: programmed time of the extra pulses relative to the
 %               regular pulse of the channel, from the 'Sequence' entries; see extraPulseOffsets),
+%               stimSequenceLog ([time channel period_ms nTimes t1_ms t2_ms]: regular stimulus times of the
+%               programmed sequences, one row per channel entry of the 'Sequence' lines; see stimSequences,
+%               2026-10-23),
 %               rockerSpeedLog ([time rpm]), rockerSource ('status channel' or 'log'), rockerLogIntervals
 %               ([from to] in s with rocker speed > 0 according to the log file), recordingStopped (1 = the log
 %               file ends with 'Recording stopped' for this file, 0 = recording still running or aborted, NaN = no
@@ -141,6 +144,7 @@ H.rockerSpeedLog = L.rockerSpeedEvents; %[time rpm]: 'rockerSpeed' entries (0 = 
 H.pulseSettingsLog = L.pulseSettingsEvents; %[time logChannel code value]: pulse durations (us; code 1 charge, 2 pause,
                                            %3 decharge; log channel 10k + c = extra pulse #k of channel c)
 H.extraPulseLog = L.extraPulseOffsets;     %[time channel k offset_ms line]: programmed extra pulse times (2026-10-10)
+H.stimSequenceLog = L.stimSequences;       %[time channel period_ms nTimes t1_ms t2_ms]: programmed sequences (2026-10-23)
 
 % sampling rate: option > log file > 500 Hz for old 8-channel files (software 1.0.x) > 400 Hz
 if ~isempty(opts.samplingRate)
@@ -672,7 +676,7 @@ if nargin < 2, fileTime = []; end
 L = struct('samplingRate',nan,'recordingDuration',nan,'nChannelsController',nan,'singleChannelMode',[], ...
     'extendedSensorModeEvents',zeros(0,2),'startDatenum',nan,'programVersion','','clockNote','', ...
     'offsetEvents',zeros(0,3),'calibrationEvents',zeros(0,3),'rockerSpeedEvents',zeros(0,2), ...
-    'recordingStopped',nan,'pulseSettingsEvents',zeros(0,4),'extraPulseOffsets',zeros(0,5));
+    'recordingStopped',nan,'pulseSettingsEvents',zeros(0,4),'extraPulseOffsets',zeros(0,5),'stimSequences',zeros(0,6));
 if ~exist(logFile,'file'), return; end
 % MyoDish logs are UTF-16 little endian (with byte order mark); converted copies may be UTF-8
 fid = fopen(logFile, 'r');
@@ -805,12 +809,15 @@ if ~isnan(lineStart)
 end
 pst = pst(1:nPst, :);
 X = extraPulseOffsets(seqEv);
+Q = stimSequences(seqEv);
 if ~isnan(lineStart)
     pst(pst(:,5) < lineStart, 1) = -inf;
     X(X(:,5) < lineStart, 1) = -inf;
+    Q(Q(:,7) < lineStart, 1) = -inf;
 end
 L.pulseSettingsEvents = pst(:,1:4);
 L.extraPulseOffsets = X;
+L.stimSequences = Q(:,1:6);
 L.rockerSpeedEvents = rck(:,1:2);
 L.extendedSensorModeEvents = ext(:,1:2);
 L.offsetEvents = offs(:,1:3);
@@ -894,4 +901,35 @@ for i = 1:numel(ev)
 end
 X = vertcat(rows{:});
 if isempty(X), X = zeros(0, 5); end
+end
+
+
+function Q = stimSequences(ev)
+% Regular stimulus times of the programmed sequences, from the 'Sequence' entries of the log file: software 2022/2023
+% 'StimPeriod P' and 'StimTimes a b ...' per channel, software 2026 'Sent stimPeriod P' and 'Added stimTime(s) a b#k ...'
+% (b#k = extra pulse k, not a regular time; see extraPulseOffsets). Q: rows [time, channel, period (ms), number of
+% regular times, first, second regular time (ms, sorted; NaN without), line]; one row per channel entry, the period =
+% the last one sent before it. mda_groupBeats uses the sequences with two regular times (S1 at t1, S2 at t2) to tell
+% the S1 from the S2 pulses. TS 2026-10-23
+Q = zeros(0, 7);
+P = nan;
+for i = 1:numel(ev)
+    t = ev{i}{1}; chn = ev{i}{2}; ln = ev{i}{3}; txt = strtrim(ev{i}{4});
+    m = regexp(txt, '^(?:Sent\s+)?stimPeriod\s+(-?\d+(?:\.\d+)?)', 'tokens', 'once', 'ignorecase');
+    if ~isempty(m)
+        p = str2double(m{1}); if ~isnan(p) && p > 0, P = p; end
+        continue;
+    end
+    tok = regexp(txt, '^(?:Added\s+)?stimTime(?:s|\(s\))?\s*(.*)$', 'tokens', 'once', 'ignorecase');
+    if isempty(tok) || isnan(chn) || chn < 1 || chn > 8, continue; end   %log channel 10k + c: extra pulse k only
+    reg = [];
+    for p = regexp(strtrim(tok{1}), '\s+', 'split')
+        if ~isempty(regexp(p{1}, '^-?\d+(\.\d+)?$', 'once')), reg(end+1) = str2double(p{1}); end %#ok<AGROW>
+    end
+    reg = sort(reg);
+    t1 = nan; t2 = nan;
+    if numel(reg) >= 1, t1 = reg(1); end
+    if numel(reg) >= 2, t2 = reg(2); end
+    Q(end+1, :) = [t, chn, P, numel(reg), t1, t2, ln]; %#ok<AGROW>
+end
 end

@@ -71,6 +71,39 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
+- **Refractory-period protocols with S1-S2 pairs in every period** (the lab's human standard schedule of 2022: S1 at
+  0 and S2 at 960 → 80 ms in every period of 2 s, 15 pairs per step; the stem-cell schedule: period 1.2 s, S2 640 →
+  80 ms; checked on two recordings of 2023, 8 channels each):
+  1. **S1 and S2 from the programmed sequences of the log file** (`Sequence` entries: `StimPeriod` / `StimTimes` of
+     the software of 2022–2023, `Sent stimPeriod` / `Added stimTime(s)` of 2026; `H.stimSequenceLog` of `mda_readMdd`
+     / `read_mdd`). A sequence with two regular times per period marks its pulses by their phase within the period:
+     S1 = pulse followed by a pulse t2 − t1 later, S2 = the pulse t2 − t1 after an S1; group value = the programmed
+     interval (`S2 130 ms` instead of `S2 127.5 ms` measured on the 2.5-ms grid; example 8: RP results shift by
+     ≤ 2.5 ms). By the intervals alone an S2 later than half the period was the next S1 (640 ms of 1200 ms → `S2 560
+     ms`, two steps in one group) and an S2 at half the period no S2 at all (`other`). Pulses that fit both roles
+     (equal intervals; the first S1 after a switch when old period − old interval = new interval) are placed on the
+     S1 grid of the sequence (the controller keeps the period when it switches sequences); equal intervals without
+     an unambiguous S1-S2 neighbour stay plain pacing. Without `Sequence` entries: as before.
+  2. **S1 template from the pairs** (`mda_protocolResults` / `protocol_results`): the S2 response needs a mean
+     steady-state S1 contraction (S1 interval before and after, rocker at rest); with pairs in every period there is
+     none (*only 1 steady-state S1 beats*, all RP results NaN). Now, with fewer than 3 such beats, the template is the
+     mean S1 of the pairs with the longest S2 interval (rocker at rest), cut 20 ms before their S2 and held at the
+     mean of the 50 ms before the cut, which must be ≤ 10 % of the peak (the S1 contraction has relaxed; otherwise
+     a note and no estimates); the noise level uses pseudo-S2 intervals that end ≥ 100 ms before the cut. Note
+     *template: S1 of the N pairs at … ms (no steady-state S1 beats)*. Human standard schedule (period 2 s, cut at
+     940 ms, CD90 0.3–0.4 s): all 8 channels get results (noise level 20–30 %). Stem-cell schedule (period 1.2 s):
+     the S1 of the 640-ms pairs comes only 560 ms after the previous S2 and is itself premature; 2 of 8 channels
+     had a noise level > 50 % (no estimates, as before for unreliable templates).
+  3. **Separate peak not before the S1 peak**: at S2 intervals shorter than the time to peak (80–100 ms) the S1 peak
+     itself lay in the search window and counted as a separate S2 peak (100 % at 80 ms). The window now starts at
+     the later of S2 + 25 ms and the template peak + 10 ms.
+- **PRP and ST protocols with the rocker running** (option `ffrRockerFallback`, default on, as for FFR steps): a
+  protocol range without any contraction with the rocker at rest (the human standard schedule keeps the rocker
+  running during the post-rest potentiation and stimulation threshold steps) is summarized from the contractions with
+  the rocker moving (note *no contraction with the rocker at rest in the range: contractions with the rocker moving
+  used*); before, these ranges had no included contraction and no PRP / amplitude-threshold results. The schedule's
+  pauses of 3, 12, 50 and 120 s are not within ±10 % of 15, 30 or 60 s, so `PRP15/30/60_pct` stay empty and the
+  potentiation is in the group summary (`rest 14 s`, `rest 52 s`, `rest 122 s`).
 - **MATLAB GUI: guarded callbacks and an error log.** Every callback (buttons, lists, mouse, keys) and the plotting
   after the detection run guarded: an error is shown in the status line in red (`Error in …: …`) instead of only in
   the command window, and appended with version, file, window, channel and stack to

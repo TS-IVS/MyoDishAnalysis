@@ -168,10 +168,15 @@ def _s2_results(R, Z, trace, opts):
     """S2 response by subtraction of the scaled mean steady-state S1 contraction (GetRefractoryPeriod, 2026-10-06):
     template = mean S1 contraction (S1 interval before and after, rocker at rest), scaled per S2 on S1 ... S2 + 20 ms;
     response = maximum of the residual (30-ms mean) S2 + 30 ms ... min(S2 + 600 ms, S1 interval - 100 ms) (% of S1);
-    separate peak = local maximum of the S1+S2 trace S2 + 25 ms ... min(S2 + 600 ms, next stimulus + 20 ms) with
+    separate peak = local maximum of the S1+S2 trace S2 + 25 ms ... min(S2 + 600 ms, next stimulus + 20 ms), not
+    before the S1 peak of the template + 10 ms (2026-10-23: at intervals shorter than the time to peak the S1 peak
+    itself is no separate peak), with
     prominence >= max(noise level, 2 %) (not limited by the template, so that the peak is found also when the S2
     interval is close to the S1 interval); noise level = 99th percentile of the response at pseudo-S2 on the template
-    beats (leave-one-out)."""
+    beats (leave-one-out). Without steady-state S1 beats (fewer than 3; S1-S2 pairs in every period, e.g. the human
+    standard schedule; 2026-10-23): template = mean S1 contraction of the pairs with the longest S2 interval (rocker at
+    rest), cut 20 ms before their S2 and held at the mean of the 50 ms before the cut (<= 10 % of the peak, otherwise
+    no template); pseudo-S2 intervals of the noise level end >= 100 ms before the cut."""
     notes = []
     t = np.asarray(trace["t"], float).ravel()
     f = np.asarray(trace["f"], float).ravel()
@@ -186,6 +191,11 @@ def _s2_results(R, Z, trace, opts):
     ni = Z["nextInt"].to_numpy(float)
     p = pi[(role == "S1") & inR]
     p = p[~np.isnan(p)]
+    jS2 = np.flatnonzero((role == "S2") & inR)
+    if not p.size and jS2.size:  # S1-S2 pairs in every period, no other S1: the period (2026-10-23)
+        q = jS2[(jS2 > 0) & (jS2 < st.size - 1)]
+        p = st[q + 1] - st[q - 1]
+        p = p[~np.isnan(p)]
     if t.size < 10 or not p.size:
         return ["S2 response: no S1 stimuli"]
     S1 = float(np.median(p))
@@ -226,14 +236,41 @@ def _s2_results(R, Z, trace, opts):
     Y = Y[:, ok]
     nT = Y.shape[1]
     R["nTemplateBeats"] = float(nT)
-    jS2 = np.flatnonzero((role == "S2") & inR)
     R["nS2"] = float(jS2.size)
     if not jS2.size:
         return ["no S2 stimuli"]
+    cutT = math.inf  # end of the template (pairs template: 20 ms before their S2)
+    if nT < 3:
+        # S1-S2 pairs in every period (no steady-state S1 beats; 2026-10-23): template from the S1 of the pairs with
+        # the longest S2 interval, cut 20 ms before the S2 and held at the mean of the 50 ms before the cut
+        vS2 = val[jS2]
+        vmax = float(np.nanmax(vS2)) if np.any(~np.isnan(vS2)) else math.nan
+        jL = [j for j in jS2[(vS2 == vmax) & (jS2 > 0)]
+              if in_data(st[j - 1] - 0.05, st[j] - 0.02) and at_rest(st[j - 1], st[j] - 0.02)]
+        if len(jL) >= 3:
+            cutT = min(st[j] - st[j - 1] for j in jL) - 0.02
+            cols = []
+            for j in jL:
+                y = get_trace(st[j - 1])
+                y[tg > cutT] = np.mean(y[(tg > cutT - 0.05) & (tg <= cutT)])
+                cols.append(y)
+            Y = np.column_stack(cols)
+            Y = Y[:, ~np.isnan(Y).any(axis=0)]
+            nT = Y.shape[1]
+            if nT >= 3:
+                mT = Y.mean(axis=1)
+                tail = float(np.mean(mT[(tg > cutT - 0.05) & (tg <= cutT)]) / np.max(mT))
+                lab = mround(2000 * vmax) / 2
+                if tail > 0.1:
+                    return [f"template: S1 of the {nT} pairs at {lab:g} ms not relaxed before the S2 "
+                            f"({mround(100 * tail)} % of the peak), no steady-state S1 beats - no estimates"]
+                notes.append(f"template: S1 of the {nT} pairs at {lab:g} ms (no steady-state S1 beats)")
+                R["nTemplateBeats"] = float(nT)
     if nT < 3:
         return [f"only {nT} steady-state S1 beats with the rocker at rest (>= 3 needed)"]
     m = Y.mean(axis=1)
     A1 = float(np.max(m))
+    tPk = float(tg[int(np.argmax(m))])  # peak time of the S1 template
     R["amplitudeS1_uN"] = A1
     if A1 <= 1e-6:  # flat signal: A1 ~ +-1e-12 (rounding, sign depends on the order of summation), 2026-10-08
         return ["no S1 contraction"]
@@ -251,8 +288,8 @@ def _s2_results(R, Z, trace, opts):
         Kw = np.flatnonzero((tg >= c + 0.03) & (tg <= winResp))
         rmax = float(np.max(r[Kw])) if Kw.size else math.nan
         pmax = 0.0
-        if gy is not None:
-            Kq = np.flatnonzero((gy >= c + 0.025) & (gy <= winPeak))
+        if gy is not None:  # not before the S1 peak: an S2 shortly after the S1 (interval < time to peak) would show
+            Kq = np.flatnonzero((gy >= max(c + 0.025, tPk + 0.01)) & (gy <= winPeak))  # the S1 peak itself (2026-10-23)
             if Kq.size >= 3:
                 isMax, P = islocalmax(movmean(y[Kq], w))
                 if isMax.any():
@@ -287,7 +324,10 @@ def _s2_results(R, Z, trace, opts):
     for k in range(nT):
         mk = (sumY - Y[:, k]) / (nT - 1)
         for c in uCI:
-            rk, ak, _ = s2response(Y[:, k], mk, c, min(c + 0.6, S1 - 0.1))
+            wr = min(c + 0.6, S1 - 0.1, cutT)  # pairs template: the window ends >= 100 ms before the cut
+            if wr - c < 0.1:
+                continue
+            rk, ak, _ = s2response(Y[:, k], mk, c, wr)
             if ak >= 0.2 and not math.isnan(rk):
                 nullV.append(100 * rk / (ak * float(np.max(mk))))
     noise = _prctile(np.array(nullV), 99)

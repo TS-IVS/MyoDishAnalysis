@@ -22,7 +22,16 @@ function [B, G, Z, notes] = mda_groupBeats(H, B, C, range, by, opts, steadyN)
 %                             the 400-Hz status channel, could fall into one group, e.g. 127.5 and 120 ms).
 %                             'S1' = the other stimuli at the basic interval (median, +-5 %) that are not followed by an
 %                             S2 ('pre-S2': relaxation cut off by the S2); stimuli at other intervals (e.g. trains at a
-%                             higher rate between the S1-S2 steps): group 'other'
+%                             higher rate between the S1-S2 steps): group 'other'.
+%                             With the programmed sequences of the log file ('Sequence' entries, H.stimSequenceLog;
+%                             2026-10-23) the pulses of a sequence with two regular times per period (S1 at t1, S2 at
+%                             t2) are classified by that sequence: S1 = pulse followed by a pulse t2 - t1 later, S2 =
+%                             the pulse t2 - t1 after an S1, group value = the programmed interval (e.g. 'S2 130 ms'
+%                             for 127.5 ms on the 2.5-ms grid), basic interval = the period. Needed for S1-S2 pairs in
+%                             every period (human standard schedule: S1 at 0, S2 at 80 ... 960 ms, period 2 s; the
+%                             S1 of the next pair is the 'post-S2' stimulus) when the S2 is later than half the
+%                             period (e.g. 640 ms of 1200 ms: by the intervals alone the next S1, 560 ms later,
+%                             would be the S2) or at half the period (equal intervals). See s2FromSequences.
 %          'stimCurrent'      stimulus current of the pulse (mA, status channel)
 %          'pauseLength'      post-rest potentiation: first stimulus after a pause (interval >= 1.5 s, >= 1.5 x the
 %                             median interval and >= 1.5 x the interval before; the median interval returns within the
@@ -135,6 +144,16 @@ switch lower(by)
     case 's2interval'
         premature = prevInt < 0.95 * [nan; prevInt(1:end-1)] & (isnan(nextInt) | nextInt > 1.05 * prevInt);
         isS2 = premature & ~[false; premature(1:end-1)];
+        % programmed S1-S2 sequences of the log file (2026-10-23): a sequence with two regular times per period (S1
+        % at t1, S2 at t2) marks its pulses by their phase within the period: the S2 is the pulse t2 - t1 after an
+        % S1, the nominal interval is the group value. This also classifies an S2 later than half the period (e.g.
+        % 640 ms of 1200 ms: by the intervals alone the next S1, 560 ms later, would be taken for the S2) and an S2
+        % at half the period (equal intervals), see s2FromSequences
+        nomCI = nan(nS, 1); perQ = nan(nS, 1); inQ = false(nS, 1);
+        if isfield(H, 'stimSequenceLog') && ~isempty(H.stimSequenceLog) && nS > 0
+            [sq, nomCI, perQ, inQ] = s2FromSequences(H.stimSequenceLog, stimCh, tt, prevInt, nextInt);
+            isS2(inQ) = sq(inQ); premature(inQ) = sq(inQ);
+        end
         role(:) = {'S1'};
         role(isS2) = {'S2'};
         post = [false; isS2(1:end-1)];
@@ -142,6 +161,8 @@ switch lower(by)
         cand = ~isS2 & ~post;                      %S1 = basic interval; other intervals: 'other'
         inR = tt >= range(1) & tt <= range(2);
         base = median(prevInt(cand & inR), 'omitnan');
+        pq = unique(perQ(inQ & inR & ~isnan(perQ)));
+        if isnan(base) && isscalar(pq), base = pq; end   %only S1-S2 pairs: the period of the sequences
         % last stimulus of the channel (no next interval) at the basic interval after a post-S2 stimulus: an S1, not
         % an S2 (e.g. 1-Hz pacing resumed after the last S1-S2 pair; a true S2 at the end is shorter than the basic
         % interval), 2026-10-21
@@ -153,6 +174,7 @@ switch lower(by)
         role(cand & abs(prevInt - base) > 0.05 * base) = {'other'};
         role(strcmp(role, 'S1') & [isS2(2:end); false]) = {'preS2'};   %relaxation cut off by the S2
         s2 = nan(nS, 1); s2(isS2) = prevInt(isS2);
+        s2(isS2 & ~isnan(nomCI)) = nomCI(isS2 & ~isnan(nomCI));       %programmed interval (log file)
         gid = clusterValues(s2, 0.005, 0);
         v2 = groupMedian(s2, gid);
         val(isS2) = v2(isS2);
@@ -251,6 +273,20 @@ B.group = bLbl;
 B.groupValue = bVal;
 B.groupRole = bRole;
 B.groupStep = bStep;
+
+% ------------------------------------------------------------------ PRP / ST with the rocker moving (2026-10-23)
+% rocker 'stopped' and no contraction of the range with the rocker at rest (schedules that keep the rocker running
+% during the post-rest potentiation and stimulation threshold steps, e.g. the human standard schedule): with
+% opts.ffrRockerFallback the contractions with the rocker moving are included (as for the FFR steady state), note
+if any(strcmpi(by, {'pauseLength', 'stimCurrent'})) && strcmp(opts.rocker, 'stopped') && opts.ffrRockerFallback && height(B) > 0
+    inB = B.t_peak >= range(1) & B.t_peak <= range(2);
+    elig = inB & ~isnan(B.amplitude);
+    if strcmp(opts.beats, 'stimulated'), elig = elig & strcmp(B.beatType, 'stimulated'); end
+    if any(elig) && ~any(elig & ~B.rockerMoving)
+        B.included(elig) = true;
+        notes{end+1} = 'no contraction with the rocker at rest in the range: contractions with the rocker moving used';
+    end
+end
 
 % ------------------------------------------------------------------ FFR: steady state per frequency (2026-10-10)
 selStep = containers.Map('KeyType', 'char', 'ValueType', 'double');
@@ -446,6 +482,86 @@ end
 
 
 % =====================================================================================================
+function [isS2, nomCI, perQ, inQ] = s2FromSequences(Q, ch, tt, prevInt, nextInt)
+% S1 and S2 pulses of the programmed S1-S2 sequences of channel ch. Q = H.stimSequenceLog ([time channel period_ms
+% nTimes t1_ms t2_ms], mda_readMdd), tt = stimulus times of the channel (sorted), prevInt / nextInt = intervals.
+% A sequence holds from its log time to the log time of the next sequence of the channel; the controller switches
+% at the end of the running period and the data lag the log by about 0.3 s, so a pulse within period + 0.3 s after
+% a log time belongs to the previous sequence if it fits that one and not the new one. A sequence with two regular
+% times = S1-S2 pairs with the nominal interval c = t2 - t1: S1 = pulse followed by a pulse c later, S2 = pulse c
+% after an S1 (tolerance 6 ms: 2.5-ms grid of the status channel, delay of the first pair after a switch). A pulse
+% that fits both (every pulse when c = half the period; the first S1 after a switch when old period - old interval
+% = c) is classified by the phase of the unambiguous S1 pulses of the sequence or, with equal intervals, of the
+% previous / next S1-S2 sequence with the same period (the controller keeps the period, so the S1 grid continues;
+% equal intervals without such a neighbour = plain pacing, not S1-S2). Outputs for every pulse: isS2, nomCI (s; the
+% S2 pulses), perQ (period, s) and inQ (true: pulse of an S1-S2 sequence; isS2 overrides the interval rule).
+% TS 2026-10-23
+nS = numel(tt);
+isS2 = false(nS, 1); nomCI = nan(nS, 1); perQ = nan(nS, 1); inQ = false(nS, 1);
+Q = Q(Q(:,2) == ch & ~isnan(Q(:,3)) & Q(:,3) > 0, :);
+if isempty(Q) || nS == 0, return; end
+[~, o] = sort(Q(:,1)); Q = Q(o, :);
+[~, last] = unique(Q(:,1), 'last'); Q = Q(last, :);   %several entries at one time: the last one
+tq = Q(:,1); P = Q(:,3) / 1000; n = Q(:,4); nQ = numel(tq);
+ci = nan(nQ, 1); ci(n == 2) = (Q(n == 2, 6) - Q(n == 2, 5)) / 1000;
+tol = 0.006;
+% sequence of every pulse: the last one logged before it (NaN before the first); within period + 0.3 s after the
+% log time the previous one if the pulse fits it and not the new one
+blk = discretize(tt(:), [tq; inf]);
+for i = find(~isnan(blk) & blk > 1)'
+    k = blk(i);
+    if tt(i) > tq(k) + P(k) + 0.3, continue; end
+    if fitsSequence(prevInt(i), nextInt(i), ci(k-1), P(k-1), tol) && ...
+            ~fitsSequence(prevInt(i), nextInt(i), ci(k), P(k), tol)
+        blk(i) = k - 1;
+    end
+end
+pair = n == 2 & ~isnan(ci) & ci > 0;
+amb = pair & abs(ci - P / 2) <= tol;            %equal intervals: S1-S2 only next to an unambiguous S1-S2 sequence
+for k = find(amb)'
+    ok = (k > 1 && pair(k-1) && ~amb(k-1) && abs(P(k-1) - P(k)) < 1e-9) || ...
+        (k < nQ && pair(k+1) && ~amb(k+1) && abs(P(k+1) - P(k)) < 1e-9);
+    if ~ok, pair(k) = false; end
+end
+isS1 = false(nS, 1);
+order = [find(pair & ~amb); find(pair & amb)];   %unambiguous sequences first (phase for the others)
+for k = order'
+    I = find(blk == k);
+    if isempty(I), continue; end
+    inQ(I) = true; perQ(I) = P(k);
+    s1 = abs(nextInt(I) - ci(k)) <= tol;         %followed by a pulse at the S2 interval
+    s2 = abs(prevInt(I) - ci(k)) <= tol;         %preceded by a pulse at the S2 interval
+    t0 = nan;                                    %an S1 time: the S1 grid t0 + m x period
+    u = I(s1 & ~s2);
+    if ~isempty(u)
+        t0 = tt(u(1));
+    elseif k > 1 && pair(k-1) && abs(P(k-1) - P(k)) < 1e-9 && any(isS1(blk == k-1))
+        t0 = tt(find(isS1 & blk == k-1, 1, 'last'));
+    elseif k < nQ && pair(k+1) && abs(P(k+1) - P(k)) < 1e-9 && any(isS1(blk == k+1))
+        t0 = tt(find(isS1 & blk == k+1, 1));
+    elseif any(s1)
+        t0 = tt(I(find(s1, 1)));
+    end
+    onGrid = false(size(I));
+    if ~isnan(t0), onGrid = abs(mod(tt(I) - t0 + P(k) / 2, P(k)) - P(k) / 2) <= tol; end
+    a1 = (s1 & ~s2) | (s1 & s2 & onGrid);
+    isS1(I(a1)) = true;
+    a2 = (s2 & ~s1) | (s1 & s2 & ~onGrid);
+    a2 = a2 & [false; a1(1:end-1)] & [true; diff(I) == 1];   %the pulse after an S1 of this sequence
+    isS2(I(a2)) = true;
+    nomCI(I(a2)) = ci(k);
+end
+end
+
+
+function ok = fitsSequence(prevInt, nextInt, c, P, tol)
+% the pulse fits the sequence: S1-S2 pairs (interval c): preceded or followed by a pulse c apart; plain pacing:
+% an interval of one period
+if isnan(c), c = P; end
+ok = abs(prevInt - c) <= tol || abs(nextInt - c) <= tol;
+end
+
+
 function gid = clusterValues(v, absTol, relTol)
 % groups of similar values: sorted distinct values, a new group where the gap > absTol + relTol * lower value
 gid = nan(size(v));

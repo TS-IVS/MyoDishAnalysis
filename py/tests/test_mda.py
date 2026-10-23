@@ -368,9 +368,10 @@ def test_prp_groups_example7():
 def test_protocol_results_examples():
     def res(f, ch, **kw):
         return mda.myodish_analysis(os.path.join(EX, f), ch, quiet=True, **kw)[2]["protocolResults"].iloc[0]
-    r = res("example8_rabbitVentricle_EP.mdd", 1, protocol="RP", rocker="any")  # S2 463 ms: none, 492 ms: full
-    assert 463 < r["refPeriodNoPeak_ms"] < 492 and r["refPeriodNoPeakStep_ms"] == 30  # 492.5 - 462.5 (0.5-ms steps)
-    assert 463 <= r["refPeriodNoResponse_ms"] < 492 and r["S2noiseLevel_pct"] < 10
+    r = res("example8_rabbitVentricle_EP.mdd", 1, protocol="RP", rocker="any")  # S2 460 ms: none, 490 ms: full
+    # (programmed intervals of the 'Sequence' lines, 2026-10-23; before: 462.5 / 492.5 ms measured on the 2.5-ms grid)
+    assert 460 < r["refPeriodNoPeak_ms"] < 490 and r["refPeriodNoPeakStep_ms"] == 30
+    assert 460 <= r["refPeriodNoResponse_ms"] < 490 and r["S2noiseLevel_pct"] < 10
     r = res("example3_humanVentricle.mdd", 6, protocol="FFR")
     assert r["maxCapturedFrequency_Hz"] == 4 and 90 < r["FFR_1Hz_pct"] < 115 and 60 < r["FFR_3Hz_pct"] < 90
     r = res("example2_rabbitVentricle.mdd", 5, protocol="ST", rocker="any")
@@ -435,6 +436,135 @@ def test_s2_groups_last_pulse_and_grid(tmp_path):
     assert int(S.loc[S["group"] == "S1", "nStimuli"].iloc[0]) == 6 + 3 * 10 - 10  # the last S1 of every step is pre-S2
     assert all(int(x) == 1 for x in g["nStimuli"])
     assert S.loc[S["groupRole"] == "postS2", "nStimuli"].sum() == 10
+
+
+def _paired_recording(tmp_path, name, steps_ms, s2_amp, period=1.2, n_pairs=8, fs=400, sequences=True, pre=4,
+                      rocker=False):
+    """S1-S2 pairs in every period (human standard schedule, 2026-10-23): S1 pacing at the period (pre pulses from 1 s),
+    then per step n_pairs periods with the S1 at 0 and the S2 at the step interval; a contraction after every S1
+    (1000 uN, rise 50 ms, fall 150 ms) and after every S2 (s2_amp[step] uN; 0 = no response). With sequences, the log
+    file has the 'Sequence' lines of software 2023 ('StimPeriod' / 'StimTimes' per channel) 0.5 s before the first
+    S1 of every step (and of the pacing). rocker: bit 15 set in every sample (rocker moving throughout)."""
+    ts = [1.0 + k * period for k in range(pre)]
+    s1 = ts[-1]
+    s2t, s2a, seq = [], [], [(0.5, None)]
+    for ci, a in zip(steps_ms, s2_amp):
+        seq.append((s1 + period - 0.5, ci))
+        for _ in range(n_pairs):
+            s1 += period
+            ts += [s1, s1 + ci / 1000]
+            s2t.append(s1 + ci / 1000); s2a.append(a)
+    ts = np.round(np.array(ts) * fs) / fs
+    T = int(np.ceil(ts[-1])) + 2
+    n = T * fs
+    tt = np.arange(n) / fs
+    F = np.full(n, 2000.0)
+    amp = {round(float(t), 4): a for t, a in zip(np.round(np.array(s2t) * fs) / fs, s2a)}
+    for t0 in ts:
+        a = amp.get(round(float(t0), 4), 1000.0)
+        if a <= 0:
+            continue
+        x = t0 + 0.03
+        m = (tt >= x) & (tt < x + 0.05)
+        F[m] += a * (tt[m] - x) / 0.05
+        m = (tt >= x + 0.05) & (tt < x + 0.2)
+        F[m] += a - a * (tt[m] - x - 0.05) / 0.15
+    F += np.random.default_rng(3).normal(0, 2, n)  # a little noise (noise level of the S2 response > 0)
+    X = np.zeros((9, n), np.int16)
+    X[0] = np.round(F).astype(np.int16)
+    code = np.full(n, 16384 if rocker else 0, np.uint16)
+    code[np.round(ts * fs).astype(int)] += 512 + 50
+    X[8] = code.view(np.int16)
+    mdd = str(tmp_path / f"{name}.mdd")
+    X.T.astype("<i2").tofile(mdd)
+
+    def stamp(t):
+        return f"2026 01 01 06:{int(t) // 60:02d}:{int(t) % 60:02d}:{int(round((t % 1) * 1000)):03d};{int(round(t * 1000))}"
+    L = ["systemTime;dataLogTime;channel;code;value", "2026 01 01 06:00:00:000;0;0;nChannels;9",
+         "2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd", "2026 01 01 06:00:00:000;0;0;samplingRate Recording;400"]
+    for c in range(1, 9):
+        L += [f"2026 01 01 06:00:00:000;0;{c};Calibration;1000", f"2026 01 01 06:00:00:000;0;{c};Offset;0"]
+    if sequences:
+        for t, ci in seq:
+            L += [f"{stamp(t)};0;Sequence;transmitted", f"{stamp(t)};0;Sequence;StimPeriod {int(round(period * 1000))}"]
+            for c in range(1, 9):
+                times = f"{10 * (c - 1)}" if ci is None else f"{10 * (c - 1)} {10 * (c - 1) + ci:g}"
+                L.append(f"{stamp(t)};{c};Sequence;StimTimes {times}")
+    L.append(f"{stamp(T)};0;Recording;stopped: x.mdd")
+    (tmp_path / f"{name}_log.log").write_text("\n".join(L) + "\n")
+    return mdd, T, float(ts[pre] - 0.5)
+
+
+def test_s2_pairs_in_every_period_sequences_and_template(tmp_path):
+    # 2026-10-23 (as s2PairsTest of mda_test.m; human standard schedule of the lab): S1 at 0 and S2 at 640, 600, 560
+    # and 400 ms in every period of 1.2 s, 8 pairs per step, S2 response at 640 ... 560 ms, none at 400 ms.
+    # 1) The 'Sequence' lines of the log file tell the S1 from the S2: by the intervals alone the 640-ms S2 (later
+    # than half the period) is the next S1 and 560 ms its interval, and at 600 ms (equal intervals) there is no S2;
+    # 2) without steady-state S1 beats the S2 response uses the S1 of the pairs at the longest interval as template.
+    steps = [640, 600, 560, 400]
+    mdd, T, t0 = _paired_recording(tmp_path, "pairs", steps, [800, 800, 800, 0])
+    _, S, I = mda.myodish_analysis(mdd, 1, t0, T, groupBy="S2interval", quiet=True, noFiltering=True, spikeRemoval=False)
+    g = S[S["groupRole"] == "S2"]
+    assert g["group"].tolist() == [f"S2 {x} ms" for x in sorted(steps)]
+    assert g["nStimuli"].tolist() == [8, 8, 8, 8]
+    assert S.loc[S["groupRole"] == "postS2", "nStimuli"].sum() == 4 * 8 - 1  # the S1 of the next pair
+    assert "other" not in S["group"].tolist()
+    r = I["protocolResults"].iloc[0]
+    assert r["nTemplateBeats"] == 8 and "template: S1 of the 8 pairs at 640 ms" in r["resultNote"]
+    resp = dict(zip(g["groupValue"].round(3), g["S2response_pct"]))
+    sep = dict(zip(g["groupValue"].round(3), g["separatePeak_percent"]))
+    assert 60 < resp[0.64] < 100 and 60 < resp[0.56] < 100 and resp[0.4] < 10
+    assert sep[0.64] == 100 and sep[0.56] == 100 and sep[0.4] == 0
+    assert abs(r["refPeriodNoPeak_ms"] - 480) < 1e-6 and r["refPeriodAllCaptured_ms"] == 560
+    assert 400 < r["refPeriodNoResponse_ms"] < 560
+    # without the 'Sequence' lines (intervals alone): 640 ms is read as 560 ms, 600 ms as equal intervals
+    mdd2, T2, t02 = _paired_recording(tmp_path, "pairs2", steps, [800, 800, 800, 0], sequences=False)
+    _, S2, _ = mda.myodish_analysis(mdd2, 1, t02, T2, groupBy="S2interval", quiet=True, noFiltering=True, spikeRemoval=False)
+    assert "S2 640 ms" not in S2["group"].tolist() and "other" in S2["group"].tolist()
+    assert int(S2.loc[S2["group"] == "S2 560 ms", "nStimuli"].iloc[0]) == 16
+
+
+def test_st_prp_rocker_fallback(tmp_path):
+    # 2026-10-23: stimulation threshold with the rocker moving throughout (schedules that keep the rocker running):
+    # with rocker 'stopped' no contraction is at rest; option ffrRockerFallback (default) includes the contractions
+    # with the rocker moving (note), off: no amplitude thresholds
+    fs = 400
+    cur = [10] * 6 + [20] * 6 + [30] * 6 + [40] * 6
+    ts = 1.0 + np.arange(len(cur))
+    amp = {10: 0, 20: 500, 30: 1000, 40: 1000}
+    T = int(ts[-1]) + 2
+    n = T * fs
+    tt = np.arange(n) / fs
+    F = np.full(n, 2000.0)
+    for t0, c in zip(ts, cur):
+        a = amp[c]
+        x = t0 + 0.03
+        m = (tt >= x) & (tt < x + 0.05)
+        F[m] += a * (tt[m] - x) / 0.05
+        m = (tt >= x + 0.05) & (tt < x + 0.2)
+        F[m] += a - a * (tt[m] - x - 0.05) / 0.15
+    X = np.zeros((9, n), np.int16)
+    X[0] = np.round(F).astype(np.int16)
+    code = np.full(n, 16384, np.uint16)  # rocker bit in every sample
+    code[np.round(ts * fs).astype(int)] += 512 + np.array(cur, np.uint16)
+    X[8] = code.view(np.int16)
+    mdd = str(tmp_path / "st.mdd")
+    X.T.astype("<i2").tofile(mdd)
+    L = ["systemTime;dataLogTime;channel;code;value", "2026 01 01 06:00:00:000;0;0;nChannels;9",
+         "2026 01 01 06:00:00:000;0;0;Recording;started: x.mdd", "2026 01 01 06:00:00:000;0;0;samplingRate Recording;400",
+         "2026 01 01 06:00:00:000;0;0;rockerSpeed;60"]
+    for c in range(1, 9):
+        L += [f"2026 01 01 06:00:00:000;0;{c};Calibration;1000", f"2026 01 01 06:00:00:000;0;{c};Offset;0"]
+    L.append(f"2026 01 01 06:00:{T:02d}:000;{T * 1000};0;Recording;stopped: x.mdd")
+    (tmp_path / "st_log.log").write_text("\n".join(L) + "\n")
+    kw = dict(groupBy="stimCurrent", quiet=True, noFiltering=True, spikeRemoval=False, rocker="stopped")
+    _, S, I = mda.myodish_analysis(mdd, 1, 0.5, T, **kw)
+    r = I["protocolResults"].iloc[0]
+    assert S.loc[S["group"] == "30 mA", "nContractions"].iloc[0] == 6
+    assert r["captureThreshold_mA"] == 20 and r["stimThreshold50_mA"] == 20 and r["stimThreshold95_mA"] == 30
+    assert any("rocker moving used" in str(x) for x in I["notes"])
+    _, S0, I0 = mda.myodish_analysis(mdd, 1, 0.5, T, ffrRockerFallback=False, **kw)
+    assert S0["nContractions"].sum() == 0 and np.isnan(I0["protocolResults"].iloc[0]["stimThreshold50_mA"])
 
 
 def test_grouping_tolerances(tmp_path):

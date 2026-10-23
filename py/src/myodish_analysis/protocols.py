@@ -553,6 +553,16 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
         with np.errstate(invalid="ignore"):
             premature = (prevInt < 0.95 * np.r_[np.nan, prevInt[:-1]]) & (np.isnan(nextInt) | (nextInt > 1.05 * prevInt))
         isS2 = premature & ~np.r_[False, premature[:-1]]
+        # programmed S1-S2 sequences of the log file (2026-10-23): a sequence with two regular times per period (S1
+        # at t1, S2 at t2) marks its pulses by their phase within the period: the S2 is the pulse t2 - t1 after an
+        # S1, the nominal interval is the group value. This also classifies an S2 later than half the period (e.g.
+        # 640 ms of 1200 ms: by the intervals alone the next S1, 560 ms later, would be taken for the S2) and an S2
+        # at half the period (equal intervals), see _s2_from_sequences
+        nomCI = np.full(nS, np.nan); perQ = np.full(nS, np.nan); inQ = np.zeros(nS, bool)
+        Qlog = getattr(H, "stimSequenceLog", None)
+        if Qlog is not None and np.size(Qlog) > 0 and nS > 0:
+            sq, nomCI, perQ, inQ = _s2_from_sequences(np.asarray(Qlog, float).reshape(-1, 6), stimCh, tt, prevInt, nextInt)
+            isS2[inQ] = sq[inQ]
         role[:] = "S1"
         role[isS2] = "S2"
         post = np.r_[False, isS2[:-1]][:nS]
@@ -561,6 +571,9 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
         inR = (tt >= r0) & (tt <= r1)
         p = prevInt[cand & inR]
         base = float(np.median(p[~np.isnan(p)])) if np.any(~np.isnan(p)) else math.nan
+        pq = np.unique(perQ[inQ & inR & ~np.isnan(perQ)])
+        if math.isnan(base) and pq.size == 1:  # only S1-S2 pairs: the period of the sequences
+            base = float(pq[0])
         # last stimulus of the channel (no next interval) at the basic interval after a post-S2 stimulus: an S1, not
         # an S2 (e.g. 1-Hz pacing resumed after the last S1-S2 pair; a true S2 at the end is shorter than the basic
         # interval), 2026-10-21
@@ -576,6 +589,8 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
         role[(role == "S1") & np.r_[isS2[1:], False][:nS]] = "preS2"  # relaxation cut off by the S2
         s2 = np.full(nS, np.nan)
         s2[isS2] = prevInt[isS2]
+        kq = isS2 & ~np.isnan(nomCI)
+        s2[kq] = nomCI[kq]  # programmed interval (log file)
         v2 = _group_median(s2, _cluster_values(s2, 0.005, 0.0))  # within 5 ms = one group (2026-10-21; before 7.5)
         val[isS2] = v2[isS2]
         ip = np.flatnonzero(post)
@@ -664,6 +679,21 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
     B["groupValue"] = bVal
     B["groupRole"] = list(bRole)
     B["groupStep"] = bStep
+
+    # PRP / ST with the rocker moving (2026-10-23): rocker 'stopped' and no contraction of the range with the rocker at
+    # rest (schedules that keep the rocker running during the post-rest potentiation and stimulation threshold steps,
+    # e.g. the human standard schedule): with ffrRockerFallback the contractions with the rocker moving are included
+    # (as for the FFR steady state), note
+    if byl in ("pauselength", "stimcurrent") and rockerSel == "stopped" and ffrFallback and nB > 0:
+        inB = (tPeak >= r0) & (tPeak <= r1)
+        elig = inB & ~np.isnan(B["amplitude"].to_numpy(float))
+        if beatsSel == "stimulated":
+            elig &= B["beatType"].to_numpy() == "stimulated"
+        if elig.any() and not (elig & ~B["rockerMoving"].to_numpy(bool)).any():
+            inc = B["included"].to_numpy(bool).copy()
+            inc[elig] = True
+            B["included"] = inc
+            notes.append("no contraction with the rocker at rest in the range: contractions with the rocker moving used")
 
     # FFR: steady state per frequency (2026-10-10)
     selStep = {}
@@ -915,6 +945,90 @@ def add_empty_group_columns(B, T):
 
 
 # =====================================================================================================
+def _s2_from_sequences(Q, ch, tt, prevInt, nextInt):
+    """S1 and S2 pulses of the programmed S1-S2 sequences of channel ch. Q = H.stimSequenceLog ([time channel
+    period_ms nTimes t1_ms t2_ms], read_mdd), tt = stimulus times of the channel (sorted), prevInt / nextInt =
+    intervals. A sequence holds from its log time to the log time of the next sequence of the channel; the controller
+    switches at the end of the running period and the data lag the log by about 0.3 s, so a pulse within period +
+    0.3 s after a log time belongs to the previous sequence if it fits that one and not the new one. A sequence with
+    two regular times = S1-S2 pairs with the nominal interval c = t2 - t1: S1 = pulse followed by a pulse c later,
+    S2 = pulse c after an S1 (tolerance 6 ms: 2.5-ms grid of the status channel, delay of the first pair after a
+    switch). A pulse that fits both (every pulse when c = half the period; the first S1 after a switch when old
+    period - old interval = c) is classified by the phase of the unambiguous S1 pulses of the sequence or, with equal
+    intervals, of the previous / next S1-S2 sequence with the same period (the controller keeps the period, so the S1
+    grid continues; equal intervals without such a neighbour = plain pacing, not S1-S2). Returns for every pulse:
+    isS2, nomCI (s; the S2 pulses), perQ (period, s) and inQ (True: pulse of an S1-S2 sequence; isS2 overrides the
+    interval rule). TS 2026-10-23 (port of mda_groupBeats.m)"""
+    nS = tt.size
+    isS2 = np.zeros(nS, bool); nomCI = np.full(nS, np.nan); perQ = np.full(nS, np.nan); inQ = np.zeros(nS, bool)
+    Q = Q[(Q[:, 1] == ch) & ~np.isnan(Q[:, 2]) & (Q[:, 2] > 0)]
+    if Q.shape[0] == 0 or nS == 0:
+        return isS2, nomCI, perQ, inQ
+    Q = Q[np.argsort(Q[:, 0], kind="stable")]
+    _, firstRev = np.unique(Q[::-1, 0], return_index=True)  # several entries at one time: the last one
+    Q = Q[np.sort(Q.shape[0] - 1 - firstRev)]
+    tq = Q[:, 0]; P = Q[:, 2] / 1000.0; n = Q[:, 3]; nQ = tq.size
+    ci = np.full(nQ, np.nan)
+    two = n == 2
+    ci[two] = (Q[two, 5] - Q[two, 4]) / 1000.0
+    tol = 0.006
+
+    def fits(pi, ni, c, per):
+        # the pulse fits the sequence: S1-S2 pairs (interval c): preceded or followed by a pulse c apart; plain
+        # pacing: an interval of one period
+        if math.isnan(c):
+            c = per
+        return (abs(pi - c) <= tol) or (abs(ni - c) <= tol)
+
+    # sequence of every pulse: the last one logged before it (-1 before the first); within period + 0.3 s after the
+    # log time the previous one if the pulse fits it and not the new one
+    blk = np.searchsorted(tq, tt, side="right") - 1
+    for i in np.flatnonzero(blk > 0):
+        k = blk[i]
+        if tt[i] > tq[k] + P[k] + 0.3:
+            continue
+        if fits(prevInt[i], nextInt[i], ci[k - 1], P[k - 1]) and not fits(prevInt[i], nextInt[i], ci[k], P[k]):
+            blk[i] = k - 1
+    pair = two & ~np.isnan(ci) & (ci > 0)
+    with np.errstate(invalid="ignore"):
+        amb = pair & (np.abs(ci - P / 2) <= tol)  # equal intervals: S1-S2 only next to an unambiguous S1-S2 sequence
+    for k in np.flatnonzero(amb):
+        ok = (k > 0 and pair[k - 1] and not amb[k - 1] and abs(P[k - 1] - P[k]) < 1e-9) or \
+            (k < nQ - 1 and pair[k + 1] and not amb[k + 1] and abs(P[k + 1] - P[k]) < 1e-9)
+        if not ok:
+            pair[k] = False
+    isS1 = np.zeros(nS, bool)
+    order = list(np.flatnonzero(pair & ~amb)) + list(np.flatnonzero(pair & amb))  # unambiguous sequences first
+    for k in order:
+        I = np.flatnonzero(blk == k)
+        if I.size == 0:
+            continue
+        inQ[I] = True; perQ[I] = P[k]
+        with np.errstate(invalid="ignore"):
+            s1 = np.abs(nextInt[I] - ci[k]) <= tol  # followed by a pulse at the S2 interval
+            s2 = np.abs(prevInt[I] - ci[k]) <= tol  # preceded by a pulse at the S2 interval
+        t0 = math.nan  # an S1 time: the S1 grid t0 + m x period
+        u = I[s1 & ~s2]
+        if u.size:
+            t0 = tt[u[0]]
+        elif k > 0 and pair[k - 1] and abs(P[k - 1] - P[k]) < 1e-9 and (isS1 & (blk == k - 1)).any():
+            t0 = tt[np.flatnonzero(isS1 & (blk == k - 1))[-1]]
+        elif k < nQ - 1 and pair[k + 1] and abs(P[k + 1] - P[k]) < 1e-9 and (isS1 & (blk == k + 1)).any():
+            t0 = tt[np.flatnonzero(isS1 & (blk == k + 1))[0]]
+        elif s1.any():
+            t0 = tt[I[np.flatnonzero(s1)[0]]]
+        onGrid = np.zeros(I.size, bool)
+        if not math.isnan(t0):
+            onGrid = np.abs(np.mod(tt[I] - t0 + P[k] / 2, P[k]) - P[k] / 2) <= tol
+        a1 = (s1 & ~s2) | (s1 & s2 & onGrid)
+        isS1[I[a1]] = True
+        a2 = (s2 & ~s1) | (s1 & s2 & ~onGrid)
+        a2 &= np.r_[False, a1[:-1]] & np.r_[True, np.diff(I) == 1]  # the pulse after an S1 of this sequence
+        isS2[I[a2]] = True
+        nomCI[I[a2]] = ci[k]
+    return isS2, nomCI, perQ, inQ
+
+
 def _cluster_values(v, absTol, relTol):
     """groups of similar values: sorted distinct values, a new group where the gap > absTol + relTol * lower value."""
     gid = np.full(v.shape, -1)

@@ -877,7 +877,7 @@ P = mda_protocols(file)                                              % protocols
   | `groupBy` | value | default for |
   |---|---|---|
   | `pacingFrequency` | 1 / interval from the previous stimulus (Hz); intervals within 2 % form a cluster, its frequency (1 / median interval) is rounded to `frequencyResolution` (0.1 Hz) at ≥ 1 Hz and to `frequencyResolutionLow` (0.05 Hz) below 1 Hz: clusters with the same rounded frequency are one group (0.99, 1.0, 1.001 Hz = `1 Hz`; 0.74, 0.75 Hz = `0.75 Hz`; before 2026-10-10: label rounded to 0.05 Hz at all rates, `groupValue` unrounded); `groupValue` = the rounded frequency, `stimFrequency` = 1 / median interval. **FFR protocols** (2026-10-10, option `steadyStateBeats`, default 10): each frequency is summarized from its steady state, the last 10 contractions of the longest run of consecutive stimuli at this frequency (other runs, e.g. the basic pacing before and after the protocol, are not used; `groupStep` = number of the run), of its longest sequence of captured stimuli whose previous and next stimuli are captured, too (partial capture, e.g. 2:1: no steady state, note); 0 = all contractions of the frequency (versions ≤ 1.0.0-beta.3) | FFR |
-  | `S2interval` | S2 = premature stimulus (interval < 95 % of the previous one, next interval longer or unknown, previous stimulus not premature; the last stimulus of the channel at the basic interval is an S1); groups `S2 <ms>` and `post-S2 <ms>` (the next stimulus; post-extrasystolic potentiation; S2 intervals within 5 ms are one group: the 400-Hz status channel records a pulse on a 2.5-ms grid, so the same interval can appear ±2.5 ms apart, while 10-ms steps of a schedule stay apart), `S1` (other stimuli at the basic interval, median ± 5 %, not followed by an S2), `pre-S2` (S1 followed by an S2: relaxation cut off) and `other` (other intervals, e.g. trains at a higher rate between the S1-S2 steps; analyse them with `pacingFrequency`) | RP |
+  | `S2interval` | S2 = premature stimulus (interval < 95 % of the previous one, next interval longer or unknown, previous stimulus not premature; the last stimulus of the channel at the basic interval is an S1); groups `S2 <ms>` and `post-S2 <ms>` (the next stimulus; post-extrasystolic potentiation; S2 intervals within 5 ms are one group: the 400-Hz status channel records a pulse on a 2.5-ms grid, so the same interval can appear ±2.5 ms apart, while 10-ms steps of a schedule stay apart), `S1` (other stimuli at the basic interval, median ± 5 %, not followed by an S2), `pre-S2` (S1 followed by an S2: relaxation cut off) and `other` (other intervals, e.g. trains at a higher rate between the S1-S2 steps; analyse them with `pacingFrequency`). **With the programmed sequences of the log file** (`Sequence` entries, 2026-10-23: `StimPeriod` / `StimTimes` per channel of the software of 2022–2023, `Sent stimPeriod` / `Added stimTime(s)` of 2026) the pulses of a sequence with two regular times per period (S1 at t1, S2 at t2) are classified by that sequence: S1 = pulse followed by a pulse t2 − t1 later, S2 = the pulse t2 − t1 after an S1, `groupValue` = the programmed interval (`S2 130 ms` for 127.5 ms on the 2.5-ms grid). This is needed for schedules with an S1-S2 pair in every period (the lab's human standard schedule: S1 at 0, S2 at 960 → 80 ms, period 2 s; the S1 of the next pair is the `post-S2` stimulus): an S2 later than half the period (640 ms of 1200 ms) would otherwise be read as the next S1 with 560 ms, and an S2 at half the period (equal intervals) as no S2. Pulses that fit both roles are placed on the S1 grid of the sequence (the controller keeps the period when it switches sequences) | RP |
   | `stimCurrent` | current of the pulse (mA, status channel); `currentReached_percent` per group (pulses whose current was reached; pulses with an unknown result left out, see *Current reached* below) | ST |
   | `pauseLength` | first stimulus after a pause (interval ≥ 1.5 s, ≥ 1.5 × the median interval and ≥ 1.5 × the interval before; the median interval returns within the next 3 stimuli): `rest <s>`, one group per pause with `groupStep` = number of the pause (pooling over channels whose effective pauses differ); stimuli within 10 s after a pause `after rest` (decaying potentiation, not part of the reference); other stimuli at the median interval (± 5 %) `steady` (reference); all others `other`. Pauses (interval − steady interval) within `pauseTolerance` (10 %) of the shortest pause of a set have the same pause length (`groupValue` = their median interval, equal labels numbered `#n`) | PRP |
   | `pulseDuration` | `chargeDuration` entry of the log file for the stimulated channel (ms) | PD |
@@ -912,12 +912,21 @@ P = mda_protocols(file)                                              % protocols
 
   S2 response (as in GetRefractoryPeriod): the mean S1 contraction (S1 interval before and after, rocker at rest) is
   scaled to the S1 contraction of each S1-S2 pair (S1 … S2 + 20 ms) and subtracted; response = maximum of the
-  residual (30-ms mean) S2 + 30 … 600 ms in % of S1; separate peak = local maximum of the force after the S2 with a
-  prominence ≥ max(noise level, 2 %); noise level = 99th percentile of the response at pseudo-S2 on the S1 beats. A
+  residual (30-ms mean) S2 + 30 … 600 ms in % of S1; separate peak = local maximum of the force after the S2 (not
+  before the peak of the S1 template + 10 ms: at intervals shorter than the time to peak the S1 peak itself is no
+  separate peak, 2026-10-23) with a prominence ≥ max(noise level, 2 %); noise level = 99th percentile of the
+  response at pseudo-S2 on the S1 beats. **Without steady-state S1 beats** (fewer than 3: an S1-S2 pair in every
+  period, e.g. the human standard schedule; 2026-10-23) the template is the mean S1 of the pairs with the longest S2
+  interval (rocker at rest), cut 20 ms before their S2 and held at the mean of the 50 ms before the cut, which must be
+  ≤ 10 % of the peak (relaxed S1; otherwise no estimates, note); the noise level then uses pseudo-S2 intervals that
+  end ≥ 100 ms before the cut; note *template: S1 of the N pairs at … ms*. With a period of 2 s and S2 ≤ 960 ms the
+  S1 is preceded by ≥ 1.04 s; with the stem-cell schedule (period 1.2 s, S2 up to 640 ms) the template S1 is itself
+  premature, and channels with a noise level ≥ 50 % get no estimates. A
   transition is the first S2 interval (from long to short) below the level that stays below it (at the next shorter
   interval, or in the median of this and all shorter intervals: a single value just above the level among the
   shortest intervals does not undo a transition), interpolated linearly; tested intervals in 0.5-ms steps (the 400-Hz status channel records a pulse on a
-  2.5-ms grid). Example 8 (rabbit, ERP 460 ms in the lab table): no peak 477.5 ms, no response 464 ms (step 30 ms).
+  2.5-ms grid; with `Sequence` entries the programmed intervals). Example 8 (rabbit, ERP 460 ms in the lab table): no
+  peak 475 ms, no response 461 ms (step 30 ms; programmed intervals 460 / 490 ms).
   The three values do not depend on the contraction detection: an S2 response too small for the detection
   threshold (e.g. 9 % of S1 at 150 ms in a rat slice, threshold 30 % of the typical amplitude) still counts as a
   separate peak, and a response without a peak of its own (a broadened relaxation) still counts as a response.
@@ -925,12 +934,14 @@ P = mda_protocols(file)                                              % protocols
   rocker at rest are included unless `'rocker'` / `'beats'` is given (grouping by rocker speed: all). Sharp-electrode recordings (no rocker) and protocols without rocker stops need
   `'rocker','any'` (GUI: "all contractions"). FFR protocols (2026-10-10, option `ffrRockerFallback`, default on): a
   frequency without contractions with the rocker at rest is summarized from its contractions with the rocker moving
-  (note). A contraction counts as "rocker moving" if the rocker moved anywhere
+  (note); PRP and ST protocols (2026-10-23, same option): a protocol range without any contraction with the rocker at
+  rest (schedules that keep the rocker running during these steps, e.g. the human standard schedule) is summarized
+  from the contractions with the rocker moving (note *no contraction with the rocker at rest in the range: …*). A contraction counts as "rocker moving" if the rocker moved anywhere
   between its diastolic minimum and 90 % relaxation. After a stimulation pause the diastolic minimum is searched only
   in the last 0.5 s before the stimulus (option `pauseDiastoleWindow`), so that rocker movement or drift during the
   rest does not count (PRP: the rocker typically stops ~1.2 s before the post-rest stimulus).
-* Examples: `examples/example3_humanVentricle` (FFR), `example8_rabbitVentricle_EP` (RP: no response ≤ 463 ms,
-  response at 492 ms), `example2_rabbitVentricle` (PD, ST), `example7_pigVentricle` (PRP), `example1_rabbitVentricle`
+* Examples: `examples/example3_humanVentricle` (FFR), `example8_rabbitVentricle_EP` (RP: no response ≤ 460 ms,
+  response at 490 ms), `example2_rabbitVentricle` (PD, ST), `example7_pigVentricle` (PRP), `example1_rabbitVentricle`
   (rocker speed).
 
 ## Parameters (per contraction)

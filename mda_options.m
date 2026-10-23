@@ -140,7 +140,10 @@ function opts = mda_options(varargin)
 %
 % PROTOCOLS (see MyoDishAnalysis 'protocol' and mda_groupBeats)
 %   'ffrRockerFallback' true (default) | false: FFR protocols with rocker 'stopped': a pacing frequency (step) without
-%                      contractions with the rocker at rest is summarized from its contractions with the rocker moving
+%                      contractions with the rocker at rest is summarized from its contractions with the rocker moving;
+%                      PRP and ST protocols (2026-10-23): a protocol range without any contraction with the rocker at
+%                      rest (schedules that keep the rocker running during these steps) is summarized from the
+%                      contractions with the rocker moving (note)
 %   'prpReference'     post-rest potentiation, reference amplitude of each post-rest contraction: 'preceding'
 %                      (default): median of the last prpReferenceBeats (6) contractions of the pacing before the pause;
 %                      'firstTrain': mean of the contractions of the pacing before the first pause of the protocol;
