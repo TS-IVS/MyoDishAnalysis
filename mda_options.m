@@ -139,11 +139,12 @@ function opts = mda_options(varargin)
 %                      The minimum and the rocker state then do not depend on drift or rocker movement during the pause
 %
 % PROTOCOLS (see MyoDishAnalysis 'protocol' and mda_groupBeats)
-%   'rockerFallback'   true (default) | false: protocols with rocker 'stopped': a group (FFR frequency, current
-%                      step, pause, S2 interval ...) without contractions with the rocker at rest is summarized from
-%                      its contractions with the rocker moving, and the S2 response of RP protocols without S1-S2
-%                      pairs at rest uses all pairs (note). Schedules do not always stop the rocker. Older name
-%                      'ffrRockerFallback' (FFR only, versions <= 1.0.0-beta.5) is accepted; 2026-10-23
+%   'rockerFallback'   true (default) | false: protocols with rocker 'stopped': an FFR frequency without contractions
+%                      with the rocker at rest, or a PRP / ST / RP range without any such contraction in its protocol
+%                      groups, is summarized from the contractions with the rocker moving, and the S2 response of RP
+%                      protocols without S1-S2 pairs at rest uses all pairs (note). Schedules do not always stop the
+%                      rocker. Older name 'ffrRockerFallback' (FFR only, versions <= 1.0.0-beta.5) is accepted;
+%                      2026-10-23
 %   'prpReference'     post-rest potentiation, reference amplitude of each post-rest contraction: 'preceding'
 %                      (default): median of the last prpReferenceBeats (6) contractions of the pacing before the pause;
 %                      'firstTrain': mean of the contractions of the pacing before the first pause of the protocol;

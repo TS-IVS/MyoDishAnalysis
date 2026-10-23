@@ -680,30 +680,25 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
     B["groupRole"] = list(bRole)
     B["groupStep"] = bStep
 
-    # groups without rocker stop (2026-10-23): rocker 'stopped' and a group without any contraction with the rocker at
-    # rest (schedules do not always stop the rocker, e.g. during the post-rest potentiation and stimulation threshold
-    # steps of the human standard schedule): with rockerFallback the contractions of the group with the rocker moving
-    # are included (note). FFR frequencies: the steady-state selection below
+    # protocols without rocker stops (2026-10-23): rocker 'stopped' and no contraction of the protocol's groups with the
+    # rocker at rest (schedules do not always stop the rocker, e.g. during the post-rest potentiation and stimulation
+    # threshold steps of the human standard schedule): with rockerFallback the contractions with the rocker moving are
+    # included (note). Only the whole range, so that a protocol with rocker stops keeps its at-rest contractions as the
+    # only ones (a single step without a stop is not filled with rocker-moving beats). FFR frequencies: per frequency,
+    # the steady-state selection below (2026-10-10)
     if byl != "pacingfrequency" and rockerSel == "stopped" and ffrFallback and nB > 0:
         inB = (tPeak >= r0) & (tPeak <= r1)
         elig = inB & ~np.isnan(B["amplitude"].to_numpy(float))
         if beatsSel == "stimulated":
             elig &= B["beatType"].to_numpy() == "stimulated"
         grp = B["group"].to_numpy()
+        elig &= (B["groupRole"].to_numpy() != "other") & (grp != "unknown")  # protocol groups only
         moving = B["rockerMoving"].to_numpy(bool)
-        inc = B["included"].to_numpy(bool).copy()
-        keysB = list(dict.fromkeys(grp[elig].tolist()))
-        fb = []
-        for key in keysB:
-            g = elig & (grp == key)
-            if not (g & ~moving).any():
-                inc[g] = True
-                fb.append(key)
-        B["included"] = inc
-        if fb and len(fb) == len(keysB):
+        if elig.any() and not (elig & ~moving).any():
+            inc = B["included"].to_numpy(bool).copy()
+            inc[elig] = True
+            B["included"] = inc
             notes.append("no contraction with the rocker at rest in the range: contractions with the rocker moving used")
-        elif fb:
-            notes.append("no contraction with the rocker at rest at %s: contractions with the rocker moving used" % ", ".join(fb))
 
     # FFR: steady state per frequency (2026-10-10)
     selStep = {}

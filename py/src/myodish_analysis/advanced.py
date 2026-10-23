@@ -418,9 +418,9 @@ ROWS = (
      "whose previous and next stimuli are captured, too (partial capture, e.g. 2:1, gives no steady "
      "state). 0 = all contractions of the frequency (versions <= 1.0.0-beta.3)",
      1, "contractions", "Protocols", False),
-    ("rockerFallback", "protocols: groups without rocker stop", "check", None,
+    ("rockerFallback", "protocols without rocker stops", "check", None,
      "protocols with rocker 'stopped' (default of protocols): contractions with the rocker at rest are used "
-     "(more accurate); a group (frequency, current, pause, S2 interval) without such contractions is summarized "
+     "(more accurate); an FFR frequency, or a PRP / ST / RP range, without such contractions is summarized "
      "from the contractions with the rocker moving, and the S2 response of RP protocols without S1-S2 pairs at "
      "rest uses all pairs (note). Schedules do not always stop the rocker",
      1, "", "Protocols", False),

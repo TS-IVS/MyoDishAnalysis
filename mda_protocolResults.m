@@ -122,10 +122,10 @@ switch lower(char(by))
         pr = find(strcmp(role, 'postRest') & ~isnan(val));
         pause = val(pr) - cl;
         pct = G.amplitude_pctOfRef(pr);
-        % pauses of the protocol in ascending order (2026-10-23): PRP1 ... PRP6 (pauses within pauseTolerance have one
+        % pauses of the protocol in ascending order (2026-10-23): PRP1 ... PRP8 (pauses within pauseTolerance have one
         % group value, mda_groupBeats; several pauses of one length: their mean); variant = the list of pauses
         pv = unique(val(pr));
-        for q = 1:min(6, numel(pv))
+        for q = 1:min(8, numel(pv))
             k = find(val(pr) == pv(q));
             R.(sprintf('PRP%d_pct', q)) = mean(pct(k), 'omitnan');
             R.(sprintf('PRP%d_pause_s', q)) = mean(pause(k));
@@ -167,6 +167,7 @@ c = {'maxCapturedFrequency_Hz', 'amplitude_0p5Hz_uN', 'FFR_1Hz_pct', 'FFR_2Hz_pc
     'PRP15_pct', 'PRP15_pause_s', 'PRP30_pct', 'PRP30_pause_s', 'PRP60_pct', 'PRP60_pause_s', ...
     'PRP1_pct', 'PRP1_pause_s', 'PRP2_pct', 'PRP2_pause_s', 'PRP3_pct', 'PRP3_pause_s', ...
     'PRP4_pct', 'PRP4_pause_s', 'PRP5_pct', 'PRP5_pause_s', 'PRP6_pct', 'PRP6_pause_s', ...
+    'PRP7_pct', 'PRP7_pause_s', 'PRP8_pct', 'PRP8_pause_s', ...
     'variant', 'resultNote'};
 end
 
@@ -263,9 +264,9 @@ R.nS2 = numel(jS2);
 if isempty(jS2), notes = {'no S2 stimuli'}; return; end
 isSS = strcmp(role, 'S1') & inR & abs(prevI - S1) < tol & abs(ni - S1) < tol;
 vS2 = val(jS2);
-% protocol variant (2026-10-23): S1 train + S2 pairs (steady-state S1 stimuli: S1 interval before and after) or
-% S1-S2 pairs in every period
-if nnz(isSS) >= 3, R.variant = {'S1 train + S2 pairs'}; else, R.variant = {'S1-S2 pairs in every period'}; end
+% protocol variant (2026-10-23): S1 train + S2 pairs (steady-state S1 stimuli with the S1 interval before and after:
+% the template of the S2 response) or S1-S2 pairs without such a train (e.g. a pair in every period)
+if nnz(isSS) >= 3, R.variant = {'S1 train + S2 pairs'}; else, R.variant = {'S1-S2 pairs without S1 train'}; end
 if ~isempty(vS2) && any(~isnan(vS2))
     R.variant = {sprintf('%s, S2 %g-%g ms (%d steps)', R.variant{1}, round(2000 * max(vS2)) / 2, ...
         round(2000 * min(vS2)) / 2, numel(unique(vS2(~isnan(vS2)))))};

@@ -37,6 +37,7 @@ RESULT_COLUMNS = [
     "PRP15_pct", "PRP15_pause_s", "PRP30_pct", "PRP30_pause_s", "PRP60_pct", "PRP60_pause_s",
     "PRP1_pct", "PRP1_pause_s", "PRP2_pct", "PRP2_pause_s", "PRP3_pct", "PRP3_pause_s",
     "PRP4_pct", "PRP4_pause_s", "PRP5_pct", "PRP5_pause_s", "PRP6_pct", "PRP6_pause_s",
+    "PRP7_pct", "PRP7_pause_s", "PRP8_pct", "PRP8_pause_s",
     "variant", "resultNote"]
 
 
@@ -107,10 +108,10 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
         pr = np.flatnonzero((role == "postRest") & ~np.isnan(val))
         pause = val[pr] - cl
         pct = G["amplitude_pctOfRef"].to_numpy(float)[pr]
-        # pauses of the protocol in ascending order (2026-10-23): PRP1 ... PRP6 (pauses within pauseTolerance have one
+        # pauses of the protocol in ascending order (2026-10-23): PRP1 ... PRP8 (pauses within pauseTolerance have one
         # group value, group_beats; several pauses of one length: their mean); variant = the list of pauses
         pv = np.unique(val[pr])
-        for q in range(min(6, pv.size)):
+        for q in range(min(8, pv.size)):
             k = np.flatnonzero(val[pr] == pv[q])
             p_ = pct[k]
             R[f"PRP{q + 1}_pct"] = float(np.mean(p_[~np.isnan(p_)])) if np.any(~np.isnan(p_)) else math.nan
@@ -246,9 +247,9 @@ def _s2_results(R, Z, trace, opts):
     with np.errstate(invalid="ignore"):
         isSS = (role == "S1") & inR & (np.abs(pi - S1) < tol) & (np.abs(ni - S1) < tol)
     vS2 = val[jS2]
-    # protocol variant (2026-10-23): S1 train + S2 pairs (steady-state S1 stimuli: S1 interval before and after) or
-    # S1-S2 pairs in every period
-    R["variant"] = "S1 train + S2 pairs" if int(isSS.sum()) >= 3 else "S1-S2 pairs in every period"
+    # protocol variant (2026-10-23): S1 train + S2 pairs (steady-state S1 stimuli with the S1 interval before and
+    # after: the template of the S2 response) or S1-S2 pairs without such a train (e.g. a pair in every period)
+    R["variant"] = "S1 train + S2 pairs" if int(isSS.sum()) >= 3 else "S1-S2 pairs without S1 train"
     if vS2.size and np.any(~np.isnan(vS2)):
         R["variant"] += ", S2 %g-%g ms (%d steps)" % (mround(2000 * np.nanmax(vS2)) / 2, mround(2000 * np.nanmin(vS2)) / 2,
                                                      np.unique(vS2[~np.isnan(vS2)]).size)

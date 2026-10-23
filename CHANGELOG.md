@@ -71,7 +71,7 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
-- **Refractory-period protocols with S1-S2 pairs in every period** (the lab's human standard schedule of 2022: S1 at
+- **Refractory-period protocols with an S1-S2 pair in every period** (the lab's human standard schedule of 2022: S1 at
   0 and S2 at 960 → 80 ms in every period of 2 s, 15 pairs per step; the stem-cell schedule: period 1.2 s, S2 640 →
   80 ms; checked on two recordings of 2023, 8 channels each):
   1. **S1 and S2 from the programmed sequences of the log file** (`Sequence` entries: `StimPeriod` / `StimTimes` of
@@ -102,15 +102,19 @@ MATLAB and Python versions have the same version number and give the same result
 - **Protocols without rocker stops: option `rockerFallback`** (default on; replaces `ffrRockerFallback`, which is
   still accepted in options, settings files and the GUI). Schedules do not always stop the rocker (the human standard
   schedule keeps it running during the post-rest potentiation and stimulation threshold steps): with rocker
-  `'stopped'` a group (FFR frequency as before, now also current step, pause, S2 interval …) without any contraction
-  with the rocker at rest is summarized from its contractions with the rocker moving (note), and the S2 response of
-  an RP protocol without S1-S2 pairs at rest uses all pairs (note *no S1-S2 pairs with the rocker at rest: all pairs
-  used*). Before, such groups had no included contraction and no PRP / amplitude-threshold / RP results.
+  `'stopped'` a PRP, ST or RP range without any contraction with the rocker at rest (in its protocol groups; `other`
+  stimuli do not count) is summarized from its contractions with the rocker moving (note *no contraction with the
+  rocker at rest in the range: …*), and the S2 response of an RP protocol without S1-S2 pairs at rest uses all pairs
+  (note *no S1-S2 pairs with the rocker at rest: all pairs used*). Only the whole range: a protocol with rocker stops
+  keeps its at-rest contractions as the only ones (a single step without a stop is not filled with rocker-moving
+  beats, which would shift e.g. the maximum amplitude of a threshold protocol). FFR frequencies as before (per
+  frequency, 2026-10-10). Before, such ranges had no included contraction and no PRP / amplitude-threshold / RP
+  results.
 - **Protocol results: column `variant`** — the protocol as recorded, from the pulse pattern: FFR `0.2-4 Hz (12
   steps)`, ST `8-95 mA (30 steps)`, PRP `pauses 3/12/50/120 s`, RP `S1 train + S2 pairs, S2 800-320 ms (16 steps)` or
-  `S1-S2 pairs in every period, S2 960-80 ms (34 steps)`. It tells schedules with other pauses, steps or structure
+  `S1-S2 pairs without S1 train, S2 960-80 ms (34 steps)`. It tells schedules with other pauses, steps or structure
   apart (e.g. when pooling), without further rules in the analysis.
-- **PRP results by rank: `PRP1_pct` … `PRP6_pct` (+ `_pause_s`)** for the pauses of the protocol in ascending order
+- **PRP results by rank: `PRP1_pct` … `PRP8_pct` (+ `_pause_s`)** for the pauses of the protocol in ascending order
   (pauses within `pauseTolerance` are one length, several pauses of one length: their mean), so that schedules with
   other pauses get results (the human standard schedule: 3, 12, 50 and 120 s, not within ±10 % of 15 / 30 / 60 s);
   `PRP15/30/60_pct` stay as the lab's standard columns. The `_pause_s` column shows the pause, so that recordings

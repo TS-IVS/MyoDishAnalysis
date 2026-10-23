@@ -908,8 +908,8 @@ P = mda_protocols(file)                                              % protocols
   | | `refPeriodAllCaptured_ms` | shortest S2 interval above which every S2 interval gives a separate contraction peak at every S2 (from long to short: the S2 interval before the first one with a missing peak; all with a peak: the shortest analysed interval, note; 2026-10-10). Definition as the refractory period of the MyoDish export, but more sensitive to a single S2 without a separate peak: in 323 recordings of human slices `refPeriodNoPeak_ms` agreed better with the export (within 10 %: 95 vs 85 %, bias −1 vs +13 ms) |
   | | `…Step_ms`, `S2noiseLevel_pct`, `amplitudeS1_uN`, `nS2`, `nTemplateBeats` | distance of the two S2 intervals around the transition (uncertainty ≈ ± step/2), noise level, ... |
   | | `S2shortest_ms`, `S2longest_ms` | shortest / longest analysed S2 interval: a transition that is *not reached* (NaN, note) lies below `S2shortest_ms` (e.g. a slice that still gives a separate S2 contraction at the shortest S2 interval of the protocol), one *already at the longest interval* above `S2longest_ms` |
-  | all | `variant` | the protocol as recorded, from the pulse pattern (2026-10-23): FFR `0.2-4 Hz (12 steps)`, ST `8-95 mA (30 steps)`, PRP `pauses 3/12/50/120 s`, RP `S1 train + S2 pairs, S2 800-320 ms (16 steps)` or `S1-S2 pairs in every period, …` (fewer than 3 S1 stimuli with the S1 interval before and after). Tells apart schedules with other pauses, steps or structure, e.g. when pooling |
-  | PRP | `PRP1_pct` … `PRP6_pct` (+ `_pause_s`) | amplitude in % of the reference after the pauses of the protocol in ascending order (2026-10-23; pauses within `pauseTolerance` are one length, several pauses of one length: their mean); the `_pause_s` column shows the pause, so that recordings with different schedules are not pooled unnoticed |
+  | all | `variant` | the protocol as recorded, from the pulse pattern (2026-10-23): FFR `0.2-4 Hz (12 steps)`, ST `8-95 mA (30 steps)`, PRP `pauses 3/12/50/120 s`, RP `S1 train + S2 pairs, S2 800-320 ms (16 steps)` or `S1-S2 pairs without S1 train, …` (fewer than 3 steady-state S1 stimuli with the S1 interval before and after: the template comes from the pairs). Tells apart schedules with other pauses, steps or structure, e.g. when pooling |
+  | PRP | `PRP1_pct` … `PRP8_pct` (+ `_pause_s`) | amplitude in % of the reference after the pauses of the protocol in ascending order (2026-10-23; pauses within `pauseTolerance` are one length, several pauses of one length: their mean); the `_pause_s` column shows the pause, so that recordings with different schedules are not pooled unnoticed |
   | PRP | `PRP15_pct`, `PRP30_pct`, `PRP60_pct` (+ `_pause_s`) | the lab's standard pauses: amplitude in % of the reference after a pause of 15 / 30 / 60 s ± `pauseTolerance` (10 %; several pauses: their mean, note; before 2026-10-10 the nearest pause within ± 50 %) (pause = stimulus interval − steady interval). Reference (option `prpReference`, 2026-10-10): `'preceding'` (default) = median of the last `prpReferenceBeats` (6) contractions of the pacing before each pause (this pacing loads the SR; slow changes of the amplitude during the protocol do not enter the ratio), `'firstTrain'` = mean of the contractions of the pacing before the first pause, `'steady'` = mean of the group `steady` (versions ≤ 1.0.0-beta.3) |
 
   S2 response (as in GetRefractoryPeriod): the mean S1 contraction (S1 interval before and after, rocker at rest) is
@@ -935,11 +935,13 @@ P = mda_protocols(file)                                              % protocols
 * **Rocker, stimulated beats**: with `'protocol'` only stimulated contractions (`'beats','stimulated'`) with the
   rocker at rest are included unless `'rocker'` / `'beats'` is given (grouping by rocker speed: all). Sharp-electrode recordings (no rocker) and protocols without rocker stops need
   `'rocker','any'` (GUI: "all contractions"). Schedules do not always stop the rocker: with option `rockerFallback`
-  (default on; 2026-10-23, before `ffrRockerFallback` for FFR only, still accepted) a group (FFR frequency, current
-  step, pause, S2 interval …) without contractions with the rocker at rest is summarized from its contractions with
-  the rocker moving (note *no contraction with the rocker at rest at …: contractions with the rocker moving used*;
-  the human standard schedule keeps the rocker running during PRP and ST), and the S2 response of an RP protocol
-  without S1-S2 pairs at rest uses all pairs (note). A contraction counts as "rocker moving" if the rocker moved anywhere
+  (default on; 2026-10-23, before `ffrRockerFallback` for FFR only, still accepted) an FFR frequency without
+  contractions with the rocker at rest, or a PRP, ST or RP range without any such contraction in its protocol groups
+  (`other` stimuli do not count), is summarized from the contractions with the rocker moving (note *no contraction
+  with the rocker at rest …: contractions with the rocker moving used*; the human standard schedule keeps the rocker
+  running during PRP and ST). Only the whole range for PRP, ST and RP: a protocol with rocker stops keeps its at-rest
+  contractions as the only ones. The S2 response of an RP protocol without S1-S2 pairs at rest uses all pairs
+  (note). A contraction counts as "rocker moving" if the rocker moved anywhere
   between its diastolic minimum and 90 % relaxation. After a stimulation pause the diastolic minimum is searched only
   in the last 0.5 s before the stimulus (option `pauseDiastoleWindow`), so that rocker movement or drift during the
   rest does not count (PRP: the rocker typically stops ~1.2 s before the post-rest stimulus).

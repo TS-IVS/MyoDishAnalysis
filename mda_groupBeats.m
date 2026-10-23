@@ -275,28 +275,20 @@ B.groupValue = bVal;
 B.groupRole = bRole;
 B.groupStep = bStep;
 
-% ------------------------------------------------------------------ groups without rocker stop (2026-10-23)
-% rocker 'stopped' and a group without any contraction with the rocker at rest (schedules do not always stop the
-% rocker, e.g. during the post-rest potentiation and stimulation threshold steps of the human standard schedule):
-% with opts.rockerFallback the contractions of the group with the rocker moving are included (note). FFR
-% frequencies: the steady-state selection below
+% ------------------------------------------------------------------ protocols without rocker stops (2026-10-23)
+% rocker 'stopped' and no contraction of the protocol's groups with the rocker at rest (schedules do not always stop
+% the rocker, e.g. during the post-rest potentiation and stimulation threshold steps of the human standard schedule):
+% with opts.rockerFallback the contractions with the rocker moving are included (note). Only the whole range, so that
+% a protocol with rocker stops keeps its at-rest contractions as the only ones (a single step without a stop is not
+% filled with rocker-moving beats). FFR frequencies: per frequency, the steady-state selection below (2026-10-10)
 if ~strcmpi(by, 'pacingFrequency') && strcmp(opts.rocker, 'stopped') && opts.rockerFallback && height(B) > 0
     inB = B.t_peak >= range(1) & B.t_peak <= range(2);
     elig = inB & ~isnan(B.amplitude);
     if strcmp(opts.beats, 'stimulated'), elig = elig & strcmp(B.beatType, 'stimulated'); end
-    keysB = unique(B.group(elig), 'stable');
-    fb = {};
-    for key = keysB'
-        g = elig & strcmp(B.group, key{1});
-        if ~any(g & ~B.rockerMoving)
-            B.included(g) = true;
-            fb{end+1} = key{1}; %#ok<AGROW>
-        end
-    end
-    if ~isempty(fb) && numel(fb) == numel(keysB)
+    elig = elig & ~strcmp(B.groupRole, 'other') & ~strcmp(B.group, 'unknown');   %protocol groups only
+    if any(elig) && ~any(elig & ~B.rockerMoving)
+        B.included(elig) = true;
         notes{end+1} = 'no contraction with the rocker at rest in the range: contractions with the rocker moving used';
-    elseif ~isempty(fb)
-        notes{end+1} = sprintf('no contraction with the rocker at rest at %s: contractions with the rocker moving used', strjoin(fb, ', '));
     end
 end
 

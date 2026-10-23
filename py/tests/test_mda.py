@@ -380,7 +380,7 @@ def test_protocol_results_examples():
         <= r["stimThreshold99_mA"]
     r = res("example7_pigVentricle.mdd", 1, protocol="PRP")
     assert (r["PRP15_pause_s"], r["PRP30_pause_s"], r["PRP60_pause_s"]) == (15, 30, 60)
-    assert (r["PRP1_pause_s"], r["PRP6_pause_s"]) == (1, 30) and r["variant"] == "pauses 1/2/4/8/15/30/60 s"  # 7 pauses, 6 columns
+    assert (r["PRP1_pause_s"], r["PRP7_pause_s"]) == (1, 60) and np.isnan(r["PRP8_pct"]) and r["variant"] == "pauses 1/2/4/8/15/30/60 s"
     assert 120 < r["PRP15_pct"] < 130 and np.isnan(r["FFR_1Hz_pct"])  # reference 'steady' (<= 1.0.0-beta.3): 115-125
     r = res("example8_rabbitVentricle_EP.mdd", 1, protocol="RP", rocker="any")
     assert r["S2shortest_ms"] < r["refPeriodNoPeak_ms"] < r["S2longest_ms"]
@@ -524,7 +524,7 @@ def test_s2_pairs_in_every_period_sequences_and_template(tmp_path):
     _, S2, _ = mda.myodish_analysis(mdd2, 1, t02, T2, groupBy="S2interval", quiet=True, noFiltering=True, spikeRemoval=False)
     assert "S2 640 ms" not in S2["group"].tolist() and "other" in S2["group"].tolist()
     assert int(S2.loc[S2["group"] == "S2 560 ms", "nStimuli"].iloc[0]) == 16
-    assert r["variant"] == "S1-S2 pairs in every period, S2 640-400 ms (4 steps)"
+    assert r["variant"] == "S1-S2 pairs without S1 train, S2 640-400 ms (4 steps)"
     # rocker moving throughout (no pair at rest): option rockerFallback (default) uses all pairs (note); off: NaN
     mdd3, T3, t03 = _paired_recording(tmp_path, "pairs3", steps, [800, 800, 800, 0], rocker=True)
     kw3 = dict(groupBy="S2interval", quiet=True, noFiltering=True, spikeRemoval=False, rocker="stopped")
