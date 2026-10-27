@@ -57,6 +57,9 @@ function [B, C] = mda_analyzeChannel(S, channel, range, opts)
 %      median rise before the stimuli (C.noiseMedian), or large (>= 0.7 x typical and >= 3 x that median);
 %      unpaced: >= 0.5 x typical. Otherwise column uncertain = true ('sensitive', default) or the contraction is
 %      not counted ('specific'). C.stimCapturedCertain: stimulus followed by a certain contraction.
+%   2c. electrode tests of the control software (2026-10-27, mda_readMdd: S.electrodeTestWindows): a contraction whose
+%      peak lies in a test window of the stimulated channel was paced by the test's own pulses, if at all: column
+%      electrodeTest = true, not included (the test pulses themselves are not in S.stim).
 %   3. stimulus assignment (option stimAssignment, default 'onset', 2026-10-10): every pulse of the channel, regular
 %      or extra pulse (status channel bit 16: pre-pulses, CCM pulses, ...), is a candidate. Contraction onset =
 %      the tangent at the maximum dF/dt between the diastolic minimum and the peak, crossing the diastolic level.
@@ -474,10 +477,21 @@ included = ~isnan(V(:,1));
 if strcmp(opts.beats, 'stimulated'), included = included & strcmp(beatType, 'stimulated'); end
 if strcmp(opts.rocker, 'stopped'),   included = included & ~rockerMoving; end
 if strcmp(opts.rocker, 'moving'),    included = included & rockerMoving; end
+% electrode test of the control software on this channel (2026-10-27, see mda_readMdd): the contractions in its
+% window were paced by the test's own pulses (if at all): column electrodeTest, not included
+electrodeTest = false(n, 1);
+if isfield(S, 'electrodeTestWindows') && ~isempty(S.electrodeTestWindows)
+    wc = stimCh; if wc == 0, wc = channel; end
+    W = S.electrodeTestWindows(S.electrodeTestWindows(:, 3) == wc, :);
+    for w = 1:size(W, 1)
+        electrodeTest = electrodeTest | (tPeakSel >= W(w, 1) & tPeakSel <= W(w, 2));
+    end
+    included = included & ~electrodeTest;
+end
 
 B = table(repmat(channel, n, 1), (1:n)', tPeakSel, beatType, tStim, tPeakSel - tStim, rockerMoving, included, ...
-    uncertain, 'VariableNames', {'channel','contraction','t_peak','beatType','t_stim','stimToPeak','rockerMoving', ...
-    'included','uncertain'});
+    uncertain, electrodeTest, 'VariableNames', {'channel','contraction','t_peak','beatType','t_stim','stimToPeak', ...
+    'rockerMoving','included','uncertain','electrodeTest'});
 % eliciting pulse and the pulses that did not elicit a contraction (2026-10-10, see pulseProperties / pulseText)
 if isfield(S, 'samplingRate'), fs = S.samplingRate; else, fs = 2 / dt; end   %pulse ID = raw sample number
 snapMs = opts.offsetSnap * 1000;                    %programmed offsets (log file) used within this time (ms)
@@ -492,7 +506,7 @@ B = [B, table(col(tOn(sel)), col(tOn(sel)) - tStim, rise50, rise50 - tStim, sv(:
     't_rise50', 'stimToRise50', 'stimPulse', 'stimCurrent', 'stimChargeDuration', 'stimPauseDuration', ...
     'stimDechargeDuration', 'elicitedByExtraPulse', 'stimAmbiguous', 'prePulses', 'postPulses'})];
 B = [B, array2table(V, 'VariableNames', names), table(promSel, 'VariableNames', {'prominence'})];
-B.Properties.VariableUnits = [{'','','s','','s','s','','',''}, {'s','s','s','s','','mA','us','us','us','','','',''}, ...
+B.Properties.VariableUnits = [{'','','s','','s','s','','','',''}, {'s','s','s','s','','mA','us','us','us','','','',''}, ...
     PI(:,2)', {'uN'}];
 B.invertedSignal = repmat(sgn < 0, n, 1);
 if sgn < 0                  %inverted signal: only rate, capture and stimulus timing (2026-10-11)

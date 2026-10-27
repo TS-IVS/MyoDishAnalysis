@@ -283,7 +283,103 @@ ok = ok && okP;
 % not fit the file size: recognized by nChannels 8 / 500 Hz in the log file; contractions only (unpaced)
 ok8 = old8ChannelTest();
 ok = ok && ok8;
+% electrode test of the control software inside a recording (2026-10-27): its pulses and contractions left out
+okE = electrodeTestTest();
+ok = ok && okE;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
+end
+
+
+function okE = electrodeTestTest()
+% as test_electrode_test_window in py/tests/test_mda.py: an electrode test of the control software (release 2.2.2)
+% on channel 1 from 40 to 80 s inside a recording paced at 1 Hz / 50 mA (contractions 1000 uN). The test's own pulses
+% (1 mA, 200, 100, 50, 25, ... with "not reached" above the limit) are read from the log (electrodeTestStart /
+% electrodeTestEnd, window + 1 s) and moved to S.stimElectrodeTest; the contractions in the window are flagged
+% (column electrodeTest) and not included. Channel 2 (no test) is unaffected.
+fs = 400; T = 120; n = T * fs; tt = (0:n-1) / fs;
+ts = 1 + (0:T-3);                                    %1 Hz
+testCur = [1 1 1 200 200 200 100 100 100 50 50 50 25 25 25 37 37 37 43 43 43 46 46 46 48 48 48 49 49 49 50 50 50];
+inWin = ts >= 40 & ts < 40 + numel(testCur);
+cur1 = 50 * ones(size(ts)); cur1(inWin) = testCur;
+reached = true(size(ts)); reached(inWin) = testCur <= 50;
+F1 = 2000 * ones(1, n); F2 = F1;
+for k = 1:numel(ts)
+    a = 1000 * (cur1(k) >= 25); x = ts(k) + 0.03;    %captured from 25 mA
+    I = tt >= x & tt < x + 0.05; I2 = tt >= x + 0.05 & tt < x + 0.2;
+    F1(I) = F1(I) + a * (tt(I) - x) / 0.05;  F1(I2) = F1(I2) + a - a * (tt(I2) - x - 0.05) / 0.15;
+    F2(I) = F2(I) + 1000 * (tt(I) - x) / 0.05; F2(I2) = F2(I2) + 1000 - 1000 * (tt(I2) - x - 0.05) / 0.15;
+end
+X = zeros(9, n, 'int16');
+X(1,:) = int16(round(F1)); X(2,:) = int16(round(F2));
+code = zeros(1, n, 'uint16');
+k = round(ts * fs) + 1;
+notPrev = [false, ~reached(1:end-1)];                %bit 9 of a pulse = the result of the PREVIOUS base pulse
+code(k) = uint16(512 + cur1 + 256 * notPrev);        %channel 1
+code(k + 2) = uint16(1024 + 50);                     %channel 2, 5 ms later
+X(9,:) = typecast(code, 'int16');
+base = [tempname '_etest'];
+mdd = [base '.mdd']; lg = [base '_log.log'];
+fid = fopen(mdd, 'w'); fwrite(fid, X, 'int16'); fclose(fid);
+L = {'systemTime;dataLogTime;channel;code;value', '2026 01 01 06:00:00:000;0;0;nChannels;9', ...
+    '2026 01 01 06:00:00:000;0;0;Recording;started: et.mdd', '2026 01 01 06:00:00:000;0;0;samplingRate Recording;400'};
+for c = 1:8
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Calibration;1000', c); %#ok<AGROW>
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Offset;0', c); %#ok<AGROW>
+end
+L{end+1} = ['2026 01 01 06:00:40:000;40000;0;system;{"v":1,"event":"electrodeTestStart","actionId":"TEST000000-7","by":null,' ...
+    '"run":"TEST000000-7","time":"2026-01-01T06:00:40+01:00","trigger":"manual","mode":"routine","solution":null,' ...
+    '"channels":[1],"chargeTicks":3000,"pauseTicks":1000,"dechargeTicks":3000,"regulation":"off","ceilingMa":200,' ...
+    '"checkBelowMa":50,"noCurrentBelowMa":5,"periodMs":1000,"rockerRpm":60,"rockerStopped":false,"recording":true,' ...
+    '"controllerId":"SIMDEV01A","myoDishId":null}'];
+L{end+1} = '2026 01 01 06:01:19:900;79900;1;warning;Electrode test TEST000000-7: the next pulse of channel 1 may show "current not reached" - x';
+L{end+1} = ['2026 01 01 06:01:20:000;80000;1;system;{"v":1,"event":"electrodeTestChannel","actionId":"TEST000000-8","by":"auto",' ...
+    '"run":"TEST000000-7","status":"ok","iMaxMa":50,"firstNotReachedMa":51,"percentOfMedian":null,"flag":"check",' ...
+    '"ramp":"search","startMa":1,"ceilingMa":200,"pulses":33,"notReachedPulses":6,"unknownPulses":0,"sliceGroup":null,' ...
+    '"why":null,"settingsKnown":true}'];
+L{end+1} = ['2026 01 01 06:01:20:000;80000;0;system;{"v":1,"event":"electrodeTestEnd","actionId":"TEST000000-9","by":"auto",' ...
+    '"run":"TEST000000-7","outcome":"done","why":null,"seconds":40.0,"restored":true}'];
+L{end+1} = sprintf('2026 01 01 06:02:00:000;%d;0;Recording;stopped: et.mdd', T * 1000);
+fid = fopen(lg, 'w'); fprintf(fid, '%s\n', L{:}); fclose(fid);
+okE = false;
+try
+    H = mda_readMdd(mdd);
+    E = H.electrodeTests;
+    okH = numel(E) == 1 && strcmp(E.run, 'TEST000000-7') && isequal(E.channels, 1) && E.tStart == 40 && E.tEnd == 80 && ...
+        strcmp(E.endKind, 'end') && strcmp(E.results(1).status, 'ok') && E.results(1).iMaxMa == 50 && isequal(E.nextPulseWarning, 1) && ...
+        isequal(H.electrodeTestWindows, [40 81 1]) && any(contains(H.notes, 'Electrode test TEST000000-7 (manual, routine) 40 - 81 s on channel 1'));
+    S = mda_readMdd(mdd, 0, T);
+    st = S.stim; et = S.stimElectrodeTest;
+    okS = numel(et.time) == 42 && all(et.channel == 1) && any(et.current == 200) && ...   %40 ... 81 s
+        ~any(st.channel == 1 & st.time >= 40 & st.time <= 81) && nnz(st.channel == 1) == numel(ts) - 42 && ...
+        nnz(st.channel == 2) == numel(ts) && all(st.currentReached(find(st.channel == 1, nnz(st.channel == 1) - 1)) == 1) && ...
+        nnz(et.currentReached == 0) == 6;
+    o = {'groupBy', 'stimCurrent', 'quiet', true, 'noFiltering', 'spikeRemoval', false};
+    [B, S2, I] = MyoDishAnalysis(mdd, [1 2], 0.5, T, o{:});
+    b1 = B(B.channel == 1, :); b2 = B(B.channel == 2, :);
+    win = b1.t_peak >= 40 & b1.t_peak <= 81;
+    g1 = S2(S2.channel == 1, :);
+    okB = nnz(win) > 30 && all(b1.electrodeTest(win)) && ~any(b1.included(win)) && ~any(b1.electrodeTest(~win)) && ...
+        all(b1.included(~win)) && ~any(b2.electrodeTest) && all(b2.included) && height(g1) == 1 && ...
+        strcmp(g1.group{1}, '50 mA') && g1.currentReached_percent == 100 && g1.nContractions == nnz(b1.included) && ...
+        any(contains(I.notes, 'Electrode test TEST000000-7'));
+    % a recording started during a run while another recording's log was open has no start line: the window starts
+    % with the file, the channels are those of the channel lines (software dev, 2026-10-27)
+    fid = fopen(lg, 'w'); fprintf(fid, '%s\n', L{~contains(L, 'electrodeTestStart')}); fclose(fid);
+    H = mda_readMdd(mdd); E = H.electrodeTests;
+    S = mda_readMdd(mdd, 0, T);
+    okM = numel(E) == 1 && E.startMissing && isequal(E.channels, 1) && E.tStart == -inf && E.tEnd == 80 && ...
+        isequal(H.electrodeTestWindows, [-inf 81 1]) && ...
+        any(contains(H.notes, 'Electrode test TEST000000-7 (start in another log) start - 81 s on channel 1')) && ...
+        numel(S.stimElectrodeTest.time) == 42 + nnz(ts < 40) && (~any(S.stim.channel == 1) || min(S.stim.time(S.stim.channel == 1)) > 81);
+    okE = okH && okS && okB && okM;
+    fprintf(['electrode test: window %d, test stimuli %d (expected 42), stimuli of channel 1 left %d (expected %d), contractions in ' ...
+        'the window %d flagged %d / included %d, groups of channel 1 %d (expected 1, 50 mA), reached %g %%, no start line %d   %s\n'], ...
+        okH, numel(et.time), nnz(st.channel == 1), numel(ts) - 42, nnz(win), nnz(b1.electrodeTest(win)), nnz(b1.included(win)), ...
+        height(g1), g1.currentReached_percent, okM, passStr(okE));
+catch ME
+    fprintf('electrode test: %s   FAILED\n', ME.message);
+end
+delete(mdd); delete(lg);
 end
 
 

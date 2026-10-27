@@ -248,8 +248,9 @@ def _s2_results(R, Z, trace, opts):
         isSS = (role == "S1") & inR & (np.abs(pi - S1) < tol) & (np.abs(ni - S1) < tol)
     vS2 = val[jS2]
     # protocol variant (2026-10-23): S1 train + S2 pairs (steady-state S1 stimuli with the S1 interval before and
-    # after: the template of the S2 response) or S1-S2 pairs without such a train (e.g. a pair in every period)
-    R["variant"] = "S1 train + S2 pairs" if int(isSS.sum()) >= 3 else "S1-S2 pairs without S1 train"
+    # after, at least 3 and 10 % of the S2 count: the template of the S2 response) or S1-S2 pairs without such a
+    # train (a pair in every period, at most a few S1 before the first pair)
+    R["variant"] = "S1 train + S2 pairs" if int(isSS.sum()) >= max(3, 0.1 * jS2.size) else "S1-S2 pairs without S1 train"
     if vS2.size and np.any(~np.isnan(vS2)):
         R["variant"] += ", S2 %g-%g ms (%d steps)" % (mround(2000 * np.nanmax(vS2)) / 2, mround(2000 * np.nanmin(vS2)) / 2,
                                                      np.unique(vS2[~np.isnan(vS2)]).size)

@@ -71,6 +71,19 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
+- **Electrode test of the control software (2.2.2, Tools > Electrode Test) left out of the analysis** (2026-10-27).
+  The test sends pulses of 1–200 mA to the tested channels while the recording runs (no sequence or pulse lines in
+  the log, "current not reached" on purpose above the limit). `mda_readMdd` / `read_mdd` read its structured
+  `system` events (`electrodeTestStart` / `Channel` / `End` / `Setting` / `Reset` / `Skipped`) and warning lines:
+  `H.electrodeTests` (one entry per run: channels, times, outcome, results per channel, line), `H.electrodeTestWindows`
+  (`[from to channel]`: start event to end + 1 s; an interrupted run to its warning line; no end → end of file);
+  the stimulus pulses of the tested channels in a window are moved from `stim` to `stimElectrodeTest` (same fields),
+  so they are no stimuli of the protocols, pulse table or GUI. `mda_analyzeChannel` / `analyze_channel`: new column
+  `electrodeTest` of the contraction table (peak within a window of the stimulus channel); such contractions are not
+  `included`; a note per run (*Electrode test <run> (manual, full) 0:40 - 1:21 s on channel 1: its stimuli and the
+  contractions in that time are left out of the analysis.*). Recordings without electrode-test lines are unchanged.
+  Test recording of a controller (2.2.2, three runs on channels 1, 2, 6 and 8): 456 of 2,262 pulses left out. New tests
+  `electrodeTestTest` (`mda_test`) and `test_electrode_test_window` (Python). README: *Electrode test*.
 - **Refractory-period protocols with an S1-S2 pair in every period** (the lab's human standard schedule of 2022: S1 at
   0 and S2 at 960 → 80 ms in every period of 2 s, 15 pairs per step; the stem-cell schedule: period 1.2 s, S2 640 →
   80 ms; checked on two recordings of 2023, 8 channels each):

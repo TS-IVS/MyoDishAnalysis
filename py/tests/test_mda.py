@@ -1632,3 +1632,100 @@ def test_anonymize_cli(an_rec, tmp_path, capsys):
     assert "dates shifted by -399 days" in capsys.readouterr().out
     assert an.main([mdd, "rec1", "--outdir", str(tmp_path / "y")]) == 1
     assert "original values are still in the output" in capsys.readouterr().err
+
+
+def test_electrode_test_window(tmp_path):
+    # 2026-10-27 (as electrodeTestTest of mda_test.m): an electrode test of the control software (release 2.2.2) on
+    # channel 1 from 40 to 80 s inside a recording paced at 1 Hz / 50 mA (contractions 1000 uN). The test's own pulses
+    # (1 mA, 200, 100, 50, 25, ... with "not reached" above the limit) are read from the log (electrodeTestStart /
+    # electrodeTestEnd, window + 1 s) and moved to S.stimElectrodeTest; the contractions in the window are flagged
+    # (column electrodeTest) and not included. Channel 2 (no test) is unaffected.
+    fs = 400
+    T = 120
+    n = T * fs
+    tt = np.arange(n) / fs
+    ts = 1.0 + np.arange(T - 2)  # 1 Hz
+    testCur = [1] * 3 + [200] * 3 + [100] * 3 + [50] * 3 + [25] * 3 + [37] * 3 + [43] * 3 + [46] * 3 + [48] * 3 + [49] * 3 + [50] * 3
+    inWin = (ts >= 40) & (ts < 40 + len(testCur))
+    cur1 = np.full(ts.size, 50.0)
+    cur1[inWin] = testCur
+    reached = np.ones(ts.size, bool)
+    reached[inWin] = np.array(testCur) <= 50  # the test fails above the limit (56 mA would be I*; here 50 reached)
+    F1 = np.full(n, 2000.0)
+    F2 = np.full(n, 2000.0)
+    for t0, c in zip(ts, cur1):
+        a = 1000.0 if c >= 25 else 0.0  # captured from 25 mA
+        x = t0 + 0.03
+        m = (tt >= x) & (tt < x + 0.05)
+        F1[m] += a * (tt[m] - x) / 0.05
+        m2 = (tt >= x + 0.05) & (tt < x + 0.2)
+        F1[m2] += a - a * (tt[m2] - x - 0.05) / 0.15
+        F2[m] += 1000 * (tt[m] - x) / 0.05
+        F2[m2] += 1000 - 1000 * (tt[m2] - x - 0.05) / 0.15
+    X = np.zeros((9, n), np.int16)
+    X[0] = np.round(F1).astype(np.int16)
+    X[1] = np.round(F2).astype(np.int16)
+    code = np.zeros(n, np.uint16)
+    k = np.round(ts * fs).astype(int)
+    # bit 9 of a pulse = the result of the PREVIOUS base pulse of the channel (mda_readMdd, 2026-10-20)
+    notPrev = np.r_[False, ~reached[:-1]]
+    code[k] = 512 + cur1.astype(np.uint16) + 256 * notPrev.astype(np.uint16)  # channel 1: bits 10-13 = 1
+    code[k + 2] = 1024 + 50  # channel 2, 5 ms later
+    X[8] = code.view(np.int16)
+    mdd = str(tmp_path / "et.mdd")
+    X.T.astype("<i2").tofile(mdd)
+    L = ["systemTime;dataLogTime;channel;code;value", "2026 01 01 06:00:00:000;0;0;nChannels;9",
+         "2026 01 01 06:00:00:000;0;0;Recording;started: et.mdd", "2026 01 01 06:00:00:000;0;0;samplingRate Recording;400"]
+    for c in range(1, 9):
+        L += [f"2026 01 01 06:00:00:000;0;{c};Calibration;1000", f"2026 01 01 06:00:00:000;0;{c};Offset;0"]
+    L += ['2026 01 01 06:00:40:000;40000;0;system;{"v":1,"event":"electrodeTestStart","actionId":"TEST000000-7","by":null,'
+          '"run":"TEST000000-7","time":"2026-01-01T06:00:40+01:00","trigger":"manual","mode":"routine","solution":null,'
+          '"channels":[1],"chargeTicks":3000,"pauseTicks":1000,"dechargeTicks":3000,"regulation":"off","ceilingMa":200,'
+          '"checkBelowMa":50,"noCurrentBelowMa":5,"periodMs":1000,"rockerRpm":60,"rockerStopped":false,"recording":true,'
+          '"controllerId":"SIMDEV01A","myoDishId":null}',
+          '2026 01 01 06:01:19:900;79900;1;warning;Electrode test TEST000000-7: the next pulse of channel 1 may show "current not reached" - x',
+          '2026 01 01 06:01:20:000;80000;1;system;{"v":1,"event":"electrodeTestChannel","actionId":"TEST000000-8","by":"auto",'
+          '"run":"TEST000000-7","status":"ok","iMaxMa":50,"firstNotReachedMa":51,"percentOfMedian":null,"flag":"check",'
+          '"ramp":"search","startMa":1,"ceilingMa":200,"pulses":33,"notReachedPulses":6,"unknownPulses":0,"sliceGroup":null,'
+          '"why":null,"settingsKnown":true}',
+          '2026 01 01 06:01:20:000;80000;0;system;{"v":1,"event":"electrodeTestEnd","actionId":"TEST000000-9","by":"auto",'
+          '"run":"TEST000000-7","outcome":"done","why":null,"seconds":40.0,"restored":true}']
+    L.append(f"2026 01 01 06:02:00:000;{T * 1000};0;Recording;stopped: et.mdd")
+    (tmp_path / "et_log.log").write_text("\n".join(L) + "\n")
+    H = mda.read_mdd(mdd)
+    assert len(H.electrodeTests) == 1
+    E = H.electrodeTests[0]
+    assert E.run == "TEST000000-7" and E.channels == [1] and E.tStart == 40 and E.tEnd == 80 and E.endKind == "end"
+    assert E.results[0].status == "ok" and E.results[0].iMaxMa == 50 and E.nextPulseWarning == [1]
+    assert H.electrodeTestWindows.tolist() == [[40.0, 81.0, 1.0]]
+    assert any("Electrode test TEST000000-7 (manual, routine) 40 - 81 s on channel 1" in x for x in H.notes)
+    S = mda.read_mdd(mdd, 0, T)
+    st, et = S.stim, S.stimElectrodeTest
+    assert et.time.size == 42 and set(et.channel.tolist()) == {1} and 200 in et.current.tolist()  # 40 ... 81 s
+    assert not np.any((st.channel == 1) & (st.time >= 40) & (st.time <= 81))
+    assert np.count_nonzero(st.channel == 1) == ts.size - 42 and np.count_nonzero(st.channel == 2) == ts.size
+    assert np.all(st.currentReached[st.channel == 1][:-1] == 1)  # the "not reached" of the test pulses left with them
+    assert np.count_nonzero(et.currentReached == 0) == 6  # 200 and 100 mA
+    kw = dict(groupBy="stimCurrent", quiet=True, noFiltering=True, spikeRemoval=False)
+    B, S2, I = mda.myodish_analysis(mdd, [1, 2], 0.5, T, **kw)
+    b1 = B[B["channel"] == 1]
+    win = (b1["t_peak"] >= 40) & (b1["t_peak"] <= 81)
+    assert win.sum() > 30 and b1.loc[win, "electrodeTest"].all() and not b1.loc[win, "included"].any()
+    assert not b1.loc[~win, "electrodeTest"].any() and b1.loc[~win, "included"].all()
+    b2 = B[B["channel"] == 2]
+    assert not b2["electrodeTest"].any() and b2["included"].all()
+    g1 = S2[S2["channel"] == 1]
+    assert list(g1["group"]) == ["50 mA"] and g1["currentReached_percent"].iloc[0] == 100
+    assert g1["nContractions"].iloc[0] == b1["included"].sum()
+    assert any("Electrode test TEST000000-7" in str(x) for x in I["notes"])
+    # a recording started during a run while another recording's log was open has no start line: the window starts
+    # with the file, the channels are those of the channel lines (software dev, 2026-10-27)
+    (tmp_path / "et_log.log").write_text("\n".join(x for x in L if "electrodeTestStart" not in x) + "\n")
+    H = mda.read_mdd(mdd)
+    E = H.electrodeTests[0]
+    assert len(H.electrodeTests) == 1 and E.startMissing and E.channels == [1] and E.tStart == -np.inf and E.tEnd == 80
+    assert H.electrodeTestWindows.tolist() == [[-np.inf, 81.0, 1.0]]
+    assert any("Electrode test TEST000000-7 (start in another log) start - 81 s on channel 1" in x for x in H.notes)
+    S = mda.read_mdd(mdd, 0, T)
+    assert S.stimElectrodeTest.time.size == 42 + np.count_nonzero(ts < 40)
+    assert not np.any(S.stim.channel == 1) or S.stim.time[S.stim.channel == 1].min() > 81

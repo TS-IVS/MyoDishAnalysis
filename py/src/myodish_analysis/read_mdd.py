@@ -42,7 +42,13 @@ OUTPUT (S, a Struct with the field names of the MATLAB version)
               10k + c = extra pulse #k of channel c), extraPulseLog ([time channel k offset_ms line]: programmed time
               of the extra pulses relative to the regular pulse of the channel, see extra_pulse_offsets),
               stimSequenceLog ([time channel period_ms nTimes t1_ms t2_ms]: regular stimulus times of the
-              programmed sequences, see stim_sequences; 2026-10-23), calibrationApplied,
+              programmed sequences, see stim_sequences; 2026-10-23), electrodeTests (list of Structs, one per
+              electrode test of the control software (Tools > Electrode Test, release 2.2.2): run, tStart, tEnd,
+              channels, trigger, mode, outcome, results per channel (status, iMaxMa, ...); see electrode_tests,
+              2026-10-27) and electrodeTestWindows ([from to channel], s in the file: start to end + 1 s; no end in
+              the log: to the end of the file; the test's own pulses of the listed channels are no stimuli of the
+              experiment: moved to stimElectrodeTest, the contractions in the windows not included, see
+              analyze_channel, column electrodeTest), calibrationApplied,
               extendedSensorFactor, rockerSource ('status channel' or 'log'), rockerLogIntervals ([from to] in s
               with rocker speed > 0 according to the log file)
   data:       t (s; centre of the averaged raw samples, first raw sample = 0 s), dt, force (nData x n, uN),
@@ -57,7 +63,8 @@ OUTPUT (S, a Struct with the field names of the MATLAB version)
               measurement times; option halfRateInterpolation, default True; 2026-10-21), so that the timing does not
               depend on the phase of the pairs (before: up to 2.5 ms).
               rockerOn (bool, n), stim (Struct of arrays: time, channel, current, currentReached, external,
-              isExtraPulse, rockerOn; one entry per stimulus pulse of any channel)
+              isExtraPulse, rockerOn; one entry per stimulus pulse of any channel; without the pulses of the
+              electrode tests, see stimElectrodeTest)
               currentReached (2026-10-20): 1 = the current of the pulse was reached, 0 = not reached, NaN = unknown.
               The firmware (V18G-V19C) writes the result of a pulse ("current not reached", status bit 9) into the
               report of the NEXT base pulse of the same channel (the report is written at the start of a pulse, its
@@ -93,6 +100,7 @@ from .options import options as _options
 from .spikes import remove_spikes
 
 import re as _re
+import json as _json
 
 
 def read_mdd(mdd_file, from_s=None, to_s=None, opts=None, progress=None):
@@ -148,6 +156,7 @@ def read_header(mdd_file, opts=None):
     H.pulseSettingsLog = L.pulseSettingsEvents
     H.extraPulseLog = L.extraPulseOffsets
     H.stimSequenceLog = L.stimSequences  # [time channel period_ms nTimes t1_ms t2_ms]: programmed sequences (2026-10-23)
+    H.electrodeTests = L.electrodeTests  # electrode tests of the control software (2026-10-27, see electrode_tests)
 
     # sampling rate: option > log file > 500 Hz for old 8-channel files (software 1.0.x) > 400 Hz
     if opts.samplingRate is not None:
@@ -212,6 +221,24 @@ def read_header(mdd_file, opts=None):
     H.stimRow = nCh - 1  # 0-based row of the status channel (MATLAB: nCh)
     H.totalSamples = H.bytes // (2 * nCh)
     H.totalSeconds = H.totalSamples / fs
+
+    # electrode tests (2026-10-27): windows [from to channel] (s in the file) in which the stimuli of a channel are the
+    # test's own pulses (start to end + 1 s: the result of a pulse comes with the next one, see electrode_tests); no
+    # end in the log: to the end of the file. Their stimuli and contractions are left out of the analysis (read_data,
+    # analyze_channel).
+    W = []
+    for E in H.electrodeTests:
+        tEnd = E.tEnd + 1
+        if math.isnan(tEnd):
+            tEnd = H.totalSeconds
+        if not E.channels or tEnd < 0:
+            continue
+        W.extend([E.tStart, tEnd, c] for c in E.channels)
+        kind = ", ".join(x for x in (E.trigger, E.mode) if x)
+        H.notes.append(f"Electrode test {E.run} ({kind}) {_time_text(E.tStart)} - {_time_text(tEnd)} s on "
+                       f"channel{'' if len(E.channels) == 1 else 's'} {', '.join(str(c) for c in E.channels)}: its "
+                       "stimuli and the contractions in that time are left out of the analysis.")
+    H.electrodeTestWindows = np.array(W, dtype=float).reshape(-1, 3)
 
     # rocker state: bit 15 of the status channel or, if this bit is missing although the log file has rocker speeds
     # > 0 (firmware error in some setups) or there is no status channel, the 'rockerSpeed' entries of the log file
@@ -396,6 +423,16 @@ def read_data(H, from_s, to_s, nDS=2, stim_only=False, spike_removal=False, opts
         state = rocker_state_from_log(S.rockerLogIntervals, (i0 + np.arange(nRaw)) / fs)
         S.rockerOn = state.reshape(n, nDS).any(axis=1)
         S.stim.rockerOn = state[np.round(S.stim.time * fs).astype(int) - i0]
+    # electrode tests (2026-10-27): the test's own pulses of the tested channels (1 mA, the top, halving steps,
+    # regulation off; "not reached" on purpose above the limit) are no stimuli of the experiment: moved to
+    # S.stimElectrodeTest
+    isTest = np.zeros(S.stim.time.size, bool)
+    for w in S.get("electrodeTestWindows", np.zeros((0, 3))):
+        isTest |= (S.stim.channel == w[2]) & (S.stim.time >= w[0]) & (S.stim.time <= w[1])
+    S.stimElectrodeTest = Struct()
+    for k in list(S.stim.keys()):
+        S.stimElectrodeTest[k] = S.stim[k][isTest]
+        S.stim[k] = S.stim[k][~isTest]
     return S
 
 
@@ -673,7 +710,7 @@ def read_log(log_file, file_time=None):
                singleChannelMode=None, extendedSensorModeEvents=np.zeros((0, 2)), startDatenum=math.nan,
                programVersion="", clockNote="", offsetEvents=np.zeros((0, 3)), calibrationEvents=np.zeros((0, 3)),
                rockerSpeedEvents=np.zeros((0, 2)), recordingStopped=None, pulseSettingsEvents=np.zeros((0, 4)),
-               extraPulseOffsets=np.zeros((0, 5)), stimSequences=np.zeros((0, 6)))
+               extraPulseOffsets=np.zeros((0, 5)), stimSequences=np.zeros((0, 6)), electrodeTests=[])
     txt = read_log_text(log_file)
     if txt is None:
         return L
@@ -691,6 +728,7 @@ def read_log(log_file, file_time=None):
     ext, offs, cal, rck = [], [], [], []  # last column: line number
     pst = []  # pulse durations: time, log channel, code (1-3), value (us), line
     seqEv = []  # 'Sequence' entries: (time, log channel, line, text)
+    etEv, etWarn = [], []  # electrode test events (JSON) and warning lines (2026-10-27)
     pstCodes = ("chargeduration", "pauseduration", "dechargeduration")
     lineStart = lineStartPar = math.nan
     tMax = tMaxPar = -math.inf  # latest dataLogTime since the chosen start line
@@ -759,6 +797,10 @@ def read_log(log_file, file_time=None):
                 pst.append([tsec, ch, pstCodes.index(lc) + 1, v, i])
         elif lc == "sequence":  # stimulus times of the sequence (regular and extra pulses #k)
             seqEv.append((tsec, str2double(f[2]), i, value))
+        elif lc == "system" and value.startswith("{") and '"electrodeTest' in value:
+            etEv.append((tsec, str2double(f[2]), i, value))  # electrode test events (2026-10-27)
+        elif lc == "warning" and lv.startswith("electrode test "):
+            etWarn.append((tsec, str2double(f[2]), i, value))
         elif lc == "nchannels":
             v = str2double(value)
             if not math.isnan(v):
@@ -809,6 +851,7 @@ def read_log(log_file, file_time=None):
     L.pulseSettingsEvents = pst[:, :4].copy()
     L.extraPulseOffsets = X
     L.stimSequences = Q[:, :6].copy()
+    L.electrodeTests = electrode_tests(etEv, etWarn, lineStart)
     L.rockerSpeedEvents = rck[:, :2].copy()
     L.extendedSensorModeEvents = ext[:, :2].copy()
     L.offsetEvents = offs[:, :3].copy()
@@ -923,3 +966,97 @@ def stim_sequences(ev):
         t2 = reg[1] if len(reg) >= 2 else math.nan
         rows.append([t, chn, P, len(reg), t1, t2, ln])
     return np.array(rows, dtype=float).reshape(-1, 7)
+
+
+_RE_ET_WARN = _re.compile(r"^Electrode test (\S+?):?\s")
+
+
+def electrode_tests(ev, warn, lineStart):
+    """Electrode tests of the control software (Tools > Electrode Test, release 2.2.2, 2026-10-27): per run the window
+    in which the listed channels pulsed with the test's own currents (1 mA, the top, then halving steps, regulation
+    off), from the 'system' events electrodeTestStart / electrodeTestChannel / electrodeTestEnd of the log file (JSON,
+    one run = the actionId of its start) and the warning lines 'Electrode test <run> interrupted (...)' / '... a
+    restart of the controller is suspected ...' (an interrupted run keeps the test settings on the controller until
+    that line). Returns a list of Structs: run, tStart, tEnd (s in the file; NaN = no end in the log: the window lasts
+    to the end of the file), endKind ('end' / 'warning' / 'none'), channels (tested), trigger, mode, outcome, why,
+    seconds, restored, results (list of Structs: channel, status, iMaxMa, firstNotReachedMa, flag, why),
+    nextPulseWarning (channels whose first pulse after the run may carry the flag of the last test pulse), startMissing
+    (True: no start line in this log, the recording was started during the run while another recording's log was
+    open; the window starts with the file, the channels are those of the channel lines), line (of
+    the start). ev / warn: (time, log channel, line, text); entries before lineStart ('Recording started') get the
+    time -inf. Port of electrodeTests in mda_readMdd.m."""
+    R = []
+
+    def text(d, name):
+        v = d.get(name)
+        return v if isinstance(v, str) else ""
+
+    def num(d, name):
+        v = d.get(name)
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else math.nan
+
+    def find(run):
+        for k in range(len(R) - 1, -1, -1):
+            if R[k].run == run:
+                return k
+        return None
+
+    for t, chn, ln, txt in ev:
+        try:
+            d = _json.loads(txt)
+        except ValueError:
+            continue
+        if not isinstance(d, dict) or "event" not in d:
+            continue
+        run = text(d, "run") or text(d, "actionId")
+        k = find(run)
+        if not math.isnan(lineStart) and ln < lineStart:
+            t = -math.inf
+        e = d["event"]
+        if k is None and e in ("electrodeTestChannel", "electrodeTestEnd"):
+            # a recording started during a run while another recording's log was open has no start line (the start
+            # went into that log): the run is known from its channel / end lines, the window starts with the file, the
+            # tested channels are those of the channel lines
+            R.append(Struct(run=run, tStart=-math.inf, tEnd=math.nan, endKind="none", channels=[],
+                            trigger="start in another log", mode="", outcome="", why="", seconds=math.nan,
+                            restored=math.nan, results=[], nextPulseWarning=[], line=ln, startMissing=True))
+            k = len(R) - 1
+        if e == "electrodeTestStart":
+            ch = d.get("channels")
+            ch = [int(c) for c in ch] if isinstance(ch, list) else ([int(ch)] if isinstance(ch, (int, float)) else [])
+            R.append(Struct(run=run, tStart=t, tEnd=math.nan, endKind="none", channels=ch, trigger=text(d, "trigger"),
+                            mode=text(d, "mode"), outcome="", why="", seconds=math.nan, restored=math.nan,
+                            results=[], nextPulseWarning=[], line=ln, startMissing=False))
+        elif e == "electrodeTestChannel":
+            R[k].results.append(Struct(channel=chn, status=text(d, "status"), iMaxMa=num(d, "iMaxMa"),
+                                       firstNotReachedMa=num(d, "firstNotReachedMa"), flag=text(d, "flag"),
+                                       why=text(d, "why")))
+            if R[k].startMissing and not math.isnan(chn) and chn > 0 and int(chn) not in R[k].channels:
+                R[k].channels.append(int(chn))
+        elif e == "electrodeTestEnd":
+            R[k].outcome = text(d, "outcome"); R[k].why = text(d, "why"); R[k].seconds = num(d, "seconds")
+            if isinstance(d.get("restored"), bool):
+                R[k].restored = float(d["restored"])
+            # an interrupted run (or a controller restart) keeps the test settings until the warning line below (read
+            # after the events: it wins); its end line only says when the reports had decided
+            R[k].tEnd = t; R[k].endKind = "end"
+    for t, chn, ln, txt in warn:
+        m = _RE_ET_WARN.match(txt)
+        if m is None:
+            continue
+        k = find(m.group(1))
+        if k is None:
+            continue
+        if not math.isnan(lineStart) and ln < lineStart:
+            t = -math.inf
+        if "interrupted" in txt or "restart of the controller" in txt:
+            R[k].tEnd = t; R[k].endKind = "warning"  # the settings of the tested channels were sent again
+        elif "may show" in txt and not math.isnan(chn) and chn > 0:
+            R[k].nextPulseWarning.append(int(chn))
+    return R
+
+
+def _time_text(t):
+    if math.isinf(t):
+        return "start" if t < 0 else "end"
+    return f"{t:.0f}"

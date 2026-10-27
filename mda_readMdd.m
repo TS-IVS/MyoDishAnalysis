@@ -55,6 +55,13 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               stimSequenceLog ([time channel period_ms nTimes t1_ms t2_ms]: regular stimulus times of the
 %               programmed sequences, one row per channel entry of the 'Sequence' lines; see stimSequences,
 %               2026-10-23),
+%               electrodeTests (struct array, one per electrode test of the control software (Tools > Electrode Test,
+%               release 2.2.2): run, tStart, tEnd, channels, trigger, mode, outcome, results per channel (status,
+%               iMaxMa, ...); see electrodeTests, 2026-10-27) and electrodeTestWindows ([from to channel], s in the
+%               file: start to end + 1 s; no end in the log: to the end of the file). The test's own pulses of the
+%               listed channels (1 mA, the top, halving steps, regulation off, "not reached" on purpose above the
+%               limit) are no stimuli of the experiment: they are moved to stimElectrodeTest (same fields as stim)
+%               and the contractions in the windows are not included (mda_analyzeChannel, column electrodeTest),
 %               rockerSpeedLog ([time rpm]), rockerSource ('status channel' or 'log'), rockerLogIntervals
 %               ([from to] in s with rocker speed > 0 according to the log file), recordingStopped (1 = the log
 %               file ends with 'Recording stopped' for this file, 0 = recording still running or aborted, NaN = no
@@ -73,7 +80,8 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               'halfRateInterpolation', default true; 2026-10-21), so that the timing does not depend on the phase of
 %               the pairs (before: up to 2.5 ms).
 %               stim (struct with fields time, channel, current, currentReached, external, isExtraPulse,
-%               rockerOn; one entry per stimulus pulse of any channel; channel 0 = external trigger pulse)
+%               rockerOn; one entry per stimulus pulse of any channel; channel 0 = external trigger pulse; without
+%               the pulses of the electrode tests, see stimElectrodeTest)
 %               currentReached (2026-10-20): 1 = the current of the pulse was reached, 0 = not reached, NaN = unknown.
 %               The firmware (V18G-V19C) writes the result of a pulse ("current not reached", status bit 9) into the
 %               report of the NEXT base pulse of the same channel (the report is written at the start of a pulse, its
@@ -145,6 +153,7 @@ H.pulseSettingsLog = L.pulseSettingsEvents; %[time logChannel code value]: pulse
                                            %3 decharge; log channel 10k + c = extra pulse #k of channel c)
 H.extraPulseLog = L.extraPulseOffsets;     %[time channel k offset_ms line]: programmed extra pulse times (2026-10-10)
 H.stimSequenceLog = L.stimSequences;       %[time channel period_ms nTimes t1_ms t2_ms]: programmed sequences (2026-10-23)
+H.electrodeTests = L.electrodeTests;       %electrode tests of the control software (2026-10-27, see electrodeTests)
 
 % sampling rate: option > log file > 500 Hz for old 8-channel files (software 1.0.x) > 400 Hz
 if ~isempty(opts.samplingRate)
@@ -220,6 +229,24 @@ end
 H.stimRow = nCh;
 H.totalSamples = floor(H.bytes / (2 * nCh));
 H.totalSeconds = H.totalSamples / fs;
+
+% electrode tests (2026-10-27): windows [from to channel] (s in the file) in which the stimuli of a channel are the
+% test's own pulses (start to end + 1 s: the result of a pulse comes with the next one, see electrodeTests); no end
+% in the log: to the end of the file. Their stimuli and contractions are left out of the analysis (readData,
+% mda_analyzeChannel).
+H.electrodeTestWindows = zeros(0, 3);
+for k = 1:numel(H.electrodeTests)
+    E = H.electrodeTests(k);
+    tEnd = E.tEnd + 1;
+    if isnan(tEnd), tEnd = H.totalSeconds; end
+    if isempty(E.channels) || tEnd < 0, continue; end
+    H.electrodeTestWindows = [H.electrodeTestWindows; repmat([E.tStart tEnd], numel(E.channels), 1), E.channels(:)]; %#ok<AGROW>
+    kind = {E.trigger, E.mode}; kind = strjoin(kind(~cellfun(@isempty, kind)), ', ');
+    H.notes{end+1} = sprintf(['Electrode test %s (%s) %s - %s s on channel%s %s: its stimuli and the contractions ' ...
+        'in that time are left out of the analysis.'], E.run, kind, ...
+        timeText(E.tStart), timeText(tEnd), plural(numel(E.channels)), ...
+        strjoin(arrayfun(@(c) sprintf('%d', c), E.channels, 'UniformOutput', false), ', ')); %#ok<AGROW>
+end
 
 % rocker state: bit 15 of the status channel or, if this bit is missing although the log file has rocker speeds
 % > 0 (firmware error in some setups) or there is no status channel, the 'rockerSpeed' entries of the log file
@@ -401,6 +428,21 @@ if isLog && nRaw > 0                               %rocker state from the 'rocke
     state = rockerStateFromLog(S.rockerLogIntervals, (i0 + (0:nRaw-1)) / fs);
     S.rockerOn = any(reshape(state, nDS, n), 1);
     S.stim.rockerOn = reshape(state(round(S.stim.time * fs) - i0 + 1), [], 1);
+end
+% electrode tests (2026-10-27): the test's own pulses of the tested channels (1 mA, the top, halving steps, regulation
+% off; "not reached" on purpose above the limit) are no stimuli of the experiment: moved to S.stimElectrodeTest
+isTest = false(size(S.stim.time));
+if isfield(S, 'electrodeTestWindows')
+    W = S.electrodeTestWindows;
+    for w = 1:size(W, 1)
+        isTest = isTest | (S.stim.channel == W(w, 3) & S.stim.time >= W(w, 1) & S.stim.time <= W(w, 2));
+    end
+end
+S.stimElectrodeTest = S.stim;
+fn = fieldnames(S.stim);
+for k = 1:numel(fn)
+    S.stimElectrodeTest.(fn{k}) = S.stim.(fn{k})(isTest);
+    S.stim.(fn{k}) = S.stim.(fn{k})(~isTest);
 end
 end
 
@@ -676,7 +718,8 @@ if nargin < 2, fileTime = []; end
 L = struct('samplingRate',nan,'recordingDuration',nan,'nChannelsController',nan,'singleChannelMode',[], ...
     'extendedSensorModeEvents',zeros(0,2),'startDatenum',nan,'programVersion','','clockNote','', ...
     'offsetEvents',zeros(0,3),'calibrationEvents',zeros(0,3),'rockerSpeedEvents',zeros(0,2), ...
-    'recordingStopped',nan,'pulseSettingsEvents',zeros(0,4),'extraPulseOffsets',zeros(0,5),'stimSequences',zeros(0,6));
+    'recordingStopped',nan,'pulseSettingsEvents',zeros(0,4),'extraPulseOffsets',zeros(0,5),'stimSequences',zeros(0,6), ...
+    'electrodeTests',electrodeTests({}, {}, nan));
 if ~exist(logFile,'file'), return; end
 % MyoDish logs are UTF-16 little endian (with byte order mark); converted copies may be UTF-8
 fid = fopen(logFile, 'r');
@@ -698,6 +741,7 @@ sysAll = cell(numel(lines), 1); textAll = sysAll; tAll = nan(numel(lines), 1); v
 ext = zeros(0,3); offs = zeros(0,4); cal = zeros(0,4); rck = zeros(0,3);  %last column: line number
 pst = zeros(0,5); nPst = 0;                         %pulse durations: time, log channel, code (1-3), value (us), line
 seqEv = cell(0, 1);                                 %'Sequence' entries: {time, log channel, line, text}
+etEv = cell(0, 1); etWarn = cell(0, 1);             %electrode test events (JSON) and warning lines (2026-10-27)
 pstCodes = {'chargeDuration', 'pauseDuration', 'dechargeDuration'};
 lineStart = nan; lineStartPar = nan;
 tMax = -inf; tMaxPar = -inf;                        %latest dataLogTime since the chosen start line
@@ -767,6 +811,10 @@ for i = 1:numel(lines)
         end
     elseif strcmpi(code,'Sequence')                  %stimulus times of the sequence (regular and extra pulses #k)
         seqEv{end+1, 1} = {tsec, str2double(f{3}), i, value}; %#ok<AGROW>
+    elseif strcmpi(code,'system') && startsWith(value, '{') && contains(value, '"electrodeTest')
+        etEv{end+1, 1} = {tsec, str2double(f{3}), i, value}; %#ok<AGROW>   %electrode test events (2026-10-27)
+    elseif strcmpi(code,'warning') && strncmpi(value, 'Electrode test ', 15)
+        etWarn{end+1, 1} = {tsec, str2double(f{3}), i, value}; %#ok<AGROW>
     elseif strcmpi(code,'nChannels')
         v = str2double(value); if ~isnan(v), L.nChannelsController = v; end
     elseif strcmpi(code,'programInfo') && contains(value,'Version','IgnoreCase',true)
@@ -818,6 +866,7 @@ end
 L.pulseSettingsEvents = pst(:,1:4);
 L.extraPulseOffsets = X;
 L.stimSequences = Q(:,1:6);
+L.electrodeTests = electrodeTests(etEv, etWarn, lineStart);
 L.rockerSpeedEvents = rck(:,1:2);
 L.extendedSensorModeEvents = ext(:,1:2);
 L.offsetEvents = offs(:,1:3);
@@ -932,4 +981,103 @@ for i = 1:numel(ev)
     if numel(reg) >= 2, t2 = reg(2); end
     Q(end+1, :) = [t, chn, P, numel(reg), t1, t2, ln]; %#ok<AGROW>
 end
+end
+
+
+function R = electrodeTests(ev, warn, lineStart)
+% Electrode tests of the control software (Tools > Electrode Test, release 2.2.2, 2026-10-27): per run the window in
+% which the listed channels pulsed with the test's own currents (1 mA, the top, then halving steps, regulation off),
+% from the 'system' events electrodeTestStart / electrodeTestChannel / electrodeTestEnd of the log file (JSON, one run
+% = the actionId of its start) and the warning lines 'Electrode test <run> interrupted (...)' / '... a restart of the
+% controller is suspected ...' (an interrupted run keeps the test settings on the controller until that line).
+% R: struct array with run, tStart, tEnd (s in the file; NaN = no end in the log: the window lasts to the end of the
+% file), endKind ('end' / 'warning' / 'none'), channels (tested), trigger, mode, outcome, why, seconds, restored,
+% results (struct array: channel, status, iMaxMa, firstNotReachedMa, flag, why), nextPulseWarning (channels whose
+% first pulse after the run may carry the flag of the last test pulse), line (of the start), startMissing (true: no
+% start line in this log, the recording was started during the run while another recording's log was open; the
+% window starts with the file, the channels are those of the channel lines)
+% ev / warn: {time, log channel, line, text}; entries before lineStart ('Recording started') get the time -Inf
+R = struct('run', {}, 'tStart', {}, 'tEnd', {}, 'endKind', {}, 'channels', {}, 'trigger', {}, 'mode', {}, ...
+    'outcome', {}, 'why', {}, 'seconds', {}, 'restored', {}, 'results', {}, 'nextPulseWarning', {}, 'line', {}, ...
+    'startMissing', {});
+res0 = struct('channel', {}, 'status', {}, 'iMaxMa', {}, 'firstNotReachedMa', {}, 'flag', {}, 'why', {});
+for i = 1:numel(ev)
+    t = ev{i}{1}; chn = ev{i}{2}; ln = ev{i}{3};
+    try
+        d = jsondecode(ev{i}{4});
+    catch
+        continue;
+    end
+    if ~isstruct(d) || ~isfield(d, 'event'), continue; end
+    run = jsonText(d, 'run');
+    if isempty(run), run = jsonText(d, 'actionId'); end
+    k = find(strcmp({R.run}, run), 1, 'last');
+    if ~isnan(lineStart) && ln < lineStart, t = -inf; end
+    if isempty(k) && any(strcmp(d.event, {'electrodeTestChannel', 'electrodeTestEnd'}))
+        % a recording started during a run while another recording's log was open has no start line (the start went
+        % into that log): the run is known from its channel / end lines, the window starts with the file, the tested
+        % channels are those of the channel lines
+        R(end+1) = struct('run', run, 'tStart', -inf, 'tEnd', nan, 'endKind', 'none', 'channels', [], ...
+            'trigger', 'start in another log', 'mode', '', 'outcome', '', 'why', '', 'seconds', nan, 'restored', nan, ...
+            'results', res0, 'nextPulseWarning', [], 'line', ln, 'startMissing', true); %#ok<AGROW>
+        k = numel(R);
+    end
+    switch d.event
+        case 'electrodeTestStart'
+            ch = [];
+            if isfield(d, 'channels') && isnumeric(d.channels), ch = double(d.channels(:))'; end
+            R(end+1) = struct('run', run, 'tStart', t, 'tEnd', nan, 'endKind', 'none', 'channels', ch, ...
+                'trigger', jsonText(d, 'trigger'), 'mode', jsonText(d, 'mode'), 'outcome', '', 'why', '', ...
+                'seconds', nan, 'restored', nan, 'results', res0, 'nextPulseWarning', [], 'line', ln, ...
+                'startMissing', false); %#ok<AGROW>
+        case 'electrodeTestChannel'
+            R(k).results(end+1) = struct('channel', chn, 'status', jsonText(d, 'status'), 'iMaxMa', jsonNum(d, 'iMaxMa'), ...
+                'firstNotReachedMa', jsonNum(d, 'firstNotReachedMa'), 'flag', jsonText(d, 'flag'), 'why', jsonText(d, 'why'));
+            if R(k).startMissing && ~isnan(chn) && chn > 0 && ~any(R(k).channels == chn)
+                R(k).channels(end+1) = chn;
+            end
+        case 'electrodeTestEnd'
+            R(k).outcome = jsonText(d, 'outcome'); R(k).why = jsonText(d, 'why');
+            R(k).seconds = jsonNum(d, 'seconds');
+            if isfield(d, 'restored') && islogical(d.restored), R(k).restored = double(d.restored); end
+            % an interrupted run (or a controller restart) keeps the test settings until the warning line below (read
+            % after the events: it wins); its end line only says when the reports had decided
+            R(k).tEnd = t; R(k).endKind = 'end';
+    end
+end
+for i = 1:numel(warn)
+    t = warn{i}{1}; chn = warn{i}{2}; ln = warn{i}{3}; txt = warn{i}{4};
+    tok = regexp(txt, '^Electrode test (\S+?):?\s', 'tokens', 'once');
+    if isempty(tok), continue; end
+    k = find(strcmp({R.run}, tok{1}), 1, 'last');
+    if isempty(k), continue; end
+    if ~isnan(lineStart) && ln < lineStart, t = -inf; end
+    if contains(txt, 'interrupted') || contains(txt, 'restart of the controller')
+        R(k).tEnd = t; R(k).endKind = 'warning';     %the settings of the tested channels were sent again
+    elseif contains(txt, 'may show') && ~isnan(chn) && chn > 0
+        R(k).nextPulseWarning(end+1) = chn;
+    end
+end
+end
+
+
+function s = jsonText(d, name)
+s = '';
+if isfield(d, name) && (ischar(d.(name)) || isstring(d.(name))), s = char(d.(name)); end
+end
+
+
+function v = jsonNum(d, name)
+v = nan;
+if isfield(d, name) && isnumeric(d.(name)) && isscalar(d.(name)), v = double(d.(name)); end
+end
+
+
+function s = timeText(t)
+if isinf(t), if t < 0, s = 'start'; else, s = 'end'; end, else, s = sprintf('%.0f', t); end
+end
+
+
+function s = plural(n)
+if n == 1, s = ''; else, s = 's'; end
 end

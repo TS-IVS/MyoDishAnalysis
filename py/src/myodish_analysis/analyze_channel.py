@@ -46,6 +46,9 @@ PROCESSING (see the MATLAB help and README)
      before the stimuli (C.noiseMedian), or large (>= 0.7 x typical and >= 3 x that median); unpaced: >= 0.5 x
      typical. Otherwise column uncertain = True ('sensitive', default) or the contraction is not counted
      ('specific'). C.stimCapturedCertain: stimulus followed by a certain contraction
+  2c. electrode tests of the control software (2026-10-27, read_mdd: S.electrodeTestWindows): a contraction whose peak
+     lies in a test window of the stimulated channel was paced by the test's own pulses, if at all: column
+     electrodeTest = True, not included (the test pulses themselves are not in S.stim)
   3. stimulus assignment (option stimAssignment, default 'onset', 2026-10-10): every pulse of the channel, regular or
      extra pulse (status channel bit 16), is a candidate. Onset = the tangent at the maximum dF/dt crossing the
      diastolic level. A pulse can only have elicited a contraction if it lies in the gate onset - gateMax ... onset +
@@ -86,7 +89,7 @@ from .parameters import PARAMETERS
 from .zero_force import zero_force, zero_at
 
 UNITS_FIRST = {"channel": "", "contraction": "", "t_peak": "s", "beatType": "", "t_stim": "s", "stimToPeak": "s",
-               "rockerMoving": "", "included": "", "uncertain": ""}
+               "rockerMoving": "", "included": "", "uncertain": "", "electrodeTest": ""}
 UNITS_STIM = {"t_onset": "s", "stimToOnset": "s", "t_rise50": "s", "stimToRise50": "s", "stimPulse": "",
               "stimCurrent": "mA", "stimChargeDuration": "us",
               "stimPauseDuration": "us", "stimDechargeDuration": "us", "elicitedByExtraPulse": "", "stimAmbiguous": "",
@@ -447,10 +450,19 @@ def analyze_channel(S, channel, range_=None, opts=None):
         included &= ~rockerMoving
     if opts.rocker == "moving":
         included &= rockerMoving
+    # electrode test of the control software on this channel (2026-10-27, see read_mdd): the contractions in its
+    # window were paced by the test's own pulses (if at all): column electrodeTest, not included
+    electrodeTest = np.zeros(n, bool)
+    W = S.get("electrodeTestWindows", None)
+    if W is not None and len(W):
+        wc = stimCh if stimCh != 0 else channel
+        for w in W[W[:, 2] == wc]:
+            electrodeTest |= (tPeakSel >= w[0]) & (tPeakSel <= w[1])
+        included = included & ~electrodeTest
     B = pd.DataFrame({"channel": np.full(n, channel, dtype=float), "contraction": np.arange(1, n + 1, dtype=float),
                       "t_peak": tPeakSel, "beatType": pd.Series(list(beatSel), dtype=object), "t_stim": tStim,
                       "stimToPeak": tPeakSel - tStim, "rockerMoving": rockerMoving, "included": included,
-                      "uncertain": uncertain})
+                      "uncertain": uncertain, "electrodeTest": electrodeTest})
     # eliciting pulse and the pulses that did not elicit a contraction (2026-10-10, see pulse_properties / pulse_text)
     fs = float(S.samplingRate) if "samplingRate" in S else 2.0 / dt  # pulse ID = raw sample number
     snapMs = float(opts.offsetSnap) * 1000  # programmed offsets (log file) used within this time (ms)

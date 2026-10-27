@@ -908,7 +908,7 @@ P = mda_protocols(file)                                              % protocols
   | | `refPeriodAllCaptured_ms` | shortest S2 interval above which every S2 interval gives a separate contraction peak at every S2 (from long to short: the S2 interval before the first one with a missing peak; all with a peak: the shortest analysed interval, note; 2026-10-10). Definition as the refractory period of the MyoDish export, but more sensitive to a single S2 without a separate peak: in 323 recordings of human slices `refPeriodNoPeak_ms` agreed better with the export (within 10 %: 95 vs 85 %, bias −1 vs +13 ms) |
   | | `…Step_ms`, `S2noiseLevel_pct`, `amplitudeS1_uN`, `nS2`, `nTemplateBeats` | distance of the two S2 intervals around the transition (uncertainty ≈ ± step/2), noise level, ... |
   | | `S2shortest_ms`, `S2longest_ms` | shortest / longest analysed S2 interval: a transition that is *not reached* (NaN, note) lies below `S2shortest_ms` (e.g. a slice that still gives a separate S2 contraction at the shortest S2 interval of the protocol), one *already at the longest interval* above `S2longest_ms` |
-  | all | `variant` | the protocol as recorded, from the pulse pattern (2026-10-23): FFR `0.2-4 Hz (12 steps)`, ST `8-95 mA (30 steps)`, PRP `pauses 3/12/50/120 s`, RP `S1 train + S2 pairs, S2 800-320 ms (16 steps)` or `S1-S2 pairs without S1 train, …` (fewer than 3 steady-state S1 stimuli with the S1 interval before and after: the template comes from the pairs). Tells apart schedules with other pauses, steps or structure, e.g. when pooling |
+  | all | `variant` | the protocol as recorded, from the pulse pattern (2026-10-23): FFR `0.2-4 Hz (12 steps)`, ST `8-95 mA (30 steps)`, PRP `pauses 3/12/50/120 s`, RP `S1 train + S2 pairs, S2 800-320 ms (16 steps)` or `S1-S2 pairs without S1 train, …` (steady-state S1 stimuli with the S1 interval before and after: fewer than 3 or than 10 % of the S2 count; the template of the S2 response then comes from the pairs). Tells apart schedules with other pauses, steps or structure, e.g. when pooling |
   | PRP | `PRP1_pct` … `PRP8_pct` (+ `_pause_s`) | amplitude in % of the reference after the pauses of the protocol in ascending order (2026-10-23; pauses within `pauseTolerance` are one length, several pauses of one length: their mean); the `_pause_s` column shows the pause, so that recordings with different schedules are not pooled unnoticed |
   | PRP | `PRP15_pct`, `PRP30_pct`, `PRP60_pct` (+ `_pause_s`) | the lab's standard pauses: amplitude in % of the reference after a pause of 15 / 30 / 60 s ± `pauseTolerance` (10 %; several pauses: their mean, note; before 2026-10-10 the nearest pause within ± 50 %) (pause = stimulus interval − steady interval). Reference (option `prpReference`, 2026-10-10): `'preceding'` (default) = median of the last `prpReferenceBeats` (6) contractions of the pacing before each pause (this pacing loads the SR; slow changes of the amplitude during the protocol do not enter the ratio), `'firstTrain'` = mean of the contractions of the pacing before the first pause, `'steady'` = mean of the group `steady` (versions ≤ 1.0.0-beta.3) |
 
@@ -1250,6 +1250,45 @@ their intervals, and the EP alignment also tries the trigger pulses (`mddChannel
 unit carries one chamber, any channel with a signal belongs to it: analyse the channel with the slice.
 Test recording (rabbit LV, 2.6 h, 8,691 trigger pulses): with the trigger pulses 30 / 30 contractions stimulated
 at 0.5 Hz (stimulus → peak 99 ms) and 196 / 196 at 4 Hz (91 ms); before, all `unpaced`.
+
+## Electrode test (software 2.2.2, Tools > Electrode Test; 2026-10-27)
+The electrode test of the control software (2.2.2 and later, build 42274 of the lab's rabbit experiments of 2026-10)
+sends test pulses to the channels it tests (1 mA, then the maximum of 200 mA and halving steps down to the current
+the electrodes just reach; regulation off, "current not reached" on purpose above the limit) while a recording
+runs. The test writes no sequence or pulse lines, only structured `system` events (`electrodeTestStart`,
+`electrodeTestChannel`, `electrodeTestEnd`, `electrodeTestSetting`, `electrodeTestReset`, `electrodeTestSkipped`)
+and warning lines (`Electrode test <run>: the next pulse of channel N may show "current not reached" ...`,
+`Electrode test <run> interrupted (...)`, `... a restart of the controller is suspected ...`). Without this, the
+test pulses would be stimuli of the analysed channel: the threshold protocols would see currents of 1–200 mA, and
+the contractions they elicit (or the missed beats, when the current is below the threshold) would enter the
+summaries. `mda_readMdd` / `read_mdd` therefore read the events:
+* `H.electrodeTests` (`info.electrodeTests`): one entry per run: `run` (ID of the event), `tStart`, `tEnd`
+  (`electrodeTestEnd` or the warning line that ends an interrupted run; NaN when the file ends first), `endKind`
+  (`end` / `warning`), `channels`, `trigger` (manual / interval), `mode`, `outcome` (done / aborted / interrupted),
+  `why`, `seconds`, `restored` (stimulation settings restored or not), `results` (one entry per channel: status
+  ok / noCurrent / suspectNoFlag / noSensor / noReports / skipped / aborted, `iMaxMa`, `firstNotReachedMa`, `flag`),
+  `nextPulseWarning` (channels whose next pulse may carry the test's "current not reached", see *Current reached*),
+  `line` (number in the log file). Events of the log before the recording started (the log holds the whole
+  session) are kept with `tStart` −∞ and do not open a window.
+* `H.electrodeTestWindows` (`info.electrodeTestWindows`; one row per channel and run: `[from to channel]`):
+  from the start event to the end + 1 s (the base pulse that carries the result of the last test pulse);
+  an interrupted run ends at its warning line; a run without an end lasts until the end of the file.
+* **Stimulus pulses of the tested channels within a window** are moved from `stim` to `stimElectrodeTest`
+  (same fields) and are therefore not stimuli of the protocols, the pulse table, the stimulus plot or the GUI.
+  Pulses of channels not under test and all pulses outside the windows stay as they are.
+* **Contractions** whose peak lies in a window of their stimulus channel get the column **`electrodeTest`** (true)
+  in the contraction table and are **not `included`** (not in any summary or group), like contractions during a
+  signal gap. The window is also a note of the analysis (`info.notes`, report):
+  *Electrode test <run> (manual, full) 0:40 - 1:21 s on channel 1: its stimuli and the contractions in that time
+  are left out of the analysis.*
+* Recordings without electrode-test lines (all software before 2.2.2) are read as before; nothing changes in their
+  results. Test recording of a controller (2.2.2, 10 min, three manual runs on channels 1, 2, 6 and 8): 456 of 2,262 pulses
+  are test pulses (1–200 mA) and left out, 3 notes; MATLAB and Python agree.
+* The "current not reached" of the test pulses stays with them: by the previous-pulse rule (*Current reached*
+  above) the first base pulse after a test carries the result of the last test pulse, and that result is assigned
+  to the test pulse before the split, so `currentReached` of the first regular pulse after a test is its own.
+* Not yet: the test's results (`iMaxMa` per channel and run) as a table of the report, and the test pulses in the
+  GUI plot.
 
 ## Rocker artifact (`'rockerFilter',true`, GUI checkbox; `mda_rockerFilter`)
 While the rocker moves, the dish tilts periodically and each sensor shows an additive periodic signal at the rocker

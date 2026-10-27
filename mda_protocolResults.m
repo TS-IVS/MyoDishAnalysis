@@ -264,9 +264,10 @@ R.nS2 = numel(jS2);
 if isempty(jS2), notes = {'no S2 stimuli'}; return; end
 isSS = strcmp(role, 'S1') & inR & abs(prevI - S1) < tol & abs(ni - S1) < tol;
 vS2 = val(jS2);
-% protocol variant (2026-10-23): S1 train + S2 pairs (steady-state S1 stimuli with the S1 interval before and after:
-% the template of the S2 response) or S1-S2 pairs without such a train (e.g. a pair in every period)
-if nnz(isSS) >= 3, R.variant = {'S1 train + S2 pairs'}; else, R.variant = {'S1-S2 pairs without S1 train'}; end
+% protocol variant (2026-10-23): S1 train + S2 pairs (steady-state S1 stimuli with the S1 interval before and after,
+% at least 3 and 10 % of the S2 count: the template of the S2 response) or S1-S2 pairs without such a train (a pair
+% in every period, at most a few S1 before the first pair)
+if nnz(isSS) >= max(3, 0.1 * numel(jS2)), R.variant = {'S1 train + S2 pairs'}; else, R.variant = {'S1-S2 pairs without S1 train'}; end
 if ~isempty(vS2) && any(~isnan(vS2))
     R.variant = {sprintf('%s, S2 %g-%g ms (%d steps)', R.variant{1}, round(2000 * max(vS2)) / 2, ...
         round(2000 * min(vS2)) / 2, numel(unique(vS2(~isnan(vS2)))))};
