@@ -286,7 +286,34 @@ ok = ok && ok8;
 % electrode test of the control software inside a recording (2026-10-27): its pulses and contractions left out
 okE = electrodeTestTest();
 ok = ok && okE;
+% experiment report with recordings of earlier passes (2026-11-01): their flags come from mda_flags.csv with fewer
+% columns than the flags of the recordings of this pass; the report must still be written
+okM = mixedFlagsReportTest();
+ok = ok && okM;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
+end
+
+
+function okM = mixedFlagsReportTest()
+% one recording of an earlier pass (R: the 11 columns of mda_flags.csv) and one of this pass (R from the flags of
+% an empty summary with a status table: all columns); mda_report must write the PDF and return one table
+rec = struct('name', 'example/recording_1.mdd', 'file', 'x', 'open', 'x', 'S', [], 'C', [], 'P', [], 'P_file', '', ...
+    'R', [], 'status', [], 'notes', {{}}, 'new', false);
+rec.R = table([1; 2], {'ch 1'; 'ch 2'}, {'beating'; 'removed'}, [100; 0], [95; NaN], {''; ''}, {'ok'; 'ok'}, ...
+    {''; ''}, {''; ''}, [NaN; NaN], [NaN; NaN], 'VariableNames', {'channel', 'label', 'status', 'nDetected', ...
+    'capture_percent', 'flags', 'level', 'red', 'yellow', 'window_from', 'window_to'});
+rec2 = rec; rec2.name = 'example/recording_2.mdd'; rec2.new = true; rec2.R = [];
+rec2.status = table([1; 2], {'beating'; 'no slice'}, 'VariableNames', {'channel', 'status'});
+out = fullfile(tempdir, 'mda_test_mixed_report.pdf');
+try
+    R = mda_report([rec; rec2], out, 'title', 'mda_test: mixed flag columns');
+    okM = isfile(out) && height(R) == 4 && all(ismember({'recording', 'channel', 'noiseIndex', 'matlab'}, ...
+        R.Properties.VariableNames)) && isequal(R.recording(1:2), {rec.name; rec.name});
+    delete(out);
+catch ME
+    okM = false; fprintf('   %s\n', ME.message);
+end
+fprintf('report with flags of earlier passes (fewer columns): %s\n', passStr(okM));
 end
 
 

@@ -5,6 +5,14 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
+- **MATLAB watcher: experiment report not written when the experiment had recordings of earlier passes** (2026-11-01;
+  since 2026-10-21): the recordings of this pass carry the full flag table, the earlier ones only the columns of
+  `mda_flags.csv`, and the concatenation failed (*All tables being vertically concatenated must have the same number of
+  variables*; the watcher listed `PDF report <experiment>: MATLAB:table:vertcat:SizeMismatch`, the per-recording results
+  were complete). `mda_report` now adds the missing columns (NaN / empty / false) before concatenating. Python was not
+  affected (`pd.concat`). Test `mixedFlagsReportTest` (`mda_test`).
+- **MATLAB `mda_report`: warning *Integer operands are required for colon operator* on the image page** of the experiment
+  report (text width scaled with the page size was not an integer).
 - **Current reached (status bit 9) assigned to the right pulse.** The controller writes the report of a pulse when the
   pulse starts, and the result ("current not reached") only becomes known at its end; bit 9 of a pulse is therefore
   the result of the previous base pulse of the same channel (firmware V18G–V19C, confirmed by the firmware source and

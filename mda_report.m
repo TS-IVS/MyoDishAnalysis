@@ -531,7 +531,10 @@ for i = 1:nR
     if ~isfield(rec, 'notes') || isempty(rec.notes), recs(i).notes = {}; else, recs(i).notes = cellstr(rec.notes); end
     Rs{i} = R;
 end
-if nR, Rall = vertcat(Rs{:}); else, Rall = reportFlags([], [], [], fl); end
+full = reportFlags([], [], [], fl);                 %all columns (recordings of earlier passes: flags of mda_flags.csv,
+cols = [{'recording'}, full.Properties.VariableNames, {'window_from', 'window_to', 'matlab', 'python'}];
+for i = 1:nR, Rs{i} = alignFlags(Rs{i}, cols, full); end   %fewer columns; 2026-11-01)
+if nR, Rall = vertcat(Rs{:}); else, Rall = alignFlags(full, cols, full); end
 isCheck = cellfun(@(R) any(strcmp(R.level, 'check')), Rs);
 nRed = cellfun(@(R) sum(cellfun(@(x) sum(ismember(x, 'INSDFR')), R.flags(strcmp(R.level, 'check')))), Rs);
 maxNI = cellfun(@(R) max([0; R.noiseIndex(strcmp(R.level, 'check') & ~isnan(R.noiseIndex))]), Rs);
@@ -551,6 +554,26 @@ listPages(out, recs, Rs, check, det, pg);
 for k = 1:numel(det)
     detailPage(out, recs(det(k)), Rs{det(k)});
 end
+end
+
+
+function R = alignFlags(R, cols, full)
+% R with all columns of cols in that order (missing ones added: NaN, '' or false by their type in full; other columns
+% of R kept at the end), so that the flag tables of all recordings of a report can be concatenated (2026-11-01: the
+% recordings of earlier passes carry only the columns of mda_flags.csv)
+have = R.Properties.VariableNames;
+n = height(R);
+for k = 1:numel(cols)
+    c = cols{k};
+    if ismember(c, have), continue; end
+    if ismember(c, full.Properties.VariableNames), v = full.(c); else, v = {''}; end
+    if iscell(v), R.(c) = repmat({''}, n, 1);
+    elseif islogical(v), R.(c) = false(n, 1);
+    else, R.(c) = nan(n, 1);
+    end
+end
+extra = setdiff(R.Properties.VariableNames, cols, 'stable');
+R = R(:, [cols, extra]);
 end
 
 
@@ -914,8 +937,10 @@ end
 
 
 function w = wrapText(s, n)
-% lines of at most n characters, broken at spaces (as Python textwrap.wrap)
+% lines of at most n characters, broken at spaces (as Python textwrap.wrap); n rounded (the image page scales it
+% with the page size, 2026-11-01)
 s = strtrim(regexprep(char(s), '\s+', ' '));
+n = max(1, round(n));
 w = {};
 while numel(s) > n
     k = find(s(1:n+1) == ' ', 1, 'last');
