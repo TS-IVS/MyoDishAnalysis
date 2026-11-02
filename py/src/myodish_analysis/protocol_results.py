@@ -18,7 +18,7 @@ R      dict with all result columns (NaN where not applicable), see RESULT_COLUM
        (FFR: FFR_<f>Hz_pct of 0.2, 0.75, 1 Hz and 1.5 ... 10 Hz in 0.5-Hz steps, FFR_COLUMNS; 2026-11-02)
 
 TS 2026-10-07 (port of mda_protocolResults.m; tolerances frequencyResolution / pauseTolerance, refPeriodAllCaptured
-2026-10-10; FFR of every step 2026-11-02)
+2026-10-10; FFR of every step, alternans, FFR maximum, ST minimal response, RP 10 % level and PESP 2026-11-02)
 """
 from __future__ import annotations
 
@@ -39,12 +39,14 @@ def _ffr_columns():
 FFR_FREQUENCIES, FFR_COLUMNS = _ffr_columns()
 
 RESULT_COLUMNS = [
-    "maxCapturedFrequency_Hz", "amplitude_0p5Hz_uN"] + FFR_COLUMNS + [
+    "maxCapturedFrequency_Hz", "maxStableFrequency_Hz", "frequencyOfMaxAmplitude_Hz", "FFRmax_pct",
+    "amplitude_0p5Hz_uN"] + FFR_COLUMNS + [
     "captureThreshold_mA", "stimThreshold10_mA", "stimThreshold50_mA", "stimThreshold95_mA", "stimThreshold99_mA",
-    "maxAmplitude_uN",
+    "maxAmplitude_uN", "stimThresholdMinResponse_mA", "minDetectableResponse_pct",
     "refPeriodNoPeak_ms", "refPeriodNoPeakStep_ms", "refPeriodNoResponse_ms", "refPeriodNoResponseStep_ms",
-    "refPeriodAllCaptured_ms",
+    "refPeriodResponse_ms", "refPeriodResponseStep_ms", "refPeriodAllCaptured_ms",
     "S2shortest_ms", "S2longest_ms", "S2noiseLevel_pct", "amplitudeS1_uN", "nS2", "nTemplateBeats",
+    "PESPmax_pct", "PESPmaxS2_ms",
     "PRP15_pct", "PRP15_pause_s", "PRP30_pct", "PRP30_pause_s", "PRP60_pct", "PRP60_pause_s",
     "PRP1_pct", "PRP1_pause_s", "PRP2_pct", "PRP2_pause_s", "PRP3_pct", "PRP3_pause_s",
     "PRP4_pct", "PRP4_pause_s", "PRP5_pct", "PRP5_pause_s", "PRP6_pct", "PRP6_pause_s",
@@ -69,7 +71,8 @@ def captured_groups(G):
 
 def protocol_results(by, G, Z=None, trace=None, opts=None):
     """R: dict with RESULT_COLUMNS; S2interval also '_s2groups' {groupValue (s): (median S2 response %, % of S2 with a
-    separate peak)} for the group summary (removed by the caller before the results table)."""
+    separate peak)}, stimCurrent with trace also '_stgroups' {groupValue (mA): stimulus-locked response %} for the
+    group summary (removed by the caller before the results table)."""
     R = {c: math.nan for c in RESULT_COLUMNS}
     R["resultNote"] = ""
     R["variant"] = ""
@@ -102,6 +105,19 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
                 R[c] = 100 * _at(val, amp, cap, f, res) / a05
                 inCol |= np.abs(val - f) <= res / 2 + 1e-9
             inCol |= np.abs(val - 0.5) <= fResLow / 2 + 1e-9
+        # FFR maximum and highest captured frequency without alternans (2026-11-02; capturedF of GetFFRdata: alternans
+        # ratio below 0.5; NaN ratio, fewer than 2 pairs: not checked)
+        oka = ok & ~np.isnan(amp)
+        if oka.any():
+            vv, aa = val[oka], amp[oka]
+            i = int(np.argmax(aa))
+            R["frequencyOfMaxAmplitude_Hz"] = float(vv[i])
+            R["FFRmax_pct"] = 100 * float(aa[i]) / a05
+        if "alternansRatio" in G.columns:
+            with np.errstate(invalid="ignore"):
+                okS = ok & ~(G["alternansRatio"].to_numpy(float) >= 0.5)
+            if okS.any():
+                R["maxStableFrequency_Hz"] = float(np.max(val[okS]))
         if math.isnan(a05):
             notes.append("no captured 0.5 Hz group")
         elif (ok & ~inCol).any():
@@ -123,6 +139,8 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
                 R[f"stimThreshold{x}_mA"] = float(np.min(val[k]))
         else:
             notes.append("no captured current with included contractions")
+        if Z is not None and trace is not None:  # minimal detectable response (2026-11-02)
+            notes += _st_response(R, G, Z, trace, opts, cap)
 
     elif byl == "pauselength":
         st = np.flatnonzero(role == "steady")
@@ -157,6 +175,14 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
             notes.append("S2 response: no data")
         else:
             notes += _s2_results(R, Z, trace, opts)
+        # post-extrasystolic potentiation (2026-11-02): amplitude_pctOfRef of the post-S2 groups (contraction after the
+        # S2 in % of the S1 amplitude); its maximum over the S2 intervals
+        pctG = G["amplitude_pctOfRef"].to_numpy(float)
+        ps = np.flatnonzero((role == "postS2") & ~np.isnan(pctG))
+        if ps.size:
+            i = int(ps[np.argmax(pctG[ps])])
+            R["PESPmax_pct"] = float(pctG[i])
+            R["PESPmaxS2_ms"] = mround(2000 * float(val[i])) / 2
     R["resultNote"] = "; ".join(notes)
     return R
 
@@ -206,6 +232,128 @@ def _transition(ci, v, level, name, notes):
         return math.nan, math.nan
     step = ci[k - 1] - ci[k]
     return float(ci[k] + (level - v[k]) / (v[k - 1] - v[k]) * step), float(step)
+
+
+def _st_response(R, G, Z, trace, opts, cap):
+    """minimal detectable response of a stimulation threshold protocol (GetStimThreshold 2026-10-06; 2026-11-02), see
+    stResponse in mda_protocolResults.m: template = mean stimulus-locked contraction (-50 ms ... Tt) at the stimuli of
+    the captured currents with >= 95 % of the largest mean amplitude (fewer than 3 stimuli: the 3 captured currents
+    with the highest current); projection of every stimulus onto it; response of a current = median projection (%,
+    R['_stgroups']); detection limit = max(99th percentile, median + 4 robust SD) at pseudo-stimuli in the middle of
+    the stimulus intervals (>= 10); stimThresholdMinResponse_mA = lowest current above the limit whose next higher
+    current is also above it; NaN with a limit >= 25 %."""
+    notes = []
+    t = np.asarray(trace["t"], float).ravel()
+    f = np.asarray(trace["f"], float).ravel()
+    tR = np.asarray(trace["tR"], float).ravel()
+    rock = np.asarray(trace["rockerOn"], bool).ravel()
+    stopped = opts is not None and str(opts.get("rocker", "any")) == "stopped"
+    fallback = not (opts is not None and not bool(opts.get("rockerFallback", True)))
+    st = Z["t"].to_numpy(float)
+    zv = Z["value"].to_numpy(float)
+    inR = Z["inRange"].to_numpy(bool)
+    ni = Z["nextInt"].to_numpy(float)
+    if t.size < 10:
+        return ["stimulus-locked response: no data"]
+    dt = float(np.median(np.diff(t)))
+    val = G["groupValue"].to_numpy(float)
+    amp = G["amplitude_mean"].to_numpy(float)
+    oka = cap & ~np.isnan(val) & ~np.isnan(amp)
+    if not oka.any():
+        return notes
+    mx = float(np.max(amp[oka]))
+    isTpl = inR & np.isin(zv, val[oka & (amp >= 0.95 * mx)])
+    if int(isTpl.sum()) < 3:
+        cv = np.sort(val[oka])[::-1]
+        isTpl = inR & np.isin(zv, cv[:3])
+    nx = ni[isTpl & ~np.isnan(ni)]
+    Tt = min(0.8, (float(np.min(nx)) if nx.size else math.inf) - 0.1)
+    if not Tt > 0.1:
+        return ["stimulus-locked response: stimulus intervals too short"]
+    tg = np.arange(mround(-0.05 / dt), mround(Tt / dt) + 1) * dt
+    K = tg >= 0
+    Bl = tg < 0
+    sortedR = bool(np.all(np.diff(tR) >= 0))
+    nRock = np.r_[0, np.cumsum(rock)] if sortedR else None
+
+    def in_data(a, b):
+        return t[0] <= a and t[-1] >= b
+
+    def get_y(s):
+        x = s + tg
+        y = np.interp(x, t, f)
+        y[(x < t[0]) | (x > t[-1])] = np.nan
+        return y
+
+    def make_at_rest(use_rest):
+        def at_rest(a, b):
+            if not use_rest:
+                return True
+            if sortedR:
+                i0 = int(np.searchsorted(tR, a, side="left"))
+                i1 = int(np.searchsorted(tR, b, side="right"))
+                return i1 > i0 and nRock[i1] - nRock[i0] == 0
+            k = (tR >= a) & (tR <= b)
+            return bool(k.any()) and not bool(rock[k].any())
+        return at_rest
+
+    useRest = stopped
+    for _pass in range(2):
+        at_rest = make_at_rest(useRest)
+        usable = np.zeros(st.size, bool)
+        for j in np.flatnonzero(inR):
+            usable[j] = in_data(st[j] - 0.05, st[j] + Tt) and at_rest(st[j] - 0.05, st[j] + Tt)
+        jT = np.flatnonzero(isTpl & usable)
+        Y = np.column_stack([get_y(st[j]) for j in jT]) if jT.size else np.zeros((tg.size, 0))
+        Y = Y[:, ~np.isnan(Y).any(axis=0)] if Y.size else Y
+        if Y.shape[1] >= 2 or not useRest or not fallback:
+            break
+        useRest = False
+        notes.append("stimulus-locked response: fewer than 2 template stimuli with the rocker at rest, all used")
+    if Y.shape[1] < 2:
+        notes.append("stimulus-locked response: no template")
+        return notes
+    Y = Y - Y[Bl, :].mean(axis=0)
+    m = Y.mean(axis=1)
+    mm = float(m[K] @ m[K])
+    if mm <= 0:
+        return notes
+
+    def proj(y):
+        return float((y[K] - np.mean(y[Bl])) @ m[K]) / mm
+
+    gv = np.unique(val[~np.isnan(val)])
+    resp = np.full(gv.size, np.nan)
+    for q in range(gv.size):
+        a = np.array([proj(get_y(st[j])) for j in np.flatnonzero(usable & (zv == gv[q]))], float)
+        a = a[~np.isnan(a)]
+        if a.size:
+            resp[q] = 100 * float(np.median(a))
+    R["_stgroups"] = {float(x): float(r) for x, r in zip(gv, resp)}
+    pA = []
+    for j in np.flatnonzero(inR):
+        if j < 1 or not inR[j - 1]:
+            continue
+        ps = (st[j - 1] + st[j]) / 2
+        if ps - 0.05 >= st[j - 1] + Tt and ps + Tt <= st[j] and in_data(ps - 0.05, ps + Tt) and \
+                at_rest(ps - 0.05, ps + Tt):
+            pA.append(proj(get_y(ps)))
+    pA = np.array(pA, float)
+    pA = pA[~np.isnan(pA)]
+    if pA.size < 10:
+        notes.append("stimulus-locked response: fewer than 10 pseudo-stimuli, no detection limit")
+        return notes
+    med = float(np.median(pA))
+    noise = 100 * max(_prctile(pA, 99), med + 4 * 1.4826 * float(np.median(np.abs(pA - med))))
+    R["minDetectableResponse_pct"] = noise
+    with np.errstate(invalid="ignore"):
+        det = resp > noise
+    k = np.flatnonzero(det & np.r_[det[1:], True])
+    if noise >= 25:
+        notes.append("stimulus-locked response: detection limit %d %%, no reliable contraction" % mround(noise))
+    elif k.size:
+        R["stimThresholdMinResponse_mA"] = float(gv[k[0]])
+    return notes
 
 
 def _s2_results(R, Z, trace, opts):
@@ -421,6 +569,13 @@ def _s2_results(R, Z, trace, opts):
     R["refPeriodNoPeak_ms"], R["refPeriodNoPeakStep_ms"] = _transition(ciU, 100 * fracSep, 50, "no peak", notes)
     R["refPeriodNoResponse_ms"], R["refPeriodNoResponseStep_ms"] = _transition(ciU, medResp, noise, "no response",
                                                                                notes)
+    # response below 10 % of the S1 amplitude (responseLevel of GetRefractoryPeriod, 2026-11-02); not with a noise
+    # level >= 10 %
+    if not math.isnan(noise) and noise >= 10:
+        notes.append("response < 10 %: noise level >= 10 %, not determined")
+    else:
+        R["refPeriodResponse_ms"], R["refPeriodResponseStep_ms"] = _transition(ciU, medResp, 10, "response < 10 %",
+                                                                               notes)
     # as GetRefractoryPeriod (MyoDish exports, 2026-10-10): the interval before the first one (from long to short) at
     # which not every S2 had a separate peak
     kA = np.flatnonzero(fracSep < 1)
@@ -434,7 +589,8 @@ def _s2_results(R, Z, trace, opts):
         notes.append("all captured: not every S2 with a separate peak already at the longest interval")
     if not math.isnan(noise) and noise >= 50:
         for c in ("refPeriodNoPeak_ms", "refPeriodNoPeakStep_ms", "refPeriodNoResponse_ms",
-                  "refPeriodNoResponseStep_ms", "refPeriodAllCaptured_ms"):
+                  "refPeriodNoResponseStep_ms", "refPeriodAllCaptured_ms", "refPeriodResponse_ms",
+                  "refPeriodResponseStep_ms"):
             R[c] = math.nan
         notes = [f"noise level {mround(noise)} %: no reliable stimulus-locked S1 contraction - no estimates"]
     return notes

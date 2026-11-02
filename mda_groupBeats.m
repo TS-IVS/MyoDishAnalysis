@@ -72,7 +72,12 @@ function [B, G, Z, notes] = mda_groupBeats(H, B, C, range, by, opts, steadyN)
 %          e.g. the last one of the file, left out, see mda_readMdd) and amplitude_pctOfRef
 %          (mean amplitude in % of the group 'S1' / 'steady'; pacingFrequency: in % of the captured 0.5-Hz group, i.e.
 %          the force-frequency relationship of every frequency step, as mda_protocolResults, 2026-11-02; NaN for the
-%          other quantities). stimFrequency of a group = 1 / median interval from the previous stimulus.
+%          other quantities), amplitude_reference (the reference amplitude, uN; post-rest groups: mean of the
+%          references of the pauses; 2026-11-02), stimResponse_pct (current groups: median stimulus-locked response
+%          in % of the template, filled by MyoDishAnalysis from mda_protocolResults, 2026-11-02) and alternansRatio
+%          (pacingFrequency: mean over the pairs of successive stimuli of 1 - smaller / larger response, 0 = equal
+%          beats, 0.5 = every second beat half as large, 1 = 2:1; as GetFFRdata, 2026-11-02; NaN otherwise).
+%          stimFrequency of a group = 1 / median interval from the previous stimulus.
 %          amplitude_CV (population SD / mean of the included amplitudes, from mda_summarize) and irregular
 %          (amplitude_CV > opts.irregularCV, 0.15; NaN with < 2 contractions). pauseLength, post-rest groups
 %          (2026-10-10): amplitude_pctOfRef = mean of the amplitudes in % of the reference of each pause (option
@@ -86,7 +91,7 @@ function [B, G, Z, notes] = mda_groupBeats(H, B, C, range, by, opts, steadyN)
 %
 % TS 2026-10-07 (S2interval: groups 'other', 'pre-S2'; pauseLength: one group per pause, 'after rest', 'other';
 % uncertain contractions 2026-10-09; extra pulses, tolerances frequencyResolution / pauseTolerance, FFR steady state,
-% PRP reference per pause, irregular groups 2026-10-10; FFR reference 0.5 Hz 2026-11-02)
+% PRP reference per pause, irregular groups 2026-10-10; FFR reference 0.5 Hz, alternans, reference column 2026-11-02)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -295,6 +300,7 @@ end
 
 % ------------------------------------------------------------------ FFR: steady state per frequency (2026-10-10)
 selStep = containers.Map('KeyType', 'char', 'ValueType', 'double');
+selRun = containers.Map('KeyType', 'char', 'ValueType', 'double');   %FFR: run summarized per group (alternans, 2026-11-02)
 if strcmpi(by, 'pacingFrequency') && steadyN > 0 && height(B) > 0 && nS > 0
     eligible = ~isnan(B.amplitude);
     if strcmp(opts.beats, 'stimulated'), eligible = eligible & strcmp(B.beatType, 'stimulated'); end
@@ -345,6 +351,7 @@ if strcmpi(by, 'pacingFrequency') && steadyN > 0 && height(B) > 0 && nS > 0
         B.included(rowsG) = false;
         B.included(iu) = true;
         selStep(key{1}) = step(find(runId == rSel, 1));
+        selRun(key{1}) = rSel;
     end
     if ~isempty(fb)
         notes{end+1} = sprintf('no contraction with the rocker at rest at %s: contractions with the rocker moving used', ...
@@ -412,8 +419,9 @@ for q = 1:numel(keys)
     if ~any(js), T.stimFrequency = nan; end
     capt = nan; reach = nan;
     if any(js), capt = 100 * mean(captured(js)); reach = 100 * mean(reached(js), 'omitnan'); end   %NaN: unknown
-    T = addvars(T, capt, reach, nan, nan, 'After', 'missedBeats_percent', ...
-        'NewVariableNames', {'capture_percent', 'currentReached_percent', 'S2response_pct', 'separatePeak_percent'});   %S2 groups: filled by MyoDishAnalysis (2026-10-21)
+    T = addvars(T, capt, reach, nan, nan, nan, 'After', 'missedBeats_percent', ...
+        'NewVariableNames', {'capture_percent', 'currentReached_percent', 'S2response_pct', 'separatePeak_percent', ...
+        'stimResponse_pct'});   %S2 / current groups: filled by MyoDishAnalysis (2026-10-21, 2026-11-02)
     T = [table(keys(q), kv(q), roleOrder(kr(q)), ks(q), {by}, 'VariableNames', {'group','groupValue','groupRole','groupStep','groupBy'}), T]; %#ok<AGROW>
     parts{q} = T;
 end
@@ -437,10 +445,46 @@ elseif strcmpi(by, 'pacingFrequency')               %FFR: % of the captured 0.5-
         ref = G.amplitude_mean(r(i));
     end
 end
-G = addvars(G, 100 * G.amplitude_mean / ref, 'After', 'amplitude_SD', 'NewVariableNames', 'amplitude_pctOfRef');
+G = addvars(G, 100 * G.amplitude_mean / ref, repmat(ref, height(G), 1), 'After', 'amplitude_SD', ...
+    'NewVariableNames', {'amplitude_pctOfRef', 'amplitude_reference'});   %reference amplitude (uN), 2026-11-02
 irregular = double(G.amplitude_CV > opts.irregularCV);
 irregular(isnan(G.amplitude_CV)) = nan;
 G = addvars(G, irregular, 'After', 'amplitude_CV', 'NewVariableNames', 'irregular');
+% FFR: alternans ratio of every frequency (2026-11-02, as GetFFRdata): per pair of successive stimuli of the group
+% 1 - smaller / larger response (amplitude of the stimulated contraction, 0 without one), mean over the pairs. Stimuli
+% of the summarized run (steady state) or of the range; with rocker 'stopped' only pairs whose contractions are at
+% rest (none: all pairs, rockerFallback); pairs without any contraction left out; NaN with fewer than 2 pairs
+alt = nan(height(G), 1);
+if strcmpi(by, 'pacingFrequency') && height(B) > 0 && nS > 1
+    cOfA = zeros(nS, 1);
+    okA = has & strcmp(B.beatType, 'stimulated') & ~isnan(B.amplitude);
+    cOfA(k(okA)) = find(okA);
+    for q = 1:height(G)
+        if isnan(G.groupValue(q)), continue; end
+        js = find(inR & strcmp(lbl, G.group{q}));
+        if isKey(selRun, G.group{q}), js = js(runId(js) == selRun(G.group{q})); end
+        jp = js(ismember(js + 1, js));               %first stimulus of every pair of successive stimuli
+        if isempty(jp), continue; end
+        c1 = cOfA(jp); c2 = cOfA(jp + 1);
+        a1 = zeros(size(jp)); a2 = a1; mv = false(size(jp));
+        a1(c1 > 0) = B.amplitude(c1(c1 > 0)); a2(c2 > 0) = B.amplitude(c2(c2 > 0));
+        mv(c1 > 0) = B.rockerMoving(c1(c1 > 0)); mv(c2 > 0) = mv(c2 > 0) | B.rockerMoving(c2(c2 > 0));
+        hasC = c1 > 0 | c2 > 0;
+        switch opts.rocker
+            case 'stopped'
+                use = hasC & ~mv;
+                if ~any(use) && opts.rockerFallback, use = hasC; end
+            case 'moving'
+                use = hasC & mv;
+            otherwise
+                use = hasC;
+        end
+        aMax = max(a1(use), a2(use)); aMin = min(a1(use), a2(use));
+        okP = aMax > 0;
+        if nnz(okP) >= 2, alt(q) = mean(1 - aMin(okP) ./ aMax(okP)); end
+    end
+end
+G = addvars(G, alt, 'After', 'irregular', 'NewVariableNames', 'alternansRatio');
 if selStep.Count > 0                               %FFR: number of the run summarized
     for q = 1:height(G)
         if isKey(selStep, G.group{q}), G.groupStep(q) = selStep(G.group{q}); end
@@ -489,6 +533,7 @@ if strcmpi(by, 'pauseLength') && ~strcmp(opts.prpReference, 'steady') && height(
     for q = find(strcmp(G.groupRole, 'postRest'))'
         rq = post(strcmp(B.group(post), G.group{q}));
         G.amplitude_pctOfRef(q) = 100 * mean(B.amplitude(rq) ./ refOf(rq), 'omitnan');
+        G.amplitude_reference(q) = mean(refOf(rq), 'omitnan');   %2026-11-02
     end
 end
 end

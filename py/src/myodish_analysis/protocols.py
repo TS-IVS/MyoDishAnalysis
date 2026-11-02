@@ -53,7 +53,8 @@ steady_n (FFR protocols: opts.steadyStateBeats): steady state per frequency (the
 longest run, within it of the longest sequence of consecutive captured stimuli with captured neighbours; rocker at rest
 if any, see rockerFallback); pauseLength: reference of each pause (prpReference); amplitude_CV, irregular;
 return_notes=True: also the notes (2026-10-10). pacingFrequency: amplitude_pctOfRef = % of the captured 0.5-Hz group
-(force-frequency relationship of every step, as protocol_results; 2026-11-02).
+(force-frequency relationship of every step, as protocol_results; 2026-11-02); amplitude_reference (uN), alternansRatio
+(pacingFrequency) and stimResponse_pct (current groups, fill_st_group_columns) as in mda_groupBeats.m (2026-11-02).
 
 TS 2026-10-07 (port of mda_protocols.m and mda_groupBeats.m; schedule files 2026-10-07; uncertain contractions
 2026-10-09; extra pulses, frequency / pause tolerances, FFR steady state, PRP reference, irregular groups 2026-10-10;
@@ -704,6 +705,7 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
 
     # FFR: steady state per frequency (2026-10-10)
     selStep = {}
+    selRun = {}  # FFR: run summarized per group (alternans, 2026-11-02)
     if byl == "pacingfrequency" and steadyN > 0 and nB > 0 and nS > 0:
         amp = B["amplitude"].to_numpy(float)
         eligible = ~np.isnan(amp)
@@ -755,6 +757,7 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
             inc[rowsG] = False
             inc[iu] = True
             selStep[key] = float(step[np.flatnonzero(runId == rSel)[0]])
+            selRun[key] = int(rSel)
         B["included"] = inc
         if fb:
             notes.append("no contraction with the rocker at rest at %s: contractions with the rocker moving used"
@@ -836,6 +839,7 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
         T.insert(pos + 1, "currentReached_percent", reach)
         T.insert(pos + 2, "S2response_pct", np.nan)  # S2 groups: filled from the S2 response (2026-10-21)
         T.insert(pos + 3, "separatePeak_percent", np.nan)
+        T.insert(pos + 4, "stimResponse_pct", np.nan)  # current groups: filled from protocol_results (2026-11-02)
         T.insert(0, "groupBy", by)
         T.insert(0, "groupStep", float(ks[q]))
         T.insert(0, "groupRole", roleOrder[kr[q]])
@@ -865,10 +869,54 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
         if r.size:
             ref = float(G["amplitude_mean"].iloc[r[np.argmin(np.abs(gv[r] - 0.5))]])
     G.insert(list(G.columns).index("amplitude_SD") + 1, "amplitude_pctOfRef", 100 * G["amplitude_mean"] / ref)
+    G.insert(list(G.columns).index("amplitude_pctOfRef") + 1, "amplitude_reference", ref)  # uN, 2026-11-02
     cv = G["amplitude_CV"].to_numpy(float)
     with np.errstate(invalid="ignore"):
         irregular = np.where(np.isnan(cv), np.nan, (cv > irrCV).astype(float))
     G.insert(list(G.columns).index("amplitude_CV") + 1, "irregular", irregular)
+    # FFR: alternans ratio of every frequency (2026-11-02, as GetFFRdata): per pair of successive stimuli of the group
+    # 1 - smaller / larger response (amplitude of the stimulated contraction, 0 without one), mean over the pairs.
+    # Stimuli of the summarized run (steady state) or of the range; with rocker 'stopped' only pairs whose contractions
+    # are at rest (none: all pairs, rockerFallback); pairs without any contraction left out; NaN with < 2 pairs
+    alt = np.full(len(G), np.nan)
+    if byl == "pacingfrequency" and nB > 0 and nS > 1:
+        ampA = B["amplitude"].to_numpy(float)
+        movA = B["rockerMoving"].to_numpy(bool)
+        cOfA = np.full(nS, -1)
+        okA = has & (B["beatType"].to_numpy() == "stimulated") & ~np.isnan(ampA)
+        for i in np.flatnonzero(okA):
+            cOfA[k[i]] = i
+        gvA = G["groupValue"].to_numpy(float)
+        for q in range(len(G)):
+            if math.isnan(gvA[q]):
+                continue
+            key = G["group"].iloc[q]
+            js = np.flatnonzero(inR & (lbl == key))
+            if key in selRun:
+                js = js[runId[js] == selRun[key]]
+            jp = js[np.isin(js + 1, js)]  # first stimulus of every pair of successive stimuli
+            if not jp.size:
+                continue
+            c1, c2 = cOfA[jp], cOfA[jp + 1]
+            a1 = np.where(c1 >= 0, ampA[np.maximum(c1, 0)], 0.0)
+            a2 = np.where(c2 >= 0, ampA[np.maximum(c2, 0)], 0.0)
+            mv = (np.where(c1 >= 0, movA[np.maximum(c1, 0)], False)
+                  | np.where(c2 >= 0, movA[np.maximum(c2, 0)], False))
+            hasP = (c1 >= 0) | (c2 >= 0)
+            if rockerSel == "stopped":
+                use = hasP & ~mv
+                if not use.any() and ffrFallback:
+                    use = hasP
+            elif rockerSel == "moving":
+                use = hasP & mv
+            else:
+                use = hasP
+            aMax = np.maximum(a1[use], a2[use])
+            aMin = np.minimum(a1[use], a2[use])
+            okP = aMax > 0
+            if int(okP.sum()) >= 2:
+                alt[q] = float(np.mean(1 - aMin[okP] / aMax[okP]))
+    G.insert(list(G.columns).index("irregular") + 1, "alternansRatio", alt)
     if selStep:  # FFR: number of the run summarized
         G["groupStep"] = [selStep.get(g, x) for g, x in zip(G["group"], G["groupStep"].to_numpy(float))]
     if byl == "pacingfrequency" and steadyN > 0 and minGB > 0:
@@ -913,12 +961,17 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
                 refOf[post] = float(np.mean(amp[lst]))
         grp = B["group"].to_numpy()
         pct = G["amplitude_pctOfRef"].to_numpy(float).copy()
+        refC = G["amplitude_reference"].to_numpy(float).copy()
         for q in np.flatnonzero(G["groupRole"].to_numpy() == "postRest"):
             rq = post[grp[post] == G["group"].iloc[q]]
             x = amp[rq] / refOf[rq]
             x = x[~np.isnan(x)]
             pct[q] = 100 * float(np.mean(x)) if x.size else math.nan
+            y = refOf[rq]
+            y = y[~np.isnan(y)]
+            refC[q] = float(np.mean(y)) if y.size else math.nan  # 2026-11-02
         G["amplitude_pctOfRef"] = pct
+        G["amplitude_reference"] = refC
     return _out(B, G)
 
 
@@ -936,6 +989,20 @@ def fill_s2_group_columns(T, s2groups):
     return T
 
 
+def fill_st_group_columns(T, stgroups):
+    """column stimResponse_pct of the current groups of T from protocol_results ('_stgroups': group value (mA) ->
+    median stimulus-locked response in % of the template), 2026-11-02"""
+    if not stgroups or "groupValue" not in T.columns:
+        return T
+    T = T.copy()
+    gv = T["groupValue"].to_numpy(float)
+    col = T.columns.get_loc("stimResponse_pct")
+    for i in range(len(T)):
+        if not math.isnan(gv[i]) and float(gv[i]) in stgroups:
+            T.iloc[i, col] = stgroups[float(gv[i])]
+    return T
+
+
 def add_empty_group_columns(B, T):
     """the group columns for a range without grouping (group 'all'), so that the tables can be concatenated."""
     B = B.copy()
@@ -949,8 +1016,11 @@ def add_empty_group_columns(B, T):
     T.insert(pos + 1, "currentReached_percent", np.nan)
     T.insert(pos + 2, "S2response_pct", np.nan)
     T.insert(pos + 3, "separatePeak_percent", np.nan)
+    T.insert(pos + 4, "stimResponse_pct", np.nan)
     T.insert(list(T.columns).index("amplitude_SD") + 1, "amplitude_pctOfRef", np.nan)
+    T.insert(list(T.columns).index("amplitude_pctOfRef") + 1, "amplitude_reference", np.nan)
     T.insert(list(T.columns).index("amplitude_CV") + 1, "irregular", np.nan)
+    T.insert(list(T.columns).index("irregular") + 1, "alternansRatio", np.nan)
     T.insert(0, "groupBy", "none")
     T.insert(0, "groupStep", np.nan)
     T.insert(0, "groupRole", "")

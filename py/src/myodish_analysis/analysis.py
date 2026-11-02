@@ -73,7 +73,7 @@ from .analyze_channel import analyze_channel
 from .labels import labels as make_labels
 from .options import options as make_options
 from .protocol_results import RESULT_COLUMNS, protocol_results
-from .protocols import add_empty_group_columns, fill_s2_group_columns, find_protocols, group_beats
+from .protocols import add_empty_group_columns, fill_s2_group_columns, fill_st_group_columns, find_protocols, group_beats
 from .read_mdd import read_mdd
 from .report import analysis_report, report_path
 from .rocker_filter import rocker_filter
@@ -301,7 +301,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
                     gb = groupByR[r].lower()
                     if gb in ("pacingfrequency", "stimcurrent", "s2interval", "pauselength"):
                         trace = None
-                        if gb == "s2interval":  # S2 response: traces of the whole range
+                        if gb in ("s2interval", "stimcurrent"):  # S2 / stimulus-locked response: traces (ST 2026-11-02)
                             if Sres is None:
                                 Sres = read_mdd(H, max(0.0, ranges[r, 0] - 2), ranges[r, 1] + 2, opts)
                             optsC = Struct(opts)
@@ -311,6 +311,7 @@ def myodish_analysis(mdd_file, channels=None, from_s=0, to_s=math.inf, *, output
                             trace = dict(t=Cx.t, f=Cx.f, tR=Sres.t, rockerOn=Sres.rockerOn)
                         Rr = protocol_results(groupByR[r], T, Z, trace, opts)
                         T = fill_s2_group_columns(T, Rr.pop("_s2groups", None))
+                        T = fill_st_group_columns(T, Rr.pop("_stgroups", None))
                         pNote = str(protocols["note"].iloc[r]) if protocols is not None and "note" in protocols else ""
                         resRows.append(dict({"range": labels[r], "channel": ch, "from": float(ranges[r, 0]),
                                              "to": float(ranges[r, 1]), "groupBy": groupByR[r]}, **Rr,

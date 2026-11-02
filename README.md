@@ -888,8 +888,14 @@ P = mda_protocols(file)                                              % protocols
   `S2response_pct` and `separatePeak_percent` (S2 groups: median S2 response in % of the S1 amplitude and % of the
   S2 with a separate peak, from the template subtraction of the RP results below; an S2 response too small for the
   detection threshold still shows here), `amplitude_pctOfRef` (mean amplitude in % of the group `S1` / `steady`; FFR (`pacingFrequency`): in % of the captured 0.5-Hz group, i.e. the force-frequency relationship of every frequency step, since 2026-11-02; post-rest groups: see PRP reference below),
+  `amplitude_reference` (the reference amplitude in µN; post-rest groups: mean of the references of the pauses;
+  2026-11-02), `stimResponse_pct` (current groups: median stimulus-locked response in % of the template, see
+  `stimThresholdMinResponse_mA` below; 2026-11-02),
   `amplitude_CV` (coefficient of variation of the amplitudes, population SD / mean), `irregular` (1 if
-  `amplitude_CV` > `irregularCV`, 0.15: conduction block, alternans or extra beats) and mean, SD and n of all
+  `amplitude_CV` > `irregularCV`, 0.15: conduction block, alternans or extra beats), `alternansRatio` (FFR groups:
+  mean over the pairs of successive stimuli of 1 − smaller / larger response, 0 without a contraction; 0 = equal
+  beats, 0.5 = every second beat half as large, 1 = 2:1; stimuli of the summarized run, pairs with the rocker at rest;
+  as GetFFRdata, 2026-11-02) and mean, SD and n of all
   parameters (e.g. `diastolicForce_mean`, `TTR90_mean`, `dFdtMax_mean`) and of the stimulus timing `stimToOnset`,
   `stimToRise50`, `stimToPeak` (since 2026-11-02): every beat parameter per step of the tested quantity (FFR: frequency,
   PRP: pause, ST: current, RP: S2 interval). FFR frequencies summarized from fewer than `minGroupBeats` (5) included contractions are listed in the
@@ -903,10 +909,15 @@ P = mda_protocols(file)                                              % protocols
   | protocol | columns | definition |
   |---|---|---|
   | FFR | `maxCapturedFrequency_Hz` | highest captured pacing frequency |
+  | | `maxStableFrequency_Hz` | highest captured pacing frequency with `alternansRatio` < 0.5 (capturedF of GetFFRdata; 2026-11-02) |
+  | | `frequencyOfMaxAmplitude_Hz`, `FFRmax_pct` | captured frequency with the largest mean amplitude and that amplitude in % of 0.5 Hz (positive / negative FFR; 2026-11-02) |
   | | `FFR_0p2Hz_pct`, `FFR_0p75Hz_pct`, `FFR_1Hz_pct`, `FFR_1p5Hz_pct`, `FFR_2Hz_pct`, … `FFR_10Hz_pct`, `amplitude_0p5Hz_uN` | mean amplitude at 0.2, 0.75, 1 Hz and 1.5 … 10 Hz (0.5-Hz steps) in % of 0.5 Hz (captured groups; NaN: step not run or not captured; group frequencies rounded to 0.1 Hz, below 1 Hz to 0.05 Hz, before 2026-10-10 ± 5 %; before 2026-11-02 only 1 / 2 / 3 Hz). Captured steps between or above these frequencies: in % of 0.5 Hz in `resultNote` (*FFR of further steps: 1.2 Hz 90.0 %*). Every step with all parameters: sheet `protocols` |
   | ST | `stimThreshold10_mA`, `…50`, `…95`, `…99` | lowest captured current whose mean amplitude is ≥ 10 / 50 / 95 / 99 % of the largest one (thresh10 … thresh99 of GetStimThreshold); `captureThreshold_mA` = lowest captured current, `maxAmplitude_uN` |
+  | | `stimThresholdMinResponse_mA`, `minDetectableResponse_pct` | lowest current whose stimulus-locked response (projection onto the mean contraction of the currents with ≥ 95 % of the largest amplitude; `stimResponse_pct` of the groups) exceeds the detection limit (99th percentile / median + 4 robust SD of the projection at pseudo-stimuli between the stimuli), as does the next higher current; detects partial responses below the capture criterion; NaN with a detection limit ≥ 25 % (threshMinResponse / minDetectableResponse of GetStimThreshold; 2026-11-02) |
   | RP | `refPeriodNoPeak_ms` | S2 interval below which there is no separate contraction peak (< 50 % of the S2 with a peak) |
   | | `refPeriodNoResponse_ms` | S2 interval below which there is no response at all (median S2 response < noise level) |
+  | | `refPeriodResponse_ms` | S2 interval below which the median S2 response is < 10 % of the S1 amplitude (refPeriodResponse of GetRefractoryPeriod; NaN with a noise level ≥ 10 %; 2026-11-02) |
+  | | `PESPmax_pct`, `PESPmaxS2_ms` | post-extrasystolic potentiation: largest `amplitude_pctOfRef` of the post-S2 groups (contraction after the S2 in % of the S1 amplitude; with rocker `stopped` only contractions at rest, so NaN when the rocker restarts right after the S2) and its S2 interval (2026-11-02) |
   | | `refPeriodAllCaptured_ms` | shortest S2 interval above which every S2 interval gives a separate contraction peak at every S2 (from long to short: the S2 interval before the first one with a missing peak; all with a peak: the shortest analysed interval, note; 2026-10-10). Definition as the refractory period of the MyoDish export, but more sensitive to a single S2 without a separate peak: in 323 recordings of human slices `refPeriodNoPeak_ms` agreed better with the export (within 10 %: 95 vs 85 %, bias −1 vs +13 ms) |
   | | `…Step_ms`, `S2noiseLevel_pct`, `amplitudeS1_uN`, `nS2`, `nTemplateBeats` | distance of the two S2 intervals around the transition (uncertainty ≈ ± step/2), noise level, ... |
   | | `S2shortest_ms`, `S2longest_ms` | shortest / longest analysed S2 interval: a transition that is *not reached* (NaN, note) lies below `S2shortest_ms` (e.g. a slice that still gives a separate S2 contraction at the shortest S2 interval of the protocol), one *already at the longest interval* above `S2longest_ms` |

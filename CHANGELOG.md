@@ -93,6 +93,19 @@ MATLAB and Python versions have the same version number and give the same result
     frequencies in `resultNote` (*FFR of further steps: 1.2 Hz 90.0 %*). The FFR columns of `protocolResults` are in
     frequency order, so the later columns moved.
   - Tests: `mda_test` (grouping test), `test_mda.py`.
+- **Protocols: values of the lab's former protocol scripts** (GetFFRdata, GetStimThreshold, GetRefractoryPeriod,
+  GetPostRestPotentiation; 2026-11-02; compared on the example recordings, same results where defined alike).
+  - FFR: `alternansRatio` per frequency (group summary; mean over the pairs of successive stimuli of 1 − smaller /
+    larger response, 2:1 = 1), protocol results `maxStableFrequency_Hz` (highest captured frequency with alternans
+    ratio < 0.5), `frequencyOfMaxAmplitude_Hz` and `FFRmax_pct`.
+  - ST: `stimThresholdMinResponse_mA` and `minDetectableResponse_pct` (stimulus-locked response by projection onto the
+    mean contraction, detection limit from pseudo-stimuli; detects partial responses), `stimResponse_pct` per current.
+    The ranges of threshold protocols are now read a second time for the traces (as RP).
+  - RP: `refPeriodResponse_ms` (+ `Step`; median S2 response < 10 % of S1) and `PESPmax_pct` / `PESPmaxS2_ms`
+    (post-extrasystolic potentiation from the post-S2 groups).
+  - All protocols: `amplitude_reference` (the reference amplitude of `amplitude_pctOfRef`, per pause for PRP).
+  - The new group columns are in every summary row of a protocol run (NaN where not applicable); the protocol results
+    have 10 more columns. Tests: `mda_test` (protocol selection test), `test_mda.py`.
 - **Electrode test of the control software (2.2.2, Tools > Electrode Test) left out of the analysis** (2026-10-27).
   The test sends pulses of 1–200 mA to the tested channels while the recording runs (no sequence or pulse lines in
   the log, "current not reached" on purpose above the limit). `mda_readMdd` / `read_mdd` read its structured

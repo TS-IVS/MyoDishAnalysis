@@ -379,12 +379,17 @@ def test_protocol_results_examples():
     r = res("example2_rabbitVentricle.mdd", 5, protocol="ST", rocker="any")
     assert r["captureThreshold_mA"] <= r["stimThreshold10_mA"] <= r["stimThreshold50_mA"] <= r["stimThreshold95_mA"] \
         <= r["stimThreshold99_mA"]
+    # minimal detectable response (2026-11-02; GetStimThreshold: 10 mA, detection limit 3.2 %)
+    assert r["stimThresholdMinResponse_mA"] == 10 and 1 < r["minDetectableResponse_pct"] < 5
     r = res("example7_pigVentricle.mdd", 1, protocol="PRP")
     assert (r["PRP15_pause_s"], r["PRP30_pause_s"], r["PRP60_pause_s"]) == (15, 30, 60)
     assert (r["PRP1_pause_s"], r["PRP7_pause_s"]) == (1, 60) and np.isnan(r["PRP8_pct"]) and r["variant"] == "pauses 1/2/4/8/15/30/60 s"
     assert 120 < r["PRP15_pct"] < 130 and np.isnan(r["FFR_1Hz_pct"])  # reference 'steady' (<= 1.0.0-beta.3): 115-125
     r = res("example8_rabbitVentricle_EP.mdd", 1, protocol="RP", rocker="any")
     assert r["S2shortest_ms"] < r["refPeriodNoPeak_ms"] < r["S2longest_ms"]
+    # 10 % response level and PESP (2026-11-02; GetRefractoryPeriod: refPeriodResponse 467 ms on the measured intervals)
+    assert r["refPeriodNoResponse_ms"] <= r["refPeriodResponse_ms"] < r["refPeriodNoPeak_ms"] and r["refPeriodResponseStep_ms"] == 30
+    assert 120 < r["PESPmax_pct"] < 130 and r["PESPmaxS2_ms"] == 490
 
 
 def _s1s2_recording(tmp_path, name, s2_ms, fs=400):
@@ -748,6 +753,13 @@ def test_protocol_selection(tmp_path):
     assert abs(g(S1, "PRP 1", "rest 20 s")["amplitude_pctOfRef"] - 100 * 2500 / 1090) < 1e-6
     assert abs(g(S2, "PRP 1", "rest 10 s")["amplitude_pctOfRef"] - 100 * 2000 / 1040) < 1e-6
     assert abs(g(S2, "PRP 1", "rest 20 s")["amplitude_pctOfRef"] - 100 * 2500 / 1040) < 1e-6
+    # 2026-11-02: alternans ratio (2 Hz 2:1 = 1, 1 Hz amplitudes +10 uN per pulse < 0.01), FFR maximum, highest
+    # frequency without alternans, reference amplitude of the PRP groups
+    assert not a2.empty and a2["alternansRatio"].iloc[0] == 1 and g(S1, "FFR 1", "1 Hz")["alternansRatio"] < 0.01
+    rF = I1["protocolResults"][I1["protocolResults"]["range"] == "FFR 1"].iloc[0]
+    assert rF["maxStableFrequency_Hz"] == 1 and rF["frequencyOfMaxAmplitude_Hz"] == 1
+    assert abs(g(S1, "PRP 1", "rest 10 s")["amplitude_reference"] - 1090) < 1e-6
+    assert abs(g(S2, "PRP 1", "rest 10 s")["amplitude_reference"] - 1040) < 1e-6 and abs(a["amplitude_reference"] - 1115) < 1e-6
 
 
 @pytest.mark.skipif(not os.path.isdir(EX), reason="example recordings not available")

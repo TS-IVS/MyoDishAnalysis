@@ -75,8 +75,9 @@ function [contractions, summary, info] = MyoDishAnalysis(mddFile, channels, from
 %                       of the protocol type (FFR: pacingFrequency, RP: S2interval, ST: stimCurrent, PRP:
 %                       pauseLength, PD: pulseDuration). The summary then has one row per range, channel and group
 %                       (columns group, groupValue, groupRole, groupStep, groupBy, capture_percent,
-%                       amplitude_pctOfRef (FFR: % of 0.5 Hz, 2026-11-02), amplitude_CV, irregular, mean / SD / n of
-%                       every parameter and of the stimulus timing, ...). FFR protocols (2026-10-10): each frequency
+%                       amplitude_pctOfRef (FFR: % of 0.5 Hz, 2026-11-02), amplitude_reference, amplitude_CV, irregular,
+%                       alternansRatio (FFR), stimResponse_pct (ST), mean / SD / n of every parameter and of the stimulus
+%                       timing, ...). FFR protocols (2026-10-10): each frequency
 %                       from its steady state (the last steadyStateBeats contractions of its longest run; rocker at
 %                       rest if there are such contractions, see rockerFallback); post-rest potentiation: reference
 %                       per pause (prpReference); see mda_groupBeats.
@@ -345,17 +346,22 @@ for r = 1:nR
                 gb = lower(groupByR{r});
                 if ismember(gb, {'pacingfrequency', 'stimcurrent', 's2interval', 'pauselength'})
                     trace = [];
-                    if strcmp(gb, 's2interval')            %S2 response: traces of the whole range
+                    if ismember(gb, {'s2interval', 'stimcurrent'})   %S2 / stimulus-locked response: traces of the range (ST 2026-11-02)
                         if isempty(Sres), Sres = mda_readMdd(H, max(0, ranges(r,1) - 2), ranges(r,2) + 2, opts); end
                         optsC = opts; optsC.zeroForce = zeroOfChannel(c); optsC.threshold = thrOfChannel(c);
                         [~, Cx] = mda_analyzeChannel(Sres, channels(c), ranges(r,:), optsC);
                         trace = struct('t', Cx.t, 'f', Cx.f, 'tR', Sres.t, 'rockerOn', Sres.rockerOn);
                     end
                     [Rr, G2] = mda_protocolResults(groupByR{r}, T, Z, trace, opts);
-                    if ~isempty(G2)                    %S2 groups: S2response_pct / separatePeak_percent (2026-10-21)
+                    if ~isempty(G2) && ismember('groupValue_ms', G2.Properties.VariableNames)   %S2 groups: S2response_pct / separatePeak_percent (2026-10-21)
                         for q = find(strcmp(T.groupRole, 'S2'))'
                             m = find(abs(G2.groupValue_ms - round(2000 * T.groupValue(q)) / 2) < 1e-9, 1);
                             if ~isempty(m), T.S2response_pct(q) = G2.S2response_pct(m); T.separatePeak_percent(q) = G2.separatePeak_percent(m); end
+                        end
+                    elseif ~isempty(G2)                %current groups: stimResponse_pct (2026-11-02)
+                        for q = 1:height(T)
+                            m = find(G2.groupValue == T.groupValue(q), 1);
+                            if ~isempty(m), T.stimResponse_pct(q) = G2.stimResponse_pct(m); end
                         end
                     end
                     pNote = {''};                      %note of the protocol (e.g. 'no end comment: end estimated ...')
@@ -372,10 +378,10 @@ for r = 1:nR
                 if grouping                            %same columns as the grouped ranges
                     B.group = repmat({'all'}, height(B), 1); B.groupValue = nan(height(B), 1); B.groupRole = repmat({''}, height(B), 1);
                     B.groupStep = nan(height(B), 1);
-                    T = addvars(T, nan, nan, nan, nan, 'After', 'missedBeats_percent', ...
-                        'NewVariableNames', {'capture_percent', 'currentReached_percent', 'S2response_pct', 'separatePeak_percent'});
-                    T = addvars(T, nan(height(T), 1), 'After', 'amplitude_SD', 'NewVariableNames', 'amplitude_pctOfRef');
-                    T = addvars(T, nan(height(T), 1), 'After', 'amplitude_CV', 'NewVariableNames', 'irregular');
+                    T = addvars(T, nan, nan, nan, nan, nan, 'After', 'missedBeats_percent', ...
+                        'NewVariableNames', {'capture_percent', 'currentReached_percent', 'S2response_pct', 'separatePeak_percent', 'stimResponse_pct'});
+                    T = addvars(T, nan(height(T), 1), nan(height(T), 1), 'After', 'amplitude_SD', 'NewVariableNames', {'amplitude_pctOfRef', 'amplitude_reference'});
+                    T = addvars(T, nan(height(T), 1), nan(height(T), 1), 'After', 'amplitude_CV', 'NewVariableNames', {'irregular', 'alternansRatio'});
                     T = [table({'all'}, nan, {''}, nan, {'none'}, 'VariableNames', {'group','groupValue','groupRole','groupStep','groupBy'}), T]; %#ok<AGROW>
                 end
             end

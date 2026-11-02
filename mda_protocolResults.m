@@ -6,8 +6,8 @@ function [R, G2] = mda_protocolResults(by, G, Z, trace, opts)
 %   by     grouping of the range ('pacingFrequency', 'stimCurrent', 'S2interval', 'pauseLength'; others: note only)
 %   G      group summary of the channel and range ([B, G, Z] = mda_groupBeats(...))
 %   Z      stimuli of the channel (third output of mda_groupBeats); needed for S2interval
-%   trace  S2interval: struct t, f (filtered force of the channel: mda_analyzeChannel C.t / C.f), tR, rockerOn (rocker
-%          state of the samples: mda_readMdd S.t / S.rockerOn); [] for the other quantities
+%   trace  S2interval, stimCurrent (2026-11-02): struct t, f (filtered force of the channel: mda_analyzeChannel C.t /
+%          C.f), tR, rockerOn (rocker state of the samples: mda_readMdd S.t / S.rockerOn); [] for the other quantities
 %   opts   options (rocker 'stopped': template and S2 windows only while the rocker is at rest)
 %
 %   R      one-row table, all columns (NaN where not applicable):
@@ -15,6 +15,11 @@ function [R, G2] = mda_protocolResults(by, G, Z, trace, opts)
 %   GetFFRdata / GetStimThreshold: at most 1 skipped stimulus per rocker stop).
 %   FFR (pacingFrequency)
 %     maxCapturedFrequency_Hz   highest captured pacing frequency
+%     maxStableFrequency_Hz     highest captured pacing frequency whose alternans ratio (alternansRatio of the group,
+%                               mda_groupBeats) is below 0.5 (NaN ratio: not checked; capturedF of GetFFRdata,
+%                               2026-11-02)
+%     frequencyOfMaxAmplitude_Hz, FFRmax_pct   captured frequency with the largest mean amplitude and that amplitude in
+%                               % of 0.5 Hz (2026-11-02)
 %     amplitude_0p5Hz_uN        mean amplitude at 0.5 Hz (captured group; groups: frequencies rounded to
 %                               opts.frequencyResolution, 0.1 Hz, below 1 Hz frequencyResolutionLow, 0.05 Hz, see
 %                               mda_groupBeats)
@@ -29,6 +34,12 @@ function [R, G2] = mda_protocolResults(by, G, Z, trace, opts)
 %     stimThreshold10_mA ... 99 lowest captured current with a mean amplitude >= 10 / 50 / 95 / 99 % of the largest
 %                               mean amplitude of the captured currents (thresh10 ... thresh99 of GetStimThreshold)
 %     maxAmplitude_uN           largest mean amplitude of the captured currents
+%     stimThresholdMinResponse_mA, minDetectableResponse_pct   (2026-11-02, GetStimThreshold threshMinResponse /
+%                               minDetectableResponse; needs trace) lowest current at which the stimulus-locked
+%                               response (projection onto the mean contraction of the currents with >= 95 % of the
+%                               largest amplitude; stimResponse_pct of the groups, G2) exceeds the detection limit (from
+%                               pseudo-stimuli between the stimuli), as at the next higher current; detects partial
+%                               responses below the capture criterion; NaN with a detection limit >= 25 %. See stResponse
 %   RP (S2interval): S2 response by subtraction of the scaled mean steady-state S1 contraction (GetRefractoryPeriod
 %     2026-10-06). Template = mean S1 contraction (S1 interval before and after, rocker at rest), scaled per S2 on
 %     S1 ... S2 + 20 ms. Response = maximum of the residual (30-ms mean) S2 + 30 ms ... min(S2 + 600 ms, S1 interval -
@@ -46,6 +57,8 @@ function [R, G2] = mda_protocolResults(by, G, Z, trace, opts)
 %     refPeriodNoPeak_ms        S2 interval below which there is no separate contraction peak (fraction of S2 with
 %                               a separate peak < 50 %)
 %     refPeriodNoResponse_ms    S2 interval below which there is no response at all (median response < noise level)
+%     refPeriodResponse_ms      S2 interval below which the median response is < 10 % of the S1 amplitude
+%                               (refPeriodResponse of GetRefractoryPeriod; NaN with a noise level >= 10 %; 2026-11-02)
 %     ...Step_ms                distance of the two intervals around the transition (uncertainty ~ +-Step/2)
 %     refPeriodAllCaptured_ms   (2026-10-10) from long to short S2 intervals, the interval before the first one at
 %                               which not every S2 had a separate peak (definition above); every S2 with a separate
@@ -59,6 +72,9 @@ function [R, G2] = mda_protocolResults(by, G, Z, trace, opts)
 %     S2shortest_ms, S2longest_ms   shortest / longest analysed S2 interval (NaN with 'not reached': the transition
 %                               is below S2shortest_ms; 'already at the longest interval': above S2longest_ms)
 %     S2noiseLevel_pct, amplitudeS1_uN, nS2, nTemplateBeats
+%     PESPmax_pct, PESPmaxS2_ms post-extrasystolic potentiation: largest amplitude_pctOfRef of the post-S2 groups (the
+%                               contraction after the S2 in % of the S1 amplitude; included contractions, i.e. with
+%                               rocker 'stopped' only at rest) and its S2 interval (2026-11-02)
 %   PRP (pauseLength)
 %     PRP15_pct, PRP30_pct, PRP60_pct   amplitude in % of the reference (option prpReference, default: median of the
 %                               last 6 contractions before the pause) after a pause of 15 / 30 / 60 s
@@ -68,11 +84,12 @@ function [R, G2] = mda_protocolResults(by, G, Z, trace, opts)
 %   resultNote
 %   G2 (S2interval, 2026-10-21): table groupValue_ms, S2response_pct (median S2 response of the group, % of the S1
 %   amplitude), separatePeak_percent (% of its S2 with a separate peak) for the columns of the group summary;
-%   otherwise empty
+%   stimCurrent with trace (2026-11-02): table groupValue, stimResponse_pct; otherwise empty
 %
 % TS 2026-10-07 (tolerances frequencyResolution / pauseTolerance 2026-10-10: FFR groups at 0.1 Hz (below 1 Hz
 % 0.05 Hz), before +-5 %;
-% pauses +-10 %, before the nearest pause within +-50 %; refPeriodAllCaptured 2026-10-10; FFR of every step 2026-11-02)
+% pauses +-10 %, before the nearest pause within +-50 %; refPeriodAllCaptured 2026-10-10; FFR of every step, alternans,
+% FFR maximum, ST minimal response, RP 10 % level and PESP 2026-11-02)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -112,6 +129,19 @@ switch lower(char(by))
             inCol = inCol | abs(val - fc(q)) <= res / 2 + 1e-9;
         end
         inCol = inCol | abs(val - 0.5) <= fResLow / 2 + 1e-9;
+        % FFR maximum and highest captured frequency without alternans (2026-11-02; capturedF of GetFFRdata: alternans
+        % ratio below 0.5; NaN ratio, fewer than 2 pairs: not checked)
+        oka = ok & ~isnan(amp);
+        if any(oka)
+            vv = val(oka); aa = amp(oka);
+            [mx, i] = max(aa);
+            R.frequencyOfMaxAmplitude_Hz = vv(i);
+            R.FFRmax_pct = 100 * mx / a05;
+        end
+        if ismember('alternansRatio', G.Properties.VariableNames)
+            okS = ok & ~(G.alternansRatio >= 0.5);
+            if any(okS), R.maxStableFrequency_Hz = max(val(okS)); end
+        end
         if isnan(a05)
             notes{end+1} = 'no captured 0.5 Hz group';
         elseif any(ok & ~inCol)
@@ -133,6 +163,10 @@ switch lower(char(by))
             end
         else
             notes{end+1} = 'no captured current with included contractions';
+        end
+        if ~isempty(Z) && ~isempty(trace)               %minimal detectable response (2026-11-02)
+            [R, n3, G2] = stResponse(R, G, Z, trace, opts, cap);
+            notes = [notes, n3];
         end
     case 'pauselength'
         st = find(strcmp(role, 'steady'), 1);
@@ -170,6 +204,13 @@ switch lower(char(by))
             [R, n2, G2] = s2Results(R, Z, trace, opts);
             notes = [notes, n2];
         end
+        % post-extrasystolic potentiation (2026-11-02): amplitude_pctOfRef of the post-S2 groups (contraction after the
+        % S2 in % of the S1 amplitude); its maximum over the S2 intervals
+        ps = find(strcmp(role, 'postS2') & ~isnan(G.amplitude_pctOfRef));
+        if ~isempty(ps)
+            [R.PESPmax_pct, i] = max(G.amplitude_pctOfRef(ps));
+            R.PESPmaxS2_ms = round(2000 * val(ps(i))) / 2;
+        end
 end
 R.resultNote = {strjoin(notes, '; ')};
 end
@@ -178,12 +219,14 @@ end
 % =====================================================================================================
 function c = resultColumns()
 [~, ffr] = ffrColumns();
-c = [{'maxCapturedFrequency_Hz', 'amplitude_0p5Hz_uN'}, ffr, { ...
+c = [{'maxCapturedFrequency_Hz', 'maxStableFrequency_Hz', 'frequencyOfMaxAmplitude_Hz', 'FFRmax_pct', ...
+    'amplitude_0p5Hz_uN'}, ffr, { ...
     'captureThreshold_mA', 'stimThreshold10_mA', 'stimThreshold50_mA', 'stimThreshold95_mA', 'stimThreshold99_mA', ...
-    'maxAmplitude_uN', ...
+    'maxAmplitude_uN', 'stimThresholdMinResponse_mA', 'minDetectableResponse_pct', ...
     'refPeriodNoPeak_ms', 'refPeriodNoPeakStep_ms', 'refPeriodNoResponse_ms', 'refPeriodNoResponseStep_ms', ...
-    'refPeriodAllCaptured_ms', ...
+    'refPeriodResponse_ms', 'refPeriodResponseStep_ms', 'refPeriodAllCaptured_ms', ...
     'S2shortest_ms', 'S2longest_ms', 'S2noiseLevel_pct', 'amplitudeS1_uN', 'nS2', 'nTemplateBeats', ...
+    'PESPmax_pct', 'PESPmaxS2_ms', ...
     'PRP15_pct', 'PRP15_pause_s', 'PRP30_pct', 'PRP30_pause_s', 'PRP60_pct', 'PRP60_pause_s', ...
     'PRP1_pct', 'PRP1_pause_s', 'PRP2_pct', 'PRP2_pause_s', 'PRP3_pct', 'PRP3_pause_s', ...
     'PRP4_pct', 'PRP4_pause_s', 'PRP5_pct', 'PRP5_pause_s', 'PRP6_pct', 'PRP6_pause_s', ...
@@ -421,6 +464,13 @@ G2 = table(ciU(:), medResp(:), 100 * fracSep(:), 'VariableNames', {'groupValue_m
 if ~isempty(ciU), R.S2shortest_ms = ciU(end); R.S2longest_ms = ciU(1); end
 [R.refPeriodNoPeak_ms, R.refPeriodNoPeakStep_ms, notes] = transition(ciU, 100 * fracSep, 50, 'no peak', notes);
 [R.refPeriodNoResponse_ms, R.refPeriodNoResponseStep_ms, notes] = transition(ciU, medResp, noise, 'no response', notes);
+% response below 10 % of the S1 amplitude (responseLevel of GetRefractoryPeriod, 2026-11-02); not with a noise level
+% >= 10 %
+if ~isnan(noise) && noise >= 10
+    notes{end+1} = 'response < 10 %: noise level >= 10 %, not determined';
+else
+    [R.refPeriodResponse_ms, R.refPeriodResponseStep_ms, notes] = transition(ciU, medResp, 10, 'response < 10 %', notes);
+end
 % as GetRefractoryPeriod (MyoDish exports, 2026-10-10): the interval before the first one (from long to short) at which
 % not every S2 had a separate peak
 kA = find(fracSep < 1, 1);
@@ -434,6 +484,7 @@ end
 if ~isnan(noise) && noise >= 50
     R.refPeriodNoPeak_ms = nan; R.refPeriodNoPeakStep_ms = nan;
     R.refPeriodNoResponse_ms = nan; R.refPeriodNoResponseStep_ms = nan; R.refPeriodAllCaptured_ms = nan;
+    R.refPeriodResponse_ms = nan; R.refPeriodResponseStep_ms = nan;
     notes = {sprintf('noise level %d %%: no reliable stimulus-locked S1 contraction - no estimates', round(noise))};
 end
 
@@ -462,6 +513,108 @@ end
                 if any(isMax), pmax = max(P(isMax)); end
             end
         end
+    end
+end
+
+
+function [R, notes, G2] = stResponse(R, G, Z, trace, opts, cap)
+% minimal detectable response of a stimulation threshold protocol (GetStimThreshold 2026-10-06; 2026-11-02). Template =
+% mean stimulus-locked contraction (-50 ms ... Tt) at the stimuli of the captured currents whose mean amplitude is >=
+% 95 % of the largest one (fewer than 3 such stimuli: the 3 captured currents with the highest current); Tt = min(0.8 s,
+% shortest stimulus interval after a template stimulus - 0.1 s). Every stimulus is projected onto the template
+% (least-squares scale, 1 = like the template); response of a current = median projection in % (stimResponse_pct of the
+% group, G2). Detection limit = max(99th percentile, median + 4 robust SD) of the same projection at pseudo-stimuli in
+% the middle of the stimulus intervals (only where the previous contraction has ended; at least 10).
+% stimThresholdMinResponse_mA = lowest current whose response exceeds the detection limit, as does the response of the
+% next higher current (the highest current: alone); NaN if the detection limit is >= 25 % (no reliable stimulus-locked
+% contraction). Windows -50 ms ... Tt with the rocker at rest (rocker 'stopped'; fewer than 2 template stimuli at
+% rest: all, option rockerFallback, note).
+notes = {}; G2 = [];
+t = double(trace.t(:)); f = double(trace.f(:));
+tR = double(trace.tR(:)); rock = logical(trace.rockerOn(:));
+stopped = isstruct(opts) && isfield(opts, 'rocker') && strcmp(opts.rocker, 'stopped');
+fallback = ~(isstruct(opts) && isfield(opts, 'rockerFallback') && ~opts.rockerFallback);
+st = Z.t; zv = Z.value; inR = logical(Z.inRange); ni = Z.nextInt;
+if numel(t) < 10, notes = {'stimulus-locked response: no data'}; return; end
+dt = median(diff(t));
+val = G.groupValue; amp = G.amplitude_mean;
+oka = cap & ~isnan(val) & ~isnan(amp);
+if ~any(oka), return; end
+mx = max(amp(oka));
+isTpl = inR & ismember(zv, val(oka & amp >= 0.95 * mx));
+if nnz(isTpl) < 3
+    cv = sort(val(oka), 'descend');
+    isTpl = inR & ismember(zv, cv(1:min(3, end)));
+end
+Tt = min(0.8, min([ni(isTpl & ~isnan(ni)); inf]) - 0.1);
+if ~(Tt > 0.1), notes = {'stimulus-locked response: stimulus intervals too short'}; return; end
+tg = (round(-0.05 / dt):round(Tt / dt))' * dt;
+K = tg >= 0; Bl = tg < 0;
+sortedR = issorted(tR);
+if sortedR, nRock = [0; cumsum(double(rock))]; end
+inData = @(a, b) t(1) <= a && t(end) >= b;
+useRest = stopped;
+for pass = 1:2
+    if ~useRest
+        atRest = @(a, b) true;
+    elseif sortedR
+        atRest = @(a, b) restSorted(tR, nRock, a, b);
+    else
+        atRest = @(a, b) any(tR >= a & tR <= b) && ~any(rock(tR >= a & tR <= b));
+    end
+    usable = false(numel(st), 1);
+    for j = find(inR(:))'
+        usable(j) = inData(st(j) - 0.05, st(j) + Tt) && atRest(st(j) - 0.05, st(j) + Tt);
+    end
+    jT = find(isTpl & usable);
+    Y = nan(numel(tg), numel(jT));
+    for q = 1:numel(jT), Y(:, q) = getY(st(jT(q))); end
+    Y = Y(:, all(~isnan(Y), 1));
+    if size(Y, 2) >= 2 || ~useRest || ~fallback, break; end
+    useRest = false;
+    notes{end+1} = 'stimulus-locked response: fewer than 2 template stimuli with the rocker at rest, all used'; %#ok<AGROW>
+end
+if size(Y, 2) < 2, notes{end+1} = 'stimulus-locked response: no template'; return; end
+Y = Y - mean(Y(Bl, :), 1);
+m = mean(Y, 2); mm = m(K)' * m(K);
+if mm <= 0, return; end
+% response of every current group
+gv = unique(val(~isnan(val)));
+resp = nan(size(gv));
+for q = 1:numel(gv)
+    jq = find(usable & zv == gv(q));
+    a = nan(numel(jq), 1);
+    for i = 1:numel(jq), a(i) = proj(getY(st(jq(i)))); end
+    a = a(~isnan(a));
+    if ~isempty(a), resp(q) = 100 * median(a); end
+end
+G2 = table(gv(:), resp(:), 'VariableNames', {'groupValue', 'stimResponse_pct'});
+% detection limit: pseudo-stimuli in the middle of the stimulus intervals
+pA = zeros(0, 1);
+for j = find(inR(:))'
+    if j < 2 || ~inR(j - 1), continue; end
+    ps = (st(j - 1) + st(j)) / 2;
+    if ps - 0.05 >= st(j - 1) + Tt && ps + Tt <= st(j) && inData(ps - 0.05, ps + Tt) && atRest(ps - 0.05, ps + Tt)
+        pA(end+1, 1) = proj(getY(ps)); %#ok<AGROW>
+    end
+end
+pA = pA(~isnan(pA));
+if numel(pA) < 10, notes{end+1} = 'stimulus-locked response: fewer than 10 pseudo-stimuli, no detection limit'; return; end
+noise = 100 * max(mprctile(pA, 99), median(pA) + 4 * 1.4826 * median(abs(pA - median(pA))));
+R.minDetectableResponse_pct = noise;
+det = resp > noise;                                  %NaN response: not detected
+k = find(det & [det(2:end); true], 1, 'first');
+if noise >= 25
+    notes{end+1} = sprintf('stimulus-locked response: detection limit %d %%, no reliable contraction', round(noise));
+elseif ~isempty(k)
+    R.stimThresholdMinResponse_mA = gv(k);
+end
+
+    function y = getY(s)
+        y = interp1(t, f, s + tg, 'linear', nan);
+    end
+    function a1 = proj(y)
+        a1 = ((y(K) - mean(y(Bl)))' * m(K)) / mm;
     end
 end
 
