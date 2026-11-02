@@ -3329,7 +3329,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'recordings (no rocker) or protocols without rocker stops: all contractions']);
         cSt = uicontrol(f4, dd{:}, 'Style', 'checkbox', 'String', 'only stimulated contractions', 'Value', 1, ...
             'Position', [x0+0.08 0.3 0.265 0.03]);
-        prPar = [PI(~startsWith(PI(:,1), 'ref'), 1:2); {'amplitude_pctOfRef', '% of S1 / steady'; 'capture_percent', '%'; 'nContractions', ''}];
+        [~, ~, prTI] = mda_parameters();                %stimulus timing (2026-11-02)
+        prPar = [PI(~startsWith(PI(:,1), 'ref'), 1:2); prTI(:, 1:2); {'amplitude_pctOfRef', '% of S1 / steady / 0.5 Hz'; 'capture_percent', '%'; 'nContractions', ''}];
         uicontrol(f4, dd{:}, 'Style', 'text', 'String', 'Parameter', 'HorizontalAlignment', 'left', 'Position', [x0 0.25 0.08 0.03]);
         pPa = uicontrol(f4, dd{:}, 'Style', 'popupmenu', 'String', strcat(prPar(:,1), {' ('}, strrep(prPar(:,2), 'u', mu), {')'}), ...
             'Position', [x0+0.08 0.255 0.265 0.03], 'Callback', guard(@(~,~) prDraw()));

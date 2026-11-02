@@ -52,10 +52,12 @@ stimuli of the channel with role, value and capture, input of protocol_results):
 steady_n (FFR protocols: opts.steadyStateBeats): steady state per frequency (the last steady_n contractions of the
 longest run, within it of the longest sequence of consecutive captured stimuli with captured neighbours; rocker at rest
 if any, see rockerFallback); pauseLength: reference of each pause (prpReference); amplitude_CV, irregular;
-return_notes=True: also the notes (2026-10-10).
+return_notes=True: also the notes (2026-10-10). pacingFrequency: amplitude_pctOfRef = % of the captured 0.5-Hz group
+(force-frequency relationship of every step, as protocol_results; 2026-11-02).
 
 TS 2026-10-07 (port of mda_protocols.m and mda_groupBeats.m; schedule files 2026-10-07; uncertain contractions
-2026-10-09; extra pulses, frequency / pause tolerances, FFR steady state, PRP reference, irregular groups 2026-10-10)
+2026-10-09; extra pulses, frequency / pause tolerances, FFR steady state, PRP reference, irregular groups 2026-10-10;
+FFR reference 0.5 Hz 2026-11-02)
 """
 from __future__ import annotations
 
@@ -854,6 +856,14 @@ def group_beats(H, B, C, range_, by, opts=None, return_stimuli=False, steady_n=0
         r = np.flatnonzero(G["groupRole"].to_numpy() == refRole)
         if r.size:
             ref = float(G["amplitude_mean"].iloc[r[0]])
+    elif byl == "pacingfrequency":  # FFR: % of the captured 0.5-Hz group (2026-11-02)
+        from .protocol_results import captured_groups
+        gv = G["groupValue"].to_numpy(float)
+        with np.errstate(invalid="ignore"):
+            r = np.flatnonzero(captured_groups(G) & (np.abs(gv - 0.5) <= float(opts.get("frequencyResolutionLow", 0.05))
+                                                     / 2 + 1e-9))
+        if r.size:
+            ref = float(G["amplitude_mean"].iloc[r[np.argmin(np.abs(gv[r] - 0.5))]])
     G.insert(list(G.columns).index("amplitude_SD") + 1, "amplitude_pctOfRef", 100 * G["amplitude_mean"] / ref)
     cv = G["amplitude_CV"].to_numpy(float)
     with np.errstate(invalid="ignore"):

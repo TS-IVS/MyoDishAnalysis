@@ -887,10 +887,12 @@ P = mda_protocols(file)                                              % protocols
   `nContractions`, `capture_percent` (stimuli followed by a contraction, independent of the rocker filter),
   `S2response_pct` and `separatePeak_percent` (S2 groups: median S2 response in % of the S1 amplitude and % of the
   S2 with a separate peak, from the template subtraction of the RP results below; an S2 response too small for the
-  detection threshold still shows here), `amplitude_pctOfRef` (mean amplitude in % of the group `S1` / `steady`; post-rest groups: see PRP reference below),
+  detection threshold still shows here), `amplitude_pctOfRef` (mean amplitude in % of the group `S1` / `steady`; FFR (`pacingFrequency`): in % of the captured 0.5-Hz group, i.e. the force-frequency relationship of every frequency step, since 2026-11-02; post-rest groups: see PRP reference below),
   `amplitude_CV` (coefficient of variation of the amplitudes, population SD / mean), `irregular` (1 if
   `amplitude_CV` > `irregularCV`, 0.15: conduction block, alternans or extra beats) and mean, SD and n of all
-  parameters. FFR frequencies summarized from fewer than `minGroupBeats` (5) included contractions are listed in the
+  parameters (e.g. `diastolicForce_mean`, `TTR90_mean`, `dFdtMax_mean`) and of the stimulus timing `stimToOnset`,
+  `stimToRise50`, `stimToPeak` (since 2026-11-02): every beat parameter per step of the tested quantity (FFR: frequency,
+  PRP: pause, ST: current, RP: S2 interval). FFR frequencies summarized from fewer than `minGroupBeats` (5) included contractions are listed in the
   notes (`info.notes`). The
   contraction table gets the columns `group`, `groupValue`, `groupRole`, `groupStep`; the Excel output a sheet
   `protocols`.
@@ -901,7 +903,7 @@ P = mda_protocols(file)                                              % protocols
   | protocol | columns | definition |
   |---|---|---|
   | FFR | `maxCapturedFrequency_Hz` | highest captured pacing frequency |
-  | | `FFR_1Hz_pct`, `FFR_2Hz_pct`, `FFR_3Hz_pct`, `amplitude_0p5Hz_uN` | mean amplitude at 1 / 2 / 3 Hz in % of 0.5 Hz (captured groups; group frequencies rounded to 0.1 Hz, before 2026-10-10 ± 5 %) |
+  | | `FFR_0p2Hz_pct`, `FFR_0p75Hz_pct`, `FFR_1Hz_pct`, `FFR_1p5Hz_pct`, `FFR_2Hz_pct`, … `FFR_10Hz_pct`, `amplitude_0p5Hz_uN` | mean amplitude at 0.2, 0.75, 1 Hz and 1.5 … 10 Hz (0.5-Hz steps) in % of 0.5 Hz (captured groups; NaN: step not run or not captured; group frequencies rounded to 0.1 Hz, below 1 Hz to 0.05 Hz, before 2026-10-10 ± 5 %; before 2026-11-02 only 1 / 2 / 3 Hz). Captured steps between or above these frequencies: in % of 0.5 Hz in `resultNote` (*FFR of further steps: 1.2 Hz 90.0 %*). Every step with all parameters: sheet `protocols` |
   | ST | `stimThreshold10_mA`, `…50`, `…95`, `…99` | lowest captured current whose mean amplitude is ≥ 10 / 50 / 95 / 99 % of the largest one (thresh10 … thresh99 of GetStimThreshold); `captureThreshold_mA` = lowest captured current, `maxAmplitude_uN` |
   | RP | `refPeriodNoPeak_ms` | S2 interval below which there is no separate contraction peak (< 50 % of the S2 with a peak) |
   | | `refPeriodNoResponse_ms` | S2 interval below which there is no response at all (median S2 response < noise level) |
@@ -978,6 +980,15 @@ interpolated linearly between samples; dF/dt = central difference of the filtere
 | AUC | µN·s | ∫ (F − F_dia) dt from 10 % upstroke to 90 % relaxation |
 | peakToPeakInterval, peakToPeakFrequency | s, Hz | to the previous detected contraction |
 | stimInterval, stimFrequency | s, Hz | set stimulation: stimulus of this contraction − previous stimulus pulse of the channel (extra contractions: last two stimuli before the peak) |
+
+Stimulus timing (columns of the contraction table; mean, SD and n in the summaries and protocol groups since
+2026-11-02, definitions in the sheet `parameters`; `mda_parameters` third output / `TIMING_PARAMETERS`):
+
+| column | unit | definition |
+|---|---|---|
+| stimToOnset | s | eliciting pulse → onset of the contraction |
+| stimToRise50 | s | eliciting pulse → 50 % of the amplitude on the upstroke (less dependent on the shape of the foot of the upstroke than the onset) |
+| stimToPeak | s | eliciting pulse → peak |
 
 Further columns: `t_peak` (s in the file), `clockTime`, `beatType` (`stimulated` = elicited by a pulse of the
 channel, see "Stimulus assignment"; `extra` = no eliciting pulse; `unpaced` = no stimuli in this channel), `t_stim`

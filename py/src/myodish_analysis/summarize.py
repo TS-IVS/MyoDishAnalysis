@@ -26,11 +26,12 @@ arrhythmicMinVariability), pacedSeconds (paced time of these windows: >= 5 inter
 (uN), sensorRate_inferred (Hz) and repeatedSamples_percent (sensor rate of the channel inferred from repeated raw values
 in the window read, see read_mdd; 2026-10-21), then <parameter>_mean,
 <parameter>_SD and <parameter>_n for every parameter; amplitude_CV after amplitude_n (population SD / mean of the
-included amplitudes, NaN with < 2; 2026-10-10);
+included amplitudes, NaN with < 2; 2026-10-10); then the same for the stimulus timing stimToOnset, stimToRise50,
+stimToPeak (s; TIMING_PARAMETERS, 2026-11-02);
 with a reference beat <parameter>_pctRef / _dRef _mean / _SD; with AP columns (analyze_ap) _mean / _SD / _n.
 
 TS 2026-10-06 (port of mda_summarize.m, TS 2026-10-04; uncertain contractions 2026-10-09; extra pulses 2026-10-10;
-stimulus variability 2026-10-13; several ranges 2026-10-14)
+stimulus variability 2026-10-13; several ranges 2026-10-14; stimulus timing 2026-11-02)
 """
 from __future__ import annotations
 
@@ -40,7 +41,7 @@ import numpy as np
 import pandas as pd
 
 from ._matlab import nanmean, nanstd
-from .parameters import PARAMETERS
+from .parameters import PARAMETERS, TIMING_PARAMETERS
 
 
 def ranges_of(range_):
@@ -153,6 +154,13 @@ def summarize(B, C, range_, opts=None, exclude=None):
         if p == "amplitude":  # 2026-10-10: coefficient of variation (population SD / mean; irregular groups)
             w = v[~np.isnan(v)]
             row["amplitude_CV"] = float(np.std(w) / np.mean(w)) if w.size >= 2 else math.nan
+    # 2026-11-02: stimulus timing of the contractions (stimToOnset, stimToRise50, stimToPeak): mean, SD, n (NaN without
+    # the column)
+    for p in TIMING_PARAMETERS:
+        v = B[p[0]].to_numpy(dtype=float)[I] if p[0] in B.columns else np.full(int(np.sum(I)), np.nan)
+        row[p[0] + "_mean"] = nanmean(v)
+        row[p[0] + "_SD"] = nanstd(v)
+        row[p[0] + "_n"] = int(np.sum(~np.isnan(v)))
     rel = [c for c in B.columns if c.endswith("_pctRef") or c.endswith("_dRef")]
     for c in rel:
         v = B[c].to_numpy(dtype=float)[I]

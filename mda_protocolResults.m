@@ -18,7 +18,12 @@ function [R, G2] = mda_protocolResults(by, G, Z, trace, opts)
 %     amplitude_0p5Hz_uN        mean amplitude at 0.5 Hz (captured group; groups: frequencies rounded to
 %                               opts.frequencyResolution, 0.1 Hz, below 1 Hz frequencyResolutionLow, 0.05 Hz, see
 %                               mda_groupBeats)
-%     FFR_1Hz_pct, FFR_2Hz_pct, FFR_3Hz_pct   mean amplitude at 1 / 2 / 3 Hz in % of 0.5 Hz (captured groups)
+%     FFR_0p2Hz_pct, FFR_0p75Hz_pct, FFR_1Hz_pct, FFR_1p5Hz_pct, FFR_2Hz_pct, ... FFR_10Hz_pct
+%                               mean amplitude at 0.2, 0.75, 1 Hz and 1.5 ... 10 Hz (0.5-Hz steps) in % of 0.5 Hz
+%                               (captured groups; NaN: step not run or not captured; 2026-11-02, before: 1 / 2 / 3 Hz).
+%                               Captured steps between or above these frequencies: in % of 0.5 Hz in resultNote. All
+%                               steps with all parameters: amplitude_pctOfRef and <parameter>_mean of the protocol groups
+%                               (mda_groupBeats)
 %   ST (stimCurrent)
 %     captureThreshold_mA       lowest captured current
 %     stimThreshold10_mA ... 99 lowest captured current with a mean amplitude >= 10 / 50 / 95 / 99 % of the largest
@@ -67,7 +72,7 @@ function [R, G2] = mda_protocolResults(by, G, Z, trace, opts)
 %
 % TS 2026-10-07 (tolerances frequencyResolution / pauseTolerance 2026-10-10: FFR groups at 0.1 Hz (below 1 Hz
 % 0.05 Hz), before +-5 %;
-% pauses +-10 %, before the nearest pause within +-50 %; refPeriodAllCaptured 2026-10-10)
+% pauses +-10 %, before the nearest pause within +-50 %; refPeriodAllCaptured 2026-10-10; FFR of every step 2026-11-02)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -97,10 +102,24 @@ switch lower(char(by))
         if any(ok), R.maxCapturedFrequency_Hz = max(val(ok)); end
         a05 = ampAt(val, amp, cap, 0.5, fResLow);
         R.amplitude_0p5Hz_uN = a05;
-        R.FFR_1Hz_pct = 100 * ampAt(val, amp, cap, 1, fRes) / a05;
-        R.FFR_2Hz_pct = 100 * ampAt(val, amp, cap, 2, fRes) / a05;
-        R.FFR_3Hz_pct = 100 * ampAt(val, amp, cap, 3, fRes) / a05;
-        if isnan(a05), notes{end+1} = 'no captured 0.5 Hz group'; end
+        % every frequency step in % of 0.5 Hz (2026-11-02): columns 0.2, 0.75, 1 Hz and 1.5 ... 10 Hz in 0.5-Hz steps;
+        % captured steps between or above these columns: note
+        [fc, nc] = ffrColumns();
+        inCol = false(size(val));
+        for q = 1:numel(fc)
+            res = fRes; if fc(q) < 1, res = fResLow; end
+            R.(nc{q}) = 100 * ampAt(val, amp, cap, fc(q), res) / a05;
+            inCol = inCol | abs(val - fc(q)) <= res / 2 + 1e-9;
+        end
+        inCol = inCol | abs(val - 0.5) <= fResLow / 2 + 1e-9;
+        if isnan(a05)
+            notes{end+1} = 'no captured 0.5 Hz group';
+        elseif any(ok & ~inCol)
+            k = find(ok & ~inCol);
+            [~, o] = sort(val(k)); k = k(o);
+            notes{end+1} = ['FFR of further steps: ' strjoin(arrayfun(@(i) sprintf('%g Hz %.1f %%', val(i), ...
+                100 * amp(i) / a05), k', 'UniformOutput', false), ', ')];
+        end
     case 'stimcurrent'
         ok = cap & ~isnan(val);
         R.variant = {variantText('%g-%g mA (%d steps)', val)};
@@ -158,7 +177,8 @@ end
 
 % =====================================================================================================
 function c = resultColumns()
-c = {'maxCapturedFrequency_Hz', 'amplitude_0p5Hz_uN', 'FFR_1Hz_pct', 'FFR_2Hz_pct', 'FFR_3Hz_pct', ...
+[~, ffr] = ffrColumns();
+c = [{'maxCapturedFrequency_Hz', 'amplitude_0p5Hz_uN'}, ffr, { ...
     'captureThreshold_mA', 'stimThreshold10_mA', 'stimThreshold50_mA', 'stimThreshold95_mA', 'stimThreshold99_mA', ...
     'maxAmplitude_uN', ...
     'refPeriodNoPeak_ms', 'refPeriodNoPeakStep_ms', 'refPeriodNoResponse_ms', 'refPeriodNoResponseStep_ms', ...
@@ -168,7 +188,15 @@ c = {'maxCapturedFrequency_Hz', 'amplitude_0p5Hz_uN', 'FFR_1Hz_pct', 'FFR_2Hz_pc
     'PRP1_pct', 'PRP1_pause_s', 'PRP2_pct', 'PRP2_pause_s', 'PRP3_pct', 'PRP3_pause_s', ...
     'PRP4_pct', 'PRP4_pause_s', 'PRP5_pct', 'PRP5_pause_s', 'PRP6_pct', 'PRP6_pause_s', ...
     'PRP7_pct', 'PRP7_pause_s', 'PRP8_pct', 'PRP8_pause_s', ...
-    'variant', 'resultNote'};
+    'variant', 'resultNote'}];
+end
+
+
+function [f, names] = ffrColumns()
+% frequencies of the FFR columns (Hz): 0.2, 0.75, 1, then 1.5 ... 10 in 0.5-Hz steps (steps of the lab's FFR schedules;
+% 0.5 Hz = reference); names FFR_<f>Hz_pct with p for the decimal point (FFR_0p75Hz_pct, FFR_1p5Hz_pct; 2026-11-02)
+f = [0.2, 0.75, 1:0.5:10];
+names = arrayfun(@(x) ['FFR_' strrep(sprintf('%g', x), '.', 'p') 'Hz_pct'], f, 'UniformOutput', false);
 end
 
 

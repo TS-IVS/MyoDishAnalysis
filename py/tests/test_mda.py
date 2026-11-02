@@ -375,6 +375,7 @@ def test_protocol_results_examples():
     assert r["variant"].startswith("S1 train + S2 pairs, S2 800-320 ms")
     r = res("example3_humanVentricle.mdd", 6, protocol="FFR")
     assert r["maxCapturedFrequency_Hz"] == 4 and 90 < r["FFR_1Hz_pct"] < 115 and 60 < r["FFR_3Hz_pct"] < 90
+    assert not np.isnan(r["FFR_1p5Hz_pct"]) and not np.isnan(r["FFR_3p5Hz_pct"]) and np.isnan(r["FFR_4p5Hz_pct"])  # 2026-11-02
     r = res("example2_rabbitVentricle.mdd", 5, protocol="ST", rocker="any")
     assert r["captureThreshold_mA"] <= r["stimThreshold10_mA"] <= r["stimThreshold50_mA"] <= r["stimThreshold95_mA"] \
         <= r["stimThreshold99_mA"]
@@ -625,6 +626,17 @@ def test_grouping_tolerances(tmp_path):
     assert int(Sf.loc[Sf["group"] == "1 Hz", "nStimuli"].iloc[0]) == 36
     rf = If["protocolResults"].iloc[0]
     assert rf["maxCapturedFrequency_Hz"] == 2 and abs(rf["FFR_1Hz_pct"] - 100) < 2 and abs(rf["FFR_2Hz_pct"] - 100) < 2
+    # FFR of every step in % of 0.5 Hz in the group summary (amplitude_pctOfRef) and the protocol results
+    # (FFR_<f>Hz_pct); stimulus timing in the summaries: peak 130 ms, 50 % of the upstroke 80 ms after the pulse
+    # (2026-11-02)
+    gv = Sf["groupValue"].to_numpy(float)
+    pct = Sf["amplitude_pctOfRef"].to_numpy(float)
+    assert abs(pct[np.abs(gv - 0.5) < 1e-9][0] - 100) < 1e-9
+    assert abs(pct[np.abs(gv - 0.75) < 1e-9][0] - rf["FFR_0p75Hz_pct"]) < 1e-9
+    assert abs(pct[np.abs(gv - 2) < 1e-9][0] - rf["FFR_2Hz_pct"]) < 1e-9 and abs(rf["FFR_0p75Hz_pct"] - 100) < 2
+    assert np.isnan(rf["FFR_0p2Hz_pct"]) and np.isnan(rf["FFR_1p5Hz_pct"]) and np.isnan(rf["FFR_10Hz_pct"])
+    assert (np.abs(Sf["stimToPeak_mean"] - 0.13) < 0.01).all() and (np.abs(Sf["stimToRise50_mean"] - 0.08) < 0.01).all()
+    assert (Sf["stimToPeak_n"] == Sf["nContractions"]).all() and (Sf["stimToOnset_mean"] < Sf["stimToRise50_mean"]).all()
     rest = Sp[Sp["groupRole"] == "postRest"]
     assert rest["group"].tolist() == ["rest 15.8 s #1", "rest 15.8 s #2", "rest 31.8 s #3", "rest 31.8 s #4"]
     rp = Ip["protocolResults"].iloc[0]

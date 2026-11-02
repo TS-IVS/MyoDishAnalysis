@@ -1,15 +1,18 @@
-function [P, labelNames] = mda_parameters()
+function [P, labelNames, timing] = mda_parameters()
 %MDA_PARAMETERS  Names, units and definitions of the contraction parameters (one row per parameter).
 %
 %   P = mda_parameters()   cell array {name, unit, definition}
 %   [P, labelNames] = mda_parameters()   also the names of the standard per-channel labels (see mda_labels)
+%   [P, labelNames, timing] = mda_parameters()   also the stimulus timing of the contractions {name, unit, definition}:
+%       stimToOnset, stimToRise50, stimToPeak (columns of the contraction table, mda_analyzeChannel; mean, SD and n in
+%       the summaries and protocol groups, mda_summarize; parameters sheet of the results; 2026-11-02)
 %
 % Levels: upstroke = F_dia + x % of the amplitude (last crossing before the peak); relaxation = F_min,post +
 % (100 - x) % of (F_peak - F_min,post) (first crossing after the peak). F_dia = minimum between the previous
 % and this peak, F_min,post = minimum between this and the next peak. Crossing times are interpolated
 % linearly between samples. dF/dt = central difference of the filtered signal.
 %
-% TS 2026-10-05
+% TS 2026-10-05 (stimulus timing 2026-11-02)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -43,4 +46,10 @@ P = {
     };
 labelNames = {'setupID','sliceID','species','sampleID','sampleGroup','sliceGroup','tissue','treatment', ...
     'concentration','concentrationUnit','daysInCulture','cultureStart','comment','analyst'};
+timing = {
+    'stimToOnset',  's', 'eliciting stimulus pulse to the onset of the contraction (t_onset - t_stim); NaN without eliciting pulse'
+    'stimToRise50', 's', ['eliciting stimulus pulse to 50 % of the amplitude on the upstroke (t_rise50 - t_stim; less ' ...
+        'dependent on the shape of the foot of the upstroke than the onset); NaN without eliciting pulse']
+    'stimToPeak',   's', 'eliciting stimulus pulse to the peak (t_peak - t_stim); NaN without eliciting pulse'
+    };
 end

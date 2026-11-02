@@ -19,7 +19,7 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 
 from ..analysis import myodish_analysis
-from ..parameters import PARAMETERS
+from ..parameters import PARAMETERS, TIMING_PARAMETERS
 from ..protocols import GROUP_BY, find_protocols
 from ..write_results import write_results
 from .widgets import primary
@@ -36,7 +36,8 @@ COLORS = [(0, 114, 189), (217, 83, 25), (237, 177, 32), (126, 47, 142), (119, 17
 def plot_parameters():
     """parameters that can be plotted against the group quantity: (column base name, unit)."""
     lst = [(p[0], p[1]) for p in PARAMETERS if not p[0].startswith("ref")]
-    return lst + [("amplitude_pctOfRef", "% of S1 / steady"), ("capture_percent", "%"), ("nContractions", "")]
+    lst += [(p[0], p[1]) for p in TIMING_PARAMETERS]  # stimulus timing (2026-11-02)
+    return lst + [("amplitude_pctOfRef", "% of S1 / steady / 0.5 Hz"), ("capture_percent", "%"), ("nContractions", "")]
 
 
 class ProtocolWindow(QtWidgets.QWidget):

@@ -37,7 +37,7 @@ import pandas as pd
 
 from . import __version__
 from ._matlab import datenum_to_datetime
-from .parameters import PARAMETERS
+from .parameters import PARAMETERS, TIMING_PARAMETERS
 
 
 def num2str(v):
@@ -120,7 +120,7 @@ def _option_text(v):
 
 def parameter_table(contractions=None):
     from .analyze_ap import AP_PARAMETERS
-    rows = [list(p) for p in PARAMETERS]
+    rows = [list(p) for p in PARAMETERS] + [list(p) for p in TIMING_PARAMETERS]   # with stimulus timing (2026-11-02)
     if isinstance(contractions, pd.DataFrame):
         for c in contractions.columns:
             if c.endswith("_dRef"):

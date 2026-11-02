@@ -26,13 +26,14 @@ function T = mda_summarize(B, C, range, opts, exclude)
 % (sensor rate of the channel inferred from repeated raw values in the window read, see mda_readMdd; 2026-10-21),
 % then <parameter>_mean, <parameter>_SD and
 % <parameter>_n (number of included contractions with a value of this parameter, 2026-10-05) for every parameter;
-% amplitude_CV after amplitude_n (population SD / mean of the included amplitudes, NaN with < 2; 2026-10-10).
+% amplitude_CV after amplitude_n (population SD / mean of the included amplitudes, NaN with < 2; 2026-10-10);
+% then the same for the stimulus timing stimToOnset, stimToRise50 and stimToPeak (s; mda_parameters, 2026-11-02).
 % With a reference beat (option referenceBeat): <parameter>_pctRef_mean / _SD (% of the reference) and
 % diastolicForce_dRef / diastolicSignal_dRef _mean / _SD (difference to the reference, uN), 2026-10-06.
 % With AP columns (EP recording, mda_analyzeAP): AP_dVdtMax, AP_RMP, AP_Vmax, APD25, APD50, APD90 _mean / _SD / _n.
 %
 % TS 2026-10-04 (uncertain contractions 2026-10-09; extra pulses 2026-10-10; stimulus variability 2026-10-13; several
-% ranges 2026-10-14)
+% ranges 2026-10-14; stimulus timing 2026-11-02)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -41,8 +42,9 @@ function T = mda_summarize(B, C, range, opts, exclude)
 
 if nargin < 4 || isempty(opts), opts = mda_options(); end
 if nargin < 5, exclude = []; end
-PI = mda_parameters();
+[PI, ~, TI] = mda_parameters();
 params = PI(:,1)';
+timing = TI(:,1)';                                  %stimulus timing (2026-11-02)
 
 R = reshape(double(range), [], 2);                  %one or several ranges [from to] (2026-10-14)
 inRange = inRanges(B.t_peak, R);
@@ -104,6 +106,15 @@ for k = 1:numel(params)
     T.([params{k} '_mean']) = mean(v, 'omitnan');
     T.([params{k} '_SD']) = std(v, 'omitnan');
     T.([params{k} '_n']) = sum(~isnan(v));                %contractions with a value of this parameter
+end
+% 2026-11-02: stimulus timing of the contractions (stimToOnset, stimToRise50, stimToPeak; mda_parameters): mean, SD, n
+% (NaN without the column)
+for k = 1:numel(timing)
+    v = nan(nnz(I), 1);
+    if ismember(timing{k}, B.Properties.VariableNames), v = B.(timing{k})(I); end
+    T.([timing{k} '_mean']) = mean(v, 'omitnan');
+    T.([timing{k} '_SD']) = std(v, 'omitnan');
+    T.([timing{k} '_n']) = sum(~isnan(v));
 end
 % 2026-10-10: coefficient of variation of the amplitude (population SD / mean; irregular groups, mda_groupBeats)
 v = B.amplitude(I); v = v(~isnan(v));

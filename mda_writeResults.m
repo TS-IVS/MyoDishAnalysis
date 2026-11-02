@@ -45,8 +45,8 @@ P.sheets = reshape(P.sheets, [], 2);
 [p, n, e] = fileparts(outputFile);
 if isempty(e), e = '.xlsx'; outputFile = fullfile(p, [n e]); end
 
-PI = mda_parameters();
-paramTable = cell2table(PI, 'VariableNames', {'parameter','unit','definition'});
+[PI, ~, TI] = mda_parameters();
+paramTable = cell2table([PI; TI], 'VariableNames', {'parameter','unit','definition'});   %with stimulus timing (2026-11-02)
 % 2026-10-06: parameters relative to the reference beat (if present in the contraction table)
 if istable(contractions)
     rel = contractions.Properties.VariableNames(endsWith(contractions.Properties.VariableNames, {'_pctRef', '_dRef'}));

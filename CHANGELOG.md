@@ -79,6 +79,20 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
+- **Protocols: every beat parameter per step, stimulus timing in the summaries, FFR of every frequency step**
+  (2026-11-02).
+  - Summaries and protocol groups (one row per frequency / pause / current / S2 interval) also give mean, SD and n of
+    the stimulus timing `stimToOnset`, `stimToRise50`, `stimToPeak` (s; before only in the contraction table);
+    definitions in the sheet `parameters` (`mda_parameters` third output, Python `TIMING_PARAMETERS`); the protocol
+    window of both GUIs plots them. The protocol groups already had mean, SD and n of all contraction parameters
+    (`diastolicForce_mean`, `TTR90_mean`, `dFdtMax_mean`, ...).
+  - FFR: `amplitude_pctOfRef` of the `pacingFrequency` groups = mean amplitude in % of the captured 0.5-Hz group
+    (before NaN), for every step of any FFR schedule.
+  - Protocol results: `FFR_<f>Hz_pct` for 0.2, 0.75, 1 Hz and 1.5 … 10 Hz in 0.5-Hz steps (21 columns, e.g.
+    `FFR_0p75Hz_pct`, `FFR_1p5Hz_pct`; before 1 / 2 / 3 Hz, whose names stay); captured steps between or above these
+    frequencies in `resultNote` (*FFR of further steps: 1.2 Hz 90.0 %*). The FFR columns of `protocolResults` are in
+    frequency order, so the later columns moved.
+  - Tests: `mda_test` (grouping test), `test_mda.py`.
 - **Electrode test of the control software (2.2.2, Tools > Electrode Test) left out of the analysis** (2026-10-27).
   The test sends pulses of 1–200 mA to the tested channels while the recording runs (no sequence or pulse lines in
   the log, "current not reached" on purpose above the limit). `mda_readMdd` / `read_mdd` read its structured

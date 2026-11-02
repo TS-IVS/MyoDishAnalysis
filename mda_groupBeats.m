@@ -70,8 +70,9 @@ function [B, G, Z, notes] = mda_groupBeats(H, B, C, range, by, opts, steadyN)
 %          the S1 amplitude, % of the S2 with a separate peak; 2026-10-21), capture_percent (stimuli followed by a
 %          contraction), currentReached_percent (stimuli with the set current reached; stimuli with an unknown result,
 %          e.g. the last one of the file, left out, see mda_readMdd) and amplitude_pctOfRef
-%          (mean amplitude in % of the group 'S1' / 'steady'; NaN for the other quantities). stimFrequency of a group =
-%          1 / median interval from the previous stimulus.
+%          (mean amplitude in % of the group 'S1' / 'steady'; pacingFrequency: in % of the captured 0.5-Hz group, i.e.
+%          the force-frequency relationship of every frequency step, as mda_protocolResults, 2026-11-02; NaN for the
+%          other quantities). stimFrequency of a group = 1 / median interval from the previous stimulus.
 %          amplitude_CV (population SD / mean of the included amplitudes, from mda_summarize) and irregular
 %          (amplitude_CV > opts.irregularCV, 0.15; NaN with < 2 contractions). pauseLength, post-rest groups
 %          (2026-10-10): amplitude_pctOfRef = mean of the amplitudes in % of the reference of each pause (option
@@ -85,7 +86,7 @@ function [B, G, Z, notes] = mda_groupBeats(H, B, C, range, by, opts, steadyN)
 %
 % TS 2026-10-07 (S2interval: groups 'other', 'pre-S2'; pauseLength: one group per pause, 'after rest', 'other';
 % uncertain contractions 2026-10-09; extra pulses, tolerances frequencyResolution / pauseTolerance, FFR steady state,
-% PRP reference per pause, irregular groups 2026-10-10)
+% PRP reference per pause, irregular groups 2026-10-10; FFR reference 0.5 Hz 2026-11-02)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -427,6 +428,14 @@ ref = nan;
 if ~isempty(refRole)
     r = find(strcmp(G.groupRole, refRole), 1);
     if ~isempty(r), ref = G.amplitude_mean(r); end
+elseif strcmpi(by, 'pacingFrequency')               %FFR: % of the captured 0.5-Hz group (2026-11-02)
+    nf = round(G.capture_percent / 100 .* G.nStimuli);
+    cap = (G.nStimuli - nf) <= max(1, floor(0.1 * G.nStimuli)) & nf >= 2;   %captured: as mda_protocolResults
+    r = find(cap & abs(G.groupValue - 0.5) <= opts.frequencyResolutionLow / 2 + 1e-9);
+    if ~isempty(r)
+        [~, i] = min(abs(G.groupValue(r) - 0.5));
+        ref = G.amplitude_mean(r(i));
+    end
 end
 G = addvars(G, 100 * G.amplitude_mean / ref, 'After', 'amplitude_SD', 'NewVariableNames', 'amplitude_pctOfRef');
 irregular = double(G.amplitude_CV > opts.irregularCV);

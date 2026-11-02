@@ -15,9 +15,10 @@ trace  S2interval: dict t, f (filtered force of the channel, analyze_channel C.t
 opts   options (rocker: 'stopped' = template and S2 windows only while the rocker is at rest)
 
 R      dict with all result columns (NaN where not applicable), see RESULT_COLUMNS and the help of mda_protocolResults.m
+       (FFR: FFR_<f>Hz_pct of 0.2, 0.75, 1 Hz and 1.5 ... 10 Hz in 0.5-Hz steps, FFR_COLUMNS; 2026-11-02)
 
 TS 2026-10-07 (port of mda_protocolResults.m; tolerances frequencyResolution / pauseTolerance, refPeriodAllCaptured
-2026-10-10)
+2026-10-10; FFR of every step 2026-11-02)
 """
 from __future__ import annotations
 
@@ -27,8 +28,18 @@ import numpy as np
 
 from ._matlab import islocalmax, movmean, mround
 
+def _ffr_columns():
+    """frequencies of the FFR columns (Hz): 0.2, 0.75, 1, then 1.5 ... 10 in 0.5-Hz steps (steps of the lab's FFR
+    schedules; 0.5 Hz = reference) and their names FFR_<f>Hz_pct with p for the decimal point (FFR_0p75Hz_pct,
+    FFR_1p5Hz_pct; 2026-11-02)"""
+    f = [0.2, 0.75] + [1 + 0.5 * k for k in range(19)]
+    return f, ["FFR_" + ("%g" % x).replace(".", "p") + "Hz_pct" for x in f]
+
+
+FFR_FREQUENCIES, FFR_COLUMNS = _ffr_columns()
+
 RESULT_COLUMNS = [
-    "maxCapturedFrequency_Hz", "amplitude_0p5Hz_uN", "FFR_1Hz_pct", "FFR_2Hz_pct", "FFR_3Hz_pct",
+    "maxCapturedFrequency_Hz", "amplitude_0p5Hz_uN"] + FFR_COLUMNS + [
     "captureThreshold_mA", "stimThreshold10_mA", "stimThreshold50_mA", "stimThreshold95_mA", "stimThreshold99_mA",
     "maxAmplitude_uN",
     "refPeriodNoPeak_ms", "refPeriodNoPeakStep_ms", "refPeriodNoResponse_ms", "refPeriodNoResponseStep_ms",
@@ -82,10 +93,21 @@ def protocol_results(by, G, Z=None, trace=None, opts=None):
             R["maxCapturedFrequency_Hz"] = float(np.max(val[ok]))
         a05 = _at(val, amp, cap, 0.5, fResLow)
         R["amplitude_0p5Hz_uN"] = a05
-        for f, c in ((1, "FFR_1Hz_pct"), (2, "FFR_2Hz_pct"), (3, "FFR_3Hz_pct")):
-            R[c] = 100 * _at(val, amp, cap, f, fRes) / a05
+        # every frequency step in % of 0.5 Hz (2026-11-02): columns 0.2, 0.75, 1 Hz and 1.5 ... 10 Hz in 0.5-Hz
+        # steps; captured steps between or above these columns: note
+        inCol = np.zeros(val.shape, bool)
+        with np.errstate(invalid="ignore"):
+            for f, c in zip(FFR_FREQUENCIES, FFR_COLUMNS):
+                res = fResLow if f < 1 else fRes
+                R[c] = 100 * _at(val, amp, cap, f, res) / a05
+                inCol |= np.abs(val - f) <= res / 2 + 1e-9
+            inCol |= np.abs(val - 0.5) <= fResLow / 2 + 1e-9
         if math.isnan(a05):
             notes.append("no captured 0.5 Hz group")
+        elif (ok & ~inCol).any():
+            k = np.flatnonzero(ok & ~inCol)
+            k = k[np.argsort(val[k], kind="stable")]
+            notes.append("FFR of further steps: " + ", ".join("%g Hz %.1f %%" % (val[i], 100 * amp[i] / a05) for i in k))
 
     elif byl == "stimcurrent":
         ok = cap & ~np.isnan(val)
