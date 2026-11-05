@@ -59,7 +59,8 @@ function [B, C] = mda_analyzeChannel(S, channel, range, opts)
 %      not counted ('specific'). C.stimCapturedCertain: stimulus followed by a certain contraction.
 %   2c. electrode tests of the control software (2026-10-27, mda_readMdd: S.electrodeTestWindows): a contraction whose
 %      peak lies in a test window of the stimulated channel was paced by the test's own pulses, if at all: column
-%      electrodeTest = true, not included (the test pulses themselves are not in S.stim).
+%      electrodeTest = true, not included (the test pulses themselves are not in S.stim). The same for the windows of
+%      the socket tests of the leak test (S.socketTestWindows, 2026-11-05; their discharge is not in S.stim).
 %   3. stimulus assignment (option stimAssignment, default 'onset', 2026-10-10): every pulse of the channel, regular
 %      or extra pulse (status channel bit 16: pre-pulses, CCM pulses, ...), is a candidate. Contraction onset =
 %      the tangent at the maximum dF/dt between the diastolic minimum and the peak, crossing the diastolic level.
@@ -480,9 +481,12 @@ if strcmp(opts.rocker, 'moving'),    included = included & rockerMoving; end
 % electrode test of the control software on this channel (2026-10-27, see mda_readMdd): the contractions in its
 % window were paced by the test's own pulses (if at all): column electrodeTest, not included
 electrodeTest = false(n, 1);
-if isfield(S, 'electrodeTestWindows') && ~isempty(S.electrodeTestWindows)
+W = zeros(0, 3);
+if isfield(S, 'electrodeTestWindows'), W = [W; S.electrodeTestWindows]; end
+if isfield(S, 'socketTestWindows'), W = [W; S.socketTestWindows]; end   %socket tests of the leak test (2026-11-05)
+if ~isempty(W)
     wc = stimCh; if wc == 0, wc = channel; end
-    W = S.electrodeTestWindows(S.electrodeTestWindows(:, 3) == wc, :);
+    W = W(W(:, 3) == wc, :);
     for w = 1:size(W, 1)
         electrodeTest = electrodeTest | (tPeakSel >= W(w, 1) & tPeakSel <= W(w, 2));
     end

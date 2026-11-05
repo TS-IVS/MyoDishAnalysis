@@ -291,7 +291,99 @@ ok = ok && okE;
 % columns than the flags of the recordings of this pass; the report must still be written
 okM = mixedFlagsReportTest();
 ok = ok && okM;
+% log lines of the control software lab round 5 (2026-11-05): rocker at the power-on speed after a controller restart
+% or a firmware update, socket tests of the leak test, rocker filter per logged speed
+okW = powerOnSocketTest();
+ok = ok && okW;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
+end
+
+
+function okW = powerOnSocketTest()
+% as test_power_on_rocker_and_socket_tests in py/tests/test_mda.py (2026-11-05): a temporary 9-channel recording (400 Hz,
+% 120 s, channel 1 paced at 1 Hz / 50 mA, contractions 1000 uN, rocker on all the time) with log lines of the control
+% software lab round 5:
+%  - firmware update (done) before the start, then rockerSpeed 60: power-on phase ended before the start, no note;
+%  - restart warning at 30 s (30 rpm): power-on phase 27 - 60 s (next rockerSpeed entry);
+%  - reconnect at 70 s with 'Rocker speed sent again ...' before the restart warning at 73 s: no phase;
+%  - restart warning at 90 s ('unknown'): 30 rpm from 87 s to the end of the file;
+%  - socket test of channel 1 ending at 50 s (0.4 s): its contractions are left out, the pulses stay stimuli; a socket
+%    test of channel 2 that was not sent: no window.
+% With the rocker artifact at the logged speeds (1.2117 Hz at 60 rpm, 0.6059 Hz at 30 rpm) the rocker filter must use
+% one period per speed (f0 table with 30 and 60 rpm) and recover the amplitude.
+fs = 400; T = 120; n = T * fs; tt = (0:n-1) / fs;
+ts = 1 + (0:T-3);
+F1 = 2000 * ones(1, n);
+for k = 1:numel(ts)
+    x = ts(k) + 0.03;
+    I = tt >= x & tt < x + 0.05; I2 = tt >= x + 0.05 & tt < x + 0.2;
+    F1(I) = F1(I) + 1000 * (tt(I) - x) / 0.05;  F1(I2) = F1(I2) + 1000 - 1000 * (tt(I2) - x - 0.05) / 0.15;
+end
+f = 1.2117 * ones(1, n); f(tt >= 27.27 & tt < 60.27) = 1.2117 / 2; f(tt >= 87.27) = 1.2117 / 2;
+ph = 2 * pi * cumsum(f) / fs;
+art = 150 * (cos(ph + 0.3) + 0.5 * cos(2 * ph + 2.1));
+X = zeros(9, n, 'int16');
+X(1,:) = int16(round(F1 + art));
+code = 16384 * ones(1, n, 'uint16');                 %rocker on
+k = round(ts * fs) + 1;
+code(k) = uint16(16384 + 512 + 50);                  %channel 1, 50 mA
+X(9,:) = typecast(code, 'int16');
+base = [tempname '_power'];
+mdd = [base '.mdd']; lg = [base '_log.log'];
+fid = fopen(mdd, 'w'); fwrite(fid, X, 'int16'); fclose(fid);
+L = {'systemTime;dataLogTime;channel;code;value', ...
+    ['2026 01 01 05:59:00:000;0;0;system;{"v":1,"event":"firmwareUpdate","actionId":"U1","by":"TS","phase":"done",' ...
+    '"path":"command","controllerId":"SIMDEV01A","from":"V19C","to":"V19F","sha256":"x","seconds":71.4,"why":null}'], ...
+    '2026 01 01 05:59:01:000;0;0;rockerSpeed;60', '2026 01 01 06:00:00:000;0;0;nChannels;9', ...
+    '2026 01 01 06:00:00:000;0;0;Recording;started: pw.mdd', '2026 01 01 06:00:00:000;0;0;samplingRate Recording;400'};
+for c = 1:8
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Calibration;1000', c); %#ok<AGROW>
+    L{end+1} = sprintf('2026 01 01 06:00:00:000;0;%d;Offset;0', c); %#ok<AGROW>
+end
+sock = @(t, c, st, sec) sprintf(['2026 01 01 06:00:%02d:000;%d;%d;system;{"v":1,"event":"electrodeSocketTest",' ...
+    '"actionId":"S%d","by":"TS","controllerId":"SIMDEV01A","firmware":"V19F","time":"2026-01-01T06:00:%02d+01:00",' ...
+    '"trigger":"manual","step":null,"status":"%s","why":null,"verdict":"ok","chamber":"in","seconds":%s}'], ...
+    t, 1000 * t, c, c, t, st, sec);
+L = [L, {'2026 01 01 06:00:30:000;30000;0;warning;Controller restart suspected: no data for 5.9 s, frame counter 1 after it - rocker at the power-on speed 30 rpm', ...
+    sock(50, 1, 'done', '0.4'), sock(55, 2, 'notDone', 'null'), '2026 01 01 06:01:00:000;60000;0;rockerSpeed;60', ...
+    '2026 01 01 06:01:10:000;70000;0;Event;Connection re-established', ...
+    '2026 01 01 06:01:10:100;70100;0;Event;Rocker speed sent again after the connection was re-established: 60 rpm', ...
+    '2026 01 01 06:01:10:100;70100;0;rockerSpeed;60', ...
+    '2026 01 01 06:01:13:000;73000;0;warning;Controller restart suspected: no data for 2.0 s, frame counter 1 after it - rocker at the power-on speed unknown', ...
+    '2026 01 01 06:01:30:000;90000;0;warning;Controller restart suspected: no data for 5.9 s, frame counter 1 after it - rocker at the power-on speed unknown', ...
+    '2026 01 01 06:01:59:500;119500;0;warning;Recording stopped by the software: only 50 MB free on drive Z:', ...
+    sprintf('2026 01 01 06:02:00:000;%d;0;Recording;stopped: pw.mdd', T * 1000)}];
+fid = fopen(lg, 'w'); fprintf(fid, '%s\n', L{:}); fclose(fid);
+okW = false;
+try
+    H = mda_readMdd(mdd);
+    okH = isequal(H.rockerPowerOn, [27 30 1 60; 87 30 1 inf; -inf 30 2 -inf]) && ...
+        isequal(H.rockerSpeedLog, [-inf 30; -inf 60; 27 30; 60 60; 70.1 60; 87 30]) && ...
+        any(strcmp(H.notes, ['Controller restart (warning of the control software): rocker at the power-on speed 30 rpm ' ...
+        'from 27 s until the next rockerSpeed entry (60 s) (rocker filter, rocker state from the log).'])) && ...
+        any(contains(H.notes, 'power-on speed 30 rpm from 87 s until the end of the file')) && ...
+        ~any(contains(H.notes, 'Firmware update')) && numel(H.electrodeSocketTests) == 2 && ...
+        isequal(size(H.socketTestWindows), [1 3]) && max(abs(H.socketTestWindows - [49.6 51 1])) < 1e-9 && ...
+        isempty(H.electrodeTestWindows) && ...
+        any(strcmp(H.notes, 'Socket test of channel 1 (manual, ok) 49.6 - 51.0 s: the contractions in that time are left out of the analysis.'));
+    S = mda_readMdd(mdd, 0, T);
+    okS = nnz(S.stim.channel == 1) == numel(ts) && isempty(S.stimElectrodeTest.time);   %the pulses stay stimuli
+    o = {'quiet', true, 'noFiltering', 'spikeRemoval', false};
+    B = MyoDishAnalysis(mdd, 1, 0.5, T, o{:});
+    win = B.t_peak >= 49.6 & B.t_peak <= 51;
+    okB = nnz(win) == 1 && all(B.electrodeTest(win)) && ~any(B.included(win)) && ~any(B.electrodeTest(~win));
+    [~, R] = mda_rockerFilter(S, 1, mda_options('rockerFrequency', [60 1.2117; 30 1.2117 / 2]));
+    Bf = MyoDishAnalysis(mdd, 1, 0.5, T, o{:}, 'rockerFilter', true, 'rockerFrequency', [60 1.2117; 30 1.2117 / 2]);
+    a = Bf.amplitude(Bf.included & Bf.t_peak > 5 & Bf.t_peak < 115 & abs(Bf.t_peak - 27.5) > 3 & abs(Bf.t_peak - 60.5) > 3 & abs(Bf.t_peak - 87.5) > 3);
+    okR = isequal(R.f0table(:,1)', [30 60]) && strcmp(R.status, 'corrected') && max(abs(a - 1000)) < 20;
+    okW = okH && okS && okB && okR;
+    fprintf(['power-on phases / socket tests: header %d, pulses kept %d, socket window %d contraction(s) left out %d, ' ...
+        'rocker filter speeds %s (expected 30 60), max. amplitude error %.1f uN   %s\n'], okH, okS, nnz(win), okB, ...
+        mat2str(R.f0table(:,1)'), max(abs(a - 1000)), passStr(okW));
+catch ME
+    fprintf('power-on phases / socket tests: %s   FAILED\n', ME.message);
+end
+delete(mdd); delete(lg);
 end
 
 

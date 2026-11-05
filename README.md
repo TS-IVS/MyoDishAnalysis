@@ -1236,7 +1236,9 @@ thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
   over consecutive samples or a misread status channel; the contractions are analysed as usual; **R** controller
   restart suspected (2026-10-21; the warning `Controller restart suspected: no data for … s, …` of the control
   software 2.2 in the log, read from the events table: after it the controller may have run with its power-on
-  settings instead of those in the log; all channels of the recording). Noise index =
+  settings instead of those in the log; all channels of the recording), also for a firmware update (event
+  `firmwareUpdate`, done or failed) and a recording stopped by the software for lack of disk space (2026-11-05;
+  e.g. *controller restart suspected (2, first at 1234 s); firmware update (1, first at 5 s)*). Noise index =
   uncertain % × (extra % + missed %) / 100; it is listed (e.g. `noise index 54 (uncertain 98 %, extra 0 %, missed
   55 %)`) and orders the trace pages. Arrhythmically paced channels (see "Arrhythmic pacing"): missed beats not counted,
   no C and V flags, capture shown with `~`.
@@ -1312,6 +1314,21 @@ summaries. `mda_readMdd` / `read_mdd` therefore read the events:
 * Not yet: the test's results (`iMaxMa` per channel and run) as a table of the report, and the test pulses in the
   GUI plot.
 
+## Socket tests and controller restarts (control software lab round 5; 2026-11-05)
+* **Socket tests** of the leak test (`system` event `electrodeSocketTest`, channel = the channel tested; firmware
+  V19F or later): the test discharges the electrode of the channel (1 ms) and, with a slice in, can elicit a
+  contraction. `H.electrodeSocketTests` (`time` = end of the test, `channel`, `trigger`, `status`, `verdict`,
+  `seconds`) and `H.socketTestWindows` (`[end − seconds, end + 1 s, channel]`; none for a test that was not sent):
+  contractions in the window get **`electrodeTest`** and are not `included`, as for electrode tests; the pulses of the
+  status channel stay stimuli (the discharge is not one of them). A note per window.
+* **Rocker at the power-on speed** after a controller restart: from 3 s before the warning `Controller restart
+  suspected: …` (the software decides after 3 s of data) until the next `rockerSpeed` entry, at the speed the warning
+  names (`… - rocker at the power-on speed 30 rpm`; 30 rpm if `unknown` or not given). No such phase when the speed
+  was sent again at a reconnect (`Rocker speed sent again after the connection was re-established` between a
+  `Connection re-established` at most 10 s before the warning and the warning). The same from a `firmwareUpdate`
+  event with phase `done`. The phases are rows of `H.rockerSpeedLog` (rocker filter, rocker state from the log) and
+  of `H.rockerPowerOn` (`[start rpm kind end]`, kind 1 restart, 2 firmware update), with a note each.
+
 ## Rocker artifact (`'rockerFilter',true`, GUI checkbox; `mda_rockerFilter`)
 While the rocker moves, the dish tilts periodically and each sensor shows an additive periodic signal at the rocker
 frequency (60 rpm setting = 1.212–1.215 Hz, i.e. 0.0202 Hz per rpm; 75 rpm = 1.516 Hz). Its shape and size differ
@@ -1321,7 +1338,9 @@ than the contraction, rocker cycles are detected as extra contractions.
 * **Method**: the artifact is fitted per channel and rocker period in blocks of 30 s as 6 harmonics of the rocker
   frequency to the signal **between the contractions** (contractions masked by stimulus and detection; baseline
   fitted separately for each stretch between two contractions) and subtracted. Rocker frequency: rocker speed in the
-  log file × 0.0202 Hz/rpm, refined with all channels. Blocks are used only if the stretches between the
+  log file × 0.0202 Hz/rpm, refined with all channels; a rocker period is split where the logged speed changes
+  without a stop (`rockerLogDelay` after the entry, 2026-11-05), so that each part has its own speed (e.g. a rocker
+  speed test, or the power-on speed after a controller restart). Blocks are used only if the stretches between the
   contractions cover the whole rocker cycle and the fit is consistent with the other blocks of the channel; uncertain
   blocks take the artifact of the nearest good block of the same rocker period. Rocker stops are not needed.
 * **Validation** (2026-10-05): (1) synthetic periodic artifact (60 and 200 µN peak-to-peak, random shape) added to

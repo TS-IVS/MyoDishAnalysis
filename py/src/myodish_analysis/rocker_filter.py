@@ -119,6 +119,10 @@ def rocker_filter(S, channels, opts, Sctx=None):
 
     # ------------------------------------------------------------------ rocker periods and their speed
     r0, r1 = _runs(Sctx.rockerOn, Sctx.dt, P.minRun)
+    Lsp = np.asarray(Sctx.get("rockerSpeedLog", np.zeros((0, 2))), dtype=float).reshape(-1, 2)
+    if Lsp.shape[0]:  # one period per logged speed (2026-11-05)
+        r0, r1 = _split_at_speed_changes(r0, r1, np.asarray(Sctx.t, dtype=float), Lsp, float(opts.rockerLogDelay),
+                                         Sctx.dt, P.minRun)
     if r0.size == 0 or not np.any(S.rockerOn):
         for Rc in R:
             Rc.status = "rocker not moving"
@@ -292,6 +296,31 @@ def _runs(on, dt, minLen):
     s1 = np.flatnonzero(d == -1) - 1
     keep = (s1 - s0) * dt >= minLen
     return s0[keep], s1[keep]
+
+
+def _split_at_speed_changes(s0, s1, t, L, delay, dt, minLen):
+    """rocker-on periods split where the logged speed changes while the rocker runs (2026-11-05): e.g. 60 -> 30 rpm
+    without a stop, or the power-on speed after a controller restart (read_mdd, rockerPowerOn) and the speed sent after
+    it. Each part gets its own speed and rocker frequency. Split 'delay' s after the entry; parts shorter than minLen
+    are not corrected (as short periods)."""
+    L = L[np.argsort(L[:, 0], kind="stable")]
+    c = np.flatnonzero((L[1:, 1] > 0) & (L[:-1, 1] > 0) & (L[1:, 1] != L[:-1, 1])) + 1
+    if c.size == 0 or s0.size == 0:
+        return s0, s1
+    tc = np.sort(L[c, 0] + delay)
+    tc = tc[np.isfinite(tc)]
+    t = t.ravel()
+    a, b = [], []
+    for q in range(s0.size):
+        e0 = int(s0[q])
+        for x in tc[(tc > t[s0[q]]) & (tc <= t[s1[q]])]:
+            i = int(np.flatnonzero(t >= x)[0])
+            if i > e0:
+                a.append(e0); b.append(i - 1); e0 = i
+        a.append(e0); b.append(int(s1[q]))
+    a = np.array(a, dtype=int); b = np.array(b, dtype=int)
+    keep = (b - a) * dt >= minLen
+    return a[keep], b[keep]
 
 
 # ------------------------------------------------------------------ masks (time intervals with contractions)

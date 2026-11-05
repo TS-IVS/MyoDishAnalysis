@@ -62,7 +62,15 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               listed channels (1 mA, the top, halving steps, regulation off, "not reached" on purpose above the
 %               limit) are no stimuli of the experiment: they are moved to stimElectrodeTest (same fields as stim)
 %               and the contractions in the windows are not included (mda_analyzeChannel, column electrodeTest),
-%               rockerSpeedLog ([time rpm]), rockerSource ('status channel' or 'log'), rockerLogIntervals
+%               electrodeSocketTests (struct array, one per socket test of the leak test of the control software, lab
+%               round 5: time (end of the test, s), channel, trigger, status, verdict, seconds, line; see socketTests,
+%               2026-11-05) and socketTestWindows ([from to channel]: [time - seconds, time + 1 s] of a test with a
+%               duration; the contractions in it are not included, as for electrode tests; the pulses stay stimuli:
+%               the test's discharge is not a pulse of the status channel),
+%               rockerSpeedLog ([time rpm], including the power-on phases), rockerPowerOn ([start rpm kind end]: the
+%               rocker runs at the controller's power-on speed after a controller restart (kind 1, warning 'Controller
+%               restart suspected') or a firmware update (kind 2) until the next 'rockerSpeed' entry (end); see
+%               powerOnRocker, 2026-11-05), rockerSource ('status channel' or 'log'), rockerLogIntervals
 %               ([from to] in s with rocker speed > 0 according to the log file), recordingStopped (1 = the log
 %               file ends with 'Recording stopped' for this file, 0 = recording still running or aborted, NaN = no
 %               'Recording' entries; used by MyoDishAnalysisWatch to skip recordings that are still running)
@@ -154,6 +162,16 @@ H.pulseSettingsLog = L.pulseSettingsEvents; %[time logChannel code value]: pulse
 H.extraPulseLog = L.extraPulseOffsets;     %[time channel k offset_ms line]: programmed extra pulse times (2026-10-10)
 H.stimSequenceLog = L.stimSequences;       %[time channel period_ms nTimes t1_ms t2_ms]: programmed sequences (2026-10-23)
 H.electrodeTests = L.electrodeTests;       %electrode tests of the control software (2026-10-27, see electrodeTests)
+H.electrodeSocketTests = L.socketTests;    %socket tests of the leak test (2026-11-05, see socketTests)
+H.rockerPowerOn = L.rockerPowerOn;         %[start rpm kind end]: rocker at the power-on speed (2026-11-05, see powerOnRocker)
+for k = 1:size(H.rockerPowerOn, 1)
+    P = H.rockerPowerOn(k, :);
+    if P(4) == -inf, continue; end              %ended before the recording started
+    what = {'Controller restart (warning of the control software)', 'Firmware update'};
+    if isinf(P(4)), until = 'the end of the file'; else, until = sprintf('the next rockerSpeed entry (%.0f s)', P(4)); end
+    H.notes{end+1} = sprintf(['%s: rocker at the power-on speed %g rpm from %s s until %s (rocker filter, rocker ' ...
+        'state from the log).'], what{P(3)}, P(2), timeText(P(1)), until); %#ok<AGROW>
+end
 
 % sampling rate: option > log file > 500 Hz for old 8-channel files (software 1.0.x) > 400 Hz
 if ~isempty(opts.samplingRate)
@@ -246,6 +264,20 @@ for k = 1:numel(H.electrodeTests)
         'in that time are left out of the analysis.'], E.run, kind, ...
         timeText(E.tStart), timeText(tEnd), plural(numel(E.channels)), ...
         strjoin(arrayfun(@(c) sprintf('%d', c), E.channels, 'UniformOutput', false), ', ')); %#ok<AGROW>
+end
+% socket tests of the leak test (2026-11-05): the test discharges the electrode of the channel; with a slice in, it can
+% elicit a contraction. Window [end - seconds, end + 1 s] of the channel; tests not sent (no duration) give none. The
+% contractions in it are left out (mda_analyzeChannel); the pulses of the status channel stay stimuli.
+H.socketTestWindows = zeros(0, 3);
+for k = 1:numel(H.electrodeSocketTests)
+    E = H.electrodeSocketTests(k);
+    if isnan(E.seconds) || isnan(E.channel) || E.channel < 1, continue; end
+    a = E.time - E.seconds; b = E.time + 1;
+    if b < 0 || a > H.totalSeconds, continue; end
+    H.socketTestWindows = [H.socketTestWindows; a b E.channel]; %#ok<AGROW>
+    kind = {E.trigger, E.verdict}; kind = strjoin(kind(~cellfun(@isempty, kind)), ', ');
+    H.notes{end+1} = sprintf(['Socket test of channel %d (%s) %.1f - %.1f s: the contractions in that time are left ' ...
+        'out of the analysis.'], E.channel, kind, a, b); %#ok<AGROW>
 end
 
 % rocker state: bit 15 of the status channel or, if this bit is missing although the log file has rocker speeds
@@ -719,7 +751,7 @@ L = struct('samplingRate',nan,'recordingDuration',nan,'nChannelsController',nan,
     'extendedSensorModeEvents',zeros(0,2),'startDatenum',nan,'programVersion','','clockNote','', ...
     'offsetEvents',zeros(0,3),'calibrationEvents',zeros(0,3),'rockerSpeedEvents',zeros(0,2), ...
     'recordingStopped',nan,'pulseSettingsEvents',zeros(0,4),'extraPulseOffsets',zeros(0,5),'stimSequences',zeros(0,6), ...
-    'electrodeTests',electrodeTests({}, {}, nan));
+    'electrodeTests',electrodeTests({}, {}, nan),'rockerPowerOn',zeros(0,4),'socketTests',socketTests({}, nan));
 if ~exist(logFile,'file'), return; end
 % MyoDish logs are UTF-16 little endian (with byte order mark); converted copies may be UTF-8
 fid = fopen(logFile, 'r');
@@ -742,6 +774,8 @@ ext = zeros(0,3); offs = zeros(0,4); cal = zeros(0,4); rck = zeros(0,3);  %last 
 pst = zeros(0,5); nPst = 0;                         %pulse durations: time, log channel, code (1-3), value (us), line
 seqEv = cell(0, 1);                                 %'Sequence' entries: {time, log channel, line, text}
 etEv = cell(0, 1); etWarn = cell(0, 1);             %electrode test events (JSON) and warning lines (2026-10-27)
+sockEv = cell(0, 1); fwEv = cell(0, 1); rstEv = cell(0, 1);   %socket tests, firmware updates, restart warnings (2026-11-05)
+reconL = zeros(0, 2); resendL = zeros(1, 0);        %'Connection re-established' [line time] / 'Rocker speed sent again ...' lines
 pstCodes = {'chargeDuration', 'pauseDuration', 'dechargeDuration'};
 lineStart = nan; lineStartPar = nan;
 tMax = -inf; tMaxPar = -inf;                        %latest dataLogTime since the chosen start line
@@ -825,6 +859,17 @@ for i = 1:numel(lines)
             (strcmpi(code,'Event') && contains(value,'singleChannelMode','IgnoreCase',true))
         v = lower(value);
         L.singleChannelMode = ~(contains(v,'off') || contains(v,'false') || strcmp(v,'0'));
+    elseif strcmpi(code,'system') && startsWith(value, '{') && contains(value, '"electrodeSocketTest"')
+        sockEv{end+1, 1} = {tsec, str2double(f{3}), i, value}; %#ok<AGROW>   %socket tests of the leak test (2026-11-05)
+    elseif strcmpi(code,'system') && startsWith(value, '{') && contains(value, '"firmwareUpdate"')
+        fwEv{end+1, 1} = {tsec, i, value}; %#ok<AGROW>                        %firmware updates (2026-11-05)
+    elseif strcmpi(code,'warning') && startsWith(value, 'Controller restart suspected', 'IgnoreCase', true)
+        rstEv{end+1, 1} = {tsec, i, value}; %#ok<AGROW>
+    elseif strcmpi(code,'Event') && startsWith(value, 'Connection re-established', 'IgnoreCase', true)
+        reconL(end+1, :) = [i tsec]; %#ok<AGROW>
+    elseif strcmpi(code,'Event') && startsWith(value, 'Rocker speed sent again after the connection was re-established', ...
+            'IgnoreCase', true)
+        resendL(end+1) = i; %#ok<AGROW>
     end
     if ~isnan(lineStart), tMax = max(tMax, tsec); end
     if ~isnan(lineStartPar), tMaxPar = max(tMaxPar, tsec); end
@@ -849,11 +894,25 @@ end
 % entries logged before the 'Recording started' line hold from the start of the file (time -Inf; such lines may
 % carry the dataLogTime of a previous recording)
 if isnan(lineStart), lineStart = lineStartPar; end
+% power-on phases of the rocker (controller restart, firmware update; 2026-11-05): rows of rck from their start
+pwr = powerOnRocker(rstEv, fwEv, reconL, resendL);
+rck = [rck; pwr(:,1:3)];
 if ~isnan(lineStart)
     ext(ext(:,3) < lineStart, 1) = -inf;
     offs(offs(:,4) < lineStart, 1) = -inf;
     cal(cal(:,4) < lineStart, 1) = -inf;
     rck(rck(:,3) < lineStart, 1) = -inf;
+    pwr(pwr(:,3) < lineStart, 1) = -inf;
+end
+L.rockerPowerOn = zeros(0, 4);
+if ~isempty(pwr)
+    rck = sortrows(rck, [1 3]);                     %in time; entries of the same time in the order of the log
+    pEnd = inf(size(pwr, 1), 1);                    %end of a phase: the next entry
+    for k = 1:size(pwr, 1)
+        j = find(rck(:,3) == pwr(k,3) & rck(:,1) == pwr(k,1), 1);
+        if j < size(rck, 1), pEnd(k) = rck(j+1, 1); end
+    end
+    L.rockerPowerOn = [pwr(:,1:2), pwr(:,4), pEnd];
 end
 pst = pst(1:nPst, :);
 X = extraPulseOffsets(seqEv);
@@ -867,6 +926,7 @@ L.pulseSettingsEvents = pst(:,1:4);
 L.extraPulseOffsets = X;
 L.stimSequences = Q(:,1:6);
 L.electrodeTests = electrodeTests(etEv, etWarn, lineStart);
+L.socketTests = socketTests(sockEv, lineStart);
 L.rockerSpeedEvents = rck(:,1:2);
 L.extendedSensorModeEvents = ext(:,1:2);
 L.offsetEvents = offs(:,1:3);
@@ -1057,6 +1117,66 @@ for i = 1:numel(warn)
     elseif contains(txt, 'may show') && ~isnan(chn) && chn > 0
         R(k).nextPulseWarning(end+1) = chn;
     end
+end
+end
+
+
+function P = powerOnRocker(rst, fw, recon, resend)
+% Power-on phases of the rocker (2026-11-05): after a controller restart the rocker runs at the controller's power-on
+% speed until the software sends a speed again (the next 'rockerSpeed' entry). Rows [time rpm line kind]:
+%  - warning 'Controller restart suspected: no data for x s, frame counter 1 after it - rocker at the power-on speed
+%    30 rpm' (control software 2.2): from 3 s before the warning (the software decides after 3 s of data after the
+%    silence); the speed from the text, 30 rpm if 'unknown' or not given (firmware V18G-V19G). No phase if the last
+%    'Connection re-established' before the warning lies at most 10 s before it and a line 'Rocker speed sent again
+%    after the connection was re-established' lies between the two: the restarted controller got the speed at the
+%    reconnect. kind 1.
+%  - 'system' event firmwareUpdate with phase done (control software lab round 5): the controller runs the new firmware
+%    with its power-on settings; from the line, 30 rpm. kind 2.
+% rst / fw: {time, line, text}; recon: [line time]; resend: line numbers
+decide = 3;                                         %s of data after the silence before the warning
+reconMax = 10;                                      %s: a reconnect at most this long before the warning belongs to it
+rpm0 = 30;                                          %power-on speed if the line does not give it
+P = zeros(0, 4);
+for i = 1:numel(rst)
+    t = rst{i}{1}; ln = rst{i}{2};
+    r = find(recon(:,1) < ln, 1, 'last');
+    if ~isempty(r) && t - recon(r,2) <= reconMax && any(resend > recon(r,1) & resend < ln), continue; end
+    rpm = rpm0;
+    tok = regexp(rst{i}{3}, 'power-on speed (\d+\.?\d*) rpm', 'tokens', 'once');
+    if ~isempty(tok), rpm = str2double(tok{1}); end
+    P(end+1, :) = [t - decide, rpm, ln, 1]; %#ok<AGROW>
+end
+for i = 1:numel(fw)
+    try
+        d = jsondecode(fw{i}{3});
+    catch
+        continue;
+    end
+    if isstruct(d) && strcmp(jsonText(d, 'event'), 'firmwareUpdate') && strcmp(jsonText(d, 'phase'), 'done')
+        P(end+1, :) = [fw{i}{1}, rpm0, fw{i}{2}, 2]; %#ok<AGROW>
+    end
+end
+end
+
+
+function R = socketTests(ev, lineStart)
+% Socket tests of the leak test (control software lab round 5, 2026-11-04; 2026-11-05): 'system' events
+% electrodeSocketTest, log channel = the channel tested, one line per test that ended (column 2 = its end). The test
+% discharges the electrode of the channel (1 ms); with a slice in, it can elicit a contraction. R: struct array time
+% (s in the file), channel, trigger, status, verdict, seconds (from the command to the line; NaN for a test not sent),
+% line. Lines before lineStart ('Recording started') belong to another recording: left out.
+R = struct('time', {}, 'channel', {}, 'trigger', {}, 'status', {}, 'verdict', {}, 'seconds', {}, 'line', {});
+for i = 1:numel(ev)
+    t = ev{i}{1}; chn = ev{i}{2}; ln = ev{i}{3};
+    if ~isnan(lineStart) && ln < lineStart, continue; end
+    try
+        d = jsondecode(ev{i}{4});
+    catch
+        continue;
+    end
+    if ~isstruct(d) || ~strcmp(jsonText(d, 'event'), 'electrodeSocketTest'), continue; end
+    R(end+1) = struct('time', t, 'channel', chn, 'trigger', jsonText(d, 'trigger'), 'status', jsonText(d, 'status'), ...
+        'verdict', jsonText(d, 'verdict'), 'seconds', jsonNum(d, 'seconds'), 'line', ln); %#ok<AGROW>
 end
 end
 

@@ -48,7 +48,15 @@ OUTPUT (S, a Struct with the field names of the MATLAB version)
               2026-10-27) and electrodeTestWindows ([from to channel], s in the file: start to end + 1 s; no end in
               the log: to the end of the file; the test's own pulses of the listed channels are no stimuli of the
               experiment: moved to stimElectrodeTest, the contractions in the windows not included, see
-              analyze_channel, column electrodeTest), calibrationApplied,
+              analyze_channel, column electrodeTest), electrodeSocketTests (list of Structs, one per socket test of
+              the leak test of the control software, lab round 5: time (end of the test, s), channel, trigger,
+              status, verdict, seconds, line; see socket_tests, 2026-11-05) and socketTestWindows ([from to channel]:
+              [time - seconds, time + 1 s] of a test with a duration; the contractions in it are not included, as for
+              electrode tests; the pulses stay stimuli: the test's discharge is not a pulse of the status channel),
+              rockerPowerOn ([start rpm kind end]: the rocker runs at the controller's power-on speed after
+              a controller restart (kind 1, warning 'Controller restart suspected') or a firmware update (kind 2)
+              until the next 'rockerSpeed' entry (end); these phases are rows of rockerSpeedLog too; see
+              power_on_rocker, 2026-11-05), calibrationApplied,
               extendedSensorFactor, rockerSource ('status channel' or 'log'), rockerLogIntervals ([from to] in s
               with rocker speed > 0 according to the log file)
   data:       t (s; centre of the averaged raw samples, first raw sample = 0 s), dt, force (nData x n, uN),
@@ -157,6 +165,15 @@ def read_header(mdd_file, opts=None):
     H.extraPulseLog = L.extraPulseOffsets
     H.stimSequenceLog = L.stimSequences  # [time channel period_ms nTimes t1_ms t2_ms]: programmed sequences (2026-10-23)
     H.electrodeTests = L.electrodeTests  # electrode tests of the control software (2026-10-27, see electrode_tests)
+    H.electrodeSocketTests = L.socketTests  # socket tests of the leak test (2026-11-05, see socket_tests)
+    H.rockerPowerOn = L.rockerPowerOn  # [start rpm kind end]: rocker at the power-on speed (2026-11-05, power_on_rocker)
+    for Pw in H.rockerPowerOn:
+        if Pw[3] == -math.inf:  # ended before the recording started
+            continue
+        what = ("Controller restart (warning of the control software)", "Firmware update")[int(Pw[2]) - 1]
+        until = "the end of the file" if math.isinf(Pw[3]) else f"the next rockerSpeed entry ({Pw[3]:.0f} s)"
+        H.notes.append(f"{what}: rocker at the power-on speed {_g(Pw[1])} rpm from {_time_text(Pw[0])} s until "
+                       f"{until} (rocker filter, rocker state from the log).")
 
     # sampling rate: option > log file > 500 Hz for old 8-channel files (software 1.0.x) > 400 Hz
     if opts.samplingRate is not None:
@@ -239,6 +256,21 @@ def read_header(mdd_file, opts=None):
                        f"channel{'' if len(E.channels) == 1 else 's'} {', '.join(str(c) for c in E.channels)}: its "
                        "stimuli and the contractions in that time are left out of the analysis.")
     H.electrodeTestWindows = np.array(W, dtype=float).reshape(-1, 3)
+    # socket tests of the leak test (2026-11-05): the test discharges the electrode of the channel; with a slice in, it
+    # can elicit a contraction. Window [end - seconds, end + 1 s] of the channel; tests not sent (no duration) give none.
+    # The contractions in it are left out (analyze_channel); the pulses of the status channel stay stimuli.
+    W = []
+    for E in H.electrodeSocketTests:
+        if math.isnan(E.seconds) or math.isnan(E.channel) or E.channel < 1:
+            continue
+        a = E.time - E.seconds; b = E.time + 1
+        if b < 0 or a > H.totalSeconds:
+            continue
+        W.append([a, b, E.channel])
+        kind = ", ".join(x for x in (E.trigger, E.verdict) if x)
+        H.notes.append(f"Socket test of channel {E.channel:.0f} ({kind}) {a:.1f} - {b:.1f} s: the contractions in that "
+                       "time are left out of the analysis.")
+    H.socketTestWindows = np.array(W, dtype=float).reshape(-1, 3)
 
     # rocker state: bit 15 of the status channel or, if this bit is missing although the log file has rocker speeds
     # > 0 (firmware error in some setups) or there is no status channel, the 'rockerSpeed' entries of the log file
@@ -710,7 +742,8 @@ def read_log(log_file, file_time=None):
                singleChannelMode=None, extendedSensorModeEvents=np.zeros((0, 2)), startDatenum=math.nan,
                programVersion="", clockNote="", offsetEvents=np.zeros((0, 3)), calibrationEvents=np.zeros((0, 3)),
                rockerSpeedEvents=np.zeros((0, 2)), recordingStopped=None, pulseSettingsEvents=np.zeros((0, 4)),
-               extraPulseOffsets=np.zeros((0, 5)), stimSequences=np.zeros((0, 6)), electrodeTests=[])
+               extraPulseOffsets=np.zeros((0, 5)), stimSequences=np.zeros((0, 6)), electrodeTests=[],
+               rockerPowerOn=np.zeros((0, 4)), socketTests=[])
     txt = read_log_text(log_file)
     if txt is None:
         return L
@@ -729,6 +762,8 @@ def read_log(log_file, file_time=None):
     pst = []  # pulse durations: time, log channel, code (1-3), value (us), line
     seqEv = []  # 'Sequence' entries: (time, log channel, line, text)
     etEv, etWarn = [], []  # electrode test events (JSON) and warning lines (2026-10-27)
+    sockEv, fwEv, rstEv = [], [], []  # socket tests, firmware updates, restart warnings (2026-11-05)
+    reconL, resendL = [], []  # 'Connection re-established' (line, time) / 'Rocker speed sent again ...' lines
     pstCodes = ("chargeduration", "pauseduration", "dechargeduration")
     lineStart = lineStartPar = math.nan
     tMax = tMaxPar = -math.inf  # latest dataLogTime since the chosen start line
@@ -812,6 +847,16 @@ def read_log(log_file, file_time=None):
             versions.append(value)
         elif "singlechannelmode" in lc or (lc == "event" and "singlechannelmode" in lv):
             L.singleChannelMode = not ("off" in lv or "false" in lv or lv == "0")
+        elif lc == "system" and value.startswith("{") and '"electrodeSocketTest"' in value:
+            sockEv.append((tsec, str2double(f[2]), i, value))  # socket tests of the leak test (2026-11-05)
+        elif lc == "system" and value.startswith("{") and '"firmwareUpdate"' in value:
+            fwEv.append((tsec, i, value))  # firmware updates (2026-11-05)
+        elif lc == "warning" and lv.startswith("controller restart suspected"):
+            rstEv.append((tsec, i, value))
+        elif lc == "event" and lv.startswith("connection re-established"):
+            reconL.append((i, tsec))
+        elif lc == "event" and lv.startswith("rocker speed sent again after the connection was re-established"):
+            resendL.append(i)
         if not math.isnan(lineStart):
             tMax = max(tMax, tsec)
         if not math.isnan(lineStartPar):
@@ -836,11 +881,24 @@ def read_log(log_file, file_time=None):
     offs = np.array(offs, dtype=float).reshape(-1, 4)
     cal = np.array(cal, dtype=float).reshape(-1, 4)
     rck = np.array(rck, dtype=float).reshape(-1, 3)
+    # power-on phases of the rocker (controller restart, firmware update; 2026-11-05): rows of rck from their start
+    pwr = power_on_rocker(rstEv, fwEv, reconL, resendL)
+    rck = np.vstack([rck, pwr[:, :3]])
     if not math.isnan(lineStart):
         ext[ext[:, 2] < lineStart, 0] = -math.inf
         offs[offs[:, 3] < lineStart, 0] = -math.inf
         cal[cal[:, 3] < lineStart, 0] = -math.inf
         rck[rck[:, 2] < lineStart, 0] = -math.inf
+        pwr[pwr[:, 2] < lineStart, 0] = -math.inf
+    L.rockerPowerOn = np.zeros((0, 4))
+    if pwr.shape[0]:
+        rck = rck[np.lexsort((rck[:, 2], rck[:, 0]))]  # in time; entries of the same time in the order of the log
+        pEnd = np.full(pwr.shape[0], math.inf)  # end of a phase: the next entry
+        for k in range(pwr.shape[0]):
+            j = np.flatnonzero((rck[:, 2] == pwr[k, 2]) & (rck[:, 0] == pwr[k, 0]))
+            if j.size and j[0] < rck.shape[0] - 1:
+                pEnd[k] = rck[j[0] + 1, 0]
+        L.rockerPowerOn = np.c_[pwr[:, :2], pwr[:, 3], pEnd]
     pst = np.array(pst, dtype=float).reshape(-1, 5)
     X = extra_pulse_offsets(seqEv)
     Q = stim_sequences(seqEv)
@@ -852,6 +910,7 @@ def read_log(log_file, file_time=None):
     L.extraPulseOffsets = X
     L.stimSequences = Q[:, :6].copy()
     L.electrodeTests = electrode_tests(etEv, etWarn, lineStart)
+    L.socketTests = socket_tests(sockEv, lineStart)
     L.rockerSpeedEvents = rck[:, :2].copy()
     L.extendedSensorModeEvents = ext[:, :2].copy()
     L.offsetEvents = offs[:, :3].copy()
@@ -969,6 +1028,69 @@ def stim_sequences(ev):
 
 
 _RE_ET_WARN = _re.compile(r"^Electrode test (\S+?):?\s")
+
+
+def power_on_rocker(rst, fw, recon, resend):
+    """Power-on phases of the rocker (2026-11-05): after a controller restart the rocker runs at the controller's
+    power-on speed until the software sends a speed again (the next 'rockerSpeed' entry). Rows [time rpm line kind]:
+    - warning 'Controller restart suspected: no data for x s, frame counter 1 after it - rocker at the power-on speed
+      30 rpm' (control software 2.2): from 3 s before the warning (the software decides after 3 s of data after the
+      silence); the speed from the text, 30 rpm if 'unknown' or not given (firmware V18G-V19G). No phase if the last
+      'Connection re-established' before the warning lies at most 10 s before it and a line 'Rocker speed sent again
+      after the connection was re-established' lies between the two: the restarted controller got the speed at the
+      reconnect. kind 1.
+    - 'system' event firmwareUpdate with phase done (control software lab round 5): the controller runs the new
+      firmware with its power-on settings; from the line, 30 rpm. kind 2.
+    rst / fw: (time, line, text); recon: (line, time); resend: line numbers. Port of powerOnRocker in mda_readMdd.m."""
+    decide = 3.0  # s of data after the silence before the warning
+    reconMax = 10.0  # s: a reconnect at most this long before the warning belongs to it
+    rpm0 = 30.0  # power-on speed if the line does not give it
+    P = []
+    for t, ln, txt in rst:
+        r = [x for x in recon if x[0] < ln]
+        if r and t - r[-1][1] <= reconMax and any(r[-1][0] < x < ln for x in resend):
+            continue
+        rpm = rpm0
+        m = _re.search(r"power-on speed (\d+\.?\d*) rpm", txt)
+        if m:
+            rpm = float(m.group(1))
+        P.append([t - decide, rpm, ln, 1])
+    for t, ln, txt in fw:
+        try:
+            d = _json.loads(txt)
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("event") == "firmwareUpdate" and d.get("phase") == "done":
+            P.append([t, rpm0, ln, 2])
+    return np.array(P, dtype=float).reshape(-1, 4)
+
+
+def socket_tests(ev, lineStart):
+    """Socket tests of the leak test (control software lab round 5, 2026-11-04; 2026-11-05): 'system' events
+    electrodeSocketTest, log channel = the channel tested, one line per test that ended (column 2 = its end). The test
+    discharges the electrode of the channel (1 ms); with a slice in, it can elicit a contraction. Returns a list of
+    Structs: time (s in the file), channel, trigger, status, verdict, seconds (from the command to the line; NaN for a
+    test not sent), line. Lines before lineStart ('Recording started') belong to another recording: left out. Port of
+    socketTests in mda_readMdd.m."""
+    R = []
+    for t, chn, ln, txt in ev:
+        if not math.isnan(lineStart) and ln < lineStart:
+            continue
+        try:
+            d = _json.loads(txt)
+        except ValueError:
+            continue
+        if not isinstance(d, dict) or d.get("event") != "electrodeSocketTest":
+            continue
+
+        def text(name):
+            v = d.get(name)
+            return v if isinstance(v, str) else ""
+        v = d.get("seconds")
+        sec = float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else math.nan
+        R.append(Struct(time=t, channel=chn, trigger=text("trigger"), status=text("status"), verdict=text("verdict"),
+                        seconds=sec, line=ln))
+    return R
 
 
 def electrode_tests(ev, warn, lineStart):

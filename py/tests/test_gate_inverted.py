@@ -184,6 +184,19 @@ def test_report_label_and_amplitude_change():
     assert list(RR["flags"]) == ["RT", "RX", "R"] and list(RR["level"]) == ["check"] * 3
     assert RR.loc[2, "red"] == "controller restart suspected (2, first at 1234 s)"
     assert report_flags(pd.DataFrame(rows), events=E.iloc[[0, 3]])["flags"].tolist() == ["T", "X", ""]
+    # red flag R also for a firmware update (done or failed; its start line alone not) and a recording stopped by the
+    # software for lack of disk space (control software lab round 5, 2026-11-05)
+    E2 = pd.DataFrame({"code": ["system", "system", "warning"],
+                       "text": ['{"v":1,"event":"firmwareUpdate","actionId":"U1","phase":"start"}',
+                                '{"v":1,"event":"firmwareUpdate","actionId":"U1","phase":"done","seconds":71.4}',
+                                "Recording stopped by the software: only 50 MB free on drive Z:"],
+                       "t_file": [5.0, 5.0, 3500.0]})
+    RF = report_flags(pd.DataFrame(rows), events=pd.concat([E, E2], ignore_index=True))
+    assert RF.loc[2, "red"] == ("controller restart suspected (2, first at 1234 s); firmware update (1, first at 5 s); "
+                                "recording stopped by the software (low disk space) (1, first at 3500 s)")
+    assert list(RF["flags"]) == ["RT", "RX", "R"]
+    assert report_flags(pd.DataFrame(rows), events=E2.iloc[[0]])["flags"].tolist() == ["T", "X", ""]
+    assert report_flags(pd.DataFrame(rows), events=E2.iloc[[1]]).loc[2, "red"] == "firmware update (1, first at 5 s)"
     L = legend_lines(FLAG_DEFAULTS)
     assert len(L) == 6 and all(len(t) <= 170 for _, t in L) and "T amplitude changes by > 30 %" in L[3][1]
     assert L[2][0] == "check" and L[2][1].startswith("R controller restart suspected")

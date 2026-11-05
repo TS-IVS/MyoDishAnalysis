@@ -48,7 +48,8 @@ PROCESSING (see the MATLAB help and README)
      ('specific'). C.stimCapturedCertain: stimulus followed by a certain contraction
   2c. electrode tests of the control software (2026-10-27, read_mdd: S.electrodeTestWindows): a contraction whose peak
      lies in a test window of the stimulated channel was paced by the test's own pulses, if at all: column
-     electrodeTest = True, not included (the test pulses themselves are not in S.stim)
+     electrodeTest = True, not included (the test pulses themselves are not in S.stim). The same for the windows of
+     the socket tests of the leak test (S.socketTestWindows, 2026-11-05; their discharge is not in S.stim)
   3. stimulus assignment (option stimAssignment, default 'onset', 2026-10-10): every pulse of the channel, regular or
      extra pulse (status channel bit 16), is a candidate. Onset = the tangent at the maximum dF/dt crossing the
      diastolic level. A pulse can only have elicited a contraction if it lies in the gate onset - gateMax ... onset +
@@ -453,8 +454,10 @@ def analyze_channel(S, channel, range_=None, opts=None):
     # electrode test of the control software on this channel (2026-10-27, see read_mdd): the contractions in its
     # window were paced by the test's own pulses (if at all): column electrodeTest, not included
     electrodeTest = np.zeros(n, bool)
-    W = S.get("electrodeTestWindows", None)
-    if W is not None and len(W):
+    W = [np.asarray(S.get(k), dtype=float).reshape(-1, 3) for k in ("electrodeTestWindows", "socketTestWindows")
+         if S.get(k) is not None]  # socket tests of the leak test (2026-11-05)
+    W = np.vstack(W) if W else np.zeros((0, 3))
+    if len(W):
         wc = stimCh if stimCh != 0 else channel
         for w in W[W[:, 2] == wc]:
             electrodeTest |= (tPeakSel >= w[0]) & (tPeakSel <= w[1])

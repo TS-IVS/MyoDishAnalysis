@@ -67,6 +67,9 @@ for c = 1:numel(channels), R(c).channel = channels(c); end
 
 % ------------------------------------------------------------------ rocker periods and their speed
 [r0, r1] = runs(Sctx.rockerOn, Sctx.dt, P.minRun);
+if isfield(Sctx, 'rockerSpeedLog') && ~isempty(Sctx.rockerSpeedLog)   %one period per logged speed (2026-11-05)
+    [r0, r1] = splitAtSpeedChanges(r0, r1, Sctx.t, Sctx.rockerSpeedLog, opts.rockerLogDelay, Sctx.dt, P.minRun);
+end
 if isempty(r0) || ~any(S.rockerOn)
     for c = 1:numel(channels)
         R(c).status = 'rocker not moving';
@@ -267,6 +270,30 @@ d = diff([0; on(:); 0]);
 s0 = find(d == 1); s1 = find(d == -1) - 1;
 keep = (s1 - s0) * dt >= minLen;
 s0 = s0(keep); s1 = s1(keep);
+end
+
+function [s0, s1] = splitAtSpeedChanges(s0, s1, t, L, delay, dt, minLen)
+% rocker-on periods split where the logged speed changes while the rocker runs (2026-11-05): e.g. 60 -> 30 rpm without
+% a stop, or the power-on speed after a controller restart (mda_readMdd, rockerPowerOn) and the speed sent after it.
+% Each part gets its own speed and rocker frequency. Split 'delay' s after the entry; parts shorter than minLen are not
+% corrected (as short periods).
+[~, o] = sort(L(:,1)); L = L(o,:);
+c = find(L(2:end,2) > 0 & L(1:end-1,2) > 0 & L(2:end,2) ~= L(1:end-1,2)) + 1;
+if isempty(c) || isempty(s0), return; end
+tc = sort(L(c,1) + delay);
+tc = tc(isfinite(tc));
+t = t(:);
+a = zeros(0, 1); b = zeros(0, 1);
+for q = 1:numel(s0)
+    e0 = s0(q);
+    for x = reshape(tc(tc > t(s0(q)) & tc <= t(s1(q))), 1, [])
+        i = find(t >= x, 1);
+        if i > e0, a(end+1, 1) = e0; b(end+1, 1) = i - 1; e0 = i; end %#ok<AGROW>
+    end
+    a(end+1, 1) = e0; b(end+1, 1) = s1(q); %#ok<AGROW>
+end
+keep = (b - a) * dt >= minLen;
+s0 = a(keep); s1 = b(keep);
 end
 
 % ------------------------------------------------------------------ masks (time intervals with contractions)

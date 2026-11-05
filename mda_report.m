@@ -11,7 +11,9 @@ function varargout = mda_report(varargin)
 %   R = mda_report('flags', S, C, status, fl, E)   flags per channel (table), no PDF; E (optional, 2026-10-21): events
 %                                       table of the recording (mda_logEntries / <name>_events.csv): red flag R
 %                                       'controller restart suspected' (warning of the control software 2.2, code
-%                                       warning: after it the controller may have run with its power-on settings)
+%                                       warning: after it the controller may have run with its power-on settings),
+%                                       firmware update (event firmwareUpdate, done or failed) and recording stopped by
+%                                       the software for lack of disk space (2026-11-05)
 %   f = mda_report('path', outputFile, report)  file of the report of an analysis: report [] / true / 'on' ->
 %                                       <outputFile without extension>_report.pdf ('' without outputFile), false /
 %                                       'off' -> '', a file name -> this file
@@ -142,17 +144,31 @@ end
 
 
 function s = restartWarnings(E)
-% 'controller restart suspected ...' from the events table E of a recording (lines of code warning whose text starts
-% with 'Controller restart suspected', control software 2.2, F-90): '' if none, otherwise the description of the red
-% flag R (number and time of the first one, s in the file), 2026-10-21
+% red flag R from the events table E of a recording: 'Controller restart suspected ...' (code warning, control software
+% 2.2, F-90; 2026-10-21), firmware updates ('system' event firmwareUpdate with phase done or failed, lab round 5) and
+% 'Recording stopped by the software: only <n> MB free on drive <D:>' (code warning; both 2026-11-05). '' if none,
+% otherwise the description (per kind: number and time of the first one, s in the file)
 s = '';
 if isempty(E) || ~istable(E) || ~all(ismember({'code', 'text'}, E.Properties.VariableNames)), return; end
-k = find(strcmpi(cellstr(string(E.code)), 'warning') & startsWith(lower(cellstr(string(E.text))), 'controller restart suspected'));
+code = lower(cellstr(string(E.code))); txt = cellstr(string(E.text)); low = lower(txt);
+t = nan(height(E), 1);
+if ismember('t_file', E.Properties.VariableNames), t = double(E.t_file); end
+fw = strcmp(code, 'system') & contains(txt, '"firmwareUpdate"') & ...
+    ~cellfun(@isempty, regexp(txt, '"phase"\s*:\s*"(done|failed)"', 'once'));
+parts = {};
+parts = flagPart(parts, 'controller restart suspected', find(strcmp(code, 'warning') & ...
+    startsWith(low, 'controller restart suspected')), t);
+parts = flagPart(parts, 'firmware update', find(fw), t);
+parts = flagPart(parts, 'recording stopped by the software (low disk space)', find(strcmp(code, 'warning') & ...
+    startsWith(low, 'recording stopped by the software')), t);
+s = strjoin(parts, '; ');
+end
+
+
+function parts = flagPart(parts, what, k, t)
 if isempty(k), return; end
-t = nan;
-if ismember('t_file', E.Properties.VariableNames), t = double(E.t_file(k(1))); end
-if isnan(t), s = sprintf('controller restart suspected (%d)', numel(k));
-else, s = sprintf('controller restart suspected (%d, first at %.0f s)', numel(k), t);
+if isnan(t(k(1))), parts{end+1} = sprintf('%s (%d)', what, numel(k));
+else, parts{end+1} = sprintf('%s (%d, first at %.0f s)', what, numel(k), t(k(1)));
 end
 end
 
@@ -736,8 +752,8 @@ L = {'', ['Each cell: capture (% of the stimuli followed by a contraction; ~ arr
     '#f8c9c4', sprintf(['Red = check the analysis:  I inverted signal,  N noise (uncertain %s %g %%, ' ...
         'extra+missed %s %g %%),  S large extra beats (> %g x paced),  D delay > %g ms,  F pacing > %g Hz'], ...
         char(8805), fl.uncertain, char(8805), fl.irregular, fl.artifactRatio, 1000 * fl.delay, fl.stimFrequency)
-    '#f8c9c4', ['R controller restart suspected (warning of the control software: after it the controller may have ' ...
-        'run with its power-on settings instead of those in the log)']
+    '#f8c9c4', ['R controller restart suspected or firmware update (the controller may then run with its power-on ' ...
+        'settings, not those in the log), or recording stopped (low disk space)']
     '#fbe8a6', sprintf(['Yellow = slice quality:  C capture < %g %%,  X extra beats > %g %%,  A amplitude < %g %sN,  ' ...
         'T amplitude changes by > %g %% during the recording,  V amplitude CV > %g %%'], fl.capture, fl.extra, ...
         fl.amplitude, mu, fl.amplitudeChange, fl.amplitudeCV)

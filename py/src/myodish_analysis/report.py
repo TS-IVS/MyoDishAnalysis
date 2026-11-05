@@ -167,19 +167,32 @@ def _label(r):
 
 
 def restart_warnings(E):
-    """'controller restart suspected ...' from the events table E of a recording (lines of code warning whose text
-    starts with 'Controller restart suspected', control software 2.2, F-90): '' if none, otherwise the description of
-    the red flag R (number and time of the first one, s in the file), 2026-10-21"""
+    """red flag R from the events table E of a recording: 'Controller restart suspected ...' (code warning, control
+    software 2.2, F-90; 2026-10-21), firmware updates ('system' event firmwareUpdate with phase done or failed, lab
+    round 5) and 'Recording stopped by the software: only <n> MB free on drive <D:>' (code warning; both 2026-11-05).
+    '' if none, otherwise the description (per kind: number and time of the first one, s in the file)"""
     if E is None or not len(E) or not {"code", "text"}.issubset(E.columns):
         return ""
-    k = np.flatnonzero((E["code"].astype(str).str.lower() == "warning").to_numpy()
-                       & E["text"].astype(str).str.lower().str.startswith("controller restart suspected").to_numpy())
-    if not k.size:
-        return ""
-    t = float(E["t_file"].iloc[k[0]]) if "t_file" in E.columns else math.nan
-    if math.isnan(t):
-        return f"controller restart suspected ({k.size})"
-    return f"controller restart suspected ({k.size}, first at {t:.0f} s)"
+    code = E["code"].astype(str).str.lower().to_numpy()
+    txt = E["text"].astype(str)
+    low = txt.str.lower()
+    t = E["t_file"].astype(float).to_numpy() if "t_file" in E.columns else np.full(len(E), math.nan)
+    fw = ((code == "system") & txt.str.contains('"firmwareUpdate"', regex=False).to_numpy()
+          & txt.str.contains(r'"phase"\s*:\s*"(?:done|failed)"', regex=True).to_numpy())
+    parts = []
+    for what, sel in (("controller restart suspected",
+                       (code == "warning") & low.str.startswith("controller restart suspected").to_numpy()),
+                      ("firmware update", fw),
+                      ("recording stopped by the software (low disk space)",
+                       (code == "warning") & low.str.startswith("recording stopped by the software").to_numpy())):
+        k = np.flatnonzero(sel)
+        if not k.size:
+            continue
+        if math.isnan(t[k[0]]):
+            parts.append(f"{what} ({k.size})")
+        else:
+            parts.append(f"{what} ({k.size}, first at {t[k[0]]:.0f} s)")
+    return "; ".join(parts)
 
 
 def report_flags(S, C=None, status=None, events=None, **flags):
@@ -551,8 +564,8 @@ def legend_lines(fl):
         ("check", f"Red = check the analysis:  I inverted signal,  N noise (uncertain \u2265 {fl['uncertain']:g} %, "
                   f"extra+missed \u2265 {fl['irregular']:g} %),  S large extra beats (> {fl['artifact_ratio']:g} x "
                   f"paced),  D delay > {1000 * fl['delay']:g} ms,  F pacing > {fl['stim_frequency']:g} Hz"),
-        ("check", "R controller restart suspected (warning of the control software: after it the controller may have "
-                  "run with its power-on settings instead of those in the log)"),
+        ("check", "R controller restart suspected or firmware update (the controller may then run with its power-on "
+                  "settings, not those in the log), or recording stopped (low disk space)"),
         ("quality", f"Yellow = slice quality:  C capture < {fl['capture']:g} %,  X extra beats > {fl['extra']:g} %,  "
                     f"A amplitude < {fl['amplitude']:g} {mu}N,  T amplitude changes by > {fl['amplitude_change']:g} % "
                     f"during the recording,  V amplitude CV > {fl['amplitude_cv']:g} %"),

@@ -1753,3 +1753,91 @@ def test_electrode_test_window(tmp_path):
     S = mda.read_mdd(mdd, 0, T)
     assert S.stimElectrodeTest.time.size == 42 + np.count_nonzero(ts < 40)
     assert not np.any(S.stim.channel == 1) or S.stim.time[S.stim.channel == 1].min() > 81
+
+
+def test_power_on_rocker_and_socket_tests(tmp_path):
+    # 2026-11-05 (as powerOnSocketTest of mda_test.m): a 9-channel recording (400 Hz, 120 s, channel 1 paced at 1 Hz /
+    # 50 mA, contractions 1000 uN, rocker on all the time) with log lines of the control software lab round 5:
+    #  - firmware update (done) before the start, then rockerSpeed 60: power-on phase ended before the start, no note;
+    #  - restart warning at 30 s (30 rpm): power-on phase 27 - 60 s (next rockerSpeed entry);
+    #  - reconnect at 70 s with 'Rocker speed sent again ...' before the restart warning at 73 s: no phase;
+    #  - restart warning at 90 s ('unknown'): 30 rpm from 87 s to the end of the file;
+    #  - socket test of channel 1 ending at 50 s (0.4 s): its contractions are left out, the pulses stay stimuli; a
+    #    socket test of channel 2 that was not sent: no window.
+    # With the rocker artifact at the logged speeds (1.2117 Hz at 60 rpm, 0.6059 Hz at 30 rpm) the rocker filter must
+    # use one period per speed (f0 table with 30 and 60 rpm) and recover the amplitude.
+    fs = 400
+    T = 120
+    n = T * fs
+    tt = np.arange(n) / fs
+    ts = 1.0 + np.arange(T - 2)
+    F1 = np.full(n, 2000.0)
+    for t0 in ts:
+        x = t0 + 0.03
+        m = (tt >= x) & (tt < x + 0.05)
+        F1[m] += 1000 * (tt[m] - x) / 0.05
+        m2 = (tt >= x + 0.05) & (tt < x + 0.2)
+        F1[m2] += 1000 - 1000 * (tt[m2] - x - 0.05) / 0.15
+    f = np.full(n, 1.2117)
+    f[((tt >= 27.27) & (tt < 60.27)) | (tt >= 87.27)] = 1.2117 / 2
+    ph = 2 * np.pi * np.cumsum(f) / fs
+    art = 150 * (np.cos(ph + 0.3) + 0.5 * np.cos(2 * ph + 2.1))
+    X = np.zeros((9, n), np.int16)
+    X[0] = np.round(F1 + art).astype(np.int16)
+    code = np.full(n, 16384, np.uint16)  # rocker on
+    code[np.round(ts * fs).astype(int)] = 16384 + 512 + 50  # channel 1, 50 mA
+    X[8] = code.view(np.int16)
+    mdd = str(tmp_path / "pw.mdd")
+    X.T.astype("<i2").tofile(mdd)
+    L = ["systemTime;dataLogTime;channel;code;value",
+         '2026 01 01 05:59:00:000;0;0;system;{"v":1,"event":"firmwareUpdate","actionId":"U1","by":"TS","phase":"done",'
+         '"path":"command","controllerId":"SIMDEV01A","from":"V19C","to":"V19F","sha256":"x","seconds":71.4,"why":null}',
+         "2026 01 01 05:59:01:000;0;0;rockerSpeed;60", "2026 01 01 06:00:00:000;0;0;nChannels;9",
+         "2026 01 01 06:00:00:000;0;0;Recording;started: pw.mdd", "2026 01 01 06:00:00:000;0;0;samplingRate Recording;400"]
+    for c in range(1, 9):
+        L += [f"2026 01 01 06:00:00:000;0;{c};Calibration;1000", f"2026 01 01 06:00:00:000;0;{c};Offset;0"]
+
+    def sock(t, c, st, sec):
+        return (f'2026 01 01 06:00:{t:02d}:000;{1000 * t};{c};system;{{"v":1,"event":"electrodeSocketTest",'
+                f'"actionId":"S{c}","by":"TS","controllerId":"SIMDEV01A","firmware":"V19F",'
+                f'"time":"2026-01-01T06:00:{t:02d}+01:00","trigger":"manual","step":null,"status":"{st}","why":null,'
+                f'"verdict":"ok","chamber":"in","seconds":{sec}}}')
+    L += ["2026 01 01 06:00:30:000;30000;0;warning;Controller restart suspected: no data for 5.9 s, frame counter 1 "
+          "after it - rocker at the power-on speed 30 rpm",
+          sock(50, 1, "done", "0.4"), sock(55, 2, "notDone", "null"), "2026 01 01 06:01:00:000;60000;0;rockerSpeed;60",
+          "2026 01 01 06:01:10:000;70000;0;Event;Connection re-established",
+          "2026 01 01 06:01:10:100;70100;0;Event;Rocker speed sent again after the connection was re-established: 60 rpm",
+          "2026 01 01 06:01:10:100;70100;0;rockerSpeed;60",
+          "2026 01 01 06:01:13:000;73000;0;warning;Controller restart suspected: no data for 2.0 s, frame counter 1 after "
+          "it - rocker at the power-on speed unknown",
+          "2026 01 01 06:01:30:000;90000;0;warning;Controller restart suspected: no data for 5.9 s, frame counter 1 after "
+          "it - rocker at the power-on speed unknown",
+          "2026 01 01 06:01:59:500;119500;0;warning;Recording stopped by the software: only 50 MB free on drive Z:",
+          f"2026 01 01 06:02:00:000;{T * 1000};0;Recording;stopped: pw.mdd"]
+    (tmp_path / "pw_log.log").write_text("\n".join(L) + "\n")
+    H = mda.read_mdd(mdd)
+    assert H.rockerPowerOn.tolist() == [[27, 30, 1, 60], [87, 30, 1, np.inf], [-np.inf, 30, 2, -np.inf]]
+    assert H.rockerSpeedLog.tolist() == [[-np.inf, 30], [-np.inf, 60], [27, 30], [60, 60], [70.1, 60], [87, 30]]
+    assert ("Controller restart (warning of the control software): rocker at the power-on speed 30 rpm from 27 s until "
+            "the next rockerSpeed entry (60 s) (rocker filter, rocker state from the log).") in H.notes
+    assert any("power-on speed 30 rpm from 87 s until the end of the file" in x for x in H.notes)
+    assert not any("Firmware update" in x for x in H.notes)
+    assert len(H.electrodeSocketTests) == 2 and H.electrodeTestWindows.shape == (0, 3)
+    assert H.socketTestWindows.shape == (1, 3) and np.allclose(H.socketTestWindows, [[49.6, 51, 1]], atol=1e-9, rtol=0)
+    assert ("Socket test of channel 1 (manual, ok) 49.6 - 51.0 s: the contractions in that time are left out of the "
+            "analysis.") in H.notes
+    S = mda.read_mdd(mdd, 0, T)
+    assert np.count_nonzero(S.stim.channel == 1) == ts.size and S.stimElectrodeTest.time.size == 0  # pulses stay stimuli
+    kw = dict(quiet=True, noFiltering=True, spikeRemoval=False)
+    B, _, _ = mda.myodish_analysis(mdd, 1, 0.5, T, **kw)
+    win = (B["t_peak"] >= 49.6) & (B["t_peak"] <= 51)
+    assert win.sum() == 1 and B.loc[win, "electrodeTest"].all() and not B.loc[win, "included"].any()
+    assert not B.loc[~win, "electrodeTest"].any()
+    rf = [[60, 1.2117], [30, 1.2117 / 2]]
+    _, R = mda.rocker_filter(S, [1], mda.options(rockerFrequency=rf))
+    assert R[0].f0table[:, 0].tolist() == [30, 60] and R[0].status == "corrected"
+    Bf, _, _ = mda.myodish_analysis(mdd, 1, 0.5, T, rockerFilter=True, rockerFrequency=rf, **kw)
+    t = Bf["t_peak"].to_numpy()
+    sel = (Bf["included"].to_numpy() & (t > 5) & (t < 115) & (np.abs(t - 27.5) > 3) & (np.abs(t - 60.5) > 3)
+           & (np.abs(t - 87.5) > 3))
+    assert np.max(np.abs(Bf["amplitude"].to_numpy()[sel] - 1000)) < 20

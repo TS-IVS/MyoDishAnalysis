@@ -5,6 +5,13 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
+- **Rocker filter: one rocker period per logged speed** (2026-11-05). A rocker period (rocker bit on) got the speed
+  logged at its start, so after a speed change without a stop (e.g. 60 → 30 rpm in a rocker speed test, or the
+  power-on speed after a controller restart, below) the filter used the old frequency. A period is now split
+  `rockerLogDelay` (0.27 s) after every logged change between two speeds > 0; each part gets its own speed and
+  frequency, parts shorter than 3 s are not corrected (as short periods). Only with the option `rockerFilter`;
+  example 6 (rocker speed test, one change 60 → 30 rpm at 363 s) is the only example recording affected.
+  Tests: `mda_test` (power-on test), `test_mda.py`.
 - **MATLAB watcher: experiment report not written when the experiment had recordings of earlier passes** (2026-11-01;
   since 2026-10-21): the recordings of this pass carry the full flag table, the earlier ones only the columns of
   `mda_flags.csv`, and the concatenation failed (*All tables being vertically concatenated must have the same number of
@@ -79,6 +86,23 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
+- **Control software lab round 5 (2.2.9804.25352): power-on phases of the rocker, socket tests, red flag R**
+  (2026-11-05).
+  - Rocker after a controller restart: from 3 s before the warning `Controller restart suspected: ...` (the software
+    decides after 3 s of data) until the next `rockerSpeed` entry, the rocker runs at the controller's power-on speed
+    (from the warning text, `... - rocker at the power-on speed 30 rpm`; 30 rpm if `unknown` or not given). No such
+    phase if `Rocker speed sent again after the connection was re-established` lies between a `Connection
+    re-established` at most 10 s before the warning and the warning. The same after a `firmwareUpdate` event with
+    phase `done` (30 rpm from the line). The phases are rows of `rockerSpeedLog` (rocker filter, rocker state from the
+    log) and of the new header field `rockerPowerOn` ([start rpm kind end]), with a note per phase.
+  - Socket tests of the leak test (`system` event `electrodeSocketTest`, channel = the channel tested): header field
+    `electrodeSocketTests`; a test with a duration gives the window [end − `seconds`, end + 1 s] of its channel
+    (`socketTestWindows`): its contractions are flagged `electrodeTest` and not included, as for electrode tests; the
+    pulses of the status channel stay stimuli. Tests that were not sent (`notDone`) give no window.
+  - Red flag R (report, GUI flag line, watcher) also for a firmware update (`done` or `failed`) and for `Recording
+    stopped by the software: only <n> MB free on drive <D:>`, e.g. *controller restart suspected (2, first at 1234 s);
+    firmware update (1, first at 5 s)*; legend accordingly.
+  - Tests: `mda_test` (power-on test), `mda_testGateInverted`, `test_mda.py`, `test_gate_inverted.py`.
 - **Protocols: every beat parameter per step, stimulus timing in the summaries, FFR of every frequency step**
   (2026-11-02).
   - Summaries and protocol groups (one row per frequency / pause / current / S2 interval) also give mean, SD and n of
