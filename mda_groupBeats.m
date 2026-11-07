@@ -762,6 +762,15 @@ for i = 1:numel(k)
     num = sscanf(E.text{k(i)}, '%f', 1);
     if ~isempty(num), x(i) = num; end
 end
+if any(strcmpi(code, {'chargeDuration', 'pauseDuration', 'dechargeDuration'}))
+    % real pulse durations (2026-11-07, as mda_readMdd): x 16/15 (1 us) unless the last 'pulseDurationCorrection'
+    % line before the entry says on
+    s = find(strcmpi(E.code, 'pulseDurationCorrection'));
+    for i = 1:numel(k)
+        j = s(find(s < k(i), 1, 'last'));
+        if isempty(j) || ~strcmpi(strtrim(E.text{j}), 'on'), x(i) = round(x(i) * 16 / 15); end
+    end
+end
 te = tf(k);
 [te, o] = sort(te);                                %stable
 x = x(o);

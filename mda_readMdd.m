@@ -49,7 +49,10 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               offsetLog / calibrationLog ([time channel value] of the 'Offset' / 'Calibration' entries of the log;
 %               time -Inf = logged before the recording start), calibrationApplied, extendedSensorFactor,
 %               pulseSettingsLog ([time logChannel code value]: chargeDuration (code 1), pauseDuration (2),
-%               dechargeDuration (3) entries, us; log channel 10k + c = extra pulse #k of channel c),
+%               dechargeDuration (3) entries, us; log channel 10k + c = extra pulse #k of channel c; real durations:
+%               the controller counts ticks of 1.0667 us, and the control software sent the us of the setting as
+%               ticks until the line 'pulseDurationCorrection;on' (lab round 7, 2.2.9805): a value is x 16/15
+%               (rounded to 1 us) unless the last 'pulseDurationCorrection' line before it says on; 2026-11-07),
 %               extraPulseLog ([time channel k offset_ms line]: programmed time of the extra pulses relative to the
 %               regular pulse of the channel, from the 'Sequence' entries; see extraPulseOffsets),
 %               stimSequenceLog ([time channel period_ms nTimes t1_ms t2_ms]: regular stimulus times of the
@@ -69,8 +72,12 @@ function S = mda_readMdd(mddFile, fromSeconds, toSeconds, opts, progressFcn)
 %               the test's discharge is not a pulse of the status channel),
 %               rockerSpeedLog ([time rpm], including the power-on phases), rockerPowerOn ([start rpm kind end]: the
 %               rocker runs at the controller's power-on speed after a controller restart (kind 1, warning 'Controller
-%               restart suspected') or a firmware update (kind 2) until the next 'rockerSpeed' entry (end); see
-%               powerOnRocker, 2026-11-05), rockerSource ('status channel' or 'log'), rockerLogIntervals
+%               restart suspected'; kind 3, event controllerRestart of the controller's status, firmware V19G or later)
+%               or a firmware update (kind 2) until the next 'rockerSpeed' entry (end); see powerOnRocker, 2026-11-05,
+%               2026-11-07; the rocker setpoints of the controller's status (event rockerSetpoint, targetRpm) are rows of
+%               rockerSpeedLog too), dataFileNames (struct array: events dataFileName of the control software, a data
+%               file named after another MyoDish: time, file, myoDishId, named, rule, where, answer; 2026-11-07),
+%               rockerSource ('status channel' or 'log'), rockerLogIntervals
 %               ([from to] in s with rocker speed > 0 according to the log file), recordingStopped (1 = the log
 %               file ends with 'Recording stopped' for this file, 0 = recording still running or aborted, NaN = no
 %               'Recording' entries; used by MyoDishAnalysisWatch to skip recordings that are still running)
@@ -158,16 +165,29 @@ H.offsetLog = L.offsetEvents;          %[time channel value]: sensor signal with
 H.calibrationLog = L.calibrationEvents; %[time channel value]: 'Calibration' entries (AU per mN)
 H.rockerSpeedLog = L.rockerSpeedEvents; %[time rpm]: 'rockerSpeed' entries (0 = stop)
 H.pulseSettingsLog = L.pulseSettingsEvents; %[time logChannel code value]: pulse durations (us; code 1 charge, 2 pause,
-                                           %3 decharge; log channel 10k + c = extra pulse #k of channel c)
+                                           %3 decharge; log channel 10k + c = extra pulse #k of channel c; real
+                                           %durations, see pulseDurationFactor, 2026-11-07)
+if L.pulseDurationsScaled
+    H.notes{end+1} = ['Pulse durations: logged values x 16/15 (the controller counts ticks of 1.0667 us; the control ' ...
+        'software sent the us of the setting as ticks before ''pulseDurationCorrection;on'').'];
+end
 H.extraPulseLog = L.extraPulseOffsets;     %[time channel k offset_ms line]: programmed extra pulse times (2026-10-10)
 H.stimSequenceLog = L.stimSequences;       %[time channel period_ms nTimes t1_ms t2_ms]: programmed sequences (2026-10-23)
 H.electrodeTests = L.electrodeTests;       %electrode tests of the control software (2026-10-27, see electrodeTests)
 H.electrodeSocketTests = L.socketTests;    %socket tests of the leak test (2026-11-05, see socketTests)
 H.rockerPowerOn = L.rockerPowerOn;         %[start rpm kind end]: rocker at the power-on speed (2026-11-05, see powerOnRocker)
+H.dataFileNames = L.dataFileNames;         %data file named after another MyoDish (2026-11-07, see dataFileNames)
+for k = 1:numel(H.dataFileNames)
+    D = H.dataFileNames(k);
+    if ~any(strcmp(D.answer, {'use', 'notAsked'})), continue; end
+    H.notes{end+1} = sprintf(['Data file named after another MyoDish (%s; this MyoDish: %s; %s, answer %s): check ' ...
+        'that the data belong to this MyoDish.'], D.named, D.myoDishId, D.where, D.answer); %#ok<AGROW>
+end
 for k = 1:size(H.rockerPowerOn, 1)
     P = H.rockerPowerOn(k, :);
     if P(4) == -inf, continue; end              %ended before the recording started
-    what = {'Controller restart (warning of the control software)', 'Firmware update'};
+    what = {'Controller restart (warning of the control software)', 'Firmware update', ...
+        'Controller restart (status of the controller)'};
     if isinf(P(4)), until = 'the end of the file'; else, until = sprintf('the next rockerSpeed entry (%.0f s)', P(4)); end
     H.notes{end+1} = sprintf(['%s: rocker at the power-on speed %g rpm from %s s until %s (rocker filter, rocker ' ...
         'state from the log).'], what{P(3)}, P(2), timeText(P(1)), until); %#ok<AGROW>
@@ -751,7 +771,8 @@ L = struct('samplingRate',nan,'recordingDuration',nan,'nChannelsController',nan,
     'extendedSensorModeEvents',zeros(0,2),'startDatenum',nan,'programVersion','','clockNote','', ...
     'offsetEvents',zeros(0,3),'calibrationEvents',zeros(0,3),'rockerSpeedEvents',zeros(0,2), ...
     'recordingStopped',nan,'pulseSettingsEvents',zeros(0,4),'extraPulseOffsets',zeros(0,5),'stimSequences',zeros(0,6), ...
-    'electrodeTests',electrodeTests({}, {}, nan),'rockerPowerOn',zeros(0,4),'socketTests',socketTests({}, nan));
+    'electrodeTests',electrodeTests({}, {}, nan),'rockerPowerOn',zeros(0,4),'socketTests',socketTests({}, nan), ...
+    'pulseDurationsScaled',false,'dataFileNames',dataFileNames({}));
 if ~exist(logFile,'file'), return; end
 % MyoDish logs are UTF-16 little endian (with byte order mark); converted copies may be UTF-8
 fid = fopen(logFile, 'r');
@@ -776,7 +797,10 @@ seqEv = cell(0, 1);                                 %'Sequence' entries: {time, 
 etEv = cell(0, 1); etWarn = cell(0, 1);             %electrode test events (JSON) and warning lines (2026-10-27)
 sockEv = cell(0, 1); fwEv = cell(0, 1); rstEv = cell(0, 1);   %socket tests, firmware updates, restart warnings (2026-11-05)
 reconL = zeros(0, 2); resendL = zeros(1, 0);        %'Connection re-established' [line time] / 'Rocker speed sent again ...' lines
+crEv = cell(0, 1); naL = zeros(0, 3); fwName = cell(0, 2); dfEv = cell(0, 1);   %controllerRestart, 'Restart signs not
+                                                    %acted on' [line time kind], firmware {line name}, dataFileName (2026-11-07)
 pstCodes = {'chargeDuration', 'pauseDuration', 'dechargeDuration'};
+pdc = zeros(0, 2);                                  %'pulseDurationCorrection' lines: [line on] (2026-11-07)
 lineStart = nan; lineStartPar = nan;
 tMax = -inf; tMaxPar = -inf;                        %latest dataLogTime since the chosen start line
 % 2026-10-08: state of the last 'Recording' entry (1 started, 0 stopped) for this file (name in the entry), for the
@@ -843,6 +867,8 @@ for i = 1:numel(lines)
             if nPst > size(pst, 1), pst(end + max(64, nPst), :) = 0; end
             pst(nPst,:) = [tsec ch find(strcmpi(code, pstCodes), 1) v i];
         end
+    elseif strcmpi(code,'pulseDurationCorrection')   %durations sent in ticks (on) or as the us of the setting (off)
+        pdc(end+1, :) = [i, double(strcmpi(value, 'on'))]; %#ok<AGROW>
     elseif strcmpi(code,'Sequence')                  %stimulus times of the sequence (regular and extra pulses #k)
         seqEv{end+1, 1} = {tsec, str2double(f{3}), i, value}; %#ok<AGROW>
     elseif strcmpi(code,'system') && startsWith(value, '{') && contains(value, '"electrodeTest')
@@ -863,6 +889,23 @@ for i = 1:numel(lines)
         sockEv{end+1, 1} = {tsec, str2double(f{3}), i, value}; %#ok<AGROW>   %socket tests of the leak test (2026-11-05)
     elseif strcmpi(code,'system') && startsWith(value, '{') && contains(value, '"firmwareUpdate"')
         fwEv{end+1, 1} = {tsec, i, value}; %#ok<AGROW>                        %firmware updates (2026-11-05)
+    elseif strcmpi(code,'system') && startsWith(value, '{') && contains(value, '"controllerRestart"')
+        crEv{end+1, 1} = {tsec, i, value}; %#ok<AGROW>                        %restart seen by the controller's status
+    elseif strcmpi(code,'system') && startsWith(value, '{') && contains(value, '"rockerSetpoint"')
+        try                                                                   %rocker target of the controller's status
+            d = jsondecode(value);
+            if isfield(d, 'targetRpm') && isnumeric(d.targetRpm) && isscalar(d.targetRpm)
+                rck(end+1,:) = [tsec double(d.targetRpm) i]; %#ok<AGROW>
+            end
+        catch
+        end
+    elseif strcmpi(code,'system') && startsWith(value, '{') && ~isempty(regexp(value, '"event"\s*:\s*"firmware"', 'once'))
+        tok = regexp(value, '"name"\s*:\s*"([^"]*)"', 'tokens', 'once');
+        if ~isempty(tok), fwName(end+1, :) = {i, tok{1}}; end %#ok<AGROW>    %firmware of the controller (page 0)
+    elseif strcmpi(code,'system') && startsWith(value, '{') && contains(value, '"dataFileName"')
+        dfEv{end+1, 1} = {tsec, i, value}; %#ok<AGROW>
+    elseif strcmpi(code,'Event') && startsWith(value, 'Restart signs not acted on', 'IgnoreCase', true)
+        naL(end+1, :) = [i, tsec, double(~contains(value, 'shows no restart'))]; %#ok<AGROW>
     elseif strcmpi(code,'warning') && startsWith(value, 'Controller restart suspected', 'IgnoreCase', true)
         rstEv{end+1, 1} = {tsec, i, value}; %#ok<AGROW>
     elseif strcmpi(code,'Event') && startsWith(value, 'Connection re-established', 'IgnoreCase', true)
@@ -895,7 +938,8 @@ end
 % carry the dataLogTime of a previous recording)
 if isnan(lineStart), lineStart = lineStartPar; end
 % power-on phases of the rocker (controller restart, firmware update; 2026-11-05): rows of rck from their start
-pwr = powerOnRocker(rstEv, fwEv, reconL, resendL);
+pwr = powerOnRocker(rstEv, fwEv, reconL, resendL, crEv, naL, fwName);
+L.dataFileNames = dataFileNames(dfEv);
 rck = [rck; pwr(:,1:3)];
 if ~isnan(lineStart)
     ext(ext(:,3) < lineStart, 1) = -inf;
@@ -915,6 +959,9 @@ if ~isempty(pwr)
     L.rockerPowerOn = [pwr(:,1:2), pwr(:,4), pEnd];
 end
 pst = pst(1:nPst, :);
+f = pulseDurationFactor(pst(:,5), pdc);             %real durations (2026-11-07)
+L.pulseDurationsScaled = any(f ~= 1);
+pst(:,4) = round(pst(:,4) .* f);
 X = extraPulseOffsets(seqEv);
 Q = stimSequences(seqEv);
 if ~isnan(lineStart)
@@ -1121,31 +1168,69 @@ end
 end
 
 
-function P = powerOnRocker(rst, fw, recon, resend)
-% Power-on phases of the rocker (2026-11-05): after a controller restart the rocker runs at the controller's power-on
-% speed until the software sends a speed again (the next 'rockerSpeed' entry). Rows [time rpm line kind]:
+function f = pulseDurationFactor(lines, pdc)
+% factor that turns the logged pulse durations into the real ones (2026-11-07): the controller (firmware V15-V19)
+% counts the durations of commands 10-12 in ticks of 1.0667 us (60 MHz / 64); the control software sent the us of
+% the setting 1:1 as ticks until lab round 7 (2.2.9805), so every phase ran 16/15 as long as logged. Since then it
+% writes 'pulseDurationCorrection;on|off': on = it sends round(us x 15/16) ticks, the logged value is the real one.
+% lines: line numbers of the duration entries; pdc: [line on] of the state lines. f = 1 if the last state line
+% before the entry says on, otherwise 16/15.
+f = repmat(16 / 15, size(lines));
+for i = 1:numel(lines)
+    j = find(pdc(:,1) < lines(i), 1, 'last');
+    if ~isempty(j) && pdc(j,2) == 1, f(i) = 1; end
+end
+end
+
+
+function P = powerOnRocker(rst, fw, recon, resend, cr, na, fwName)
+% Power-on phases of the rocker (2026-11-05, 2026-11-07): after a controller restart the rocker runs at the
+% controller's power-on speed until the software sends a speed again (the next 'rockerSpeed' entry). Rows [time rpm
+% line kind]:
 %  - warning 'Controller restart suspected: no data for x s, frame counter 1 after it - rocker at the power-on speed
 %    30 rpm' (control software 2.2): from 3 s before the warning (the software decides after 3 s of data after the
-%    silence); the speed from the text, 30 rpm if 'unknown' or not given (firmware V18G-V19G). No phase if the last
-%    'Connection re-established' before the warning lies at most 10 s before it and a line 'Rocker speed sent again
-%    after the connection was re-established' lies between the two: the restarted controller got the speed at the
-%    reconnect. kind 1.
-%  - 'system' event firmwareUpdate with phase done (control software lab round 5): the controller runs the new firmware
-%    with its power-on settings; from the line, 30 rpm. kind 2.
-% rst / fw: {time, line, text}; recon: [line time]; resend: line numbers
+%    silence); the speed from the text, otherwise ('unknown', no suffix) that of the firmware of the last 'firmware'
+%    event before (powerOnRpm). No phase if the last 'Connection re-established' before the warning lies at most 10 s
+%    before it and a line 'Rocker speed sent again after the connection was re-established' lies between the two (the
+%    restarted controller got the speed at the reconnect), and none if a line 'Restart signs not acted on: ...' follows
+%    it at the same time (the controller's status showed no restart, or had shown it: event controllerRestart). kind 1.
+%  - event controllerRestart of the controller's status (firmware V19G or later, lab round 7): from the line minus
+%    uptimeSeconds (the restart), the speed of its firmware. A warning whose phase starts within 10 s of it is the same
+%    restart (either order) and is dropped. kind 3.
+%  - event firmwareUpdate with phase done (lab round 5): the controller runs the new firmware with its power-on
+%    settings; from the line, the speed of the firmware it got ('to'). kind 2.
+% rst / fw / cr: {time, line, text}; recon: [line time]; resend: line numbers; na: [line time kind] of 'Restart signs
+% not acted on'; fwName: {line, name} of the 'firmware' events
 decide = 3;                                         %s of data after the silence before the warning
 reconMax = 10;                                      %s: a reconnect at most this long before the warning belongs to it
-rpm0 = 30;                                          %power-on speed if the line does not give it
-P = zeros(0, 4);
+sameMax = 10;                                       %s: a warning and a controllerRestart this close are one restart
+W = zeros(0, 4);
 for i = 1:numel(rst)
     t = rst{i}{1}; ln = rst{i}{2};
+    if any(na(:,1) > ln & abs(na(:,2) - t) <= 1), continue; end
     r = find(recon(:,1) < ln, 1, 'last');
     if ~isempty(r) && t - recon(r,2) <= reconMax && any(resend > recon(r,1) & resend < ln), continue; end
-    rpm = rpm0;
     tok = regexp(rst{i}{3}, 'power-on speed (\d+\.?\d*) rpm', 'tokens', 'once');
-    if ~isempty(tok), rpm = str2double(tok{1}); end
-    P(end+1, :) = [t - decide, rpm, ln, 1]; %#ok<AGROW>
+    if ~isempty(tok), rpm = str2double(tok{1}); else, rpm = powerOnRpm(firmwareBefore(fwName, ln)); end
+    W(end+1, :) = [t - decide, rpm, ln, 1]; %#ok<AGROW>
 end
+C = zeros(0, 4);
+for i = 1:numel(cr)
+    try
+        d = jsondecode(cr{i}{3});
+    catch
+        continue;
+    end
+    if ~isstruct(d) || ~strcmp(jsonText(d, 'event'), 'controllerRestart'), continue; end
+    up = jsonNum(d, 'uptimeSeconds'); if isnan(up), up = 0; end
+    name = jsonText(d, 'firmware'); if isempty(name), name = firmwareBefore(fwName, cr{i}{2}); end
+    C(end+1, :) = [cr{i}{1} - up, powerOnRpm(name), cr{i}{2}, 3]; %#ok<AGROW>
+end
+keep = true(size(W, 1), 1);
+for i = 1:size(W, 1)
+    keep(i) = ~any(abs(C(:,1) - W(i,1)) <= sameMax);
+end
+P = [W(keep, :); C];
 for i = 1:numel(fw)
     try
         d = jsondecode(fw{i}{3});
@@ -1153,8 +1238,48 @@ for i = 1:numel(fw)
         continue;
     end
     if isstruct(d) && strcmp(jsonText(d, 'event'), 'firmwareUpdate') && strcmp(jsonText(d, 'phase'), 'done')
-        P(end+1, :) = [fw{i}{1}, rpm0, fw{i}{2}, 2]; %#ok<AGROW>
+        P(end+1, :) = [fw{i}{1}, powerOnRpm(jsonText(d, 'to')), fw{i}{2}, 2]; %#ok<AGROW>
     end
+end
+end
+
+
+function rpm = powerOnRpm(name)
+% power-on rocker speed of a firmware (page-0 name or release, e.g. 'V19J', 'V19I candidate b5b8513', 'file
+% MyoDish_V19J_x.bin'): 45 rpm for V19J and V19K (and V20 or later), 30 rpm for V18G-V19I and the test builds (V19L,
+% V19P, V19T) and when unknown (firmware development, 2026-11-05)
+rpm = 30;
+tok = regexp(char(name), 'V(\d+)([A-Z])', 'tokens', 'once');
+if isempty(tok), return; end
+v = str2double(tok{1});
+if v >= 20 || (v == 19 && any(tok{2} == 'JK')), rpm = 45; end
+end
+
+
+function name = firmwareBefore(fwName, ln)
+% name of the last 'firmware' event before line ln ('' if none)
+name = '';
+if isempty(fwName), return; end
+k = find([fwName{:, 1}] < ln, 1, 'last');
+if ~isempty(k), name = fwName{k, 2}; end
+end
+
+
+function R = dataFileNames(ev)
+% events dataFileName of the control software (lab round 10c, 2026-11-07): the name of the main data file names
+% another MyoDish. R: struct array time, file, myoDishId, named, rule, where, answer (use, chooseOther, cancel,
+% notAsked), line
+R = struct('time', {}, 'file', {}, 'myoDishId', {}, 'named', {}, 'rule', {}, 'where', {}, 'answer', {}, 'line', {});
+for i = 1:numel(ev)
+    try
+        d = jsondecode(ev{i}{3});
+    catch
+        continue;
+    end
+    if ~isstruct(d) || ~strcmp(jsonText(d, 'event'), 'dataFileName'), continue; end
+    R(end+1) = struct('time', ev{i}{1}, 'file', jsonText(d, 'file'), 'myoDishId', jsonText(d, 'myoDishId'), ...
+        'named', jsonText(d, 'named'), 'rule', jsonText(d, 'rule'), 'where', jsonText(d, 'where'), ...
+        'answer', jsonText(d, 'answer'), 'line', ev{i}{2}); %#ok<AGROW>
 end
 end
 

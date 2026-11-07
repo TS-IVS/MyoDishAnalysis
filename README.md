@@ -1008,7 +1008,8 @@ channel, see "Stimulus assignment"; `extra` = no eliciting pulse; `unpaced` = no
 the upstroke crosses 50 % of the amplitude and its delay to the pulse; less dependent on the shape of the foot of the
 upstroke than the onset), `invertedSignal` (see "Inverted signal"), `stimPulse` (pulse ID = raw sample
 number of the eliciting pulse in the file, from 0; the key of the pulse table), `stimCurrent` (mA),
-`stimChargeDuration`, `stimPauseDuration`, `stimDechargeDuration` (µs, from the log file), `elicitedByExtraPulse`,
+`stimChargeDuration`, `stimPauseDuration`, `stimDechargeDuration` (µs, from the log file; real durations, see
+*Pulse durations*), `elicitedByExtraPulse`,
 `stimAmbiguous`, `prePulses`, `postPulses`, `prominence` (detection criterion); with `'rockerFilter',true` also
 `rockerCorrected` (rocker moved and the artifact was subtracted).
 
@@ -1126,7 +1127,8 @@ channel 10k + c = extra pulse #k of channel c).
   The leading `t` keeps spreadsheet programs from reading a cell such as `-150|15|...` as a formula; `&` instead of
   `;` because `;` is the column separator of German CSV files. Example: `t-150|15|3000|1000|3000`.
   Durations: the last `chargeDuration` / `pauseDuration` / `dechargeDuration` entry of the log file before the pulse
-  (extra pulse #k: log channel 10k + c if present, otherwise the values of the channel; software 2026).
+  (extra pulse #k: log channel 10k + c if present, otherwise the values of the channel; software 2026), as real
+  durations (see *Pulse durations* below).
   Time resolution of the pulses: 2.5 ms (400 Hz).
 * **Pulse table** (`info.pulses`, sheet / file `pulses`; `'pulseTable',false` = none; xlsx with ≥ 1,048,576 rows:
   `<name>_pulses.csv`; watcher: like the contractions, `_pulses.csv(.gz)`): one row per pulse of the analysed
@@ -1314,6 +1316,16 @@ summaries. `mda_readMdd` / `read_mdd` therefore read the events:
 * Not yet: the test's results (`iMaxMa` per channel and run) as a table of the report, and the test pulses in the
   GUI plot.
 
+## Pulse durations (2026-11-07)
+The controller (firmware V15-V19) counts the durations of the pulse phases (commands 10-12) in ticks of 1.0667 µs
+(60 MHz / 64). Until lab round 7 (2.2.9805) the control software sent the µs of the setting 1:1 as ticks, so every
+phase ran 16/15 (+6.7 %) as long as set and logged (3000 µs → 3200 µs; measured on the oscilloscope). Since then it
+sends round(µs × 15/16) ticks and writes `pulseDurationCorrection;on|off` (switchable). MDA gives real durations: a
+logged `chargeDuration` / `pauseDuration` / `dechargeDuration` is multiplied by 16/15 (rounded to 1 µs) unless the
+last `pulseDurationCorrection` line before it says `on` (`H.pulseSettingsLog`, the columns `stim...Duration`, the
+pulse table, `groupBy` `pulseDuration` and `log:...Duration`, e.g. groups `3.2 ms` for a setting of 3 ms; a note
+*Pulse durations: logged values x 16/15 ...*). Results of earlier MDA versions give the logged values.
+
 ## Socket tests and controller restarts (control software lab round 5; 2026-11-05)
 * **Socket tests** of the leak test (`system` event `electrodeSocketTest`, channel = the channel tested; firmware
   V19F or later): the test discharges the electrode of the channel (1 ms) and, with a slice in, can elicit a
@@ -1328,6 +1340,15 @@ summaries. `mda_readMdd` / `read_mdd` therefore read the events:
   `Connection re-established` at most 10 s before the warning and the warning). The same from a `firmwareUpdate`
   event with phase `done`. The phases are rows of `H.rockerSpeedLog` (rocker filter, rocker state from the log) and
   of `H.rockerPowerOn` (`[start rpm kind end]`, kind 1 restart, 2 firmware update), with a note each.
+* **Controller status** (firmware V19G or later, lab round 7; 2026-11-07): the event `controllerRestart` opens a phase
+  at its line − `uptimeSeconds` (the restart; kind 3) at the power-on speed of its firmware; a warning whose phase
+  starts within 10 s of it is the same restart. A warning followed by `Restart signs not acted on: …` at the same
+  time opens none (no restart, or already reported as `controllerRestart`). Power-on speed: the warning's text, else
+  that of the firmware of the last `firmware` event before it (V19J, V19K: 45 rpm; V18G-V19I and test builds: 30 rpm);
+  after a firmware update that of the firmware it got (`to`). The rocker targets of `rockerSetpoint` (`targetRpm`) are
+  rows of `H.rockerSpeedLog` too. Red flag R counts such a restart once.
+* **Data file named after another MyoDish** (event `dataFileName`, lab round 10c): `H.dataFileNames`; with the answer
+  `use` or `notAsked` a note and red flag R (*data file named after another MyoDish*).
 
 ## Rocker artifact (`'rockerFilter',true`, GUI checkbox; `mda_rockerFilter`)
 While the rocker moves, the dish tilts periodically and each sensor shows an additive periodic signal at the rocker

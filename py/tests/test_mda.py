@@ -1841,3 +1841,65 @@ def test_power_on_rocker_and_socket_tests(tmp_path):
     sel = (Bf["included"].to_numpy() & (t > 5) & (t < 115) & (np.abs(t - 27.5) > 3) & (np.abs(t - 60.5) > 3)
            & (np.abs(t - 87.5) > 3))
     assert np.max(np.abs(Bf["amplitude"].to_numpy()[sel] - 1000)) < 20
+    # 2026-11-07: the controller's status (controllerRestart, rockerSetpoint; firmware V19J: 45 rpm), a false alarm
+    # ('Restart signs not acted on'), pulse durations (x 16/15 before 'pulseDurationCorrection;on'), dataFileName
+    L2 = L[:-1] + [
+        "2026 01 01 06:00:00:500;0;1;chargeDuration;3000",
+        '2026 01 01 06:00:05:000;5000;0;system;{"v":1,"event":"dataFileName","actionId":"D1","by":"TS","file":"pw.mdd",'
+        '"myoDishId":"dishA","named":"dishB","rule":"myodishes","where":"start","answer":"use"}',
+        "2026 01 01 06:00:50:000;50000;0;pulseDurationCorrection;on", "2026 01 01 06:00:50:000;50000;1;chargeDuration;3000",
+        '2026 01 01 06:01:20:000;80000;0;system;{"v":1,"event":"firmware","actionId":"F1","by":"auto","name":"V19J",'
+        '"date":"261101","format":2}',
+        '2026 01 01 06:01:50:000;110000;0;system;{"v":1,"event":"controllerRestart","actionId":"C1","by":"auto",'
+        '"controllerId":"SIMDEV01A","firmware":"V19J","cause":["POR"],"srs0":130,"srs1":0,"uptimeSeconds":4,'
+        '"atDefaults":true,"sign":"uptimeLower","previousUptimeSeconds":3609.7,"pcSeconds":6.3,"handled":false}',
+        "2026 01 01 06:01:51:000;111000;0;warning;Controller restart suspected: no data for 5.9 s, frame counter 1 after "
+        "it - rocker at the power-on speed unknown",
+        "2026 01 01 06:01:55:000;115000;0;warning;Controller restart suspected: no data for 5.9 s, frame counter 1 after "
+        "it - rocker at the power-on speed unknown",
+        "2026 01 01 06:01:55:000;115000;0;Event;Restart signs not acted on: the controller's status (page 1) shows no "
+        "restart, its uptime went on",
+        '2026 01 01 06:01:57:000;117000;0;system;{"v":1,"event":"rockerSetpoint","actionId":"R1","by":"auto",'
+        '"controllerId":"SIMDEV01A","targetRpm":60,"setpointRpm":45,"rockerOn":true,"settled":false}',
+        "2026 01 01 06:01:59:600;119600;0;warning;Controller restart suspected: no data for 5.9 s, frame counter 1 after "
+        "it - rocker at the power-on speed unknown"] + L[-1:]
+    (tmp_path / "pw_log.log").write_text("\n".join(L2) + "\n")
+    H2 = mda.read_mdd(mdd)
+    # the warning at 90 s comes before the firmware line in the log: 30 rpm; the one at 119.6 s after it: V19J, 45 rpm
+    assert np.round(H2.rockerPowerOn, 1).tolist() == [[27, 30, 1, 60], [87, 30, 1, 106], [116.6, 45, 1, 117],
+                                                       [106, 45, 3, 116.6], [-np.inf, 30, 2, -np.inf]]
+    P1 = H2.pulseSettingsLog[(H2.pulseSettingsLog[:, 1] == 1) & (H2.pulseSettingsLog[:, 2] == 1)]
+    assert P1[:, [0, 3]].tolist() == [[0, 3200], [50, 3000]]
+    assert any(x.startswith("Pulse durations: logged values x 16/15") for x in H2.notes)
+    assert any("power-on speed 45 rpm from 106 s until the next rockerSpeed entry (117 s)" in x for x in H2.notes)
+    assert any("Controller restart (status of the controller): rocker at the power-on speed 45 rpm" in x for x in H2.notes)
+    assert len(H2.dataFileNames) == 1 and H2.dataFileNames[0].named == "dishB"
+    assert any(x.startswith("Data file named after another MyoDish (dishB; this MyoDish: dishA; start, answer use)")
+               for x in H2.notes)
+    from myodish_analysis.report import report_flags
+    S1 = pd.DataFrame([{"channel": 1, "from": 0.0, "to": 120.0, "nDetected": 100, "nStimuli": 100, "nMissedBeats": 0,
+                        "nExtraBeats": 0, "nUncertain": 0, "nContractions": 100, "amplitude_mean": 1000.0,
+                        "amplitude_CV": 0.1}])
+    red = report_flags(S1, events=mda.log_entries(str(tmp_path / "pw_log.log"))).loc[0, "red"]
+    assert "controller restart suspected (5, first at 30 s)" in red  # 30, 73, 90, 110 (+111), 119.6 s
+    assert "data file named after another MyoDish (1, first at 5 s)" in red
+
+
+def test_anonymize_myodish_names_and_firmware():
+    # 2026-11-07: a MyoDish name ('dishA', also 'named' of dataFileName) -> 'MyoDish1'; a number kept (as in the
+    # slice IDs); the firmware of firmwareUpdate ('to') kept, a file chosen -> its file name
+    rows = ["systemTime;dataLogTime;channel;code;value",
+            '2001 02 03 10:00:00:000;0;0;system;{"v":1,"event":"dataFileName","actionId":"D1","by":"AB","file":"rec1.mdd",'
+            '"myoDishId":"dishA","named":"dishB","rule":"myodishes","where":"start","answer":"use"}',
+            '2001 02 03 10:01:00:000;60000;0;system;{"v":1,"event":"electrodeTestStart","actionId":"E1","by":null,'
+            '"myoDishId":"7"}',
+            '2001 02 03 10:02:00:000;120000;0;system;{"v":1,"event":"firmwareUpdate","actionId":"U1","by":"AB",'
+            '"phase":"done","from":"V19D","to":"V19J","sha256":"x"}',
+            '2001 02 03 10:03:00:000;180000;0;system;{"v":1,"event":"firmwareUpdate","actionId":"U2","by":"AB",'
+            '"phase":"done","from":"V19J","to":"file fw/MyoDish_V19K_test.bin","sha256":"y"}']
+    names = an.Pseudonyms()
+    txt = an.anonymize_log_text("\r\n".join(rows), AN_NAME, "rec1", AN_DAYS, ["AB"], names)[0]
+    d, e, u1, u2 = [j for _, j in _an_json_lines(txt)]
+    assert (d["myoDishId"], d["named"], d["by"]) == ("MyoDish1", "MyoDish2", "P1")
+    assert e["myoDishId"] == "7" and u1["to"] == "V19J" and u2["to"] == "file MyoDish_V19K_test.bin"
+    assert "dishA" not in txt and "dishB" not in txt

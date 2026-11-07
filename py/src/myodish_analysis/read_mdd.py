@@ -39,7 +39,10 @@ OUTPUT (S, a Struct with the field names of the MATLAB version)
               extendedSensorIntervals, notes, offsetLog / calibrationLog ([time channel value] rows; time -Inf =
               logged before the recording start), rockerSpeedLog ([time rpm]), pulseSettingsLog ([time logChannel
               code value]: chargeDuration (code 1), pauseDuration (2), dechargeDuration (3) entries, us; log channel
-              10k + c = extra pulse #k of channel c), extraPulseLog ([time channel k offset_ms line]: programmed time
+              10k + c = extra pulse #k of channel c; real durations: the controller counts ticks of 1.0667 us, and
+              the control software sent the us of the setting as ticks until 'pulseDurationCorrection;on' (lab round
+              7, 2.2.9805): a value is x 16/15 (rounded to 1 us) unless the last 'pulseDurationCorrection' line
+              before it says on; 2026-11-07), extraPulseLog ([time channel k offset_ms line]: programmed time
               of the extra pulses relative to the regular pulse of the channel, see extra_pulse_offsets),
               stimSequenceLog ([time channel period_ms nTimes t1_ms t2_ms]: regular stimulus times of the
               programmed sequences, see stim_sequences; 2026-10-23), electrodeTests (list of Structs, one per
@@ -54,9 +57,12 @@ OUTPUT (S, a Struct with the field names of the MATLAB version)
               [time - seconds, time + 1 s] of a test with a duration; the contractions in it are not included, as for
               electrode tests; the pulses stay stimuli: the test's discharge is not a pulse of the status channel),
               rockerPowerOn ([start rpm kind end]: the rocker runs at the controller's power-on speed after
-              a controller restart (kind 1, warning 'Controller restart suspected') or a firmware update (kind 2)
-              until the next 'rockerSpeed' entry (end); these phases are rows of rockerSpeedLog too; see
-              power_on_rocker, 2026-11-05), calibrationApplied,
+              a controller restart (kind 1, warning 'Controller restart suspected'; kind 3, event controllerRestart of
+              the controller's status, firmware V19G or later) or a firmware update (kind 2) until the next
+              'rockerSpeed' entry (end); these phases are rows of rockerSpeedLog too, as the rocker setpoints of the
+              controller's status (event rockerSetpoint, targetRpm); see power_on_rocker, 2026-11-05, 2026-11-07),
+              dataFileNames (list of Structs: events dataFileName, a data file named after another MyoDish: time,
+              file, myoDishId, named, rule, where, answer; 2026-11-07), calibrationApplied,
               extendedSensorFactor, rockerSource ('status channel' or 'log'), rockerLogIntervals ([from to] in s
               with rocker speed > 0 according to the log file)
   data:       t (s; centre of the averaged raw samples, first raw sample = 0 s), dt, force (nData x n, uN),
@@ -161,7 +167,10 @@ def read_header(mdd_file, opts=None):
     H.rockerSpeedLog = L.rockerSpeedEvents
     # [time logChannel code value]: pulse durations (us; code 1 charge, 2 pause, 3 decharge; log channel 10k + c =
     # extra pulse #k of channel c); [time channel k offset_ms line]: programmed extra pulse times (2026-10-10)
-    H.pulseSettingsLog = L.pulseSettingsEvents
+    H.pulseSettingsLog = L.pulseSettingsEvents  # real durations, see pulse_duration_factor (2026-11-07)
+    if L.pulseDurationsScaled:
+        H.notes.append("Pulse durations: logged values x 16/15 (the controller counts ticks of 1.0667 us; the control "
+                       "software sent the us of the setting as ticks before 'pulseDurationCorrection;on').")
     H.extraPulseLog = L.extraPulseOffsets
     H.stimSequenceLog = L.stimSequences  # [time channel period_ms nTimes t1_ms t2_ms]: programmed sequences (2026-10-23)
     H.electrodeTests = L.electrodeTests  # electrode tests of the control software (2026-10-27, see electrode_tests)
@@ -170,10 +179,17 @@ def read_header(mdd_file, opts=None):
     for Pw in H.rockerPowerOn:
         if Pw[3] == -math.inf:  # ended before the recording started
             continue
-        what = ("Controller restart (warning of the control software)", "Firmware update")[int(Pw[2]) - 1]
+        what = ("Controller restart (warning of the control software)", "Firmware update",
+                "Controller restart (status of the controller)")[int(Pw[2]) - 1]
         until = "the end of the file" if math.isinf(Pw[3]) else f"the next rockerSpeed entry ({Pw[3]:.0f} s)"
         H.notes.append(f"{what}: rocker at the power-on speed {_g(Pw[1])} rpm from {_time_text(Pw[0])} s until "
                        f"{until} (rocker filter, rocker state from the log).")
+    H.dataFileNames = L.dataFileNames  # data file named after another MyoDish (2026-11-07, see data_file_names)
+    for D in H.dataFileNames:
+        if D.answer not in ("use", "notAsked"):
+            continue
+        H.notes.append(f"Data file named after another MyoDish ({D.named}; this MyoDish: {D.myoDishId}; {D.where}, "
+                       f"answer {D.answer}): check that the data belong to this MyoDish.")
 
     # sampling rate: option > log file > 500 Hz for old 8-channel files (software 1.0.x) > 400 Hz
     if opts.samplingRate is not None:
@@ -743,7 +759,7 @@ def read_log(log_file, file_time=None):
                programVersion="", clockNote="", offsetEvents=np.zeros((0, 3)), calibrationEvents=np.zeros((0, 3)),
                rockerSpeedEvents=np.zeros((0, 2)), recordingStopped=None, pulseSettingsEvents=np.zeros((0, 4)),
                extraPulseOffsets=np.zeros((0, 5)), stimSequences=np.zeros((0, 6)), electrodeTests=[],
-               rockerPowerOn=np.zeros((0, 4)), socketTests=[])
+               rockerPowerOn=np.zeros((0, 4)), socketTests=[], pulseDurationsScaled=False, dataFileNames=[])
     txt = read_log_text(log_file)
     if txt is None:
         return L
@@ -764,7 +780,10 @@ def read_log(log_file, file_time=None):
     etEv, etWarn = [], []  # electrode test events (JSON) and warning lines (2026-10-27)
     sockEv, fwEv, rstEv = [], [], []  # socket tests, firmware updates, restart warnings (2026-11-05)
     reconL, resendL = [], []  # 'Connection re-established' (line, time) / 'Rocker speed sent again ...' lines
+    # controllerRestart, 'Restart signs not acted on' (line, time, kind), firmware (line, name), dataFileName (2026-11-07)
+    crEv, naL, fwName, dfEv = [], [], [], []
     pstCodes = ("chargeduration", "pauseduration", "dechargeduration")
+    pdc = []  # 'pulseDurationCorrection' lines: (line, on) (2026-11-07)
     lineStart = lineStartPar = math.nan
     tMax = tMaxPar = -math.inf  # latest dataLogTime since the chosen start line
     for i, line in enumerate(lines, start=1):
@@ -830,6 +849,8 @@ def read_log(log_file, file_time=None):
             ch = str2double(f[2]); v = str2double(value)
             if not math.isnan(ch) and not math.isnan(v):
                 pst.append([tsec, ch, pstCodes.index(lc) + 1, v, i])
+        elif lc == "pulsedurationcorrection":  # durations sent in ticks (on) or as the us of the setting (off)
+            pdc.append((i, lv == "on"))
         elif lc == "sequence":  # stimulus times of the sequence (regular and extra pulses #k)
             seqEv.append((tsec, str2double(f[2]), i, value))
         elif lc == "system" and value.startswith("{") and '"electrodeTest' in value:
@@ -851,6 +872,25 @@ def read_log(log_file, file_time=None):
             sockEv.append((tsec, str2double(f[2]), i, value))  # socket tests of the leak test (2026-11-05)
         elif lc == "system" and value.startswith("{") and '"firmwareUpdate"' in value:
             fwEv.append((tsec, i, value))  # firmware updates (2026-11-05)
+        elif lc == "system" and value.startswith("{") and '"controllerRestart"' in value:
+            crEv.append((tsec, i, value))  # restart seen by the controller's status
+        elif lc == "system" and value.startswith("{") and '"rockerSetpoint"' in value:
+            try:  # rocker target of the controller's status
+                d = _json.loads(value)
+            except ValueError:
+                d = None
+            if isinstance(d, dict):
+                tr = d.get("targetRpm")
+                if isinstance(tr, (int, float)) and not isinstance(tr, bool):
+                    rck.append([tsec, float(tr), i])
+        elif lc == "system" and value.startswith("{") and _re.search(r'"event"\s*:\s*"firmware"', value):
+            m = _re.search(r'"name"\s*:\s*"([^"]*)"', value)
+            if m:
+                fwName.append((i, m.group(1)))  # firmware of the controller (page 0)
+        elif lc == "system" and value.startswith("{") and '"dataFileName"' in value:
+            dfEv.append((tsec, i, value))
+        elif lc == "event" and lv.startswith("restart signs not acted on"):
+            naL.append((i, tsec, 0 if "shows no restart" in lv else 1))
         elif lc == "warning" and lv.startswith("controller restart suspected"):
             rstEv.append((tsec, i, value))
         elif lc == "event" and lv.startswith("connection re-established"):
@@ -882,7 +922,8 @@ def read_log(log_file, file_time=None):
     cal = np.array(cal, dtype=float).reshape(-1, 4)
     rck = np.array(rck, dtype=float).reshape(-1, 3)
     # power-on phases of the rocker (controller restart, firmware update; 2026-11-05): rows of rck from their start
-    pwr = power_on_rocker(rstEv, fwEv, reconL, resendL)
+    pwr = power_on_rocker(rstEv, fwEv, reconL, resendL, crEv, naL, fwName)
+    L.dataFileNames = data_file_names(dfEv)
     rck = np.vstack([rck, pwr[:, :3]])
     if not math.isnan(lineStart):
         ext[ext[:, 2] < lineStart, 0] = -math.inf
@@ -900,6 +941,9 @@ def read_log(log_file, file_time=None):
                 pEnd[k] = rck[j[0] + 1, 0]
         L.rockerPowerOn = np.c_[pwr[:, :2], pwr[:, 3], pEnd]
     pst = np.array(pst, dtype=float).reshape(-1, 5)
+    f = pulse_duration_factor(pst[:, 4], pdc)  # real durations (2026-11-07)
+    L.pulseDurationsScaled = bool(np.any(f != 1))
+    pst[:, 3] = [mround(x) for x in pst[:, 3] * f]
     X = extra_pulse_offsets(seqEv)
     Q = stim_sequences(seqEv)
     if not math.isnan(lineStart):
@@ -1030,39 +1074,112 @@ def stim_sequences(ev):
 _RE_ET_WARN = _re.compile(r"^Electrode test (\S+?):?\s")
 
 
-def power_on_rocker(rst, fw, recon, resend):
-    """Power-on phases of the rocker (2026-11-05): after a controller restart the rocker runs at the controller's
-    power-on speed until the software sends a speed again (the next 'rockerSpeed' entry). Rows [time rpm line kind]:
+def pulse_duration_factor(lines, pdc):
+    """factor that turns the logged pulse durations into the real ones (2026-11-07): the controller (firmware V15-V19)
+    counts the durations of commands 10-12 in ticks of 1.0667 us (60 MHz / 64); the control software sent the us of
+    the setting 1:1 as ticks until lab round 7 (2.2.9805), so every phase ran 16/15 as long as logged. Since then it
+    writes 'pulseDurationCorrection;on|off': on = it sends round(us x 15/16) ticks, the logged value is the real one.
+    lines: line numbers of the duration entries; pdc: (line, on) of the state lines. f = 1 if the last state line
+    before the entry says on, otherwise 16/15. Port of pulseDurationFactor in mda_readMdd.m."""
+    f = np.full(len(lines), 16.0 / 15.0)
+    for i, ln in enumerate(lines):
+        prev = [on for (l, on) in pdc if l < ln]
+        if prev and prev[-1]:
+            f[i] = 1.0
+    return f
+
+
+def power_on_rocker(rst, fw, recon, resend, cr=(), na=(), fwName=()):
+    """Power-on phases of the rocker (2026-11-05, 2026-11-07): after a controller restart the rocker runs at the
+    controller's power-on speed until the software sends a speed again (the next 'rockerSpeed' entry). Rows [time rpm
+    line kind]:
     - warning 'Controller restart suspected: no data for x s, frame counter 1 after it - rocker at the power-on speed
       30 rpm' (control software 2.2): from 3 s before the warning (the software decides after 3 s of data after the
-      silence); the speed from the text, 30 rpm if 'unknown' or not given (firmware V18G-V19G). No phase if the last
-      'Connection re-established' before the warning lies at most 10 s before it and a line 'Rocker speed sent again
-      after the connection was re-established' lies between the two: the restarted controller got the speed at the
-      reconnect. kind 1.
-    - 'system' event firmwareUpdate with phase done (control software lab round 5): the controller runs the new
-      firmware with its power-on settings; from the line, 30 rpm. kind 2.
-    rst / fw: (time, line, text); recon: (line, time); resend: line numbers. Port of powerOnRocker in mda_readMdd.m."""
+      silence); the speed from the text, otherwise ('unknown', no suffix) that of the firmware of the last 'firmware'
+      event before (power_on_rpm). No phase if the last 'Connection re-established' before the warning lies at most
+      10 s before it and a line 'Rocker speed sent again after the connection was re-established' lies between the two
+      (the restarted controller got the speed at the reconnect), and none if a line 'Restart signs not acted on: ...'
+      follows it at the same time (the controller's status showed no restart, or had shown it: event
+      controllerRestart). kind 1.
+    - event controllerRestart of the controller's status (firmware V19G or later, lab round 7): from the line minus
+      uptimeSeconds (the restart), the speed of its firmware. A warning whose phase starts within 10 s of it is the same
+      restart (either order) and is dropped. kind 3.
+    - event firmwareUpdate with phase done (lab round 5): the controller runs the new firmware with its power-on
+      settings; from the line, the speed of the firmware it got ('to'). kind 2.
+    rst / fw / cr: (time, line, text); recon: (line, time); resend: line numbers; na: (line, time, kind) of 'Restart
+    signs not acted on'; fwName: (line, name) of the 'firmware' events. Port of powerOnRocker in mda_readMdd.m."""
     decide = 3.0  # s of data after the silence before the warning
     reconMax = 10.0  # s: a reconnect at most this long before the warning belongs to it
-    rpm0 = 30.0  # power-on speed if the line does not give it
-    P = []
+    sameMax = 10.0  # s: a warning and a controllerRestart this close are one restart
+    W = []
     for t, ln, txt in rst:
+        if any(x[0] > ln and abs(x[1] - t) <= 1 for x in na):
+            continue
         r = [x for x in recon if x[0] < ln]
         if r and t - r[-1][1] <= reconMax and any(r[-1][0] < x < ln for x in resend):
             continue
-        rpm = rpm0
         m = _re.search(r"power-on speed (\d+\.?\d*) rpm", txt)
-        if m:
-            rpm = float(m.group(1))
-        P.append([t - decide, rpm, ln, 1])
+        rpm = float(m.group(1)) if m else power_on_rpm(_firmware_before(fwName, ln))
+        W.append([t - decide, rpm, ln, 1])
+    C = []
+    for t, ln, txt in cr:
+        try:
+            d = _json.loads(txt)
+        except ValueError:
+            continue
+        if not isinstance(d, dict) or d.get("event") != "controllerRestart":
+            continue
+        up = d.get("uptimeSeconds")
+        up = float(up) if isinstance(up, (int, float)) and not isinstance(up, bool) else 0.0
+        name = d.get("firmware") if isinstance(d.get("firmware"), str) and d.get("firmware") else _firmware_before(fwName, ln)
+        C.append([t - up, power_on_rpm(name), ln, 3])
+    P = [w for w in W if not any(abs(c[0] - w[0]) <= sameMax for c in C)] + C
     for t, ln, txt in fw:
         try:
             d = _json.loads(txt)
         except ValueError:
             continue
         if isinstance(d, dict) and d.get("event") == "firmwareUpdate" and d.get("phase") == "done":
-            P.append([t, rpm0, ln, 2])
+            to = d.get("to") if isinstance(d.get("to"), str) else ""
+            P.append([t, power_on_rpm(to), ln, 2])
     return np.array(P, dtype=float).reshape(-1, 4)
+
+
+def power_on_rpm(name):
+    """power-on rocker speed of a firmware (page-0 name or release, e.g. 'V19J', 'V19I candidate b5b8513', 'file
+    MyoDish_V19J_x.bin'): 45 rpm for V19J and V19K (and V20 or later), 30 rpm for V18G-V19I and the test builds (V19L,
+    V19P, V19T) and when unknown (firmware development, 2026-11-05). Port of powerOnRpm in mda_readMdd.m."""
+    m = _re.search(r"V(\d+)([A-Z])", str(name or ""))
+    if not m:
+        return 30.0
+    v = int(m.group(1))
+    return 45.0 if v >= 20 or (v == 19 and m.group(2) in "JK") else 30.0
+
+
+def _firmware_before(fwName, ln):
+    names = [n for (l, n) in fwName if l < ln]
+    return names[-1] if names else ""
+
+
+def data_file_names(ev):
+    """events dataFileName of the control software (lab round 10c, 2026-11-07): the name of the main data file names
+    another MyoDish. Returns a list of Structs: time, file, myoDishId, named, rule, where, answer (use, chooseOther,
+    cancel, notAsked), line. Port of dataFileNames in mda_readMdd.m."""
+    R = []
+    for t, ln, txt in ev:
+        try:
+            d = _json.loads(txt)
+        except ValueError:
+            continue
+        if not isinstance(d, dict) or d.get("event") != "dataFileName":
+            continue
+
+        def text(name):
+            v = d.get(name)
+            return v if isinstance(v, str) else ""
+        R.append(Struct(time=t, file=text("file"), myoDishId=text("myoDishId"), named=text("named"), rule=text("rule"),
+                        where=text("where"), answer=text("answer"), line=ln))
+    return R
 
 
 def socket_tests(ev, lineStart):

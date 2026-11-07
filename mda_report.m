@@ -147,7 +147,12 @@ function s = restartWarnings(E)
 % red flag R from the events table E of a recording: 'Controller restart suspected ...' (code warning, control software
 % 2.2, F-90; 2026-10-21), firmware updates ('system' event firmwareUpdate with phase done or failed, lab round 5) and
 % 'Recording stopped by the software: only <n> MB free on drive <D:>' (code warning; both 2026-11-05). '' if none,
-% otherwise the description (per kind: number and time of the first one, s in the file)
+% otherwise the description (per kind: number and time of the first one, s in the file). 2026-11-07: a restart also
+% from the event controllerRestart of the controller's status (firmware V19G or later); a warning whose restart (3 s
+% before it) lies within 10 s of that of a controllerRestart (its line - uptimeSeconds) is the same restart, and a
+% warning followed by 'Restart signs not acted on: ...' at the same time counts not (the status showed no restart, or
+% had shown it as controllerRestart), as mda_readMdd (powerOnRocker); a data file named after another MyoDish (event
+% dataFileName, answer use or notAsked)
 s = '';
 if isempty(E) || ~istable(E) || ~all(ismember({'code', 'text'}, E.Properties.VariableNames)), return; end
 code = lower(cellstr(string(E.code))); txt = cellstr(string(E.text)); low = lower(txt);
@@ -155,12 +160,29 @@ t = nan(height(E), 1);
 if ismember('t_file', E.Properties.VariableNames), t = double(E.t_file); end
 fw = strcmp(code, 'system') & contains(txt, '"firmwareUpdate"') & ...
     ~cellfun(@isempty, regexp(txt, '"phase"\s*:\s*"(done|failed)"', 'once'));
+w = find(strcmp(code, 'warning') & startsWith(low, 'controller restart suspected'));
+na = find(strcmp(code, 'event') & startsWith(low, 'restart signs not acted on'));
+keepW = true(size(w));
+for i = 1:numel(w), keepW(i) = ~any(na > w(i) & abs(t(na) - t(w(i))) <= 1); end
+cr = find(strcmp(code, 'system') & contains(txt, '"controllerRestart"'));
+up = zeros(size(cr));
+for i = 1:numel(cr)
+    tok = regexp(txt{cr(i)}, '"uptimeSeconds"\s*:\s*([0-9.]+)', 'tokens', 'once');
+    if ~isempty(tok), up(i) = str2double(tok{1}); end
+end
+for i = 1:numel(w)
+    keepW(i) = keepW(i) && ~any(abs((t(cr) - up) - (t(w(i)) - 3)) <= 10);
+end
+rs = [w(keepW); cr];
+if ~isempty(rs) && ~any(isnan(t(rs))), [~, o] = sort(t(rs)); rs = rs(o); end
+df = find(strcmp(code, 'system') & contains(txt, '"dataFileName"') & ...
+    ~cellfun(@isempty, regexp(txt, '"answer"\s*:\s*"(use|notAsked)"', 'once')));
 parts = {};
-parts = flagPart(parts, 'controller restart suspected', find(strcmp(code, 'warning') & ...
-    startsWith(low, 'controller restart suspected')), t);
+parts = flagPart(parts, 'controller restart suspected', rs, t);
 parts = flagPart(parts, 'firmware update', find(fw), t);
 parts = flagPart(parts, 'recording stopped by the software (low disk space)', find(strcmp(code, 'warning') & ...
     startsWith(low, 'recording stopped by the software')), t);
+parts = flagPart(parts, 'data file named after another MyoDish', df, t);
 s = strjoin(parts, '; ');
 end
 
@@ -752,8 +774,8 @@ L = {'', ['Each cell: capture (% of the stimuli followed by a contraction; ~ arr
     '#f8c9c4', sprintf(['Red = check the analysis:  I inverted signal,  N noise (uncertain %s %g %%, ' ...
         'extra+missed %s %g %%),  S large extra beats (> %g x paced),  D delay > %g ms,  F pacing > %g Hz'], ...
         char(8805), fl.uncertain, char(8805), fl.irregular, fl.artifactRatio, 1000 * fl.delay, fl.stimFrequency)
-    '#f8c9c4', ['R controller restart suspected or firmware update (the controller may then run with its power-on ' ...
-        'settings, not those in the log), or recording stopped (low disk space)']
+    '#f8c9c4', ['R controller restart or firmware update (power-on settings, not those in the log), recording ' ...
+        'stopped (low disk space), file named after another MyoDish']
     '#fbe8a6', sprintf(['Yellow = slice quality:  C capture < %g %%,  X extra beats > %g %%,  A amplitude < %g %sN,  ' ...
         'T amplitude changes by > %g %% during the recording,  V amplitude CV > %g %%'], fl.capture, fl.extra, ...
         fl.amplitude, mu, fl.amplitudeChange, fl.amplitudeCV)

@@ -1283,6 +1283,14 @@ def _log_value_at(H, code, ch, t):
         num = sscanf_floats(str(E["text"].iloc[kk]))
         if num:
             x[i] = num[0]
+    if code.lower() in ("chargeduration", "pauseduration", "dechargeduration"):
+        # real pulse durations (2026-11-07, as read_mdd): x 16/15 (1 us) unless the last 'pulseDurationCorrection'
+        # line before the entry says on
+        s = np.flatnonzero(codes == "pulsedurationcorrection")
+        for i, kk in enumerate(k):
+            j = s[s < kk]
+            if j.size == 0 or str(E["text"].iloc[j[-1]]).strip().lower() != "on":
+                x[i] = mround(x[i] * 16.0 / 15.0)
     te = tf[k]
     o = np.argsort(te, kind="stable")
     te, x = _unique_last(te[o], x[o])

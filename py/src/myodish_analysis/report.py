@@ -72,6 +72,7 @@ TS 2026-10-11 (noise index N, large extra beats S, extra beats as slice quality 
 from __future__ import annotations
 
 import math
+import re
 import os
 import textwrap
 
@@ -170,7 +171,11 @@ def restart_warnings(E):
     """red flag R from the events table E of a recording: 'Controller restart suspected ...' (code warning, control
     software 2.2, F-90; 2026-10-21), firmware updates ('system' event firmwareUpdate with phase done or failed, lab
     round 5) and 'Recording stopped by the software: only <n> MB free on drive <D:>' (code warning; both 2026-11-05).
-    '' if none, otherwise the description (per kind: number and time of the first one, s in the file)"""
+    '' if none, otherwise the description (per kind: number and time of the first one, s in the file). 2026-11-07: a
+    restart also from the event controllerRestart of the controller's status (firmware V19G or later); a warning whose
+    restart (3 s before it) lies within 10 s of that of a controllerRestart (its line - uptimeSeconds) is the same
+    restart, and a warning followed by 'Restart signs not acted on: ...' at the same time counts not, as read_mdd
+    (power_on_rocker); a data file named after another MyoDish (event dataFileName, answer use or notAsked)"""
     if E is None or not len(E) or not {"code", "text"}.issubset(E.columns):
         return ""
     code = E["code"].astype(str).str.lower().to_numpy()
@@ -179,13 +184,30 @@ def restart_warnings(E):
     t = E["t_file"].astype(float).to_numpy() if "t_file" in E.columns else np.full(len(E), math.nan)
     fw = ((code == "system") & txt.str.contains('"firmwareUpdate"', regex=False).to_numpy()
           & txt.str.contains(r'"phase"\s*:\s*"(?:done|failed)"', regex=True).to_numpy())
+    w = np.flatnonzero((code == "warning") & low.str.startswith("controller restart suspected").to_numpy())
+    na = np.flatnonzero((code == "event") & low.str.startswith("restart signs not acted on").to_numpy())
+    w = np.array([i for i in w if not np.any((na > i) & (np.abs(t[na] - t[i]) <= 1))], dtype=int)
+    cr = np.flatnonzero((code == "system") & txt.str.contains('"controllerRestart"', regex=False).to_numpy())
+    up = np.zeros(cr.size)
+    for i, k in enumerate(cr):
+        m = re.search(r'"uptimeSeconds"\s*:\s*([0-9.]+)', str(txt.iloc[k]))
+        if m:
+            up[i] = float(m.group(1))
+    w = np.array([i for i in w if not np.any(np.abs((t[cr] - up) - (t[i] - 3)) <= 10)], dtype=int)
+    rs = np.r_[w, cr].astype(int)
+    if rs.size and not np.any(np.isnan(t[rs])):
+        rs = rs[np.argsort(t[rs], kind="stable")]
+    sel_rs = np.zeros(len(E), bool)
+    sel_rs[rs] = True
+    df = ((code == "system") & txt.str.contains('"dataFileName"', regex=False).to_numpy()
+          & txt.str.contains(r'"answer"\s*:\s*"(?:use|notAsked)"', regex=True).to_numpy())
     parts = []
-    for what, sel in (("controller restart suspected",
-                       (code == "warning") & low.str.startswith("controller restart suspected").to_numpy()),
+    for what, sel in (("controller restart suspected", sel_rs),
                       ("firmware update", fw),
                       ("recording stopped by the software (low disk space)",
-                       (code == "warning") & low.str.startswith("recording stopped by the software").to_numpy())):
-        k = np.flatnonzero(sel)
+                       (code == "warning") & low.str.startswith("recording stopped by the software").to_numpy()),
+                      ("data file named after another MyoDish", df)):
+        k = np.flatnonzero(sel) if what != "controller restart suspected" else rs
         if not k.size:
             continue
         if math.isnan(t[k[0]]):
@@ -564,8 +586,8 @@ def legend_lines(fl):
         ("check", f"Red = check the analysis:  I inverted signal,  N noise (uncertain \u2265 {fl['uncertain']:g} %, "
                   f"extra+missed \u2265 {fl['irregular']:g} %),  S large extra beats (> {fl['artifact_ratio']:g} x "
                   f"paced),  D delay > {1000 * fl['delay']:g} ms,  F pacing > {fl['stim_frequency']:g} Hz"),
-        ("check", "R controller restart suspected or firmware update (the controller may then run with its power-on "
-                  "settings, not those in the log), or recording stopped (low disk space)"),
+        ("check", "R controller restart or firmware update (power-on settings, not those in the log), recording "
+                  "stopped (low disk space), file named after another MyoDish"),
         ("quality", f"Yellow = slice quality:  C capture < {fl['capture']:g} %,  X extra beats > {fl['extra']:g} %,  "
                     f"A amplitude < {fl['amplitude']:g} {mu}N,  T amplitude changes by > {fl['amplitude_change']:g} % "
                     f"during the recording,  V amplitude CV > {fl['amplitude_cv']:g} %"),

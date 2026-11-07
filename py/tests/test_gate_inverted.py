@@ -199,7 +199,7 @@ def test_report_label_and_amplitude_change():
     assert report_flags(pd.DataFrame(rows), events=E2.iloc[[1]]).loc[2, "red"] == "firmware update (1, first at 5 s)"
     L = legend_lines(FLAG_DEFAULTS)
     assert len(L) == 6 and all(len(t) <= 170 for _, t in L) and "T amplitude changes by > 30 %" in L[3][1]
-    assert L[2][0] == "check" and L[2][1].startswith("R controller restart suspected")
+    assert L[2][0] == "check" and L[2][1].startswith("R controller restart")
 
 
 def test_report_noise_index_and_large_extra_beats():

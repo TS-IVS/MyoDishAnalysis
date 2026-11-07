@@ -378,6 +378,7 @@ def extra_pulse_test(out=print):
         code[int(round(t0 * fs))] = 512 + cur + (32768 if ex else 0)  # channel 1, current, bit 16
     X[8] = code.view(np.int16)
     L = ["systemTime;dataLogTime;channel;code;value", "2026 01 01 06:00:00:000;0;0;nChannels;9",
+         "2026 01 01 06:00:00:000;0;0;pulseDurationCorrection;on",  # durations as logged (2026-11-07)
          "2026 01 01 06:00:00:000;0;1;chargeDuration;1000", "2026 01 01 06:00:00:000;0;1;pauseDuration;100",
          "2026 01 01 06:00:00:000;0;1;dechargeDuration;1000", "2026 01 01 06:00:00:000;0;11;chargeDuration;3000",
          "2026 01 01 06:00:00:000;0;11;pauseDuration;1000", "2026 01 01 06:00:00:000;0;11;dechargeDuration;3000",

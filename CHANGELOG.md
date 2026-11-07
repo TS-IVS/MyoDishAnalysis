@@ -5,6 +5,14 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
+- **Pulse durations: real instead of logged values** (2026-11-07). The controller counts the phase durations in ticks
+  of 1.0667 µs, and the control software sent the µs of the setting as ticks until lab round 7 (2.2.9805): every phase
+  ran 16/15 as long as logged (Tom, oscilloscope). `mda_readMdd` / `read_mdd` and the grouping (`pulseDuration`,
+  `log:...Duration`) multiply the logged durations by 16/15 (rounded to 1 µs) unless the last
+  `pulseDurationCorrection` line before them says `on` (the software's correction, lab round 7). This changes
+  `stimChargeDuration`, `stimPauseDuration`, `stimDechargeDuration`, the pulse table and the pulse-duration groups of
+  all recordings so far (+6.7 %; e.g. groups `3.2 ms` instead of `3 ms`); a note per recording. MATLAB references of
+  the examples renewed. Tests: `mda_test` (power-on test), `test_mda.py`.
 - **Rocker filter: one rocker period per logged speed** (2026-11-05). A rocker period (rocker bit on) got the speed
   logged at its start, so after a speed change without a stop (e.g. 60 → 30 rpm in a rocker speed test, or the
   power-on speed after a controller restart, below) the filter used the old frequency. A period is now split
@@ -103,6 +111,18 @@ MATLAB and Python versions have the same version number and give the same result
     stopped by the software: only <n> MB free on drive <D:>`, e.g. *controller restart suspected (2, first at 1234 s);
     firmware update (1, first at 5 s)*; legend accordingly.
   - Tests: `mda_test` (power-on test), `mda_testGateInverted`, `test_mda.py`, `test_gate_inverted.py`.
+- **Control software lab rounds 6-10c (2.2.9804.41066 - 2.2.9807.7626): controller status, V19J, data file name**
+  (2026-11-07).
+  - `controllerRestart` (status of the controller, firmware V19G or later): power-on phase from its line −
+    `uptimeSeconds` (kind 3 of `rockerPowerOn`); a warning within 10 s is the same restart; a warning followed by
+    `Restart signs not acted on: ...` opens none. Power-on speed from the warning text, else from the firmware of the
+    last `firmware` event (V19J, V19K: 45 rpm, else 30); after a firmware update from its `to`. `rockerSetpoint`
+    (`targetRpm`) rows in `rockerSpeedLog`. Red flag R counts one restart once.
+  - `dataFileName` (a data file named after another MyoDish, answer `use` / `notAsked`): header field
+    `dataFileNames`, a note, red flag R.
+  - `py/tools/anonymize_recording.py`: MyoDish names in `myoDishId` / `named` (e.g. `dishA`) → `MyoDish1`, ...
+    (numbers as in the slice IDs kept); `to` of `firmwareUpdate` kept (was replaced like a folder).
+  - Tests: `mda_test` (power-on test), `test_mda.py` (also `test_anonymize_myodish_names_and_firmware`).
 - **Protocols: every beat parameter per step, stimulus timing in the summaries, FFR of every frequency step**
   (2026-11-02).
   - Summaries and protocol groups (one row per frequency / pause / current / S2 interval) also give mean, SD and n of

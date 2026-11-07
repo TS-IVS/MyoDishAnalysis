@@ -25,6 +25,9 @@ number of days):
     where a name means different things), in every event:
       pc -> 'PC', winUser -> 'user', pnp -> 'USB serial device', software -> major.minor ('2.1');
       controllerId and ftdiSerial -> 'controller1', 'controller2', ...; chamberId -> 'chamber1', ...;
+      myoDishId (every event) and named (event dataFileName: a data file named after another MyoDish): a name such as
+      'dishA' -> 'MyoDish1', ...; a number (as in the slice IDs, '<sample>_S7C3') kept (2026-11-07); to of the event
+      firmwareUpdate (the firmware) kept, 'file <name>' -> 'file <file name>';
       persons: by, initials, user, owner, removedBy and previous (event user) -> 'P1', 'P2', ... ('auto' and null
       kept); name of the event user (full name of a person) -> the pseudonym of that person;
       sampleId -> 'S1', ... (as sampleID of _labels.csv); sliceId -> the sample pseudonym inside the slice ID;
@@ -96,7 +99,7 @@ _NAME_TEXT = ("protocolRun", "scheduleRun")                   # codes whose name
 _LABELS = ("species", "tissue", "sampleGroup", "sliceGroup", "treatment", "medium", "substance", "vehicle")
 _KEEP_PERSON = ("auto",)
 _KEY_STR = re.compile(r'"(%s)"\s*:\s*"((?:[^"\\]|\\.)*)"'
-                      % "|".join(tuple(_FIXED) + ("software", "sampleId", "sliceId", "chamberId", "name")
+                      % "|".join(tuple(_FIXED) + ("software", "sampleId", "sliceId", "chamberId", "name", "myoDishId")
                                  + _CONTROLLER + _PERSON))
 _SUBSTRING = ("controller", "pnp", "software", "file name", "folder")  # searched anywhere by the final check
 
@@ -110,7 +113,7 @@ class Pseudonyms:
     a map file (--map), in several runs. originals: original value -> kind of every value replaced in this run (for
     the final check); unreadable: line numbers of structured log lines that could not be read."""
     PREFIX = {"controller": "controller", "person": "P", "sample": "S", "slice": "slice", "chamber": "chamber",
-              "folder": "folder"}
+              "folder": "folder", "myodish": "MyoDish"}
 
     def __init__(self, map_file=None):
         self.map = {k: {} for k in self.PREFIX}
@@ -426,6 +429,10 @@ def _json_field(key, v, c, ev, obj):
         return _slice_id(v, sample if isinstance(sample, str) and not isinstance(sample, _Raw) else "", names)
     if key == "chamberId":
         return names.get("chamber", v)
+    if key == "myoDishId" or (key == "named" and ev == "dataFileName"):   # MyoDish IDs, e.g. setup names (2026-11-07)
+        return v if v.strip().isdigit() else names.get("myodish", v)
+    if key == "to" and ev == "firmwareUpdate":       # the firmware (release name), or a file chosen
+        return "file " + _file_name(v[5:], c) if v.startswith("file ") else v
     if key in _FOLDERS:
         return names.get("folder", v)
     if key in _PATHS:
@@ -469,8 +476,9 @@ def _json_value(v, line, c):
                 names.replaced(x, "controller")
             elif k in _PERSON and x not in _KEEP_PERSON:
                 names.replaced(x, "person")
-            elif k in ("sampleId", "sliceId", "chamberId") and x:
-                names.replaced(x, {"sampleId": "sample", "sliceId": "slice", "chamberId": "chamber"}[k])
+            elif k in ("sampleId", "sliceId", "chamberId", "myoDishId") and x and not (k == "myoDishId" and x.isdigit()):
+                names.replaced(x, {"sampleId": "sample", "sliceId": "slice", "chamberId": "chamber",
+                                   "myoDishId": "myodish"}[k])
             elif k == "name" and x and re.search(r'"event"\s*:\s*"user"', v):   # full name of a person
                 names.replaced(x, "person")
         return v
