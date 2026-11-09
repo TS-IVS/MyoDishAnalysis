@@ -1590,15 +1590,26 @@ if isempty(r), return; end
 v = {};
 for nm = {'setupID', 'sliceID', 'species', 'tissue', 'sampleID', 'treatment'}
     if ~ismember(nm{1}, L.Properties.VariableNames), continue; end
-    x = strtrim(char(string(L.(nm{1})(r))));
-    if isempty(x) || strcmpi(x, 'NaN') || strcmp(x, '<missing>'), continue; end
+    x = cellText(L.(nm{1})(r));
+    if isempty(x), continue; end
     if strcmp(nm{1}, 'treatment') && all(ismember({'concentration', 'concentrationUnit'}, L.Properties.VariableNames))
-        cc = strtrim(char(string(L.concentration(r)))); cu = strtrim(char(string(L.concentrationUnit(r))));
-        if ~isempty(cc) && ~strcmpi(cc, 'NaN') && ~strcmp(cc, '<missing>'), x = strtrim([x ' ' cc ' ' cu]); end
+        cc = cellText(L.concentration(r)); cu = cellText(L.concentrationUnit(r));
+        if ~isempty(cc), x = strtrim([x ' ' cc ' ' cu]); end
     end
     v{end+1} = x; %#ok<AGROW>
 end
 if ~isempty(v), s = ['  ' char(183) '  ' strjoin(v, ['  ' char(183) '  '])]; end
+end
+
+
+function x = cellText(v)
+% a label value as text; empty, NaN and missing give '' (string(NaN) is <missing>, and char of it fails: a treatment
+% without concentration, 2026-11-09)
+if iscell(v), if isempty(v), v = ''; else, v = v{1}; end, end
+x = string(v);
+if isempty(x) || ismissing(x(1)), x = ''; return; end
+x = strtrim(char(x(1)));
+if strcmpi(x, 'NaN') || strcmp(x, '<missing>'), x = ''; end
 end
 
 

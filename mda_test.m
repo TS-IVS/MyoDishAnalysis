@@ -295,6 +295,10 @@ ok = ok && okM;
 % or a firmware update, socket tests of the leak test, rocker filter per logged speed
 okW = powerOnSocketTest();
 ok = ok && okW;
+% a recording stopped and started again into the same file (lines of the pause with dataLogTime 0 at the time of
+% its new opening) and lines after its end (left out), 2026-11-09
+okP = pausedRecordingTest();
+ok = ok && okP;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
 end
 
@@ -410,6 +414,54 @@ try
         'name %d   %s\n'], okH, okS, nnz(win), okB, mat2str(R.f0table(:,1)'), max(abs(a - 1000)), okC, passStr(okW));
 catch ME
     fprintf('power-on phases / socket tests: %s   FAILED\n', ME.message);
+end
+delete(mdd); delete(lg);
+end
+
+
+function okP = pausedRecordingTest()
+% as test_paused_recording_waiting_lines in py/tests/test_mda.py (2026-11-09): a recording stopped at 40 s and started
+% again into the same file at 40.01 s after a firmware update V19D -> V19J (the control software was restarted: its lines
+% before the new opening of the log carry dataLogTime 0), stopped at 120 s; after the end a later run of the control
+% software wrote another firmware update into the closed log. The update in the pause holds the time of the new opening
+% (power-on phase 40.01 - 45 s at 45 rpm, red flag R 'first at 40 s'), the lines after the end are left out.
+fs = 400; T = 120; n = T * fs;
+X = zeros(9, n, 'int16');
+X(9,:) = typecast(16384 * ones(1, n, 'uint16'), 'int16');   %rocker on
+base = [tempname '_pause'];
+mdd = [base '.mdd']; lg = [base '_log.log'];
+fid = fopen(mdd, 'w'); fwrite(fid, X, 'int16'); fclose(fid);
+fu = @(tm, ph, a, b) sprintf(['2026 01 01 %s;0;0;system;{"v":1,"event":"firmwareUpdate","actionId":"U%s","by":"TS",' ...
+    '"phase":"%s","path":"replug","controllerId":"SIMDEV01A","from":"%s","to":"%s","sha256":"x"}'], tm, b, ph, a, b);
+ln = @(tm, ms, code, v) sprintf('2026 01 01 %s;%d;0;%s;%s', tm, ms, code, v);
+L = {'systemTime;dataLogTime;channel;code;value', ln('06:00:00:000', 5, 'Event', 'LogFile created: data/pw_log.log'), ...
+    ln('06:00:00:000', 5, 'Event', 'LogFile opened: data/pw_log.log'), ln('06:00:00:000', 5, 'nChannels', '9'), ...
+    ln('06:00:00:000', 5, 'Recording', 'started: data/pw.mdd'), ln('06:00:00:000', 5, 'samplingRate Recording', '400'), ...
+    ln('06:00:01:000', 1000, 'rockerSpeed', '60'), ln('06:00:40:000', 40000, 'Recording', 'stopped: data/pw.mdd'), ...
+    ln('06:00:40:000', 40000, 'Event', 'LogFile closed: data/pw_log.log'), ...
+    ln('06:00:41:000', 0, 'Event', 'MyodishControlSoftware opened'), fu('06:00:42:000', 'start', 'V19D', 'V19J'), ...
+    fu('06:00:50:000', 'done', 'V19D', 'V19J'), ln('06:00:55:000', 40010, 'Event', 'LogFile opened: data/pw_log.log'), ...
+    ln('06:00:55:000', 40010, 'Recording', 'started: data/pw.mdd'), ln('06:01:00:000', 45000, 'rockerSpeed', '60'), ...
+    ln('06:02:15:000', 120000, 'Recording', 'stopped: data/pw.mdd'), ...
+    ln('06:02:15:000', 120000, 'Event', 'LogFile closed: data/pw_log.log'), ...
+    ln('06:02:20:000', 0, 'Event', 'MyodishControlSoftware opened'), fu('06:02:30:000', 'done', 'V19J', 'V19K')};
+fid = fopen(lg, 'w'); fprintf(fid, '%s\n', L{:}); fclose(fid);
+okP = false;
+try
+    H = mda_readMdd(mdd);
+    RF = mda_report('flags', table(1, 0, 120, 100, 100, 0, 0, 0, 100, 1000, 0.1, 'VariableNames', {'channel', 'from', ...
+        'to', 'nDetected', 'nStimuli', 'nMissedBeats', 'nExtraBeats', 'nUncertain', 'nContractions', 'amplitude_mean', ...
+        'amplitude_CV'}), [], [], [], mda_logEntries(lg));
+    okP = isequal(H.rockerPowerOn, [40.01 45 2 45]) && isequal(H.rockerSpeedLog, [1 60; 40.01 45; 45 60]) && ...
+        any(strcmp(H.notes, ['Firmware update: rocker at the power-on speed 45 rpm from 40 s until the next rockerSpeed ' ...
+        'entry (45 s) (rocker filter, rocker state from the log).'])) && ...
+        any(strcmp(H.notes, ['Log file: 2 line(s) after the end of the recording (written into the closed log by a later ' ...
+        'run of the control software) left out.'])) && H.recordingStopped == 1 && ...
+        contains(RF.red{1}, 'firmware update (1, first at 40 s)');
+    fprintf('paused recording (waiting lines, lines after the end): power-on %s, red flag ''%s''   %s\n', ...
+        mat2str(H.rockerPowerOn), RF.red{1}, passStr(okP));
+catch ME
+    fprintf('paused recording (waiting lines, lines after the end): %s   FAILED\n', ME.message);
 end
 delete(mdd); delete(lg);
 end

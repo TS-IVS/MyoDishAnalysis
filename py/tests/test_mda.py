@@ -1885,6 +1885,52 @@ def test_power_on_rocker_and_socket_tests(tmp_path):
     assert "data file named after another MyoDish (1, first at 5 s)" in red
 
 
+def test_paused_recording_waiting_lines(tmp_path):
+    # 2026-11-09 (as pausedRecordingTest of mda_test.m): a recording stopped at 40 s and started again into the same file
+    # at 40.01 s after a firmware update V19D -> V19J (the control software was restarted: its lines before the new
+    # opening of the log carry dataLogTime 0), stopped at 120 s; after the end a later run of the control software wrote
+    # another firmware update into the closed log. The update in the pause holds the time of the new opening (power-on
+    # phase 40.01 - 45 s at 45 rpm, red flag R 'first at 40 s'), the lines after the end are left out.
+    n = 120 * 400
+    X = np.zeros((9, n), np.int16)
+    X[8] = np.full(n, 16384, np.uint16).view(np.int16)  # rocker on
+    mdd = str(tmp_path / "pw.mdd")
+    X.T.astype("<i2").tofile(mdd)
+
+    def fu(tm, ph, a, b):
+        return (f'2026 01 01 {tm};0;0;system;{{"v":1,"event":"firmwareUpdate","actionId":"U{b}","by":"TS",'
+                f'"phase":"{ph}","path":"replug","controllerId":"SIMDEV01A","from":"{a}","to":"{b}","sha256":"x"}}')
+
+    def ln(tm, ms, code, v):
+        return f"2026 01 01 {tm};{ms};0;{code};{v}"
+    L = ["systemTime;dataLogTime;channel;code;value", ln("06:00:00:000", 5, "Event", "LogFile created: data/pw_log.log"),
+         ln("06:00:00:000", 5, "Event", "LogFile opened: data/pw_log.log"), ln("06:00:00:000", 5, "nChannels", "9"),
+         ln("06:00:00:000", 5, "Recording", "started: data/pw.mdd"), ln("06:00:00:000", 5, "samplingRate Recording", "400"),
+         ln("06:00:01:000", 1000, "rockerSpeed", "60"), ln("06:00:40:000", 40000, "Recording", "stopped: data/pw.mdd"),
+         ln("06:00:40:000", 40000, "Event", "LogFile closed: data/pw_log.log"),
+         ln("06:00:41:000", 0, "Event", "MyodishControlSoftware opened"), fu("06:00:42:000", "start", "V19D", "V19J"),
+         fu("06:00:50:000", "done", "V19D", "V19J"), ln("06:00:55:000", 40010, "Event", "LogFile opened: data/pw_log.log"),
+         ln("06:00:55:000", 40010, "Recording", "started: data/pw.mdd"), ln("06:01:00:000", 45000, "rockerSpeed", "60"),
+         ln("06:02:15:000", 120000, "Recording", "stopped: data/pw.mdd"),
+         ln("06:02:15:000", 120000, "Event", "LogFile closed: data/pw_log.log"),
+         ln("06:02:20:000", 0, "Event", "MyodishControlSoftware opened"), fu("06:02:30:000", "done", "V19J", "V19K")]
+    (tmp_path / "pw_log.log").write_text("\n".join(L) + "\n")
+    H = mda.read_mdd(mdd)
+    assert H.rockerPowerOn.tolist() == [[40.01, 45, 2, 45]]
+    assert H.rockerSpeedLog.tolist() == [[1, 60], [40.01, 45], [45, 60]]
+    assert ("Firmware update: rocker at the power-on speed 45 rpm from 40 s until the next rockerSpeed entry (45 s) "
+            "(rocker filter, rocker state from the log).") in H.notes
+    assert ("Log file: 2 line(s) after the end of the recording (written into the closed log by a later run of the "
+            "control software) left out.") in H.notes
+    assert H.recordingStopped == 1
+    from myodish_analysis.report import report_flags
+    S1 = pd.DataFrame([{"channel": 1, "from": 0.0, "to": 120.0, "nDetected": 100, "nStimuli": 100, "nMissedBeats": 0,
+                        "nExtraBeats": 0, "nUncertain": 0, "nContractions": 100, "amplitude_mean": 1000.0,
+                        "amplitude_CV": 0.1}])
+    red = report_flags(S1, events=mda.log_entries(str(tmp_path / "pw_log.log"))).loc[0, "red"]
+    assert "firmware update (1, first at 40 s)" in red
+
+
 def test_anonymize_myodish_names_and_firmware():
     # 2026-11-07: a MyoDish name ('dishA', also 'named' of dataFileName) -> 'MyoDish1'; a number kept (as in the
     # slice IDs); the firmware of firmwareUpdate ('to') kept, a file chosen -> its file name

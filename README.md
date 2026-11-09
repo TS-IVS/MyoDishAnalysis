@@ -861,7 +861,11 @@ P = mda_protocols(file)                                              % protocols
   log right before its `LogFile created/opened`; these lines (after the last `LogFile closed` of the log, or from
   `MyodishControlSoftware opened`, up to its next opening; `LogFile2`/`LogFile3` of the second and rocker stop
   recording included) get the time of that opening, since their dataLogTime is the frozen counter of the last main
-  recording (often of another file).
+  recording (often of another file). The same holds for a recording stopped and started again into the same file (the
+  lines of the pause, often with dataLogTime 0, get the time of the new opening); since 2026-11-09 the header
+  (`mda_readMdd`: power-on phases, rocker and pulse settings) and the red flag R use these times as well, and lines
+  after the last closing of the log that no opening follows (written into the closed log by a later run of the
+  software) are left out with a note (`mda_logEntries(E, 'waiting')`, Python `log_entries.waiting_times`).
   **Protocols from `protocolRun`**: where the log has these events, `mda_protocols` takes the protocols from them (start
   paired with end or abort by `run`; exact times; type and name of the start, also for protocols started by hand;
   notes `aborted: <reason>`, `started before this recording`, `started before this file`, `no end in the log: …`);

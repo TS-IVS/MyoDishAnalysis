@@ -152,19 +152,23 @@ function s = restartWarnings(E)
 % before it) lies within 10 s of that of a controllerRestart (its line - uptimeSeconds) is the same restart, and a
 % warning followed by 'Restart signs not acted on: ...' at the same time counts not (the status showed no restart, or
 % had shown it as controllerRestart), as mda_readMdd (powerOnRocker); a data file named after another MyoDish (event
-% dataFileName, answer use or notAsked)
+% dataFileName, answer use or notAsked). 2026-11-09: lines written while no recording of this file ran (a pause of the
+% recording, a restart of the control software) at the time of the next opening of the log, lines after the end of the
+% recording left out (mda_logEntries, mode 'waiting')
 s = '';
 if isempty(E) || ~istable(E) || ~all(ismember({'code', 'text'}, E.Properties.VariableNames)), return; end
 code = lower(cellstr(string(E.code))); txt = cellstr(string(E.text)); low = lower(txt);
 t = nan(height(E), 1);
 if ismember('t_file', E.Properties.VariableNames), t = double(E.t_file); end
-fw = strcmp(code, 'system') & contains(txt, '"firmwareUpdate"') & ...
+[wt, tw, after] = mda_logEntries(E, 'waiting');
+t(wt) = tw(wt);
+fw = strcmp(code, 'system') & contains(txt, '"firmwareUpdate"') & ~after & ...
     ~cellfun(@isempty, regexp(txt, '"phase"\s*:\s*"(done|failed)"', 'once'));
-w = find(strcmp(code, 'warning') & startsWith(low, 'controller restart suspected'));
-na = find(strcmp(code, 'event') & startsWith(low, 'restart signs not acted on'));
+w = find(strcmp(code, 'warning') & startsWith(low, 'controller restart suspected') & ~after);
+na = find(strcmp(code, 'event') & startsWith(low, 'restart signs not acted on') & ~after);
 keepW = true(size(w));
 for i = 1:numel(w), keepW(i) = ~any(na > w(i) & abs(t(na) - t(w(i))) <= 1); end
-cr = find(strcmp(code, 'system') & contains(txt, '"controllerRestart"'));
+cr = find(strcmp(code, 'system') & contains(txt, '"controllerRestart"') & ~after);
 up = zeros(size(cr));
 for i = 1:numel(cr)
     tok = regexp(txt{cr(i)}, '"uptimeSeconds"\s*:\s*([0-9.]+)', 'tokens', 'once');
@@ -175,13 +179,13 @@ for i = 1:numel(w)
 end
 rs = [w(keepW); cr];
 if ~isempty(rs) && ~any(isnan(t(rs))), [~, o] = sort(t(rs)); rs = rs(o); end
-df = find(strcmp(code, 'system') & contains(txt, '"dataFileName"') & ...
+df = find(strcmp(code, 'system') & contains(txt, '"dataFileName"') & ~after & ...
     ~cellfun(@isempty, regexp(txt, '"answer"\s*:\s*"(use|notAsked)"', 'once')));
 parts = {};
 parts = flagPart(parts, 'controller restart suspected', rs, t);
 parts = flagPart(parts, 'firmware update', find(fw), t);
 parts = flagPart(parts, 'recording stopped by the software (low disk space)', find(strcmp(code, 'warning') & ...
-    startsWith(low, 'recording stopped by the software')), t);
+    startsWith(low, 'recording stopped by the software') & ~after), t);
 parts = flagPart(parts, 'data file named after another MyoDish', df, t);
 s = strjoin(parts, '; ');
 end

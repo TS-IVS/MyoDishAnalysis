@@ -883,3 +883,14 @@ def test_empty_folder_of_another_worker_kept(tmp_path, monkeypatch):
     d = os.path.join(e, "rigX_sampleA", "01")
     W._makedirs(d)
     assert calls[0] == d and calls.count(d) == 2 and os.path.isdir(d)  # second try (os.makedirs also for parents)
+
+
+def test_label_text_treatment_without_concentration():
+    # 2026-11-09 (as the check 'treatment without concentration' in mda_testWatch.m, where string(NaN) = <missing> made
+    # the title of the trend image fail): a treatment without concentration (NaN, NA, None) gives the treatment alone
+    from myodish_analysis.watch import _label_text
+    L = pd.DataFrame({"channel": [1, 2, 3], "species": ["rat", "rat", "rat"], "treatment": ["TGFb+Anakinra"] * 2 + [None],
+                      "concentration": [np.nan, pd.NA, 10.0], "concentrationUnit": ["", None, "nM"]})
+    assert _label_text(L, 1) == "  ·  rat  ·  TGFb+Anakinra"
+    assert _label_text(L, 2) == "  ·  rat  ·  TGFb+Anakinra"
+    assert _label_text(L, 3) == "  ·  rat"

@@ -175,19 +175,25 @@ def restart_warnings(E):
     restart also from the event controllerRestart of the controller's status (firmware V19G or later); a warning whose
     restart (3 s before it) lies within 10 s of that of a controllerRestart (its line - uptimeSeconds) is the same
     restart, and a warning followed by 'Restart signs not acted on: ...' at the same time counts not, as read_mdd
-    (power_on_rocker); a data file named after another MyoDish (event dataFileName, answer use or notAsked)"""
+    (power_on_rocker); a data file named after another MyoDish (event dataFileName, answer use or notAsked). 2026-11-09:
+    lines written while no recording of this file ran (a pause of the recording, a restart of the control software) at
+    the time of the next opening of the log, lines after the end of the recording left out (log_entries.waiting_times)"""
     if E is None or not len(E) or not {"code", "text"}.issubset(E.columns):
         return ""
     code = E["code"].astype(str).str.lower().to_numpy()
     txt = E["text"].astype(str)
     low = txt.str.lower()
     t = E["t_file"].astype(float).to_numpy() if "t_file" in E.columns else np.full(len(E), math.nan)
-    fw = ((code == "system") & txt.str.contains('"firmwareUpdate"', regex=False).to_numpy()
+    from .log_entries import waiting_times
+    wt, tw, after = waiting_times(E)
+    t = np.where(wt, tw, t)
+    keep = ~after
+    fw = (keep & (code == "system") & txt.str.contains('"firmwareUpdate"', regex=False).to_numpy()
           & txt.str.contains(r'"phase"\s*:\s*"(?:done|failed)"', regex=True).to_numpy())
-    w = np.flatnonzero((code == "warning") & low.str.startswith("controller restart suspected").to_numpy())
-    na = np.flatnonzero((code == "event") & low.str.startswith("restart signs not acted on").to_numpy())
+    w = np.flatnonzero(keep & (code == "warning") & low.str.startswith("controller restart suspected").to_numpy())
+    na = np.flatnonzero(keep & (code == "event") & low.str.startswith("restart signs not acted on").to_numpy())
     w = np.array([i for i in w if not np.any((na > i) & (np.abs(t[na] - t[i]) <= 1))], dtype=int)
-    cr = np.flatnonzero((code == "system") & txt.str.contains('"controllerRestart"', regex=False).to_numpy())
+    cr = np.flatnonzero(keep & (code == "system") & txt.str.contains('"controllerRestart"', regex=False).to_numpy())
     up = np.zeros(cr.size)
     for i, k in enumerate(cr):
         m = re.search(r'"uptimeSeconds"\s*:\s*([0-9.]+)', str(txt.iloc[k]))
@@ -199,13 +205,13 @@ def restart_warnings(E):
         rs = rs[np.argsort(t[rs], kind="stable")]
     sel_rs = np.zeros(len(E), bool)
     sel_rs[rs] = True
-    df = ((code == "system") & txt.str.contains('"dataFileName"', regex=False).to_numpy()
+    df = (keep & (code == "system") & txt.str.contains('"dataFileName"', regex=False).to_numpy()
           & txt.str.contains(r'"answer"\s*:\s*"(?:use|notAsked)"', regex=True).to_numpy())
     parts = []
     for what, sel in (("controller restart suspected", sel_rs),
                       ("firmware update", fw),
                       ("recording stopped by the software (low disk space)",
-                       (code == "warning") & low.str.startswith("recording stopped by the software").to_numpy()),
+                       keep & (code == "warning") & low.str.startswith("recording stopped by the software").to_numpy()),
                       ("data file named after another MyoDish", df)):
         k = np.flatnonzero(sel) if what != "controller restart suspected" else rs
         if not k.size:

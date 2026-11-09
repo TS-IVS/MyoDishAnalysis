@@ -171,6 +171,10 @@ if L.pulseDurationsScaled
     H.notes{end+1} = ['Pulse durations: logged values x 16/15 (the controller counts ticks of 1.0667 us; the control ' ...
         'software sent the us of the setting as ticks before ''pulseDurationCorrection;on'').'];
 end
+if L.linesAfterEnd > 0                     %2026-11-09
+    H.notes{end+1} = sprintf(['Log file: %d line(s) after the end of the recording (written into the closed log by ' ...
+        'a later run of the control software) left out.'], L.linesAfterEnd);
+end
 H.extraPulseLog = L.extraPulseOffsets;     %[time channel k offset_ms line]: programmed extra pulse times (2026-10-10)
 H.stimSequenceLog = L.stimSequences;       %[time channel period_ms nTimes t1_ms t2_ms]: programmed sequences (2026-10-23)
 H.electrodeTests = L.electrodeTests;       %electrode tests of the control software (2026-10-27, see electrodeTests)
@@ -772,7 +776,7 @@ L = struct('samplingRate',nan,'recordingDuration',nan,'nChannelsController',nan,
     'offsetEvents',zeros(0,3),'calibrationEvents',zeros(0,3),'rockerSpeedEvents',zeros(0,2), ...
     'recordingStopped',nan,'pulseSettingsEvents',zeros(0,4),'extraPulseOffsets',zeros(0,5),'stimSequences',zeros(0,6), ...
     'electrodeTests',electrodeTests({}, {}, nan),'rockerPowerOn',zeros(0,4),'socketTests',socketTests({}, nan), ...
-    'pulseDurationsScaled',false,'dataFileNames',dataFileNames({}));
+    'pulseDurationsScaled',false,'dataFileNames',dataFileNames({}),'linesAfterEnd',0);
 if ~exist(logFile,'file'), return; end
 % MyoDish logs are UTF-16 little endian (with byte order mark); converted copies may be UTF-8
 fid = fopen(logFile, 'r');
@@ -787,6 +791,7 @@ else
     txt = native2unicode(b, 'UTF-8');
 end
 lines = regexp(txt, '\r?\n', 'split');
+[tWait, afterEnd] = lineTimes(lines);              %waiting lines, lines after the end (2026-11-09, mda_logEntries)
 nValid = 0;
 tStart = nan; tStop = nan; tStartPar = nan; tStopPar = nan;
 kStart = nan; kStartPar = nan; tFirst = nan;
@@ -813,6 +818,10 @@ for i = 1:numel(lines)
     if numel(f) < 5, continue; end
     tsec = str2double(f{2}) / 1000;
     if isnan(tsec), continue; end
+    if afterEnd(i), L.linesAfterEnd = L.linesAfterEnd + 1; continue; end   %after the end of the recording: left out
+    if ~isnan(tWait(i)), tsec = tWait(i); end      %written while no recording of this file ran (control software
+                                                   %restarted, recording stopped and started again): time of the
+                                                   %next opening of this log, not the dataLogTime of another run
     nValid = nValid + 1;
     sysAll{nValid} = strtrim(f{1}); tAll(nValid) = tsec;
     if nValid == 1, tFirst = tsec; end
@@ -993,6 +1002,30 @@ if ~isnat(clk(kStart))
     if isnan(tSys), tSys = 0; end
     L.startDatenum = datenum(clk(kStart)) - tSys/86400;
 end
+end
+
+
+function [tWait, afterEnd] = lineTimes(lines)
+% per line of the log (2026-11-09): time of a waiting line in the file (NaN otherwise) and true for a line after the
+% end of the recording, by the rules of mda_logEntries (waiting lines; lines after the last closing of this log that
+% no opening follows). Logs without 'LogFile' lines (software before 2.0.9xxx) have neither.
+n = numel(lines);
+tWait = nan(n, 1); afterEnd = false(n, 1);
+if ~any(contains(lines, 'LogFile', 'IgnoreCase', true)), return; end
+k = zeros(n, 1); code = cell(n, 1); txt = cell(n, 1); t = nan(n, 1); m = 0;
+for i = 1:n
+    f = strsplit(lines{i}, ';');
+    if numel(f) < 5, continue; end
+    ts = str2double(f{2}) / 1000;
+    if isnan(ts), continue; end
+    m = m + 1; k(m) = i; code{m} = strtrim(f{4}); txt{m} = strtrim(strjoin(f(5:end), ';')); t(m) = ts;
+end
+if m == 0, return; end
+[w, tNext, after] = mda_logEntries(table(code(1:m), txt(1:m), t(1:m), 'VariableNames', {'code', 'text', 't_file'}), ...
+    'waiting');
+k = k(1:m);
+tWait(k(w)) = tNext(w);
+afterEnd(k(after)) = true;
 end
 
 

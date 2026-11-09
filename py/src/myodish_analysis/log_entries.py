@@ -18,8 +18,12 @@ E.attrs['clock']   info of clock_time (format '24h' / '12h', nCorrected, ambiguo
 Lines (UTF-16 or UTF-8): systemTime;dataLogTime_ms;channel;code;value, e.g.
   2000 01 01 09:44:35:717;1025;0;comment;start rockerSpeedTest
 
+    w, t_next, after = waiting_times(E)   timing of the lines (2026-11-09, see log_events): w True for a waiting line,
+                                          t_next its time in the file (s, NaN otherwise), after True for a line
+                                          after the end of the recording. MATLAB: mda_logEntries(E, 'waiting').
+
 TS 2026-10-06 (port of mda_logEntries.m, TS 2026-10-05; 12-hour time stamps 2026-10-08; structured events 2026-10-18;
-waiting lines, codes chamber, rigor and backup 2026-10-20)
+waiting lines, codes chamber, rigor and backup 2026-10-20; waiting_times, lines after the end 2026-11-09)
 """
 from __future__ import annotations
 
@@ -164,12 +168,14 @@ _NEW_RUN = re.compile(r"^myodishcontrolsoftware opened", re.I)
 
 def waiting_lines(code, text, t):
     """waiting lines of a log (2026-10-20, see log_events): w (bool array) and t_next = dataLogTime (s) of the
-    'LogFile created/opened' of this log that follows each waiting line (NaN otherwise)"""
+    'LogFile created/opened' of this log that follows each waiting line (NaN otherwise); after (2026-11-09): lines after
+    the end of the recording (no opening of this log follows)"""
     low = [str(c).strip().lower() for c in code]
     txt = [str(x).strip() for x in text]
     n = len(low)
     w = np.zeros(n, bool)
     t_next = np.full(n, np.nan)
+    after = np.zeros(n, bool)
     kind, name = [""] * n, [""] * n
     for i in range(n):
         if low[i] == "event":
@@ -179,7 +185,7 @@ def waiting_lines(code, text, t):
                 name[i] = re.split(r"[\\/]", m.group(2).strip())[-1].strip().lower()
     first = next((i for i in range(n) if kind[i] in ("opened", "created")), None)
     if first is None:
-        return w, t_next
+        return w, t_next, after
     own = [x == name[first] for x in name]
     is_open = [own[i] and kind[i] in ("opened", "created") for i in range(n)]
     is_close = [own[i] and kind[i] == "closed" for i in range(n)]
@@ -202,9 +208,25 @@ def waiting_lines(code, text, t):
         if w[i]:
             if math.isnan(nxt):
                 w[i] = False
+                after[i] = True  # no opening follows: after the end
             else:
                 t_next[i] = nxt
-    return w, t_next
+    return w, t_next, after
+
+
+def waiting_times(E):
+    """waiting lines and lines after the end (2026-11-09) of a table with code, text and t_file (one row per log line,
+    in log order): w, t_next, after (bool / float arrays, one element per row). After the end: lines after the last
+    closing of this log (or a new run of the program) that no opening of this log follows hold no time of this file
+    (e.g. a later run of the control software that wrote into the closed log). A recording stopped and started again
+    into the same file: the lines in between (often with dataLogTime 0) are waiting lines and hold the time of its new
+    opening. read_mdd and the red flags of report use these times and leave the lines after the end out; E keeps all
+    lines with their dataLogTime. MATLAB: mda_logEntries(E, 'waiting')."""
+    n = 0 if E is None else len(E)
+    if n == 0 or not {"code", "text"}.issubset(E.columns):
+        return np.zeros(n, bool), np.full(n, np.nan), np.zeros(n, bool)
+    t = E["t_file"].to_numpy(float) if "t_file" in E.columns else np.full(n, np.nan)
+    return waiting_lines(E["code"].astype(str).str.strip().tolist(), E["text"].astype(str).str.strip().tolist(), t)
 
 
 def log_events(src):
@@ -243,7 +265,7 @@ def log_events(src):
     txt = E["text"].astype(str).str.strip()
     low = code.str.lower()
     isS = (low.isin(STRUCTURED_CODES) & txt.str.startswith("{")).to_numpy(bool)
-    wait, t_open = waiting_lines(code.tolist(), txt.tolist(), E["t_file"].to_numpy(float))
+    wait, t_open, _ = waiting_lines(code.tolist(), txt.tolist(), E["t_file"].to_numpy(float))
     rows, bad = [], []
     for i in np.flatnonzero(isS):
         try:

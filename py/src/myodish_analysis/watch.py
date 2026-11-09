@@ -1447,7 +1447,7 @@ def _label_text(L, c):
         x = L[nm].iloc[r]
         if isinstance(x, (float, np.floating)) and math.isfinite(x) and float(x).is_integer():
             x = int(x)  # 100, not 100.0 (as MATLAB)
-        x = "" if x is None or (isinstance(x, (float, np.floating)) and math.isnan(x)) else str(x).strip()
+        x = "" if x is None or (not isinstance(x, str) and bool(pd.isna(x))) else str(x).strip()  # NaN, NA, NaT
         return "" if x.lower() in ("nan", "<missing>") else x
     v = []
     for nm in ("setupID", "sliceID", "species", "tissue", "sampleID", "treatment"):

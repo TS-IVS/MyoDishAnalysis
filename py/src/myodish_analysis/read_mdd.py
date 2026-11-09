@@ -109,7 +109,7 @@ import datetime as _dt
 from ._matlab import Struct, datetime_to_datenum, mround
 from .clock_time import clock_time
 from .calibration_factor import calibration_factor
-from .log_entries import parse_clock_numbers, read_log_text, split_lines, sscanf_floats, str2double
+from .log_entries import parse_clock_numbers, read_log_text, split_lines, sscanf_floats, str2double, waiting_lines
 from .options import options as _options
 from .spikes import remove_spikes
 
@@ -171,6 +171,9 @@ def read_header(mdd_file, opts=None):
     if L.pulseDurationsScaled:
         H.notes.append("Pulse durations: logged values x 16/15 (the controller counts ticks of 1.0667 us; the control "
                        "software sent the us of the setting as ticks before 'pulseDurationCorrection;on').")
+    if L.linesAfterEnd > 0:  # 2026-11-09
+        H.notes.append(f"Log file: {L.linesAfterEnd} line(s) after the end of the recording (written into the closed "
+                       "log by a later run of the control software) left out.")
     H.extraPulseLog = L.extraPulseOffsets
     H.stimSequenceLog = L.stimSequences  # [time channel period_ms nTimes t1_ms t2_ms]: programmed sequences (2026-10-23)
     H.electrodeTests = L.electrodeTests  # electrode tests of the control software (2026-10-27, see electrode_tests)
@@ -759,7 +762,8 @@ def read_log(log_file, file_time=None):
                programVersion="", clockNote="", offsetEvents=np.zeros((0, 3)), calibrationEvents=np.zeros((0, 3)),
                rockerSpeedEvents=np.zeros((0, 2)), recordingStopped=None, pulseSettingsEvents=np.zeros((0, 4)),
                extraPulseOffsets=np.zeros((0, 5)), stimSequences=np.zeros((0, 6)), electrodeTests=[],
-               rockerPowerOn=np.zeros((0, 4)), socketTests=[], pulseDurationsScaled=False, dataFileNames=[])
+               rockerPowerOn=np.zeros((0, 4)), socketTests=[], pulseDurationsScaled=False, dataFileNames=[],
+               linesAfterEnd=0)
     txt = read_log_text(log_file)
     if txt is None:
         return L
@@ -786,6 +790,7 @@ def read_log(log_file, file_time=None):
     pdc = []  # 'pulseDurationCorrection' lines: (line, on) (2026-11-07)
     lineStart = lineStartPar = math.nan
     tMax = tMaxPar = -math.inf  # latest dataLogTime since the chosen start line
+    tWait, afterEnd = _line_times(lines)  # waiting lines, lines after the end (2026-11-09, log_entries.waiting_times)
     for i, line in enumerate(lines, start=1):
         f = _re.split(";+", line)  # strsplit: consecutive delimiters are collapsed
         if len(f) < 5:
@@ -793,6 +798,11 @@ def read_log(log_file, file_time=None):
         tsec = str2double(f[1]) / 1000.0
         if math.isnan(tsec):
             continue
+        if afterEnd[i]:  # after the end of the recording: left out
+            L.linesAfterEnd += 1
+            continue
+        if not math.isnan(tWait[i]):  # written while no recording of this file ran (control software restarted,
+            tsec = float(tWait[i])     # recording stopped and started again): time of the next opening of this log
         nValid += 1
         sysAll.append(f[0].strip()); tAll.append(tsec)
         if nValid == 1:
@@ -979,6 +989,33 @@ _RE_TIMES = _re.compile(r"^(?:Added\s+)?stimTime(?:s|\(s\))?\s*(.*)$", _re.IGNOR
 _RE_PLAIN = _re.compile(r"^-?\d+(\.\d+)?$")
 _RE_TOKEN = _re.compile(r"^(-?\d+(?:\.\d+)?)(?:#(\d))?$")
 _RE_NUM = _re.compile(r"-?\d+(\.\d+)?")
+
+
+def _line_times(lines):
+    """per line of the log (index = line number from 1; 2026-11-09): time of a waiting line in the file (NaN otherwise)
+    and True for a line after the end of the recording, by the rules of log_entries (waiting lines; lines after the
+    last closing of this log that no opening follows). Logs without 'LogFile' lines have neither."""
+    n = len(lines)
+    tWait = np.full(n + 1, np.nan)
+    afterEnd = np.zeros(n + 1, bool)
+    if not any("logfile" in x.lower() for x in lines):
+        return tWait, afterEnd
+    k, code, txt, t = [], [], [], []
+    for i, line in enumerate(lines, start=1):
+        f = _re.split(";+", line)
+        if len(f) < 5:
+            continue
+        ts = str2double(f[1]) / 1000.0
+        if math.isnan(ts):
+            continue
+        k.append(i); code.append(f[3].strip()); txt.append(";".join(f[4:]).strip()); t.append(ts)
+    if not k:
+        return tWait, afterEnd
+    w, t_next, after = waiting_lines(code, txt, np.asarray(t, float))
+    k = np.asarray(k)
+    tWait[k[w]] = t_next[w]
+    afterEnd[k[after]] = True
+    return tWait, afterEnd
 
 
 def extra_pulse_offsets(ev):

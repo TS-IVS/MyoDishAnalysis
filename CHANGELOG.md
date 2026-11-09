@@ -5,6 +5,21 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
+- **Log lines written while no recording of the file ran: at the right time** (2026-11-09). When a recording is stopped
+  and started again into the same file (e.g. for a firmware update, or after a restart of the control software), the
+  control software writes the lines of the pause into the log with the frozen dataLogTime of another run, often 0.
+  `mda_readMdd` / `read_mdd` (power-on phases of the rocker, rocker and pulse settings, warnings) and the red flag R of
+  `mda_report` / `report` took them as 0 s: a firmware update in such a pause gave *firmware update (1, first at 0 s)*
+  and a power-on phase of 0 s at the start instead of one after the new start (seen in lab data, firmware V19D ->
+  V19J). They now use the waiting-line rule of the structured events (time of the next opening of this log), and lines
+  after the last closing of the log that no opening follows (written into the closed log by a later run of the
+  software) are left out, with a note. New: `mda_logEntries(E, 'waiting')` / `log_entries.waiting_times(E)`; the events
+  table keeps all lines with their dataLogTime. Tests: `mda_test` (paused recording), `test_mda.py`.
+- **MATLAB watcher: no trend images for channels with a treatment but no concentration** (since 2026-10-14): the title
+  of the trend image converted the empty concentration (`string(NaN)` is `<missing>`) to text and failed (index message
+  *trends: MATLAB:string:CannotConvertMissingElementToChar*; seen in 8 lab recordings). Empty, NaN and
+  missing labels now give no text. Python was not affected (now also robust to `pd.NA`). Tests: `mda_testWatch`,
+  `test_watch.py`.
 - **Pulse durations: real instead of logged values** (2026-11-07). The controller counts the phase durations in ticks
   of 1.0667 µs, and the control software sent the µs of the setting as ticks until lab round 7 (2.2.9805): every phase
   ran 16/15 as long as logged (Tom, oscilloscope). `mda_readMdd` / `read_mdd` and the grouping (`pulseDuration`,

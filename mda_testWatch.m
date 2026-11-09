@@ -562,6 +562,17 @@ catch
 end
 ok = check(ok, pass, '''parallel'', ''sometimes'': error');
 
+% a treatment without concentration in the labels (2026-11-09): the trend images are made (string(NaN) is <missing>,
+% char of it failed in the title of the trend image)
+rawL = fullfile(root, 'rawLabels');
+fL = namedCopy(ex, fullfile(rawL, 'L'), 'rigL_treat', []);   %whole file (a cut copy is 'incomplete')
+fid = fopen([fL(1:end-4) '_labels.csv'], 'w');
+fprintf(fid, 'channel,species,treatment,concentration,concentrationUnit\n1,rat,TGFb+Anakinra,,\n2,rat,,,\n'); fclose(fid);
+ageFiles({[fL(1:end-4) '_labels.csv']}, 3600);
+XL = MyoDishAnalysisWatch(rawL, fullfile(root, 'resLabels'), qx{:}, 'protocols', false, 'register', false);
+pass = height(XL) == 1 && strcmp(XL.status{1}, 'ok') && ~contains(XL.message{1}, 'trends:') && contains(XL.outputs{1}, '_ch');
+ok = check(ok, pass, 'treatment without concentration in the labels: trend images made');
+
 if ok, disp('mda_testWatch: all tests passed.'); else, warning('mda_testWatch: TEST FAILED.'); end
 end
 

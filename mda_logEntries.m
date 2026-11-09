@@ -1,8 +1,11 @@
-function E = mda_logEntries(logFile, mode)
+function [E, tNext, after] = mda_logEntries(logFile, mode)
 %MDA_LOGENTRIES  All entries of a MyoDish log file (comments, events, settings) as a table, in log order.
 %
 %   E = mda_logEntries(logFile)          logFile = <name>_log.log next to the .mdd file
 %   V = mda_logEntries(logFile, 'events')   or  V = mda_logEntries(E, 'events')   structured events (below)
+%   [w, tNext, after] = mda_logEntries(E, 'waiting')   timing of the lines (below, 2026-11-09): w true for a waiting
+%                 line, tNext its time in the file (s, NaN otherwise), after true for a line after the end of the
+%                 recording (one element per row of E; E or a table with code, text, t_file in log order)
 %
 %   E.clockTime   datetime: system time of the entry (real-world date and time; 12-hour time stamps of MyoDish
 %                 software 2.0.7717-2.0.7769 corrected, see mda_clockTime)
@@ -34,6 +37,11 @@ function E = mda_logEntries(logFile, mode)
 %   a main log also holds lines about the other logs). Logs of a second or rocker stop recording have no waiting
 %   lines. Known limit: when the software lost the 'LogFile2/3 closed' line of the previous session (it does when all
 %   files are closed at once), the waiting lines before the next opening are not recognized.
+%   After the end (2026-11-09): lines after the last closing of this log (or a new run of the program) that no opening
+%   of this log follows hold no time of this file (e.g. a later run of the control software that wrote into the closed
+%   log). A recording stopped and started again into the same file: the lines in between (often with dataLogTime 0)
+%   are waiting lines and hold the time of its new opening. mda_readMdd and the red flags of mda_report use these
+%   times and leave the lines after the end out (mode 'waiting'); E keeps all lines with their dataLogTime.
 %   A line is structured if its code is one of these and its value starts with '{' (old lines never do; comments are
 %   checked by the code). Lines that cannot be read (e.g. cut off by a crash) are counted in
 %   V.Properties.UserData.nUnreadable (rows of E: .unreadable) and left out; unknown events and fields are kept.
@@ -41,7 +49,7 @@ function E = mda_logEntries(logFile, mode)
 % Python: myodish_analysis.log_entries.log_entries, log_events.
 %
 % TS 2026-10-05 (12-hour time stamps 2026-10-08; structured events 2026-10-18; waiting lines, codes chamber, rigor and
-% backup 2026-10-20)
+% backup 2026-10-20; mode 'waiting', lines after the end 2026-11-09)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -50,6 +58,11 @@ function E = mda_logEntries(logFile, mode)
 
 if nargin >= 2 && strcmpi(mode, 'events')
     if istable(logFile), E = structuredEvents(logFile); else, E = structuredEvents(mda_logEntries(logFile)); end
+    return;
+end
+if nargin >= 2 && strcmpi(mode, 'waiting')                %timing of the lines (2026-11-09)
+    if istable(logFile), T = logFile; else, T = mda_logEntries(logFile); end
+    [E, tNext, after] = waitingTimes(T);
     return;
 end
 E = table(NaT(0,1), zeros(0,1), zeros(0,1), cell(0,1), cell(0,1), false(0,1), ...
@@ -142,12 +155,13 @@ V.Properties.UserData = struct('nUnreadable', numel(bad), 'unreadable', bad);
 end
 
 
-function [w, tNext] = waitingLines(low, txt, t)
+function [w, tNext, after] = waitingLines(low, txt, t)
 % waiting lines of a log (2026-10-20, see the help): w true for a waiting line, tNext = dataLogTime (s) of the
-% 'LogFile created/opened' of this log that follows it
+% 'LogFile created/opened' of this log that follows it; after: lines after the end of the recording (2026-11-09)
 n = numel(low);
 w = false(n, 1);
 tNext = nan(n, 1);
+after = false(n, 1);
 isEv = strcmp(low, 'event');
 tok = cell(n, 1);
 tok(isEv) = regexpi(txt(isEv), '^logfile[23]?\s+(opened|created|closed)\s*:\s*(.*)$', 'tokens', 'once');
@@ -180,9 +194,20 @@ nxt = nan;                                        %only lines followed by an ope
 for i = n:-1:1
     if isOpen(i), nxt = t(i); end
     if w(i)
-        if isnan(nxt), w(i) = false; else, tNext(i) = nxt; end
+        if isnan(nxt), w(i) = false; after(i) = true; else, tNext(i) = nxt; end   %no opening follows: after the end
     end
 end
+end
+
+
+function [w, tNext, after] = waitingTimes(T)
+% waiting lines and lines after the end of a table with code, text and t_file (one row per log line, in log order)
+n = height(T);
+w = false(n, 1); tNext = nan(n, 1); after = false(n, 1);
+if n == 0 || ~all(ismember({'code', 'text'}, T.Properties.VariableNames)), return; end
+t = nan(n, 1);
+if ismember('t_file', T.Properties.VariableNames), t = double(T.t_file); end
+[w, tNext, after] = waitingLines(lower(strtrim(cellstr(string(T.code)))), strtrim(cellstr(string(T.text))), t);
 end
 
 
