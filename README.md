@@ -1348,7 +1348,8 @@ pulse table, `groupBy` `pulseDuration` and `log:...Duration`, e.g. groups `3.2 m
   at its line − `uptimeSeconds` (the restart; kind 3) at the power-on speed of its firmware; a warning whose phase
   starts within 10 s of it is the same restart. A warning followed by `Restart signs not acted on: …` at the same
   time opens none (no restart, or already reported as `controllerRestart`). Power-on speed: the warning's text, else
-  that of the firmware of the last `firmware` event before it (V19J, V19K: 45 rpm; V18G-V19I and test builds: 30 rpm);
+  that of the firmware of the last `firmware` event before it (V19J and every later V19 release, e.g. V19K, V19M, and
+  V20 or later: 45 rpm; V18G-V19I and the test builds V19L, V19P, V19T: 30 rpm);
   after a firmware update that of the firmware it got (`to`). The rocker targets of `rockerSetpoint` (`targetRpm`) are
   rows of `H.rockerSpeedLog` too. Red flag R counts such a restart once.
 * **Data file named after another MyoDish** (event `dataFileName`, lab round 10c): `H.dataFileNames`; with the answer

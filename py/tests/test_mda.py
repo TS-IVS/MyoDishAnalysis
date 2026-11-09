@@ -1887,7 +1887,8 @@ def test_power_on_rocker_and_socket_tests(tmp_path):
 
 def test_paused_recording_waiting_lines(tmp_path):
     # 2026-11-09 (as pausedRecordingTest of mda_test.m): a recording stopped at 40 s and started again into the same file
-    # at 40.01 s after a firmware update V19D -> V19J (the control software was restarted: its lines before the new
+    # at 40.01 s after a firmware update V19D -> V19M (45 rpm as every V19 release from V19J on, 2026-11-09; the
+    # control software was restarted: its lines before the new
     # opening of the log carry dataLogTime 0), stopped at 120 s; after the end a later run of the control software wrote
     # another firmware update into the closed log. The update in the pause holds the time of the new opening (power-on
     # phase 40.01 - 45 s at 45 rpm, red flag R 'first at 40 s'), the lines after the end are left out.
@@ -1908,8 +1909,8 @@ def test_paused_recording_waiting_lines(tmp_path):
          ln("06:00:00:000", 5, "Recording", "started: data/pw.mdd"), ln("06:00:00:000", 5, "samplingRate Recording", "400"),
          ln("06:00:01:000", 1000, "rockerSpeed", "60"), ln("06:00:40:000", 40000, "Recording", "stopped: data/pw.mdd"),
          ln("06:00:40:000", 40000, "Event", "LogFile closed: data/pw_log.log"),
-         ln("06:00:41:000", 0, "Event", "MyodishControlSoftware opened"), fu("06:00:42:000", "start", "V19D", "V19J"),
-         fu("06:00:50:000", "done", "V19D", "V19J"), ln("06:00:55:000", 40010, "Event", "LogFile opened: data/pw_log.log"),
+         ln("06:00:41:000", 0, "Event", "MyodishControlSoftware opened"), fu("06:00:42:000", "start", "V19D", "V19M"),
+         fu("06:00:50:000", "done", "V19D", "V19M"), ln("06:00:55:000", 40010, "Event", "LogFile opened: data/pw_log.log"),
          ln("06:00:55:000", 40010, "Recording", "started: data/pw.mdd"), ln("06:01:00:000", 45000, "rockerSpeed", "60"),
          ln("06:02:15:000", 120000, "Recording", "stopped: data/pw.mdd"),
          ln("06:02:15:000", 120000, "Event", "LogFile closed: data/pw_log.log"),
@@ -1929,6 +1930,15 @@ def test_paused_recording_waiting_lines(tmp_path):
                         "amplitude_CV": 0.1}])
     red = report_flags(S1, events=mda.log_entries(str(tmp_path / "pw_log.log"))).loc[0, "red"]
     assert "firmware update (1, first at 40 s)" in red
+
+
+def test_power_on_rpm_v19_releases_and_test_builds():
+    # 2026-11-09: 45 rpm for V19J and every later V19 release (V19M on the lab devices) and V20+; 30 rpm before V19J,
+    # for the test builds (page-0 names V19L, V19P, V19T) and when unknown
+    from myodish_analysis.read_mdd import power_on_rpm
+    want = {"V18G": 30, "V19C": 30, "V19I candidate b5b8513": 30, "V19J": 45, "V19K": 45, "V19M": 45, "V19N": 45,
+            "file MyoDish_V19M_x.bin": 45, "V19L": 30, "V19P": 30, "V19T": 30, "V20A": 45, "": 30, "allSens": 30}
+    assert {k: power_on_rpm(k) for k in want} == want
 
 
 def test_anonymize_myodish_names_and_firmware():

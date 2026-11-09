@@ -1184,13 +1184,14 @@ def power_on_rocker(rst, fw, recon, resend, cr=(), na=(), fwName=()):
 
 def power_on_rpm(name):
     """power-on rocker speed of a firmware (page-0 name or release, e.g. 'V19J', 'V19I candidate b5b8513', 'file
-    MyoDish_V19J_x.bin'): 45 rpm for V19J and V19K (and V20 or later), 30 rpm for V18G-V19I and the test builds (V19L,
-    V19P, V19T) and when unknown (firmware development, 2026-11-05). Port of powerOnRpm in mda_readMdd.m."""
+    MyoDish_V19J_x.bin'): 45 rpm for V19J and every later V19 release (V19K, V19M, ...) and V20 or later; 30 rpm for
+    V18G-V19I, the test builds (page-0 names V19L, V19P, V19T) and when unknown (firmware development, 2026-11-05;
+    later V19 releases 2026-11-09). Port of powerOnRpm in mda_readMdd.m."""
     m = _re.search(r"V(\d+)([A-Z])", str(name or ""))
     if not m:
         return 30.0
     v = int(m.group(1))
-    return 45.0 if v >= 20 or (v == 19 and m.group(2) in "JK") else 30.0
+    return 45.0 if v >= 20 or (v == 19 and m.group(2) >= "J" and m.group(2) not in "LPT") else 30.0
 
 
 def _firmware_before(fwName, ln):

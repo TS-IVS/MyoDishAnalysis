@@ -1279,13 +1279,14 @@ end
 
 function rpm = powerOnRpm(name)
 % power-on rocker speed of a firmware (page-0 name or release, e.g. 'V19J', 'V19I candidate b5b8513', 'file
-% MyoDish_V19J_x.bin'): 45 rpm for V19J and V19K (and V20 or later), 30 rpm for V18G-V19I and the test builds (V19L,
-% V19P, V19T) and when unknown (firmware development, 2026-11-05)
+% MyoDish_V19J_x.bin'): 45 rpm for V19J and every later V19 release (V19K, V19M, ...) and V20 or later; 30 rpm for
+% V18G-V19I, the test builds (page-0 names V19L, V19P, V19T) and when unknown (firmware development, 2026-11-05; later
+% V19 releases 2026-11-09: V19M runs on the lab devices)
 rpm = 30;
 tok = regexp(char(name), 'V(\d+)([A-Z])', 'tokens', 'once');
 if isempty(tok), return; end
 v = str2double(tok{1});
-if v >= 20 || (v == 19 && any(tok{2} == 'JK')), rpm = 45; end
+if v >= 20 || (v == 19 && tok{2} >= 'J' && ~any(tok{2} == 'LPT')), rpm = 45; end
 end
 
 

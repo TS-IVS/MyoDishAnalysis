@@ -5,6 +5,10 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
+- **Power-on speed of the rocker: 45 rpm also for V19M and every later V19 release** (2026-11-09; firmware: 45 rpm
+  from V19J on, V19M runs on the lab devices). Before, only V19J and V19K got 45 rpm, later releases 30 rpm. The test
+  builds (page-0 names V19L, V19P, V19T) stay at 30 rpm. Tests: `mda_test` (paused recording, update to V19M),
+  `test_mda.py`.
 - **Log lines written while no recording of the file ran: at the right time** (2026-11-09). When a recording is stopped
   and started again into the same file (e.g. for a firmware update, or after a restart of the control software), the
   control software writes the lines of the pause into the log with the frozen dataLogTime of another run, often 0.
