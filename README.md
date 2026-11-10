@@ -1244,7 +1244,17 @@ thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
   software 2.2 in the log, read from the events table: after it the controller may have run with its power-on
   settings instead of those in the log; all channels of the recording), also for a firmware update (event
   `firmwareUpdate`, done or failed) and a recording stopped by the software for lack of disk space (2026-11-05;
-  e.g. *controller restart suspected (2, first at 1234 s); firmware update (1, first at 5 s)*). Noise index =
+  e.g. *controller restart suspected (2, first at 1234 s); firmware update (1, first at 5 s)*); **L** peak force at
+  the measurement limit (2026-11-11): the highest peak signal (diastolic signal + amplitude) of the stimulation
+  protocols reaches less than 15 % of the amplitude above the peak signal of the steady contractions (column
+  `peakHeadroom`). The protocols contain contractions that must be stronger than the steady ones (low frequencies, the
+  beat after a rest); a channel whose signal cannot rise above its own steady peak has reached the end of its
+  measurement range: the amplitude is then only a lower bound, and because the peak is fixed, every rise of the
+  diastolic force lowers it one to one (apparent loss of force, apparent negative force-frequency relation). Remedy:
+  the extended sensor mode of the control software (old sensor boards) or a controller mode with a wider range. Needs
+  the protocol contractions (at least 100 of the channel), at least 50 steady ones and a steady amplitude ≥ 500 µN; no
+  flag if the protocol contractions stay more than 5 % of the amplitude below the steady peak (the channel was not in
+  the same state during the protocols). Noise index =
   uncertain % × (extra % + missed %) / 100; it is listed (e.g. `noise index 54 (uncertain 98 %, extra 0 %, missed
   55 %)`) and orders the trace pages. Arrhythmically paced channels (see "Arrhythmic pacing"): missed beats not counted,
   no C and V flags, capture shown with `~`.

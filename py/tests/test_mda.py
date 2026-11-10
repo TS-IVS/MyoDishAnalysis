@@ -1959,3 +1959,53 @@ def test_anonymize_myodish_names_and_firmware():
     assert (d["myoDishId"], d["named"], d["by"]) == ("MyoDish1", "MyoDish2", "P1")
     assert e["myoDishId"] == "7" and u1["to"] == "V19J" and u2["to"] == "file MyoDish_V19K_test.bin"
     assert "dishA" not in txt and "dishB" not in txt
+
+
+def _flag_tables(steadyPeak, protocolPeak, nProtocol=150, amplitude=10000.0):
+    # steady contractions of one channel (peak signal = diastolicSignal + amplitude) and contractions of the
+    # stimulation protocols whose highest peak signal is protocolPeak
+    dia = np.linspace(-200.0, 200.0, 80)                     # the diastolic level drifts, the peak does not
+    C = pd.DataFrame({"channel": 1, "beatType": "stimulated", "uncertain": 0, "included": 1,
+                      "amplitude": amplitude - dia, "diastolicSignal": steadyPeak - amplitude + dia,
+                      "stimToOnset": 0.04})
+    pk = np.full(nProtocol, protocolPeak - 500.0)      # the highest peak of the protocols is protocolPeak
+    pk[0] = protocolPeak
+    P = pd.DataFrame({"channel": 1, "beatType": "stimulated", "uncertain": 0,
+                      "amplitude": amplitude, "diastolicSignal": pk - amplitude})
+    S = pd.DataFrame([{"channel": 1, "from": 0.0, "to": 120.0, "nDetected": 100, "nStimuli": 100, "nMissedBeats": 0,
+                       "nExtraBeats": 0, "nUncertain": 0, "nContractions": 100, "amplitude_mean": amplitude,
+                       "amplitude_CV": 0.05}])
+    return S, C, P
+
+
+def test_peak_at_measurement_limit():
+    # 2026-11-11: red flag L. The stimulation protocols (low frequencies, the beat after a rest) must reach above the
+    # peak of the steady contractions; a channel that cannot is at the end of its measurement range.
+    from myodish_analysis.report import report_flags
+    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=5050.0)        # +0.5 % of the amplitude: at the limit
+    R = report_flags(S, C, {1: "ok"}, protocols=P)
+    assert R.loc[0, "peakHeadroom"] == pytest.approx(0.005, abs=1e-6)
+    assert "L" in R.loc[0, "flags"] and R.loc[0, "level"] == "check"
+    assert "peak force at the measurement limit" in R.loc[0, "red"]
+    assert "+1 %" in R.loc[0, "red"] or "+0 %" in R.loc[0, "red"]
+
+    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=9000.0)        # +40 %: normal headroom
+    R = report_flags(S, C, {1: "ok"}, protocols=P)
+    assert R.loc[0, "peakHeadroom"] == pytest.approx(0.4, abs=1e-6)
+    assert "L" not in R.loc[0, "flags"]
+
+    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=5050.0, nProtocol=50)   # too few protocol contractions
+    R = report_flags(S, C, {1: "ok"}, protocols=P)
+    assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]
+
+    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=4000.0)        # -10 %: not the same state, no statement
+    R = report_flags(S, C, {1: "ok"}, protocols=P)
+    assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]
+
+    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=5050.0, amplitude=300.0)  # below min_peak_amplitude
+    R = report_flags(S, C, {1: "ok"}, protocols=P)
+    assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]
+
+    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=5050.0)        # without the protocols: no flag
+    R = report_flags(S, C, {1: "ok"})
+    assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]

@@ -762,7 +762,9 @@ def _report_records(raw, res, rows, fl):
     channels to check), contractions C only for recordings with channels to check (detail pages; memory of passes
     with thousands of recordings), pulses read later (P_file)"""
     from .report import report_flags, report_window
-    ccols = {"channel", "t_peak", "beatType", "uncertain", "included", "amplitude", "stimToOnset"}
+    ccols = {"channel", "t_peak", "beatType", "uncertain", "included", "amplitude", "stimToOnset",
+             "diastolicSignal"}
+    pcols = {"channel", "beatType", "uncertain", "amplitude", "diastolicSignal"}   # red flag L (2026-11-11)
     recs = []
     for row in rows:
         rel = str(row["file"]).replace("\\", "/")
@@ -776,6 +778,7 @@ def _report_records(raw, res, rows, fl):
             continue
         rec["S"] = result_table(d, n, "summary")
         C = _read_result(os.path.join(d, n + "_contractions.csv"), usecols=lambda c: c in ccols)
+        Pc = _read_result(os.path.join(d, n + "_protocols_contractions.csv"), usecols=lambda c: c in pcols)
         CH = result_table(d, n, "channels", usecols=lambda c: c in ("channel", "status"))
         if os.path.isfile(os.path.join(d, n + ".xlsx")):  # results as .xlsx (2026-10-14)
             rec["open"] = os.path.join(d, n + ".xlsx")
@@ -783,7 +786,7 @@ def _report_records(raw, res, rows, fl):
             rec["status"] = {int(c): str(st) for c, st in zip(CH["channel"], CH["status"])}
         rec["notes"] = [m for m in str(row["message"]).split(" | ") if m.startswith("protocols:")]
         R = report_flags(rec["S"], C, rec["status"], events=result_table(d, n, "events", usecols=lambda c: c in (
-            "code", "text", "t_file")), **fl)  # events: red flag R (controller restart suspected, 2026-10-21)
+            "code", "text", "t_file")), protocols=Pc, **fl)   # events: red flag R, protocols: red flag L
         R["window_from"], R["window_to"] = math.nan, math.nan
         for i in np.flatnonzero((R["level"] == "check").to_numpy()):
             R.at[i, "window_from"], R.at[i, "window_to"] = report_window(C, int(R.at[i, "channel"]), R.at[i, "flags"])
@@ -947,11 +950,13 @@ def flags_of(results_folder, rel, analyzed="", **flags):
     if S is None:
         return pd.DataFrame(columns=FLAG_COLUMNS)
     C = _read_result(os.path.join(d, n + "_contractions.csv"), usecols=lambda c: c in {
-        "channel", "t_peak", "beatType", "uncertain", "included", "amplitude", "stimToOnset"})
+        "channel", "t_peak", "beatType", "uncertain", "included", "amplitude", "stimToOnset", "diastolicSignal"})
+    Pc = _read_result(os.path.join(d, n + "_protocols_contractions.csv"), usecols=lambda c: c in {
+        "channel", "beatType", "uncertain", "amplitude", "diastolicSignal"})   # red flag L (2026-11-11)
     CH = result_table(d, n, "channels", usecols=lambda c: c in ("channel", "status"))
     st = {int(c): str(s) for c, s in zip(CH["channel"], CH["status"])} if CH is not None else None
     E = result_table(d, n, "events", usecols=lambda c: c in ("code", "text", "t_file"))
-    R = report_flags(S, C, st, events=E, **flags)
+    R = report_flags(S, C, st, events=E, protocols=Pc, **flags)
     R.insert(0, "recording", rel)
     R["window_from"], R["window_to"] = math.nan, math.nan
     for i in np.flatnonzero((R["level"] == "check").to_numpy()):

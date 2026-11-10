@@ -113,6 +113,22 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
+- **Red flag L: peak force at the measurement limit** (2026-11-11). A channel whose slice shortens far enough can reach
+  the end of the measurement range of its chamber; the signal then has a flat top, the amplitude is only a lower bound,
+  and because the peak is fixed, every rise of the diastolic force lowers the amplitude one to one (apparent loss of
+  force, apparent negative force-frequency relation). Seen in human recordings on a myosin activator, in 6 of 8
+  channels of one setup with old sensor boards and old chambers, with nominal amplitudes of 14.5 to 28.3 mN.
+  The check uses the contractions of the stimulation protocols, which must be stronger than the steady ones (low
+  frequencies, the beat after a rest): `peakHeadroom` = (highest peak signal of the protocols - median peak signal of
+  the steady contractions) / median amplitude of the steady contractions, flagged below `peakHeadroom` (0.15). Needs at
+  least `minProtocolBeats` (100) protocol contractions, `minBeats` steady ones and a steady amplitude of at least
+  `minPeakAmplitude` (500 uN); no flag if the protocol contractions stay more than 5 % of the amplitude below the
+  steady peak (the channel was not in the same state). In a human experiment with 189 channel-days the criterion
+  flagged none of the 108 channel-days of channels that were never at the limit. Remedy for the user: the extended
+  sensor mode of the control software (old sensor boards) or a controller mode with a wider range.
+  `mda_report('flags', S, C, status, fl, E, P)` / `report_flags(..., protocols=P)` take the protocol contractions as a
+  new argument; the watcher passes them. New column `peakHeadroom` in the flags table (`mda_flags.csv` is unchanged).
+  Tests: `mda_test` (peak force at the measurement limit), `test_mda.py`.
 - **Control software lab round 5 (2.2.9804.25352): power-on phases of the rocker, socket tests, red flag R**
   (2026-11-05).
   - Rocker after a controller restart: from 3 s before the warning `Controller restart suspected: ...` (the software

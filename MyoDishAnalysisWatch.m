@@ -636,7 +636,8 @@ function recs = reportRecords(raw, res, rows, fl)
 % recordings of this pass for the reports (2026-10-15): flags R per channel (mda_report 'flags', with the window of
 % the channels to check), contractions C only for recordings with channels to check (detail pages; memory of passes
 % with thousands of recordings), pulses read later (P_file)
-ccols = {'channel', 't_peak', 'beatType', 'uncertain', 'included', 'amplitude', 'stimToOnset'};
+ccols = {'channel', 't_peak', 'beatType', 'uncertain', 'included', 'amplitude', 'stimToOnset', 'diastolicSignal'};
+pcols = {'channel', 'beatType', 'uncertain', 'amplitude', 'diastolicSignal'};   %red flag L (2026-11-11)
 recs = repmat(reportRecord(), 0, 1);
 for i = 1:numel(rows)
     row = rows{i};
@@ -653,12 +654,13 @@ for i = 1:numel(rows)
     end
     rec.S = resultTable(d, n, 'summary', {});
     C = readResult(fullfile(d, [n '_contractions.csv']), ccols);
+    Pc = readResult(fullfile(d, [n '_protocols_contractions.csv']), pcols);   %red flag L (2026-11-11)
     rec.status = resultTable(d, n, 'channels', {'channel', 'status'});
     if isfile(fullfile(d, [n '.xlsx'])), rec.open = fullfile(d, [n '.xlsx']); end   %results as .xlsx (2026-10-14)
     m = strtrim(strsplit(row.message, ' | '));
     rec.notes = m(startsWith(m, 'protocols:'));
     E = resultTable(d, n, 'events', {'code', 'text', 't_file'});   %red flag R: controller restart suspected (2026-10-21)
-    R = mda_report('flags', rec.S, C, rec.status, fl, E);
+    R = mda_report('flags', rec.S, C, rec.status, fl, E, Pc);
     R.window_from = nan(height(R), 1); R.window_to = nan(height(R), 1);
     for j = find(strcmp(R.level, 'check'))'
         [R.window_from(j), R.window_to(j)] = mda_report('window', C, R.channel(j), R.flags{j}, 20);
@@ -2170,10 +2172,12 @@ T = emptyFlags();
 S = resultTable(d, n, 'summary', {});
 if isempty(S), return; end
 C = readResult(fullfile(d, [n '_contractions.csv']), {'channel', 't_peak', 'beatType', 'uncertain', 'included', ...
-    'amplitude', 'stimToOnset'});
+    'amplitude', 'stimToOnset', 'diastolicSignal'});
+Pc = readResult(fullfile(d, [n '_protocols_contractions.csv']), {'channel', 'beatType', 'uncertain', 'amplitude', ...
+    'diastolicSignal'});                                                      %red flag L (2026-11-11)
 st = resultTable(d, n, 'channels', {'channel', 'status'});
 E = resultTable(d, n, 'events', {'code', 'text', 't_file'});
-R = mda_report('flags', S, C, st, mda_report('defaults'), E);
+R = mda_report('flags', S, C, st, mda_report('defaults'), E, Pc);
 R = addvars(R, repmat({rel}, height(R), 1), 'Before', 1, 'NewVariableNames', 'recording');
 R.window_from = nan(height(R), 1); R.window_to = nan(height(R), 1);
 for j = find(strcmp(R.level, 'check'))'

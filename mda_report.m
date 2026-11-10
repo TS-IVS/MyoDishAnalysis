@@ -8,8 +8,10 @@ function varargout = mda_report(varargin)
 %                                       first page (overview image of an experiment)
 %   R = mda_report('analysis', pdfFile, mddFile, C, S, info, resultsFile, fl)   report of one analysis (MyoDishAnalysis,
 %                                       GUI); the GUI commands open resultsFile (or the recording if it is empty)
-%   R = mda_report('flags', S, C, status, fl, E)   flags per channel (table), no PDF; E (optional, 2026-10-21): events
-%                                       table of the recording (mda_logEntries / <name>_events.csv): red flag R
+%   R = mda_report('flags', S, C, status, fl, E, P)   flags per channel (table), no PDF; E (optional, 2026-10-21): events
+%                                       table of the recording (mda_logEntries / <name>_events.csv): red flag R;
+%                                       P (optional, 2026-11-11): contractions of the stimulation protocols
+%                                       (<name>_protocols_contractions.csv): red flag L
 %                                       'controller restart suspected' (warning of the control software 2.2, code
 %                                       warning: after it the controller may have run with its power-on settings),
 %                                       firmware update (event firmwareUpdate, done or failed) and recording stopped by
@@ -61,6 +63,18 @@ function varargout = mda_report(varargin)
 %     F  stimulus frequency > stimFrequency (10 Hz) in a range (median stimulus interval; 2026-10-13): pulse pairs or
 %        groups (e.g. CCM pulses without the extra-pulse bit), bursts, pulses over consecutive samples or a misread
 %        status channel; the contractions are analysed as usual (check the stimulation)
+%     L  peak force at the measurement limit (2026-11-11, needs the protocol contractions P): the highest peak signal
+%        (diastolicSignal + amplitude) of the stimulation protocols lies less than peakHeadroom (15) % of the amplitude
+%        above the median peak signal of the steady contractions (column peakHeadroom). The protocols contain
+%        contractions that must be stronger than the steady ones (low frequencies, the beat after a rest); a channel
+%        whose signal cannot rise above its own steady peak has reached the end of its measurement range. Its amplitude
+%        is then only a lower bound, and because the peak is fixed, every rise of the diastolic force lowers the
+%        amplitude one to one (apparent loss of force, apparent negative force-frequency relation). Remedy: the
+%        extended sensor mode of the control software (old sensor boards) or a controller mode with a wider range.
+%        Needs at least minProtocolBeats (100) protocol contractions of the channel, minBeats steady contractions and a
+%        steady amplitude >= minPeakAmplitude (500 uN). No flag (peakHeadroom = NaN) if the protocol contractions stay
+%        more than 5 % of the amplitude below the steady peak: the channel was not in the same state during the
+%        protocols, so the comparison says nothing.
 %   slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
 %     C  capture < capture (90) % of the stimuli
 %     X  extra beats > extra (10) % of the detected contractions (spontaneous activity; not shown with N)
@@ -96,8 +110,8 @@ if ischar(varargin{1}) || isstring(varargin{1})
         case 'defaults'
             varargout{1} = defaults();
         case 'flags'
-            a = [varargin(2:end), cell(1, 5)];
-            varargout{1} = reportFlags(a{1}, a{2}, a{3}, flagsOf(a{4}), a{5});
+            a = [varargin(2:end), cell(1, 6)];
+            varargout{1} = reportFlags(a{1}, a{2}, a{3}, flagsOf(a{4}), a{5}, a{6});
         case 'window'
             [varargout{1}, varargout{2}] = reportWindow(varargin{2:5});
         case 'commands'
@@ -139,7 +153,30 @@ end
 % =====================================================================================================
 function fl = defaults()
 fl = struct('uncertain', 25, 'irregular', 15, 'artifactShare', 5, 'artifactRatio', 3, 'extra', 10, 'capture', 90, ...
-    'amplitudeChange', 30, 'amplitude', 75, 'amplitudeCV', 30, 'delay', 0.15, 'minBeats', 50, 'stimFrequency', 10);
+    'amplitudeChange', 30, 'amplitude', 75, 'amplitudeCV', 30, 'delay', 0.15, 'minBeats', 50, 'stimFrequency', 10, ...
+    'peakHeadroom', 0.15, 'minProtocolBeats', 100, 'minPeakAmplitude', 500);
+end
+
+
+function h = peakHeadroom(cc, P, channel, fl)
+% Peak force at the measurement limit (red flag L, 2026-11-11): how far the highest peak signal (diastolicSignal +
+% amplitude) of the stimulation protocols lies above the median peak signal of the steady contractions of the same
+% channel, in units of their median amplitude. See the help of mda_report for the criterion and the limits.
+h = NaN;
+need = {'channel', 'amplitude', 'diastolicSignal', 'beatType'};
+if isempty(cc) || isempty(P) || height(cc) == 0 || height(P) == 0, return; end
+if ~all(ismember(need, cc.Properties.VariableNames)) || ~all(ismember(need, P.Properties.VariableNames)), return; end
+st = cc(double(cc.channel) == channel & strcmp(cellstr(string(cc.beatType)), 'stimulated'), :);
+if ismember('included', st.Properties.VariableNames), st = st(truthy(st.included), :); end
+pp = P(double(P.channel) == channel & strcmp(cellstr(string(P.beatType)), 'stimulated'), :);
+if ismember('uncertain', pp.Properties.VariableNames), pp = pp(~truthy(pp.uncertain), :); end
+if height(st) < fl.minBeats || height(pp) < fl.minProtocolBeats, return; end
+a = double(st.amplitude); p = double(st.diastolicSignal) + a;
+ok = ~isnan(a) & ~isnan(p); a = a(ok); p = p(ok);
+q = double(pp.diastolicSignal) + double(pp.amplitude); q = q(~isnan(q));
+if isempty(a) || isempty(q) || median(a) < fl.minPeakAmplitude, return; end
+h = (max(q) - median(p)) / median(a);
+if h < -0.05, h = NaN; end              %the protocols stayed below the steady peak: not the same state, no statement
 end
 
 
@@ -290,9 +327,10 @@ if ismember('label', R.Properties.VariableNames) && ~isempty(R.label{r}), s = ['
 end
 
 
-function R = reportFlags(S, C, status, fl, E)
+function R = reportFlags(S, C, status, fl, E, P)
 % one row per channel: counts, values and flags (flags = codes, red / yellow = descriptions)
 if nargin < 5, E = []; end
+if nargin < 6, P = []; end
 restart = restartWarnings(E);                       %controller restart suspected (red flag R, 2026-10-21)
 chans = [];
 if ~isempty(S) && height(S) > 0, chans = double(S.channel(:)); end
@@ -305,11 +343,12 @@ chans = unique(chans);
 n = numel(chans);
 R = table(chans, repmat({''}, n, 1), repmat({''}, n, 1), zeros(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), ...
     nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), false(n, 1), ...
-    false(n, 1), nan(n, 1), repmat({''}, n, 1), repmat({''}, n, 1), repmat({''}, n, 1), repmat({''}, n, 1), ...
+    false(n, 1), nan(n, 1), nan(n, 1), repmat({''}, n, 1), repmat({''}, n, 1), repmat({''}, n, 1), ...
+    repmat({''}, n, 1), ...
     'VariableNames', {'channel', 'label', 'status', 'nDetected', 'capture_percent', 'extra_percent', ...
     'uncertain_percent', 'extraMissed_percent', 'noiseIndex', 'largeExtra_percent', 'largeExtra_ratio', ...
     'amplitude_uN', 'amplitudeChange_percent', 'amplitudeChange_hours', 'amplitudeCV_percent', 'delay_ms', ...
-    'invertedSignal', 'arrhythmicPacing', 'stimFrequency_Hz', 'flags', 'level', 'red', 'yellow'});
+    'invertedSignal', 'arrhythmicPacing', 'stimFrequency_Hz', 'peakHeadroom', 'flags', 'level', 'red', 'yellow'});
 for k = 1:n
     c = chans(k);
     if isKey(st, c), R.status{k} = st(c); end
@@ -378,6 +417,7 @@ for k = 1:n
     elseif ~isempty(s) && ismember('amplitude_mean', s.Properties.VariableNames) && any(~isnan(s.amplitude_mean))
         R.amplitude_uN(k) = median(s.amplitude_mean, 'omitnan');
     end
+    R.peakHeadroom(k) = peakHeadroom(cc, P, c, fl);      %peak force at the measurement limit (2026-11-11)
     red = {}; codes = '';
     yel = {}; ycodes = '';
     if ~strcmp(R.status{k}, 'no slice') && nDet >= fl.minBeats
@@ -412,6 +452,11 @@ for k = 1:n
         end
         if R.stimFrequency_Hz(k) > fl.stimFrequency
             red{end+1} = sprintf('stimulus frequency %.0f Hz', R.stimFrequency_Hz(k)); codes(end+1) = 'F'; %#ok<AGROW>
+        end
+        if ~isnan(R.peakHeadroom(k)) && R.peakHeadroom(k) < fl.peakHeadroom
+            red{end+1} = sprintf(['peak force at the measurement limit (the protocols reach only %+.0f %% of the ' ...
+                'amplitude above the peak of the steady contractions; extended sensor mode?)'], ...
+                100 * R.peakHeadroom(k)); codes(end+1) = 'L'; %#ok<AGROW>
         end
         if ~isempty(restart)
             red{end+1} = restart; codes(end+1) = 'R'; %#ok<AGROW>
@@ -578,7 +623,7 @@ cols = [{'recording'}, full.Properties.VariableNames, {'window_from', 'window_to
 for i = 1:nR, Rs{i} = alignFlags(Rs{i}, cols, full); end   %fewer columns; 2026-11-01)
 if nR, Rall = vertcat(Rs{:}); else, Rall = alignFlags(full, cols, full); end
 isCheck = cellfun(@(R) any(strcmp(R.level, 'check')), Rs);
-nRed = cellfun(@(R) sum(cellfun(@(x) sum(ismember(x, 'INSDFR')), R.flags(strcmp(R.level, 'check')))), Rs);
+nRed = cellfun(@(R) sum(cellfun(@(x) sum(ismember(x, 'INSDFRL')), R.flags(strcmp(R.level, 'check')))), Rs);
 maxNI = cellfun(@(R) max([0; R.noiseIndex(strcmp(R.level, 'check') & ~isnan(R.noiseIndex))]), Rs);
 check = find(isCheck | arrayfun(@(r) ~isempty(r.notes), recs(:)));
 det = find(isCheck);

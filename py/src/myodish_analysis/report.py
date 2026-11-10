@@ -45,6 +45,18 @@ Flags per channel (channels with a slice and at least min_beats (50) detected co
     F  stimulus frequency > stim_frequency (10 Hz) in a range (median stimulus interval; 2026-10-13): pulse pairs or
        groups (e.g. CCM pulses without the extra-pulse bit), bursts, pulses over consecutive samples or a misread
        status channel; the contractions are analysed as usual (check the stimulation)
+    L  peak force at the measurement limit (2026-11-11, needs the protocol contractions, argument protocols): the
+       highest peak signal (diastolicSignal + amplitude) of the stimulation protocols lies less than peak_headroom
+       (15) % of the amplitude above the median peak signal of the steady contractions (column peakHeadroom). The
+       protocols contain contractions that must be stronger than the steady ones (low frequencies, the beat after a
+       rest); a channel whose signal cannot rise above its own steady peak has reached the end of its measurement
+       range. Its amplitude is then only a lower bound, and because the peak is fixed, every rise of the diastolic
+       force lowers the amplitude one to one (apparent loss of force, apparent negative force-frequency relation).
+       Remedy: the extended sensor mode of the control software (old sensor boards) or a controller mode with a wider
+       range. Needs at least min_protocol_beats (100) protocol contractions of the channel, min_beats steady
+       contractions and a steady amplitude >= min_peak_amplitude (500 uN). No flag (peakHeadroom = NaN) if the
+       protocol contractions stay more than 5 % of the amplitude below the steady peak: the channel was not in the
+       same state during the protocols, so the comparison says nothing.
   slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
     C  capture < capture (90) % of the stimuli
     X  extra beats > extra (10) % of the detected contractions (spontaneous activity; not shown with N)
@@ -81,9 +93,9 @@ import pandas as pd
 
 FLAG_DEFAULTS = dict(uncertain=25.0, irregular=15.0, artifact_share=5.0, artifact_ratio=3.0, extra=10.0, capture=90.0,
                      amplitude_change=30.0, amplitude=75.0, amplitude_cv=30.0, delay=0.15, min_beats=50,
-                     stim_frequency=10.0)
+                     stim_frequency=10.0, peak_headroom=0.15, min_protocol_beats=100, min_peak_amplitude=500.0)
 RED_CODES = (("inverted", "I"), ("noise", "N"), ("large", "S"), ("delay", "D"), ("frequency", "F"),
-             ("restart", "R"))
+             ("restart", "R"), ("limit", "L"))
 YELLOW_CODES = (("capture", "C"), ("extra", "X"), ("amplitude", "A"), ("change", "T"), ("cv", "V"))
 RED_LETTERS = "".join(c for _, c in RED_CODES)
 _CELL_RED, _CELL_YELLOW, _CELL_GREY = "#f8c9c4", "#fbe8a6", "#eeeeee"
@@ -223,10 +235,40 @@ def restart_warnings(E):
     return "; ".join(parts)
 
 
-def report_flags(S, C=None, status=None, events=None, **flags):
+def peak_headroom(cc, protocols, channel, fl):
+    """Peak force at the measurement limit (red flag L, 2026-11-11): how far the highest peak signal
+    (diastolicSignal + amplitude) of the stimulation protocols lies above the median peak signal of the steady
+    contractions of the same channel, in units of their median amplitude. See the module help for the criterion."""
+    need = {"channel", "amplitude", "diastolicSignal", "beatType"}
+    if cc is None or not len(cc) or protocols is None or not len(protocols):
+        return math.nan
+    if not need <= set(cc.columns) or not need <= set(protocols.columns):
+        return math.nan
+    st = cc[cc["beatType"].astype(str) == "stimulated"]
+    if "included" in st.columns:
+        st = st[st["included"].astype(bool)]
+    pp = protocols[(protocols["channel"] == channel) & (protocols["beatType"].astype(str) == "stimulated")]
+    if "uncertain" in pp.columns:
+        pp = pp[~pp["uncertain"].astype(bool)]
+    if len(st) < fl["min_beats"] or len(pp) < fl["min_protocol_beats"]:
+        return math.nan
+    a = st["amplitude"].to_numpy(float)
+    p = st["diastolicSignal"].to_numpy(float) + a
+    ok = ~np.isnan(a) & ~np.isnan(p)
+    a, p = a[ok], p[ok]
+    q = pp["diastolicSignal"].to_numpy(float) + pp["amplitude"].to_numpy(float)
+    q = q[~np.isnan(q)]
+    if not a.size or not q.size or float(np.median(a)) < fl["min_peak_amplitude"]:
+        return math.nan
+    h = float((q.max() - np.median(p)) / np.median(a))
+    return math.nan if h < -0.05 else h   # the protocols stayed below the steady peak: not the same state
+
+
+def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
     """one row per channel: counts, values and flags (columns flags = codes, red / yellow = descriptions). events
     (2026-10-21): events table of the recording (log_entries / <name>_events.csv) for the red flag R (controller
-    restart suspected)."""
+    restart suspected). protocols (2026-11-11): contractions of the stimulation protocols
+    (<name>_protocols_contractions.csv) for the red flag L (peak force at the measurement limit)."""
     fl = _flags(flags)
     status = dict(status or {})
     restart = restart_warnings(events)
@@ -258,7 +300,8 @@ def report_flags(S, C=None, status=None, events=None, **flags):
                  arrhythmicPacing=bool(_truthy(s["arrhythmicPacing"]).any()) if "arrhythmicPacing" in s.columns
                  and len(s) else False,
                  stimFrequency_Hz=float(np.nanmax(s["stimFrequency"].to_numpy(float)))
-                 if "stimFrequency" in s.columns and s["stimFrequency"].notna().any() else math.nan)
+                 if "stimFrequency" in s.columns and s["stimFrequency"].notna().any() else math.nan,
+                 peakHeadroom=math.nan)
         arr = r["arrhythmicPacing"]
         if nDet > 0:  # noise index: uncertain contractions in a channel that does not follow the pacing
             if nStim > 0:  # arrhythmic pacing: missed beats expected, not counted (2026-10-13)
@@ -292,6 +335,7 @@ def report_flags(S, C=None, status=None, events=None, **flags):
                     r["largeExtra_ratio"] = float(np.median(ae) / np.median(asx))
         elif "amplitude_mean" in s.columns and s["amplitude_mean"].notna().any():
             r["amplitude_uN"] = float(np.nanmedian(s["amplitude_mean"].to_numpy(float)))
+        r["peakHeadroom"] = peak_headroom(cc, protocols, c, fl)   # peak force at the measurement limit (2026-11-11)
         red, yellow = [], []
         if r["status"] != "no slice" and nDet >= fl["min_beats"]:
             if nInv >= fl["min_beats"]:  # ranges with an inverted signal and enough contractions
@@ -315,6 +359,10 @@ def report_flags(S, C=None, status=None, events=None, **flags):
                 red.append(("frequency", "stimulus frequency %.0f Hz" % r["stimFrequency_Hz"]))
             if restart:
                 red.append(("restart", restart))
+            if not math.isnan(r["peakHeadroom"]) and r["peakHeadroom"] < fl["peak_headroom"]:
+                red.append(("limit", "peak force at the measurement limit (the protocols reach only %+.0f %% of the "
+                            "amplitude above the peak of the steady contractions; extended sensor mode?)"
+                            % (100 * r["peakHeadroom"])))
             if r["capture_percent"] < fl["capture"] and not arr:
                 yellow.append(("capture", "capture %.0f %%" % r["capture_percent"]))
             if not noise and r["extra_percent"] > fl["extra"]:
@@ -338,7 +386,7 @@ def report_flags(S, C=None, status=None, events=None, **flags):
     cols = ["channel", "label", "status", "nDetected", "capture_percent", "extra_percent", "uncertain_percent",
             "extraMissed_percent", "noiseIndex", "largeExtra_percent", "largeExtra_ratio", "amplitude_uN",
             "amplitudeChange_percent", "amplitudeChange_hours", "amplitudeCV_percent", "delay_ms", "invertedSignal",
-            "arrhythmicPacing", "stimFrequency_Hz", "flags", "level", "red", "yellow"]
+            "arrhythmicPacing", "stimFrequency_Hz", "peakHeadroom", "flags", "level", "red", "yellow"]
     return pd.DataFrame(rows, columns=cols)
 
 

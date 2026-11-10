@@ -299,7 +299,56 @@ ok = ok && okW;
 % its new opening) and lines after its end (left out), 2026-11-09
 okP = pausedRecordingTest();
 ok = ok && okP;
+% peak force at the measurement limit (red flag L), 2026-11-11
+okL = peakLimitTest();
+ok = ok && okL;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
+end
+
+
+function okL = peakLimitTest()
+% as test_peak_at_measurement_limit in py/tests/test_mda.py (2026-11-11): red flag L. The contractions of the
+% stimulation protocols (low frequencies, the beat after a rest) must reach above the peak signal of the steady
+% contractions; a channel whose signal cannot is at the end of its measurement range.
+okL = true;
+cases = {5050, 150, 10000, 0.005, true;      %+0.5 % of the amplitude above the steady peak: at the limit
+         9000, 150, 10000, 0.4,  false;      %+40 %: normal headroom
+         5050,  50, 10000, NaN,  false;      %too few protocol contractions
+         4000, 150, 10000, NaN,  false;      %the protocols stay below the steady peak: not the same state
+         5050, 150,   300, NaN,  false};     %steady amplitude below minPeakAmplitude
+for i = 1:size(cases, 1)
+    [pkProt, nProt, amp, want, flag] = cases{i,:};
+    [S, C, P] = peakLimitTables(5000, pkProt, nProt, amp);
+    R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), ...
+        mda_report('defaults'), [], P);
+    got = R.peakHeadroom(1);
+    okCase = (isnan(want) && isnan(got)) || (~isnan(want) && abs(got - want) < 1e-9);
+    okCase = okCase && (any(R.flags{1} == 'L') == flag);
+    if flag, okCase = okCase && contains(R.red{1}, 'peak force at the measurement limit') && ...
+            strcmp(R.level{1}, 'check'); end
+    if ~okCase
+        fprintf('   case %d: peakHeadroom %g (expected %g), flags ''%s''\n', i, got, want, R.flags{1});
+    end
+    okL = okL && okCase;
+end
+R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), mda_report('defaults'));
+okL = okL && isnan(R.peakHeadroom(1)) && ~any(R.flags{1} == 'L');       %without the protocols: no flag
+fprintf('peak force at the measurement limit (flag L): %s\n', passStr(okL));
+end
+
+
+function [S, C, P] = peakLimitTables(pkSteady, pkProt, nProt, amp)
+% steady contractions of one channel whose peak signal is pkSteady while the diastolic level drifts, and protocol
+% contractions whose highest peak signal is pkProt
+dia = linspace(-200, 200, 80)';
+C = table(ones(80,1), repmat({'stimulated'}, 80, 1), zeros(80,1), ones(80,1), amp - dia, ...
+    pkSteady - amp + dia, 0.04 * ones(80,1), 'VariableNames', {'channel', 'beatType', 'uncertain', 'included', ...
+    'amplitude', 'diastolicSignal', 'stimToOnset'});
+pk = (pkProt - 500) * ones(nProt, 1); pk(1) = pkProt;
+P = table(ones(nProt,1), repmat({'stimulated'}, nProt, 1), zeros(nProt,1), amp * ones(nProt,1), pk - amp, ...
+    'VariableNames', {'channel', 'beatType', 'uncertain', 'amplitude', 'diastolicSignal'});
+S = table(1, 0, 120, 100, 100, 0, 0, 0, 100, amp, 0.05, 'VariableNames', {'channel', 'from', 'to', 'nDetected', ...
+    'nStimuli', 'nMissedBeats', 'nExtraBeats', 'nUncertain', 'nContractions', 'amplitude_mean', 'amplitude_CV'});
 end
 
 
