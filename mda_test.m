@@ -305,32 +305,38 @@ ok = ok && okL;
 % the sensor value of the contractions at the limits of its characteristic (flags M and L), 2026-11-11
 okD = signalTest();
 ok = ok && okD;
-% the zero force of a channel does not change with the output mode, 2026-11-11
+% the zero force follows the output mode of the Offset entry, 2026-11-11
 okZ = zeroForceExtendedTest();
 ok = ok && okZ;
+% zero position of the chamber outside the range of a chamber in good order (flag W), 2026-11-11
+okO = offsetRangeTest();
+ok = ok && okO;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
 end
 
 
 function okZ = zeroForceExtendedTest()
-% The zero force of a channel must not change when the extended sensor mode is switched on (2026-11-11): the Offset
-% of the log is in the counts of mode 0, because the control software subtracts it after the factor of the mode
-% (force = (raw x factor - Offset) x calibration). Only the data carries the factor of the mode.
+% The 'Offset' of the log is the value the controller sent in the output mode of that moment (Tom, 2026-11-11: the
+% acceptable range of an old board is -18000 to -3000 in mode 0 and -6000 to -1000 in the extended mode, i.e. it
+% scales with the factor of the mode). So mda_zeroForce converts it with the calibration factor of the time of the
+% entry, not of the time of the data: a channel zeroed in mode 0 keeps its mode-0 reference when the mode is switched
+% during the recording, because the software writes no new Offset line there.
 okZ = true;
 H = struct('calibrationApplied', true, 'calibrationLog', [-inf 1 2000], 'extendedSensorFactor', 3.3, ...
-    'offsetLog', [0 1 -22750], 'extendedSensorIntervals', [10 inf]);
-kData = mda_calibrationFactor(H, 1, [5 20]);                         %data: with the factor of the mode
-kOffset = mda_calibrationFactor(H, 1, [5 20], false);                %Offset: without it
-z = mda_zeroForce(H, 1, [], [5 20]);
+    'offsetLog', [0 1 -15000], 'extendedSensorIntervals', [10 inf]);
+kData = mda_calibrationFactor(H, 1, [5 20]);                         %data: factor of the mode at that time
 okZ = okZ && abs(kData(1) - 0.5) < 1e-12 && abs(kData(2) - 0.5 * 3.3) < 1e-12;
-okZ = okZ && all(abs(kOffset - 0.5) < 1e-12);
-okZ = okZ && all(abs(z - (-22750 * 0.5)) < 1e-9);                    %no step at the switch
-H.extendedSensorIntervals = [-inf inf];                              %the recording starts in the extended mode
+z = mda_zeroForce(H, 1, [], [5 20]);                                 %entry in mode 0: factor 1 before and after
+okZ = okZ && all(abs(z - (-15000 * 0.5)) < 1e-9);
+H.offsetLog = [15 1 -4500];                                          %zeroed while the extended mode was on
 z2 = mda_zeroForce(H, 1, [], [5 20]);
-okZ = okZ && all(abs(z2 - (-22750 * 0.5)) < 1e-9);
+okZ = okZ && all(abs(z2 - (-4500 * 0.5 * 3.3)) < 1e-9);
+H.offsetLog = [0 1 -15000; 15 1 -4500];                              %both: a step function of time
+z3 = mda_zeroForce(H, 1, [], [5 20]);
+okZ = okZ && abs(z3(1) - (-15000 * 0.5)) < 1e-9 && abs(z3(2) - (-4500 * 0.5 * 3.3)) < 1e-9;
 zUser = mda_zeroForce(H, 1, 40, [5 20]);                             %a zero force entered by the user stays as it is
 okZ = okZ && all(abs(zUser - 40) < 1e-12);
-fprintf('zero force with the extended sensor mode: %s\n', passStr(okZ));
+fprintf('zero force and the output mode of the Offset entry: %s\n', passStr(okZ));
 end
 
 
@@ -378,6 +384,41 @@ S.zeroForce = 3 * S.zeroForce;
 R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), mda_report('defaults'), E);
 okD = okD && isnan(R.peakSignal_AU(1)) && ~any(R.flags{1} == 'L');
 fprintf('sensor value at the limits (flags M, L): %s\n', passStr(okD));
+end
+
+
+function okO = offsetRangeTest()
+% as test_zero_position_of_the_chamber in py/tests/test_mda.py (2026-11-11, Tom's ranges): yellow W when the zero
+% position of a chamber lies outside the range of a chamber in good order, which means a worn or misplaced spring
+% wire (or a channel last zeroed in another output mode). The ranges scale with the factor of the output mode.
+okO = true;
+%  Offset  repeated %  extended  expected code
+cases = {-15000,     2,  false,  '';          %old board, normal
+          -2000,     2,  false,  'W';         %hardly any travel left
+         -19000,     2,  false,  'W';         %the other end: wire misplaced
+          -4500,     2,   true,  '';          %old board, extended mode: a third of the range
+         -15000,     2,   true,  'W';         %mode 0 value in the extended mode: stale Offset
+         -15000,    48,  false,  '';          %MMC5983, normal
+          -3000,    48,  false,  'W';
+          -7000,    48,   true,  '';          %MMC5983, extended mode: half of the range
+         -15000,    28,  false,  ''};         %board unknown: no range, no flag
+for i = 1:size(cases, 1)
+    [off, rep, ext, want] = cases{i,:};
+    [S, C, E] = signalTables(5000, 500, 1000, rep, ext, off, true);
+    R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), ...
+        mda_report('defaults'), E);
+    got = R.flags{1};
+    okCase = abs(R.offset_AU(1) - off) < 1e-6 && isequal(any(got == 'W'), strcmp(want, 'W'));
+    if ~okCase
+        fprintf('   case %d: offset %g, flags ''%s'' (expected ''%s'')\n', i, R.offset_AU(1), got, want);
+    end
+    okO = okO && okCase;
+end
+[S, C, E] = signalTables(5000, 500, 1000, 2, false, -2000, true);        %two entries: the last one counts
+E = [table({'Offset'}, {'-15000'}, 0, 1, 'VariableNames', {'code', 'text', 't_file', 'channel'}); E];
+R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), mda_report('defaults'), E);
+okO = okO && R.offset_AU(1) == -2000 && any(R.flags{1} == 'W');
+fprintf('zero position of the chamber (flag W): %s\n', passStr(okO));
 end
 
 

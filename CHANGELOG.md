@@ -5,17 +5,6 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
-- **Zero force of a channel: no factor of the extended sensor mode on the `Offset`** (2026-11-11). `mda_zeroForce` /
-  `zero_force` converted the `Offset` entry of the log to uN with the same factor as the data, the factor of the
-  extended sensor mode (3.3) included. The Offset is in the counts of mode 0, because the control software subtracts
-  it after the factor (`force = (raw x factor - Offset) x calibration`), and the zero force of a channel must not
-  change when the controller changes the way it encodes the signal. In a recording that started in the extended
-  sensor mode, the zero force came out 3.3 times too large and the diastolic force was off by 2.3 x Offset x
-  calibration (with an Offset of -22750 and a calibration of 1000 AU/mN about 52 000 uN); amplitudes were not
-  affected. Only recordings in the extended sensor mode are affected, which in the lab begin on 2026-11-11 (old
-  boards). `mda_calibrationFactor` / `calibration_factor` take a new last argument `withSensorMode` /
-  `with_sensor_mode` (default true) for this. Found while answering software's question about the unit of the mode
-  2000 thresholds. Tests: `mda_test` (zero force with the extended sensor mode), `test_mda.py`.
 - **Power-on speed of the rocker: 45 rpm also for V19M and every later V19 release** (2026-11-09; firmware: 45 rpm
   from V19J on, V19M runs on the lab devices). Before, only V19J and V19K got 45 rpm, later releases 30 rpm. The test
   builds (page-0 names V19L, V19P, V19T) stay at 30 rpm. Tests: `mda_test` (paused recording, update to V19M),
@@ -124,6 +113,17 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
+- **Yellow flag W: the zero position of a chamber lies outside the range of a chamber in good order** (2026-11-11,
+  Tom's ranges). New column `offset_AU` of the flags table: the channel's last `Offset` entry of the log, i.e. the
+  sensor value without load, in the counts of the output mode of that moment. An empty chamber reads about -12000 to
+  -18000 counts after production; as a chamber is used, that value drifts towards zero and beyond, and the magnet is
+  then already deflected before any force acts, which costs that much of the travel to the limits of the flags M and
+  L. Acceptable ranges per board type and output mode, scaling with the factor of the mode: `offsetOld`
+  [-18000 -3000] and `offsetOldExtended` [-6000 -1000] for old boards (FXOS8700), `offsetNew` [-21000 -5000] and
+  `offsetNewExtended` [-10500 -2500] for MMC5983 boards. The flag text says how much travel is left and names the
+  second possible cause: a channel last zeroed in another output mode reads outside the range as well, and its
+  diastolic force is then wrong by the factor of the mode. No flag if the board type is unknown. This is about the
+  hardware, not the tissue. Tests: `mda_test` (zero position of the chamber), `test_mda.py`.
 - **Flags M and L: the deflection of the sensor leaves the straight part of its curve** (2026-11-11, Tom's rule).
   The force sensors do not measure the deflection of the spring wire linearly over the whole travel: on the old
   boards (FXOS8700, Z read directly) the curve flattens from about 0.1 mm, has only 60 % of its slope at about

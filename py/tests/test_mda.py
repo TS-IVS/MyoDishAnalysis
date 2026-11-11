@@ -2011,27 +2011,29 @@ def test_peak_at_measurement_limit():
     assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]
 
 
-def test_zero_force_with_the_extended_sensor_mode():
-    # 2026-11-11: the zero force of a channel must not change when the extended sensor mode is switched on. The
-    # Offset of the log is in the counts of mode 0, because the control software subtracts it after the factor of the
-    # mode (force = (raw x factor - Offset) x calibration). Only the data carries the factor of the mode.
+def test_zero_force_and_the_output_mode_of_the_offset_entry():
+    # 2026-11-11: the 'Offset' of the log is the value the controller sent in the output mode of that moment (Tom:
+    # the acceptable range of an old board is -18000 to -3000 in mode 0 and -6000 to -1000 in the extended mode, i.e.
+    # it scales with the factor of the mode). So zero_force converts it with the calibration factor of the time of
+    # the entry, not of the time of the data: a channel zeroed in mode 0 keeps its mode-0 reference when the mode is
+    # switched during the recording, because the software writes no new Offset line there.
     from myodish_analysis._matlab import Struct
     from myodish_analysis.calibration_factor import calibration_factor
     from myodish_analysis.zero_force import zero_force
     H = Struct(calibrationApplied=True, calibrationLog=[[-np.inf, 1, 2000]], extendedSensorFactor=3.3,
-               offsetLog=[[0.0, 1, -22750]], extendedSensorIntervals=[[10.0, np.inf]])
-    k_data = calibration_factor(H, 1, [5.0, 20.0])                        # data: with the factor of the mode
-    k_offset = calibration_factor(H, 1, [5.0, 20.0], with_sensor_mode=False)       # Offset: without it
-    assert k_data[0] == pytest.approx(0.5) and k_data[1] == pytest.approx(0.5 * 3.3)
-    assert k_offset[0] == pytest.approx(0.5) and k_offset[1] == pytest.approx(0.5)
+               offsetLog=[[0.0, 1, -15000]], extendedSensorIntervals=[[10.0, np.inf]])
+    k = calibration_factor(H, 1, [5.0, 20.0])                        # data: factor of the mode at that time
+    assert k[0] == pytest.approx(0.5) and k[1] == pytest.approx(0.5 * 3.3)
+    z = zero_force(H, 1, None, [5.0, 20.0])[0]                       # entry in mode 0: factor 1 before and after
+    assert z[0] == pytest.approx(-15000 * 0.5) and z[1] == pytest.approx(-15000 * 0.5)
+    H.offsetLog = [[15.0, 1, -4500]]                                 # zeroed while the extended mode was on
     z = zero_force(H, 1, None, [5.0, 20.0])[0]
-    assert z[0] == pytest.approx(-22750 * 0.5) and z[1] == pytest.approx(-22750 * 0.5)    # no step at the switch
-    H.extendedSensorIntervals = [[-np.inf, np.inf]]                       # the recording starts in extended mode
+    assert z[0] == pytest.approx(-4500 * 0.5 * 3.3) and z[1] == pytest.approx(-4500 * 0.5 * 3.3)
+    H.offsetLog = [[0.0, 1, -15000], [15.0, 1, -4500]]               # both: a step function of time
     z = zero_force(H, 1, None, [5.0, 20.0])[0]
-    assert z[0] == pytest.approx(-22750 * 0.5) and z[1] == pytest.approx(-22750 * 0.5)
-    z = zero_force(H, 1, 40.0, [5.0, 20.0])[0]                            # a zero force from the user stays as it is
+    assert z[0] == pytest.approx(-15000 * 0.5) and z[1] == pytest.approx(-4500 * 0.5 * 3.3)
+    z = zero_force(H, 1, 40.0, [5.0, 20.0])[0]                       # a zero force from the user stays as it is
     assert z[0] == pytest.approx(40.0) and z[1] == pytest.approx(40.0)
-
 
 def _signal_tables(peak_AU, dia_AU, calibration=1000.0, repeated=2.0, extended=False, offset=-20000.0,
                    cal_line=True):
@@ -2120,3 +2122,34 @@ def test_sensor_value_at_the_limits():
     S["zeroForce"] = 3 * S["zeroForce"]
     r = report_flags(S, C, {1: "ok"}, events=E).loc[0]
     assert math.isnan(r["peakSignal_AU"]) and "L" not in r["flags"]
+
+
+def test_zero_position_of_the_chamber():
+    # 2026-11-11 (Tom's ranges): yellow W when the zero position of a chamber lies outside the range of a chamber in
+    # good order, which means a worn or misplaced spring wire (or a channel last zeroed in another output mode). The
+    # ranges scale with the factor of the output mode: old boards -18000 to -3000 in mode 0 and -6000 to -1000 in
+    # the extended mode, MMC5983 boards -21000 to -5000 and -10500 to -2500.
+    from myodish_analysis.report import report_flags
+
+    def flags(**kw):
+        S, C, E = _signal_tables(5000, 500, **kw)
+        return report_flags(S, C, {1: "ok"}, events=E).loc[0]
+
+    for off, repeated, ext, want in [(-15000.0, 2.0, False, ""),      # old board, normal
+                                     (-2000.0, 2.0, False, "W"),      # hardly any travel left
+                                     (-19000.0, 2.0, False, "W"),     # the other end: wire misplaced
+                                     (-4500.0, 2.0, True, ""),        # extended mode: a third of the range
+                                     (-15000.0, 2.0, True, "W"),      # mode 0 value in the extended mode: stale
+                                     (-15000.0, 48.0, False, ""),     # MMC5983, normal
+                                     (-3000.0, 48.0, False, "W"),
+                                     (-7000.0, 48.0, True, ""),       # MMC5983, extended mode: half of the range
+                                     (-15000.0, 28.0, False, "")]:    # board unknown: no range, no flag
+        r = flags(offset=off, repeated=repeated, extended=ext)
+        assert r["offset_AU"] == pytest.approx(off, rel=1e-9)
+        assert ("W" in r["flags"]) == (want == "W"), (off, repeated, ext, r["flags"])
+
+    S, C, E = _signal_tables(5000, 500, offset=-2000.0)      # two entries: the last one counts
+    E = pd.concat([pd.DataFrame([{"code": "Offset", "text": "-15000", "t_file": 0.0, "channel": 1}]), E],
+                  ignore_index=True)
+    r = report_flags(S, C, {1: "ok"}, events=E).loc[0]
+    assert r["offset_AU"] == pytest.approx(-2000) and "W" in r["flags"]

@@ -8,11 +8,13 @@
 
 S          file facts / data from read_mdd (offsetLog, calibration, extended sensor mode)
 zero_user  zero force entered by the user (uN); None or NaN = 'Offset' entry of the channel in the log file (written
-           at the start of a recording, AU; 0 = not calibrated --> NaN). The log value is converted to uN with the
-           calibration at the time of the entry, but without the factor of the extended sensor mode
-           (calibration_factor(..., with_sensor_mode=False)): the Offset is in the counts of mode 0, because the
-           control software subtracts it after the factor (force = (raw x factor - Offset) x calibration).
-           Otherwise the zero force of a channel would jump by that factor when the extended mode is switched on.
+           at the start of a recording, AU; 0 = not calibrated --> NaN). The log value is converted to uN like the
+           data, with calibration_factor at the time of the entry: the Offset is the value the controller sent in the
+           output mode of that moment (Tom, 2026-11-11: the acceptable range of an old board is -18000 to -3000 in
+           mode 0 and -6000 to -1000 in the extended mode, i.e. it scales with the factor of the mode), so the factor
+           of that moment is the right one. If the mode is switched during a recording the control software writes no
+           new Offset line, so the zero force of the part after the switch keeps the old reference; report notes the
+           switch.
 z          zero force at the times t (NaN = unknown), src text ('user', 'log', 'unknown', ...)
 zeroT, zeroV  the step function (times, values)
 
@@ -52,7 +54,7 @@ def zero_force(S, channel, zero_user=None, t=None):
                 src = "log: not calibrated (0)"
             else:
                 zeroT = E[:, 0].copy()
-                zeroV = v * calibration_factor(S, channel, zeroT, with_sensor_mode=False)   # mode 0 counts
+                zeroV = v * calibration_factor(S, channel, zeroT)
                 src = "log"
     idx = np.zeros(t.shape, dtype=int)  # before the first entry: the first entry
     for j in range(1, zeroT.size):

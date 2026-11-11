@@ -1265,7 +1265,11 @@ thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
   its output mode). Absolute sensor values, not deflections from rest: the characteristic depends on where the magnet
   is, so a bent spring wire resting at +3000 instead of the -12000 to -18000 of an empty chamber reaches the limit at
   the same value, with that much less travel left. The diastolic value is not compared, since the preload moves the
-  wire up from the resting value into the straight part. Limits per board type and output mode: old boards (FXOS8700) 10900 counts in mode 0 (60 %
+  wire up from the resting value into the straight part. **W** the zero position of the chamber (column `offset_AU`,
+  the channel's last `Offset` entry of the log) lies outside the range of a chamber in good order (old boards -18000
+  to -3000 in mode 0, -6000 to -1000 in the extended mode; MMC5983 -21000 to -5000 and -10500 to -2500): the spring
+  wire is worn or out of place, which costs that much of the travel, or the channel was last zeroed in another output
+  mode. Limits per board type and output mode: old boards (FXOS8700) 10900 counts in mode 0 (60 %
   of the slope near rest) and 18000 in the extended sensor mode (a margin below the jump of the conversion), red
   **L** at 14300 and 20000. Not applied to MMC5983 boards, whose curve stays straight over the whole travel a slice
   produces, nor when the board type is unknown. MDA marks this, it does not correct it. **C** capture < 90 %, **X** extra beats > 10 % (spontaneous activity; not shown with N), **A** amplitude

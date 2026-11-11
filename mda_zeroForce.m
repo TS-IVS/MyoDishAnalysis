@@ -7,10 +7,12 @@ function [z, src, zeroT, zeroV] = mda_zeroForce(S, channel, zeroUser, t)
 %   S         file facts / data from mda_readMdd (offsetLog, calibration, extended sensor mode)
 %   zeroUser  zero force entered by the user (uN); [] or NaN = 'Offset' entry of the channel in the log file
 %             (written at the start of a recording, AU; 0 = not calibrated --> NaN). The log value is converted to
-%             uN with the calibration at the time of the entry, but without the factor of the extended sensor mode
-%             (mda_calibrationFactor(..., false)): the Offset is in the counts of mode 0, because the control
-%             software subtracts it after the factor (force = (raw x factor - Offset) x calibration). Otherwise the
-%             zero force of a channel would jump by that factor when the extended sensor mode is switched on.
+%             uN like the data, with mda_calibrationFactor at the time of the entry: the Offset is the value the
+%             controller sent in the output mode of that moment (Tom, 2026-11-11: the acceptable range of an old
+%             board is -18000 to -3000 in mode 0 and -6000 to -1000 in the extended mode, i.e. it scales with the
+%             factor of the mode), so the factor of that moment is the right one. If the mode is switched during a
+%             recording the control software writes no new Offset line, so the zero force of the part after the
+%             switch keeps the old reference; mda_report notes the switch (flag M / L and the report text).
 %   z         zero force at the times t (NaN = unknown), src text ('user', 'log', 'unknown', ...)
 %
 % TS 2026-10-04
@@ -35,7 +37,7 @@ elseif isfield(S, 'offsetLog') && ~isempty(S.offsetLog)
             src = 'log: not calibrated (0)';
         else
             zeroT = E(:,1);
-            zeroV = v .* reshape(mda_calibrationFactor(S, channel, zeroT, false), [], 1);   %mode 0 counts
+            zeroV = v .* reshape(mda_calibrationFactor(S, channel, zeroT), [], 1);
             src = 'log';
         end
     end
