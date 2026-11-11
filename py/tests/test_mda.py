@@ -2009,3 +2009,68 @@ def test_peak_at_measurement_limit():
     S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=5050.0)        # without the protocols: no flag
     R = report_flags(S, C, {1: "ok"})
     assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]
+
+
+def _deflection_tables(deflection_AU, calibration=1000.0, offset=-20000.0, repeated=2.0, extended=False):
+    # one channel whose contractions reach deflection_AU counts from the rest position. uN = AU * k, k = 1000/cal;
+    # zeroForce = offset * k, diastolicForce = (raw_dia - offset) * k, amplitude = (raw_peak - raw_dia) * k
+    k = 1000.0 / calibration
+    raw_dia = offset + 0.1 * deflection_AU
+    raw_peak = offset + deflection_AU
+    C = pd.DataFrame({"channel": 1, "beatType": "stimulated", "uncertain": 0, "included": 1,
+                      "amplitude": (raw_peak - raw_dia) * k, "diastolicForce": (raw_dia - offset) * k,
+                      "diastolicSignal": raw_dia * k, "stimToOnset": 0.04}, index=range(60))
+    S = pd.DataFrame([{"channel": 1, "from": 0.0, "to": 120.0, "nDetected": 100, "nStimuli": 100, "nMissedBeats": 0,
+                       "nExtraBeats": 0, "nUncertain": 0, "nContractions": 100,
+                       "amplitude_mean": (raw_peak - raw_dia) * k, "amplitude_CV": 0.05,
+                       "zeroForce": offset * k, "repeatedSamples_percent": repeated}])
+    rows = [{"code": "Offset", "text": str(offset), "t_file": 0.0, "channel": 1}]
+    if extended:
+        rows.append({"code": "Event", "text": "extended sensor mode on", "t_file": 0.0, "channel": 0})
+    return S, C, pd.DataFrame(rows)
+
+
+def test_deflection_of_the_sensor_curve():
+    # 2026-11-11 (Tom's rule): yellow M once the deflection passes the point where the sensor curve has only 60 % of
+    # its slope near the rest position, red L at 20 %. Old boards only; mode 0 and the extended mode differ.
+    from myodish_analysis.report import report_flags
+    S, C, E = _deflection_tables(5000)                       # far inside the straight part
+    R = report_flags(S, C, {1: "ok"}, events=E)
+    assert R.loc[0, "deflection_AU"] == pytest.approx(5000, rel=1e-9) and R.loc[0, "sensorBoard"] == "old"
+    assert "M" not in R.loc[0, "flags"] and "L" not in R.loc[0, "flags"]
+
+    S, C, E = _deflection_tables(12000)                      # past 10 900, before 14 300
+    R = report_flags(S, C, {1: "ok"}, events=E)
+    assert "M" in R.loc[0, "flags"] and "L" not in R.loc[0, "flags"] and R.loc[0, "level"] == "quality"
+    assert "60 %" in R.loc[0, "yellow"] and "mode 0" in R.loc[0, "yellow"]
+
+    S, C, E = _deflection_tables(15000)                      # past 14 300
+    R = report_flags(S, C, {1: "ok"}, events=E)
+    assert "L" in R.loc[0, "flags"] and "M" not in R.loc[0, "flags"] and R.loc[0, "level"] == "check"
+    assert "20 %" in R.loc[0, "red"]
+
+    S, C, E = _deflection_tables(15000, extended=True)       # the extended mode reaches much further
+    R = report_flags(S, C, {1: "ok"}, events=E)
+    assert "M" not in R.loc[0, "flags"] and "L" not in R.loc[0, "flags"]
+    S, C, E = _deflection_tables(19000, extended=True)       # past 18 000
+    R = report_flags(S, C, {1: "ok"}, events=E)
+    assert "M" in R.loc[0, "flags"] and "extended sensor mode" in R.loc[0, "yellow"]
+    S, C, E = _deflection_tables(21000, extended=True)       # past 20 000, close to the jump
+    R = report_flags(S, C, {1: "ok"}, events=E)
+    assert "L" in R.loc[0, "flags"]
+
+    S, C, E = _deflection_tables(15000, repeated=48.0)       # MMC5983: the rule does not apply
+    R = report_flags(S, C, {1: "ok"}, events=E)
+    assert R.loc[0, "sensorBoard"] == "MMC5983" and "M" not in R.loc[0, "flags"] and "L" not in R.loc[0, "flags"]
+
+    S, C, E = _deflection_tables(15000, repeated=28.0)       # board unknown: no flag
+    R = report_flags(S, C, {1: "ok"}, events=E)
+    assert R.loc[0, "sensorBoard"] == "" and "M" not in R.loc[0, "flags"]
+
+    S, C, E = _deflection_tables(15000, calibration=3000.0)  # another calibration: counts, not uN, decide
+    R = report_flags(S, C, {1: "ok"}, events=E)
+    assert R.loc[0, "deflection_AU"] == pytest.approx(15000, rel=1e-9) and "L" in R.loc[0, "flags"]
+
+    S, C, E = _deflection_tables(15000)                      # without the Offset entry: no deflection, no flag
+    R = report_flags(S, C, {1: "ok"}, events=E[E["code"] != "Offset"])
+    assert math.isnan(R.loc[0, "deflection_AU"]) and "L" not in R.loc[0, "flags"]

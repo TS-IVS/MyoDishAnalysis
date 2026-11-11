@@ -113,6 +113,27 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
+- **Flags M and L: the deflection of the sensor leaves the straight part of its curve** (2026-11-11, Tom's rule).
+  The force sensors do not measure the deflection of the spring wire linearly over the whole travel: on the old
+  boards (FXOS8700, Z read directly) the curve flattens from about 0.1 mm, has only 60 % of its slope at about
+  0.19 mm and turns over at about 0.37 mm, so beyond that the amplitude no longer rises but falls. In the extended
+  mode of the old boards (output mode 2000, the piecewise value from X and Z) the curve stays straight to about
+  0.85 mm and then jumps by about 28 000 counts into the negative. The MMC5983 boards stay straight over the whole
+  travel a slice produces; there the fold of the conversion limits, not the curve.
+  - **Yellow M** once the median deflection passes the point with 60 % of the slope, **red L** at 20 %.
+    Limits as counts from the rest position, from Tom's pull curves of six old boards and the SV2 chambers of April
+    2026: `deflectionMode0` 10900 / 14300, `deflectionMode2000` 18000 / 20000. The second level is orange in the
+    control software, which uses the same two numbers in its live warning.
+  - New column `deflection_AU` of the flags table: median of (amplitude + diastolicForce) of the included stimulated
+    contractions, in sensor counts. The calibration factor comes from the summary's `zeroForce` and the channel's
+    `Offset` entry of the log, so no new result column is needed.
+  - The board type comes from the share of repeated raw values of the channel (summary column
+    `repeatedSamples_percent`, < 20 % old board, > 35 % MMC5983), the output mode from the log line
+    `extended sensor mode on`. Without either, `deflection_AU` is NaN and nothing is flagged. The `sensorMode` event
+    of the control software (lab version 10e) will take precedence once MDA reads it.
+  - **MDA does not correct anything** (Tom, 2026-11-11): the limitation of the old sensors is marked so that it can
+    be excluded in the analysis, not compensated by calculation.
+  - Tests: `mda_test` (deflection of the sensor curve), `test_mda.py`.
 - **Red flag L: peak force at the measurement limit** (2026-11-11). A channel whose slice shortens far enough can reach
   the end of the measurement range of its chamber; the signal then has a flat top, the amplitude is only a lower bound,
   and because the peak is fixed, every rise of the diastolic force lowers the amplitude one to one (apparent loss of

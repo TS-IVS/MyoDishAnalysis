@@ -302,7 +302,68 @@ ok = ok && okP;
 % peak force at the measurement limit (red flag L), 2026-11-11
 okL = peakLimitTest();
 ok = ok && okL;
+% deflection of the sensor past the 60 % / 20 % points of its curve (flags M and L), 2026-11-11
+okD = deflectionTest();
+ok = ok && okD;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
+end
+
+
+function okD = deflectionTest()
+% as test_deflection_of_the_sensor_curve in py/tests/test_mda.py (2026-11-11, Tom's rule): yellow M once the
+% deflection of the sensor passes the point where its curve has only 60 % of the slope it has near the rest position,
+% red L at 20 %. Old boards only, and the extended sensor mode reaches much further.
+okD = true;
+%        deflection  calibration  repeated %  extended  expected code  expected deflection
+cases = {      5000,        1000,          2,    false,          '',             5000;
+              12000,        1000,          2,    false,         'M',            12000;
+              15000,        1000,          2,    false,         'L',            15000;
+              15000,        1000,          2,     true,          '',            15000;
+              19000,        1000,          2,     true,         'M',            19000;
+              21000,        1000,          2,     true,         'L',            21000;
+              15000,        1000,         48,    false,          '',            15000;      %MMC5983: rule off
+              15000,        1000,         28,    false,          '',            15000;      %board unknown
+              15000,        3000,          2,    false,         'L',            15000};     %counts, not uN, decide
+for i = 1:size(cases, 1)
+    [defl, cal, rep, ext, want, wantAU] = cases{i,:};
+    [S, C, E] = deflectionTables(defl, cal, rep, ext);
+    R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), ...
+        mda_report('defaults'), E);
+    got = R.flags{1};
+    okCase = abs(R.deflection_AU(1) - wantAU) < 1e-6;
+    okCase = okCase && isequal(any(got == 'M'), strcmp(want, 'M')) && isequal(any(got == 'L'), strcmp(want, 'L'));
+    if ~okCase
+        fprintf('   case %d: deflection %g (expected %g), flags ''%s'' (expected ''%s'')\n', i, ...
+            R.deflection_AU(1), wantAU, got, want);
+    end
+    okD = okD && okCase;
+end
+[S, C, E] = deflectionTables(15000, 1000, 2, false);                 %without the Offset entry: no deflection
+E = E(~strcmpi(E.code, 'Offset'), :);
+R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), mda_report('defaults'), E);
+okD = okD && isnan(R.deflection_AU(1)) && ~any(R.flags{1} == 'L');
+fprintf('deflection of the sensor curve (flags M, L): %s\n', passStr(okD));
+end
+
+
+function [S, C, E] = deflectionTables(deflAU, calibration, repeated, extended)
+% one channel whose contractions reach deflAU counts from the rest position (offset -20000); uN = AU * k,
+% k = 1000 / calibration
+off = -20000;
+k = 1000 / calibration;
+rawDia = off + 0.1 * deflAU; rawPeak = off + deflAU;
+n = 60;
+C = table(ones(n,1), repmat({'stimulated'}, n, 1), zeros(n,1), ones(n,1), repmat((rawPeak - rawDia) * k, n, 1), ...
+    repmat((rawDia - off) * k, n, 1), repmat(rawDia * k, n, 1), 0.04 * ones(n,1), 'VariableNames', ...
+    {'channel', 'beatType', 'uncertain', 'included', 'amplitude', 'diastolicForce', 'diastolicSignal', 'stimToOnset'});
+S = table(1, 0, 120, 100, 100, 0, 0, 0, 100, (rawPeak - rawDia) * k, 0.05, off * k, repeated, 'VariableNames', ...
+    {'channel', 'from', 'to', 'nDetected', 'nStimuli', 'nMissedBeats', 'nExtraBeats', 'nUncertain', ...
+    'nContractions', 'amplitude_mean', 'amplitude_CV', 'zeroForce', 'repeatedSamples_percent'});
+E = table({'Offset'}, {sprintf('%g', off)}, 0, 1, 'VariableNames', {'code', 'text', 't_file', 'channel'});
+if extended
+    E = [E; table({'Event'}, {'extended sensor mode on'}, 0, 0, 'VariableNames', ...
+        {'code', 'text', 't_file', 'channel'})];
+end
 end
 
 

@@ -58,6 +58,16 @@ Flags per channel (channels with a slice and at least min_beats (50) detected co
        protocol contractions stay more than 5 % of the amplitude below the steady peak: the channel was not in the
        same state during the protocols, so the comparison says nothing.
   slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
+    M  deflection of the sensor past the point where its curve has only 60 % of the slope it has near the rest
+       position (2026-11-11, Tom's rule): the amplitude of these contractions is too small, and the more so the
+       further the deflection goes. Column deflection_AU: median of (amplitude + diastolicForce) of the included
+       stimulated contractions, in sensor counts from the rest position. Limits per board type and output mode
+       (deflection_mode0 (10900, 14300), deflection_mode2000 (18000, 20000)); the second value is the red flag L.
+       Only for old sensor boards (FXOS8700): the curve of the MMC5983 boards stays straight over the whole travel a
+       slice produces, and what limits them is the fold of the conversion, not the curve. The board follows from the
+       share of repeated raw values of the channel (summary column repeatedSamples_percent), the mode from the log
+       line 'extended sensor mode on'; without both, or without the channel's 'Offset' entry in the events table,
+       deflection_AU is NaN and nothing is flagged. The second level is orange in the control software, red here.
     C  capture < capture (90) % of the stimuli
     X  extra beats > extra (10) % of the detected contractions (spontaneous activity; not shown with N)
     A  median amplitude of the included contractions < amplitude (75 uN)
@@ -93,10 +103,12 @@ import pandas as pd
 
 FLAG_DEFAULTS = dict(uncertain=25.0, irregular=15.0, artifact_share=5.0, artifact_ratio=3.0, extra=10.0, capture=90.0,
                      amplitude_change=30.0, amplitude=75.0, amplitude_cv=30.0, delay=0.15, min_beats=50,
-                     stim_frequency=10.0, peak_headroom=0.15, min_protocol_beats=100, min_peak_amplitude=500.0)
+                     stim_frequency=10.0, peak_headroom=0.15, min_protocol_beats=100, min_peak_amplitude=500.0,
+                     deflection_mode0=(10900.0, 14300.0), deflection_mode2000=(18000.0, 20000.0))
 RED_CODES = (("inverted", "I"), ("noise", "N"), ("large", "S"), ("delay", "D"), ("frequency", "F"),
              ("restart", "R"), ("limit", "L"))
-YELLOW_CODES = (("capture", "C"), ("extra", "X"), ("amplitude", "A"), ("change", "T"), ("cv", "V"))
+YELLOW_CODES = (("deflection", "M"), ("capture", "C"), ("extra", "X"), ("amplitude", "A"), ("change", "T"),
+                ("cv", "V"))
 RED_LETTERS = "".join(c for _, c in RED_CODES)
 _CELL_RED, _CELL_YELLOW, _CELL_GREY = "#f8c9c4", "#fbe8a6", "#eeeeee"
 _GREEN, _ORANGE, _BLUE, _RED, _GREY = "#2e7d32", "#e65100", "#1565c0", "#c62828", "#555555"
@@ -235,6 +247,65 @@ def restart_warnings(E):
     return "; ".join(parts)
 
 
+def _mode_text(ext):
+    """name of the output mode for the flag texts (2026-11-11)"""
+    return "extended sensor mode" if ext else "mode 0"
+
+
+def deflection_limits(board, ext, fl):
+    """The two deflections (counts from the rest position) at which the sensor curve has only 60 % and 20 % of its
+    slope near the rest position (Tom, 2026-11-11). Empty if the rule does not apply: on MMC5983 boards the curve
+    stays straight over the whole travel a slice produces."""
+    if board != "old":
+        return ()
+    return tuple(fl["deflection_mode2000"] if ext else fl["deflection_mode0"])
+
+
+def deflection_au(cc, s, channel, events):
+    """Deflection of the sensor at the peak of the contractions, in counts from the rest position (2026-11-11):
+    median of (amplitude + diastolicForce) of the included stimulated contractions, divided by the calibration
+    factor. The factor follows from the summary's zeroForce (uN) and the channel's 'Offset' entry of the log
+    (counts). Returns (deflection, board, extended mode); the board is '' when it cannot be told."""
+    board, ext = "", False
+    if cc is None or not len(cc) or s is None or not len(s):
+        return math.nan, board, ext
+    if not {"amplitude", "diastolicForce", "beatType"} <= set(cc.columns):
+        return math.nan, board, ext
+    if "repeatedSamples_percent" in s.columns:
+        rp = float(np.nanmedian(s["repeatedSamples_percent"].to_numpy(float))) \
+            if s["repeatedSamples_percent"].notna().any() else math.nan
+        if not math.isnan(rp):
+            board = "old" if rp < 20 else ("MMC5983" if rp > 35 else "")
+    if events is not None and len(events) and "text" in events.columns:
+        ext = bool(events["text"].astype(str).str.lower().str.contains("extended sensor mode on").any())
+    inc = cc[cc["beatType"].astype(str) == "stimulated"]
+    if "included" in inc.columns:
+        inc = inc[inc["included"].astype(bool)]
+    v = inc["amplitude"].to_numpy(float) + inc["diastolicForce"].to_numpy(float)
+    v = v[~np.isnan(v)]
+    zero = float(np.nanmedian(s["zeroForce"].to_numpy(float))) if "zeroForce" in s.columns \
+        and s["zeroForce"].notna().any() else math.nan
+    off = _offset_of(events, channel)
+    if not v.size or math.isnan(zero) or math.isnan(off) or off == 0:
+        return math.nan, board, ext
+    k = zero / off                                   # uN per count, including the extended sensor mode factor
+    if not np.isfinite(k) or k == 0:
+        return math.nan, board, ext
+    return float(np.median(v) / k), board, ext
+
+
+def _offset_of(events, channel):
+    """'Offset' entry of the channel in the log (sensor counts at rest); NaN if there is none (2026-11-11)"""
+    if events is None or not len(events) or not {"code", "text", "channel"} <= set(events.columns):
+        return math.nan
+    sel = (events["code"].astype(str).str.strip().str.lower() == "offset") & (events["channel"] == channel)
+    if not sel.any():
+        return math.nan
+    v = pd.to_numeric(events.loc[sel, "text"], errors="coerce").to_numpy(float)
+    v = v[~np.isnan(v)]
+    return float(np.median(v)) if v.size else math.nan
+
+
 def peak_headroom(cc, protocols, channel, fl):
     """Peak force at the measurement limit (red flag L, 2026-11-11): how far the highest peak signal
     (diastolicSignal + amplitude) of the stimulation protocols lies above the median peak signal of the steady
@@ -301,7 +372,7 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
                  and len(s) else False,
                  stimFrequency_Hz=float(np.nanmax(s["stimFrequency"].to_numpy(float)))
                  if "stimFrequency" in s.columns and s["stimFrequency"].notna().any() else math.nan,
-                 peakHeadroom=math.nan)
+                 peakHeadroom=math.nan, deflection_AU=math.nan, sensorBoard="")
         arr = r["arrhythmicPacing"]
         if nDet > 0:  # noise index: uncertain contractions in a channel that does not follow the pacing
             if nStim > 0:  # arrhythmic pacing: missed beats expected, not counted (2026-10-13)
@@ -336,6 +407,8 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
         elif "amplitude_mean" in s.columns and s["amplitude_mean"].notna().any():
             r["amplitude_uN"] = float(np.nanmedian(s["amplitude_mean"].to_numpy(float)))
         r["peakHeadroom"] = peak_headroom(cc, protocols, c, fl)   # peak force at the measurement limit (2026-11-11)
+        r["deflection_AU"], r["sensorBoard"], ext = deflection_au(cc, s, c, events)   # sensor curve (2026-11-11)
+        dlim = deflection_limits(r["sensorBoard"], ext, fl)
         red, yellow = [], []
         if r["status"] != "no slice" and nDet >= fl["min_beats"]:
             if nInv >= fl["min_beats"]:  # ranges with an inverted signal and enough contractions
@@ -363,6 +436,10 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
                 red.append(("limit", "peak force at the measurement limit (the protocols reach only %+.0f %% of the "
                             "amplitude above the peak of the steady contractions; extended sensor mode?)"
                             % (100 * r["peakHeadroom"])))
+            elif not math.isnan(r["deflection_AU"]) and dlim and r["deflection_AU"] >= dlim[1]:
+                red.append(("limit", "peak force at the measurement limit: deflection %.0f counts, past the point "
+                            "where the sensor curve has only 20 %% of its slope (%s, %s; from %.0f)"
+                            % (r["deflection_AU"], r["sensorBoard"], _mode_text(ext), dlim[1])))
             if r["capture_percent"] < fl["capture"] and not arr:
                 yellow.append(("capture", "capture %.0f %%" % r["capture_percent"]))
             if not noise and r["extra_percent"] > fl["extra"]:
@@ -375,6 +452,11 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
                                + (f"over {d}" if d else "(first vs. last range)")))
             if r["amplitudeCV_percent"] > fl["amplitude_cv"] and not arr:
                 yellow.append(("cv", "amplitude CV %.0f %%" % r["amplitudeCV_percent"]))
+            if (not math.isnan(r["deflection_AU"]) and dlim and not any(k == "limit" for k, _ in red)
+                    and r["deflection_AU"] >= dlim[0]):
+                yellow.append(("deflection", "deflection %.0f counts, past the point where the sensor curve has only "
+                               "60 %% of its slope (%s, %s; from %.0f): the amplitude is too small"
+                               % (r["deflection_AU"], r["sensorBoard"], _mode_text(ext), dlim[0])))
         code = dict(RED_CODES + YELLOW_CODES)
         r["flags"] = "".join(code[k] for k, _ in red + yellow)
         r["red"] = "; ".join(t for _, t in red)
@@ -386,7 +468,8 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
     cols = ["channel", "label", "status", "nDetected", "capture_percent", "extra_percent", "uncertain_percent",
             "extraMissed_percent", "noiseIndex", "largeExtra_percent", "largeExtra_ratio", "amplitude_uN",
             "amplitudeChange_percent", "amplitudeChange_hours", "amplitudeCV_percent", "delay_ms", "invertedSignal",
-            "arrhythmicPacing", "stimFrequency_Hz", "peakHeadroom", "flags", "level", "red", "yellow"]
+            "arrhythmicPacing", "stimFrequency_Hz", "peakHeadroom", "deflection_AU", "sensorBoard", "flags",
+            "level", "red", "yellow"]
     return pd.DataFrame(rows, columns=cols)
 
 
