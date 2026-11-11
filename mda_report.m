@@ -84,9 +84,11 @@ function varargout = mda_report(varargin)
 %        the signal at the peak of the contraction, in the counts the controller itself sends in its output mode.
 %        Absolute values, not deflections from the rest position: the characteristic depends on where the magnet is,
 %        so a bent spring wire that already rests at +3000 reaches the limit at the same sensor value as a straight
-%        one, with that much less travel left. The diastolic value is not compared: an empty chamber reads about
-%        -12000 to -18000 counts, and the preload moves the wire up from there into the straight part. Limits from
-%        Tom's pull curves, per board type and output mode:
+%        one, with that much less travel left. The limits are at the upper end of the travel only, and the value
+%        is compared with its sign: an empty chamber reads about -12000 to -18000 counts, the preload and the
+%        contraction move the wire up from there, so a weak contraction from -13000 to -11000 is a normal recording
+%        and so is a diastolic value of -13000 with the peak at +2000. Limits from Tom's pull curves, per board type
+%        and output mode:
 %        signalMode0 [10900 14300] = where the curve has only 60 % and 20 % of the slope it has near the rest
 %        position (medians of the six sensors 11600 and 14200, turning point 15200); signalMode2000 [18000 20000] =
 %        13 % and 3 % below the earliest jump of the conversion (20698), because that curve stays straight to the
@@ -96,13 +98,15 @@ function varargout = mda_report(varargin)
 %        column repeatedSamples_percent), the mode from the log line 'extended sensor mode on'; without the board,
 %        peakSignal_AU is still reported but nothing is flagged. The second level is orange in the control software
 %        (Tom, 2026-11-11), red here.
-%     W  zero position of the chamber (the channel's last 'Offset' entry of the log, column offset_AU) outside the
-%        range of a chamber in good order (Tom, 2026-11-11): offsetOld [-18000 -3000] and offsetOldExtended
-%        [-6000 -1000] for old boards, offsetNew [-21000 -5000] and offsetNewExtended [-10500 -2500] for MMC5983
-%        boards. This is about the hardware, not the tissue: the spring wire is worn or out of place, which costs
-%        that much of the travel to the limits above (the text says how much is left). A channel that was last
-%        zeroed in another output mode reads outside the range as well, and then its diastolic force is wrong by the
-%        factor of the mode, so the text names both causes. No flag if the board type is unknown.
+%     W  zero position of the chamber outside the range of a chamber in good order (Tom, 2026-11-11): offsetOld
+%        [-18000 -3000] for old boards, offsetNew [-21000 -5000] for MMC5983 boards. Column offset_AU: the channel's
+%        last 'Offset' entry of the log in normalized counts (raw x factor of the output mode), which is how the
+%        control software keeps the offset, the calibration and the force, and what makes all three independent of
+%        the output mode - hence one range per board type (mda_offsetNormalized for the version rule; up to lab
+%        version 10d the line held the raw value of its mode, so there the factor is applied first). This is about
+%        the hardware, not the tissue: the spring wire is worn or out of place, which costs that much of the travel
+%        to the limits above, and the text says how much is left, in the counts of the output mode. No flag if the
+%        board type is unknown.
 %     C  capture < capture (90) % of the stimuli
 %     X  extra beats > extra (10) % of the detected contractions (spontaneous activity; not shown with N)
 %     A  median amplitude of the included contractions < amplitude (75 uN)
@@ -183,8 +187,7 @@ fl = struct('uncertain', 25, 'irregular', 15, 'artifactShare', 5, 'artifactRatio
     'amplitudeChange', 30, 'amplitude', 75, 'amplitudeCV', 30, 'delay', 0.15, 'minBeats', 50, 'stimFrequency', 10, ...
     'peakHeadroom', 0.15, 'minProtocolBeats', 100, 'minPeakAmplitude', 500, ...
     'signalMode0', [10900 14300], 'signalMode2000', [18000 20000], 'extendedSensorFactor', 3.3, ...
-    'offsetOld', [-18000 -3000], 'offsetOldExtended', [-6000 -1000], ...
-    'offsetNew', [-21000 -5000], 'offsetNewExtended', [-10500 -2500]);
+    'offsetOld', [-18000 -3000], 'offsetNew', [-21000 -5000]);
 end
 
 
@@ -207,16 +210,40 @@ end
 end
 
 
-function r = offsetRange(board, ext, fl)
-% the range in which the zero position of a chamber should lie, in the counts of the output mode (Tom, 2026-11-11):
-% a value outside it means the spring wire is worn or out of place, which costs that much of the usable travel. The
-% ranges scale with the factor of the output mode, because the Offset is the value the controller sends in that mode.
+function r = offsetRange(board, fl)
+% the range in which the zero position of a chamber should lie, in normalized counts (raw x factor of the output
+% mode, Tom 2026-11-11): a value outside it means the spring wire is worn or out of place, which costs that much of
+% the usable travel. One range per board type, because the normalized value does not depend on the output mode.
 % Empty if the board is unknown.
 r = [];
-if strcmp(board, 'old')
-    if ext, r = fl.offsetOldExtended; else, r = fl.offsetOld; end
-elseif strcmp(board, 'MMC5983')
-    if ext, r = fl.offsetNewExtended; else, r = fl.offsetNew; end
+if strcmp(board, 'old'), r = fl.offsetOld; elseif strcmp(board, 'MMC5983'), r = fl.offsetNew; end
+end
+
+
+function off = offsetNormalized(E, channel, ext, fl)
+% zero position of the channel in normalized counts (raw x factor of the output mode), from the last 'Offset' entry
+% of the log (2026-11-11). From lab version 10e on the line is already normalized; up to 10d it was the raw value of
+% the mode that was active then, so in a recording with the extended sensor mode on the factor belongs to it
+% (mda_offsetNormalized). Without a version MDA reads the file as it always did.
+off = offsetOf(E, channel);
+if isnan(off) || mda_offsetNormalized(versionOf(E)), return; end
+if ext && isfinite(fl.extendedSensorFactor) && fl.extendedSensorFactor > 0
+    off = off * fl.extendedSensorFactor;
+end
+end
+
+
+function v = versionOf(E)
+% version text of the control software from the log ('programInfo' / 'programVersion'); '' if there is none
+v = '';
+if isempty(E) || height(E) == 0 || ~all(ismember({'code', 'text'}, E.Properties.VariableNames)), return; end
+nm = lower(strtrim(cellstr(string(E.code))));
+sel = ismember(nm, {'programinfo', 'programversion'});
+if ~any(sel), return; end
+t = string(E.text(sel));
+t = t(~ismissing(t));                              %a programInfo line may have no text
+for i = 1:numel(t)
+    if ~isempty(regexp(char(t(i)), '\d+(\.\d+)+', 'once')), v = char(t(i)); return; end   %first with a version
 end
 end
 
@@ -241,10 +268,10 @@ function [au, board, ext] = peakSignalAU(cc, s, channel, E, fl)
 % The sensor value the contractions reach at their peak, in the counts the controller itself sends in its output mode
 % (2026-11-11, Tom): median over the included stimulated contractions of (amplitude + diastolicSignal), divided by
 % the calibration factor. This is an absolute value, not a deflection: the 'Offset' of the channel does not enter it,
-% because the characteristic depends on where the magnet is, not on where the wire rests without load. The peak is
-% the end of the travel that matters; the diastolic value legitimately sits in the lower, compressed part of the
-% characteristic (an empty chamber reads about -12000 to -18000 counts and the preload moves the wire up from there),
-% so it is not compared with the limits.
+% because the characteristic depends on where the magnet is, not on where the wire rests without load. The value
+% keeps its sign: the limits are at the upper end of the travel (an empty chamber reads about -12000 to -18000 counts,
+% preload and contraction move the wire up from there), so the lower part of the travel is where a recording
+% normally sits and neither the diastolic value nor a peak far below zero is compared with them.
 % The calibration factor comes from the channel's 'Calibration' entry of the log (AU per mN, 1000 if there is none)
 % and, in the extended sensor mode, the factor of that mode. If the channel's 'Offset' and the summary's zeroForce
 % are both there, they have to agree with it (zeroForce = Offset x factor of the Offset entry's own output mode, so
@@ -297,7 +324,9 @@ if ~isempty(E) && height(E) > 0 && all(ismember({'code', 'text', 'channel'}, E.P
     sel = strcmpi(nm, 'calibration') & (double(E.channel) == channel | double(E.channel) == 0);
     v = [];
     for i = find(sel(:))'
-        w = sscanf(char(string(E.text(i))), '%f')';
+        ti = string(E.text(i));
+        if ismissing(ti), continue; end
+        w = sscanf(char(ti), '%f')';
         if double(E.channel(i)) == 0 && numel(w) >= channel
             v(end+1) = w(channel); %#ok<AGROW>
         elseif double(E.channel(i)) == channel && ~isempty(w)
@@ -594,8 +623,8 @@ for k = 1:n
     R.peakHeadroom(k) = peakHeadroom(cc, P, c, fl);      %peak force at the measurement limit (2026-11-11)
     [R.peakSignal_AU(k), R.sensorBoard{k}, extMode] = peakSignalAU(cc, s, c, E, fl);   %sensor curve (2026-11-11)
     sLim = signalLimits(R.sensorBoard{k}, extMode, fl);
-    R.offset_AU(k) = offsetOf(E, c);                     %zero position of the chamber (2026-11-11)
-    oRange = offsetRange(R.sensorBoard{k}, extMode, fl);
+    R.offset_AU(k) = offsetNormalized(E, c, extMode, fl);   %zero position of the chamber (2026-11-11)
+    oRange = offsetRange(R.sensorBoard{k}, fl);
     red = {}; codes = '';
     yel = {}; ycodes = '';
     if ~strcmp(R.status{k}, 'no slice') && nDet >= fl.minBeats
@@ -635,7 +664,7 @@ for k = 1:n
             red{end+1} = sprintf(['peak force at the measurement limit (the protocols reach only %+.0f %% of the ' ...
                 'amplitude above the peak of the steady contractions; extended sensor mode?)'], ...
                 100 * R.peakHeadroom(k)); codes(end+1) = 'L'; %#ok<AGROW>
-        elseif ~isnan(R.peakSignal_AU(k)) && ~isempty(sLim) && abs(R.peakSignal_AU(k)) >= sLim(2)
+        elseif ~isnan(R.peakSignal_AU(k)) && ~isempty(sLim) && R.peakSignal_AU(k) >= sLim(2)
             red{end+1} = sprintf(['peak force at the measurement limit: sensor value %.0f counts, %s ' ...
                 '(%s, %s; from %.0f)'], R.peakSignal_AU(k), limitText(extMode, 2), R.sensorBoard{k}, ...
                 modeText(extMode), sLim(2)); %#ok<AGROW>
@@ -662,19 +691,22 @@ for k = 1:n
         if R.amplitudeCV_percent(k) > fl.amplitudeCV && ~arr
             yel{end+1} = sprintf('amplitude CV %.0f %%', R.amplitudeCV_percent(k)); ycodes(end+1) = 'V'; %#ok<AGROW>
         end
-        if ~isnan(R.peakSignal_AU(k)) && ~isempty(sLim) && ~any(codes == 'L') && abs(R.peakSignal_AU(k)) >= sLim(1)
+        if ~isnan(R.peakSignal_AU(k)) && ~isempty(sLim) && ~any(codes == 'L') && R.peakSignal_AU(k) >= sLim(1)
             yel{end+1} = sprintf('sensor value %.0f counts, %s (%s, %s; from %.0f): the amplitude is too small', ...
                 R.peakSignal_AU(k), limitText(extMode, 1), R.sensorBoard{k}, modeText(extMode), sLim(1)); %#ok<AGROW>
             ycodes(end+1) = 'M'; %#ok<AGROW>
         end
         if ~isnan(R.offset_AU(k)) && ~isempty(oRange) && ...
                 (R.offset_AU(k) < oRange(1) || R.offset_AU(k) > oRange(2))
-            if isempty(sLim), travel = ''; else
-                travel = sprintf(', %.0f counts of travel left to the limit', sLim(2) - R.offset_AU(k));
+            if isempty(sLim), travel = ''; else                %travel in the counts of the output mode
+                f = 1; if extMode && isfinite(fl.extendedSensorFactor) && fl.extendedSensorFactor > 0
+                    f = fl.extendedSensorFactor;
+                end
+                travel = sprintf(', %.0f counts of travel left to the limit', sLim(2) - R.offset_AU(k) / f);
             end
-            yel{end+1} = sprintf(['zero position of the chamber %.0f counts, outside %.0f to %.0f (%s, %s)%s: the ' ...
-                'spring wire is worn or out of place, or the channel was last zeroed in another output mode'], ...
-                R.offset_AU(k), oRange(1), oRange(2), R.sensorBoard{k}, modeText(extMode), travel); %#ok<AGROW>
+            yel{end+1} = sprintf(['zero position of the chamber %.0f normalized counts, outside %.0f to %.0f ' ...
+                '(%s)%s: the spring wire is worn or out of place'], R.offset_AU(k), oRange(1), oRange(2), ...
+                R.sensorBoard{k}, travel); %#ok<AGROW>
             ycodes(end+1) = 'W'; %#ok<AGROW>
         end
     end

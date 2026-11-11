@@ -8,13 +8,13 @@
 
 S          file facts / data from read_mdd (offsetLog, calibration, extended sensor mode)
 zero_user  zero force entered by the user (uN); None or NaN = 'Offset' entry of the channel in the log file (written
-           at the start of a recording, AU; 0 = not calibrated --> NaN). The log value is converted to uN like the
-           data, with calibration_factor at the time of the entry: the Offset is the value the controller sent in the
-           output mode of that moment (Tom, 2026-11-11: the acceptable range of an old board is -18000 to -3000 in
-           mode 0 and -6000 to -1000 in the extended mode, i.e. it scales with the factor of the mode), so the factor
-           of that moment is the right one. If the mode is switched during a recording the control software writes no
-           new Offset line, so the zero force of the part after the switch keeps the old reference; report notes the
-           switch.
+           at the start of a recording, AU; 0 = not calibrated --> NaN). The log value is converted to uN with
+           calibration_factor, and whether the factor of the extended sensor mode belongs to it depends on the
+           version of the control software (offset_normalized): from lab version 10e on the line is normalized
+           (raw x factor) and the calibration alone converts it, up to 10d it was the raw value of the mode that was
+           active when the offset was detected, so there the factor at the time of the entry belongs to it. The
+           control software writes no new Offset line when the mode is switched during a recording; the small step
+           that the approximate factor leaves is noted in the report.
 z          zero force at the times t (NaN = unknown), src text ('user', 'log', 'unknown', ...)
 zeroT, zeroV  the step function (times, values)
 
@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .calibration_factor import calibration_factor
+from .calibration_factor import calibration_factor, offset_normalized
 
 
 def _first(v):
@@ -54,7 +54,10 @@ def zero_force(S, channel, zero_user=None, t=None):
                 src = "log: not calibrated (0)"
             else:
                 zeroT = E[:, 0].copy()
-                zeroV = v * calibration_factor(S, channel, zeroT)
+                with_mode = True                 # up to 10d: raw value of the mode of that moment
+                if "programVersion" in S:
+                    with_mode = not offset_normalized(S.programVersion)
+                zeroV = v * calibration_factor(S, channel, zeroT, with_sensor_mode=with_mode)
                 src = "log"
     idx = np.zeros(t.shape, dtype=int)  # before the first entry: the first entry
     for j in range(1, zeroT.size):

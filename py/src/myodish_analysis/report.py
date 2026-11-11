@@ -64,9 +64,10 @@ Flags per channel (channels with a slice and at least min_beats (50) detected co
        signal at the peak of the contraction, in the counts the controller itself sends in its output mode. Absolute
        values, not deflections from the rest position: the characteristic depends on where the magnet is, so a bent
        spring wire that already rests at +3000 reaches the limit at the same sensor value as a straight one, with
-       that much less travel left. The diastolic value is not compared: an empty chamber reads about -12000 to
-       -18000 counts, and the preload moves the wire up from there into the straight part. Limits per board type and
-       output mode: signal_mode0
+       that much less travel left. The limits are at the upper end of the travel only, and the value is compared
+       with its sign: an empty chamber reads about -12000 to -18000 counts, the preload and the contraction move the
+       wire up from there, so a weak contraction from -13000 to -11000 is a normal recording and so is a diastolic
+       value of -13000 with the peak at +2000. Limits per board type and output mode: signal_mode0
        (10900, 14300) = where the curve has only 60 % and 20 % of the slope it has near the rest position (medians of
        the six sensors 11600 and 14200, turning point 15200); signal_mode2000 (18000, 20000) = 13 % and 3 % below the
        earliest jump of the conversion (20698), because that curve stays straight to the jump. The second value is
@@ -76,13 +77,15 @@ Flags per channel (channels with a slice and at least min_beats (50) detected co
        share of repeated raw values of the channel (summary column repeatedSamples_percent), the mode from the log
        line 'extended sensor mode on'; without the board, peakSignal_AU is still reported but nothing is flagged.
        The second level is orange in the control software, red here.
-    W  zero position of the chamber (the channel's last 'Offset' entry of the log, column offset_AU) outside the
-       range of a chamber in good order (Tom, 2026-11-11): offset_old (-18000, -3000) and offset_old_extended
-       (-6000, -1000) for old boards, offset_new (-21000, -5000) and offset_new_extended (-10500, -2500) for MMC5983
-       boards. This is about the hardware, not the tissue: the spring wire is worn or out of place, which costs that
-       much of the travel to the limits above (the text says how much is left). A channel that was last zeroed in
-       another output mode reads outside the range as well, and then its diastolic force is wrong by the factor of
-       the mode, so the text names both causes. No flag if the board type is unknown.
+    W  zero position of the chamber outside the range of a chamber in good order (Tom, 2026-11-11): offset_old
+       (-18000, -3000) for old boards, offset_new (-21000, -5000) for MMC5983 boards. Column offset_AU: the
+       channel's last 'Offset' entry of the log in normalized counts (raw x factor of the output mode), which is how
+       the control software keeps the offset, the calibration and the force, and what makes all three independent of
+       the output mode - hence one range per board type (offset_normalized for the version rule; up to lab version
+       10d the line held the raw value of its mode, so there the factor is applied first). This is about the
+       hardware, not the tissue: the spring wire is worn or out of place, which costs that much of the travel to the
+       limits above, and the text says how much is left, in the counts of the output mode. No flag if the board type
+       is unknown.
     C  capture < capture (90) % of the stimuli
     X  extra beats > extra (10) % of the detected contractions (spontaneous activity; not shown with N)
     A  median amplitude of the included contractions < amplitude (75 uN)
@@ -116,13 +119,13 @@ import textwrap
 import numpy as np
 import pandas as pd
 
+from .calibration_factor import offset_normalized
+
 FLAG_DEFAULTS = dict(uncertain=25.0, irregular=15.0, artifact_share=5.0, artifact_ratio=3.0, extra=10.0, capture=90.0,
                      amplitude_change=30.0, amplitude=75.0, amplitude_cv=30.0, delay=0.15, min_beats=50,
                      stim_frequency=10.0, peak_headroom=0.15, min_protocol_beats=100, min_peak_amplitude=500.0,
                      signal_mode0=(10900.0, 14300.0), signal_mode2000=(18000.0, 20000.0),
-                     extended_sensor_factor=3.3, offset_old=(-18000.0, -3000.0),
-                     offset_old_extended=(-6000.0, -1000.0), offset_new=(-21000.0, -5000.0),
-                     offset_new_extended=(-10500.0, -2500.0))
+                     extended_sensor_factor=3.3, offset_old=(-18000.0, -3000.0), offset_new=(-21000.0, -5000.0))
 RED_CODES = (("inverted", "I"), ("noise", "N"), ("large", "S"), ("delay", "D"), ("frequency", "F"),
              ("restart", "R"), ("limit", "L"))
 YELLOW_CODES = (("signal", "M"), ("offset", "W"), ("capture", "C"), ("extra", "X"), ("amplitude", "A"), ("change", "T"),
@@ -278,16 +281,42 @@ def _limit_text(ext, level):
     return "past the point where the sensor curve has only %d %% of its slope" % (60 if level == 1 else 20)
 
 
-def offset_range(board, ext, fl):
-    """The range in which the zero position of a chamber should lie, in the counts of the output mode (Tom,
-    2026-11-11): a value outside it means the spring wire is worn or out of place, which costs that much of the
-    usable travel. The ranges scale with the factor of the output mode, because the Offset is the value the
-    controller sends in that mode. Empty if the board is unknown."""
+def offset_range(board, fl):
+    """The range in which the zero position of a chamber should lie, in normalized counts (raw x factor of the output
+    mode, Tom 2026-11-11): a value outside it means the spring wire is worn or out of place, which costs that much of
+    the usable travel. One range per board type, because the normalized value does not depend on the output mode.
+    Empty if the board is unknown."""
     if board == "old":
-        return tuple(fl["offset_old_extended"] if ext else fl["offset_old"])
+        return tuple(fl["offset_old"])
     if board == "MMC5983":
-        return tuple(fl["offset_new_extended"] if ext else fl["offset_new"])
+        return tuple(fl["offset_new"])
     return ()
+
+
+def _version_of(events):
+    """version text of the control software from the log ('programInfo' / 'programVersion'); '' if there is none"""
+    if events is None or not len(events) or not {"code", "text"} <= set(events.columns):
+        return ""
+    code = events["code"].astype(str).str.strip().str.lower()
+    sel = code.isin(["programinfo", "programversion"])
+    for t in events.loc[sel, "text"]:                # a programInfo line may have no text: first with a version
+        if isinstance(t, str) and re.search(r"\d+(?:\.\d+)+", t):
+            return t
+    return ""
+
+
+def offset_normalized_au(events, channel, ext, fl):
+    """Zero position of the channel in normalized counts (raw x factor of the output mode), from the last 'Offset'
+    entry of the log (2026-11-11). From lab version 10e on the line is already normalized; up to 10d it was the raw
+    value of the mode that was active then, so in a recording with the extended sensor mode on the factor belongs to
+    it (offset_normalized). Without a version MDA reads the file as it always did."""
+    off = _offset_of(events, channel)
+    if math.isnan(off) or offset_normalized(_version_of(events)):
+        return off
+    f = float((fl or FLAG_DEFAULTS).get("extended_sensor_factor", 3.3))
+    if ext and np.isfinite(f) and f > 0:
+        off = off * f
+    return off
 
 
 def signal_limits(board, ext, fl):
@@ -332,9 +361,9 @@ def peak_signal_au(cc, s, channel, events, fl=None):
     mode (2026-11-11, Tom): median over the included stimulated contractions of (amplitude + diastolicSignal),
     divided by the calibration factor. This is an absolute value, not a deflection: the 'Offset' of the channel does
     not enter it, because the characteristic depends on where the magnet is, not on where the wire rests without
-    load. The peak is the end of the travel that matters; the diastolic value legitimately sits in the lower,
-    compressed part of the characteristic (an empty chamber reads about -12000 to -18000 counts and the preload moves
-    the wire up from there), so it is not compared with the limits.
+    load. The value keeps its sign: the limits are at the upper end of the travel (an empty chamber reads about
+    -12000 to -18000 counts, preload and contraction move the wire up from there), so the lower part of the travel is
+    where a recording normally sits and neither the diastolic value nor a peak far below zero is compared with them.
     The calibration factor comes from the channel's 'Calibration' entry of the log and, in the extended sensor mode,
     the factor of that mode. If the channel's 'Offset' and the summary's zeroForce are both there, they have to agree
     with it (zeroForce = Offset x factor of the Offset entry's own output mode, so in the extended sensor mode either
@@ -495,8 +524,8 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
         r["peakHeadroom"] = peak_headroom(cc, protocols, c, fl)   # peak force at the measurement limit (2026-11-11)
         r["peakSignal_AU"], r["sensorBoard"], ext = peak_signal_au(cc, s, c, events, fl)   # sensor curve
         slim = signal_limits(r["sensorBoard"], ext, fl)
-        r["offset_AU"] = _offset_of(events, c)             # zero position of the chamber (2026-11-11)
-        orange = offset_range(r["sensorBoard"], ext, fl)
+        r["offset_AU"] = offset_normalized_au(events, c, ext, fl)   # zero position of the chamber (2026-11-11)
+        orange = offset_range(r["sensorBoard"], fl)
         red, yellow = [], []
         if r["status"] != "no slice" and nDet >= fl["min_beats"]:
             if nInv >= fl["min_beats"]:  # ranges with an inverted signal and enough contractions
@@ -524,7 +553,7 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
                 red.append(("limit", "peak force at the measurement limit (the protocols reach only %+.0f %% of the "
                             "amplitude above the peak of the steady contractions; extended sensor mode?)"
                             % (100 * r["peakHeadroom"])))
-            elif not math.isnan(r["peakSignal_AU"]) and slim and abs(r["peakSignal_AU"]) >= slim[1]:
+            elif not math.isnan(r["peakSignal_AU"]) and slim and r["peakSignal_AU"] >= slim[1]:
                 red.append(("limit", "peak force at the measurement limit: sensor value %.0f counts, %s "
                             "(%s, %s; from %.0f)"
                             % (r["peakSignal_AU"], _limit_text(ext, 2), r["sensorBoard"], _mode_text(ext),
@@ -542,19 +571,20 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
             if r["amplitudeCV_percent"] > fl["amplitude_cv"] and not arr:
                 yellow.append(("cv", "amplitude CV %.0f %%" % r["amplitudeCV_percent"]))
             if (not math.isnan(r["peakSignal_AU"]) and slim and not any(k == "limit" for k, _ in red)
-                    and abs(r["peakSignal_AU"]) >= slim[0]):
+                    and r["peakSignal_AU"] >= slim[0]):
                 yellow.append(("signal", "sensor value %.0f counts, %s (%s, %s; from %.0f): the amplitude is "
                                "too small"
                                % (r["peakSignal_AU"], _limit_text(ext, 1), r["sensorBoard"], _mode_text(ext),
                                   slim[0])))
             if (not math.isnan(r["offset_AU"]) and orange
                     and not orange[0] <= r["offset_AU"] <= orange[1]):
+                f = float(fl.get("extended_sensor_factor", 3.3))     # travel in the counts of the output mode
+                f = f if (ext and np.isfinite(f) and f > 0) else 1.0
                 travel = "" if not slim else (", %.0f counts of travel left to the limit"
-                                              % (slim[1] - r["offset_AU"]))
-                yellow.append(("offset", "zero position of the chamber %.0f counts, outside %.0f to %.0f (%s, %s)%s: "
-                               "the spring wire is worn or out of place, or the channel was last zeroed in another "
-                               "output mode"
-                               % (r["offset_AU"], orange[0], orange[1], r["sensorBoard"], _mode_text(ext), travel)))
+                                              % (slim[1] - r["offset_AU"] / f))
+                yellow.append(("offset", "zero position of the chamber %.0f normalized counts, outside %.0f to %.0f "
+                               "(%s)%s: the spring wire is worn or out of place"
+                               % (r["offset_AU"], orange[0], orange[1], r["sensorBoard"], travel)))
         code = dict(RED_CODES + YELLOW_CODES)
         r["flags"] = "".join(code[k] for k, _ in red + yellow)
         r["red"] = "; ".join(t for _, t in red)

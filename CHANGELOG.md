@@ -115,15 +115,25 @@ MATLAB and Python versions have the same version number and give the same result
 ### Added
 - **Yellow flag W: the zero position of a chamber lies outside the range of a chamber in good order** (2026-11-11,
   Tom's ranges). New column `offset_AU` of the flags table: the channel's last `Offset` entry of the log, i.e. the
-  sensor value without load, in the counts of the output mode of that moment. An empty chamber reads about -12000 to
-  -18000 counts after production; as a chamber is used, that value drifts towards zero and beyond, and the magnet is
-  then already deflected before any force acts, which costs that much of the travel to the limits of the flags M and
-  L. Acceptable ranges per board type and output mode, scaling with the factor of the mode: `offsetOld`
-  [-18000 -3000] and `offsetOldExtended` [-6000 -1000] for old boards (FXOS8700), `offsetNew` [-21000 -5000] and
-  `offsetNewExtended` [-10500 -2500] for MMC5983 boards. The flag text says how much travel is left and names the
-  second possible cause: a channel last zeroed in another output mode reads outside the range as well, and its
-  diastolic force is then wrong by the factor of the mode. No flag if the board type is unknown. This is about the
-  hardware, not the tissue. Tests: `mda_test` (zero position of the chamber), `test_mda.py`.
+  sensor value without load, in **normalized counts** (raw x factor of the output mode). An empty chamber reads about
+  -12000 to -18000 counts after production; as a chamber is used, that value drifts towards zero and beyond, and the
+  magnet is then already deflected before any force acts, which costs that much of the travel to the limits of the
+  flags M and L. Acceptable ranges, one per board type because the normalized value does not depend on the output
+  mode: `offsetOld` [-18000 -3000] for old boards (FXOS8700), `offsetNew` [-21000 -5000] for MMC5983 boards. The flag
+  text says how much travel is left, in the counts of the output mode. No flag if the board type is unknown. This is
+  about the hardware, not the tissue. Tests: `mda_test` (zero position of the chamber), `test_mda.py`.
+- **`mda_offsetNormalized` / `offset_normalized`: which unit the `Offset` line of the log is in** (2026-11-11, after
+  the control software checked its source). The software keeps the offset, the calibration and the force in
+  normalized counts, raw x factor of the output mode (Tom's design decision of 2026-11-11), which makes all three
+  independent of the mode: the same force gives the same normalized value in mode 0 and in the extended sensor mode,
+  the calibration value (AU per mN) does not change with the mode, and "Detect offsets" works in any mode. What stays
+  in the raw counts of the mode is the sensor itself, i.e. the limits of its characteristic (flags M and L) and the
+  word limit. From lab version 10e (2.2.9811) on the `Offset` line holds the normalized value, so `mda_zeroForce` /
+  `zero_force` convert it with the calibration alone; up to 10d it held the raw value of the mode that was active
+  when the offset was detected, so there the factor at the time of the entry belongs to it. Without a version the
+  file is read as before. `mda_calibrationFactor` / `calibration_factor` take a new last argument `withSensorMode` /
+  `with_sensor_mode` (default true) for this. Tests: `mda_test` (zero force and the unit of the Offset entry),
+  `test_mda.py`.
 - **Flags M and L: the deflection of the sensor leaves the straight part of its curve** (2026-11-11, Tom's rule).
   The force sensors do not measure the deflection of the spring wire linearly over the whole travel: on the old
   boards (FXOS8700, Z read directly) the curve flattens from about 0.1 mm, has only 60 % of its slope at about
@@ -142,9 +152,11 @@ MATLAB and Python versions have the same version number and give the same result
     itself sends in its output mode**. These are **absolute sensor values, not deflections from the rest position**
     (Tom, 2026-11-11): the characteristic is a function of the position of the magnet, so a bent spring wire that
     already rests at +3000 instead of the -12000 to -18000 of an empty chamber reaches the limit at the same sensor
-    value, with that much less travel left, and the `Offset` of the channel does not enter the criterion. The
-    diastolic value is not compared with the limits: the preload moves the wire up from the resting value into the
-    straight part, so a diastolic value of -13000 with the peak at +2000 is a normal recording. The calibration
+    value, with that much less travel left, and the `Offset` of the channel does not enter the criterion. The value
+    is compared **with its sign**, because the limits are at the upper end of the travel only: preload and
+    contraction move the wire up from the resting value, so a weak contraction from -13000 to -11000 is a normal
+    recording (the example recordings of the repository look like that) and so is a diastolic value of -13000 with
+    the peak at +2000. The calibration
     factor comes from the channel's `Calibration` entry of the log; if the `Offset` and the summary's `zeroForce`
     imply a different factor (results made with `calibration`,`none` or with a zero force entered by the user),
     `peakSignal_AU` is NaN and nothing is flagged. No new result column is needed.

@@ -2011,32 +2011,41 @@ def test_peak_at_measurement_limit():
     assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]
 
 
-def test_zero_force_and_the_output_mode_of_the_offset_entry():
-    # 2026-11-11: the 'Offset' of the log is the value the controller sent in the output mode of that moment (Tom:
-    # the acceptable range of an old board is -18000 to -3000 in mode 0 and -6000 to -1000 in the extended mode, i.e.
-    # it scales with the factor of the mode). So zero_force converts it with the calibration factor of the time of
-    # the entry, not of the time of the data: a channel zeroed in mode 0 keeps its mode-0 reference when the mode is
-    # switched during the recording, because the software writes no new Offset line there.
+def test_zero_force_and_the_unit_of_the_offset_entry():
+    # 2026-11-11: which factor belongs to the 'Offset' of the log depends on the version of the control software
+    # (Tom, after the software checked its source): from lab version 10e on the line is normalized (raw x factor of
+    # the output mode), so the calibration alone converts it; up to 10d it was the raw value of the mode that was
+    # active when the offset was detected, so there the factor at the time of the entry belongs to it.
     from myodish_analysis._matlab import Struct
-    from myodish_analysis.calibration_factor import calibration_factor
+    from myodish_analysis.calibration_factor import calibration_factor, offset_normalized
     from myodish_analysis.zero_force import zero_force
     H = Struct(calibrationApplied=True, calibrationLog=[[-np.inf, 1, 2000]], extendedSensorFactor=3.3,
-               offsetLog=[[0.0, 1, -15000]], extendedSensorIntervals=[[10.0, np.inf]])
+               offsetLog=[[0.0, 1, -15000]], extendedSensorIntervals=[[10.0, np.inf]],
+               programVersion="Version 2.2.9810.33271")
     k = calibration_factor(H, 1, [5.0, 20.0])                        # data: factor of the mode at that time
     assert k[0] == pytest.approx(0.5) and k[1] == pytest.approx(0.5 * 3.3)
-    z = zero_force(H, 1, None, [5.0, 20.0])[0]                       # entry in mode 0: factor 1 before and after
+    k = calibration_factor(H, 1, [5.0, 20.0], with_sensor_mode=False)        # normalized values
+    assert k[0] == pytest.approx(0.5) and k[1] == pytest.approx(0.5)
+    assert not offset_normalized(H.programVersion) and offset_normalized("Version 2.2.9811.14999")
+    assert not offset_normalized("") and offset_normalized("2.3.1.0") and not offset_normalized("2.1.9999.0")
+    z = zero_force(H, 1, None, [5.0, 20.0])[0]                       # 10d, entry in mode 0: factor 1
     assert z[0] == pytest.approx(-15000 * 0.5) and z[1] == pytest.approx(-15000 * 0.5)
-    H.offsetLog = [[15.0, 1, -4500]]                                 # zeroed while the extended mode was on
+    H.offsetLog = [[15.0, 1, -4500]]                                 # 10d, zeroed while the extended mode was on
     z = zero_force(H, 1, None, [5.0, 20.0])[0]
     assert z[0] == pytest.approx(-4500 * 0.5 * 3.3) and z[1] == pytest.approx(-4500 * 0.5 * 3.3)
     H.offsetLog = [[0.0, 1, -15000], [15.0, 1, -4500]]               # both: a step function of time
     z = zero_force(H, 1, None, [5.0, 20.0])[0]
     assert z[0] == pytest.approx(-15000 * 0.5) and z[1] == pytest.approx(-4500 * 0.5 * 3.3)
+    H.programVersion = "Version 2.2.9811.14999"                      # 10e: the line is already normalized
+    for log in ([[0.0, 1, -15000]], [[15.0, 1, -15000]]):            # before or inside the extended interval
+        H.offsetLog = log
+        z = zero_force(H, 1, None, [5.0, 20.0])[0]
+        assert z[0] == pytest.approx(-15000 * 0.5) and z[1] == pytest.approx(-15000 * 0.5)
     z = zero_force(H, 1, 40.0, [5.0, 20.0])[0]                       # a zero force from the user stays as it is
     assert z[0] == pytest.approx(40.0) and z[1] == pytest.approx(40.0)
 
 def _signal_tables(peak_AU, dia_AU, calibration=1000.0, repeated=2.0, extended=False, offset=-20000.0,
-                   cal_line=True):
+                   cal_line=True, version="10e"):
     # one channel whose included stimulated contractions reach the absolute sensor value peak_AU, with their
     # diastolic value at dia_AU, both in the counts of the output mode. The tables hold what the reader delivers:
     # uN = AU * k, k = 1000/cal times the factor of the extended sensor mode (3.3), and zeroForce = offset * 1000/cal,
@@ -2053,6 +2062,9 @@ def _signal_tables(peak_AU, dia_AU, calibration=1000.0, repeated=2.0, extended=F
                        "nExtraBeats": 0, "nUncertain": 0, "nContractions": 100, "amplitude_mean": amp,
                        "amplitude_CV": 0.05, "zeroForce": zero, "repeatedSamples_percent": repeated}])
     rows = [{"code": "Offset", "text": "%g" % offset, "t_file": 0.0, "channel": 1}]
+    if version:                                      # 10e -> 2.2.9811 (Offset normalized), 10d -> 2.2.9810
+        vt = "Version 2.2.9811.14999" if version == "10e" else "Version 2.2.9810.33271"
+        rows.append({"code": "programInfo", "text": vt, "t_file": 0.0, "channel": 0})
     if cal_line:
         rows.append({"code": "Calibration", "text": "%g" % calibration, "t_file": 0.0, "channel": 1})
     if extended:
@@ -2063,10 +2075,10 @@ def _signal_tables(peak_AU, dia_AU, calibration=1000.0, repeated=2.0, extended=F
 def test_sensor_value_at_the_limits():
     # 2026-11-11 (Tom's rule): yellow M once the sensor value of the contractions passes the first limit of its
     # characteristic (mode 0: 60 % of the slope near the rest position; extended mode: a margin below the jump of
-    # the conversion), red L at the second. Old boards only. Absolute sensor values of the peak decide, in the counts
-    # of the output mode, so neither the Offset of the channel nor the sign of the signal may change the result. The
-    # diastolic value is not compared: an empty chamber reads about -12000 to -18000 counts and the preload moves the
-    # wire up from there, so a diastole of -13000 with the peak at +2000 is a normal recording (Tom, 2026-11-11).
+    # the conversion), red L at the second. Old boards only. The sensor value of the peak decides, with its sign and
+    # in the counts of the output mode, so the Offset of the channel must not change the result. The limits are at
+    # the upper end of the travel only: an empty chamber reads about -12000 to -18000 counts and preload and
+    # contraction move the wire up from there (Tom, 2026-11-11).
     from myodish_analysis.report import report_flags
 
     def flags(**kw):
@@ -2088,15 +2100,13 @@ def test_sensor_value_at_the_limits():
         r = flags(peak_AU=15000, dia_AU=1500, offset=off)
         assert r["peakSignal_AU"] == pytest.approx(15000, rel=1e-9) and "L" in r["flags"]
 
-    r = flags(peak_AU=-15000, dia_AU=-1500)                  # the other direction
-    assert r["peakSignal_AU"] == pytest.approx(-15000, rel=1e-9) and "L" in r["flags"]
-
-    r = flags(peak_AU=2000, dia_AU=-13000)                   # a normal preload: the diastole is not compared
-    assert r["peakSignal_AU"] == pytest.approx(2000, rel=1e-9)
-    assert "M" not in r["flags"] and "L" not in r["flags"]
-
-    r = flags(peak_AU=-13000, dia_AU=-14500)                 # barely contracting, low on the characteristic
-    assert r["peakSignal_AU"] == pytest.approx(-13000, rel=1e-9) and "M" in r["flags"]
+    # the limits are at the upper end of the travel only: the lower part is where a recording normally sits
+    for peak, dia, off in [(-15000, -16500, -17000.0),       # a weak slice in a new chamber
+                           (-11000, -13000, -13100.0),       # as the example recordings of the repository
+                           (2000, -13000, -15000.0)]:        # a normal preload: the diastole is not compared
+        r = flags(peak_AU=peak, dia_AU=dia, offset=off)
+        assert r["peakSignal_AU"] == pytest.approx(peak, rel=1e-9)
+        assert "M" not in r["flags"] and "L" not in r["flags"], (peak, dia, r["flags"])
 
     r = flags(peak_AU=15000, dia_AU=1500, extended=True, offset=-8000.0)   # reaches much further
     assert r["peakSignal_AU"] == pytest.approx(15000, rel=1e-9)
@@ -2127,25 +2137,30 @@ def test_sensor_value_at_the_limits():
 def test_zero_position_of_the_chamber():
     # 2026-11-11 (Tom's ranges): yellow W when the zero position of a chamber lies outside the range of a chamber in
     # good order, which means a worn or misplaced spring wire (or a channel last zeroed in another output mode). The
-    # ranges scale with the factor of the output mode: old boards -18000 to -3000 in mode 0 and -6000 to -1000 in
-    # the extended mode, MMC5983 boards -21000 to -5000 and -10500 to -2500.
+    # value compared is normalized (raw x factor of the output mode), so there is one range per board type: old
+    # boards -18000 to -3000, MMC5983 boards -21000 to -5000. From lab version 10e on the Offset line of the log is
+    # already normalized; up to 10d it was the raw value of its mode, so there the factor is applied first.
     from myodish_analysis.report import report_flags
 
     def flags(**kw):
         S, C, E = _signal_tables(5000, 500, **kw)
         return report_flags(S, C, {1: "ok"}, events=E).loc[0]
 
-    for off, repeated, ext, want in [(-15000.0, 2.0, False, ""),      # old board, normal
-                                     (-2000.0, 2.0, False, "W"),      # hardly any travel left
-                                     (-19000.0, 2.0, False, "W"),     # the other end: wire misplaced
-                                     (-4500.0, 2.0, True, ""),        # extended mode: a third of the range
-                                     (-15000.0, 2.0, True, "W"),      # mode 0 value in the extended mode: stale
-                                     (-15000.0, 48.0, False, ""),     # MMC5983, normal
-                                     (-3000.0, 48.0, False, "W"),
-                                     (-7000.0, 48.0, True, ""),       # MMC5983, extended mode: half of the range
-                                     (-15000.0, 28.0, False, "")]:    # board unknown: no range, no flag
-        r = flags(offset=off, repeated=repeated, extended=ext)
-        assert r["offset_AU"] == pytest.approx(off, rel=1e-9)
+    for off, repeated, ext, ver, want_au, want in [
+            (-15000.0, 2.0, False, "10e", -15000.0, ""),     # old board, normal
+            (-2000.0, 2.0, False, "10e", -2000.0, "W"),      # hardly any travel left
+            (-19000.0, 2.0, False, "10e", -19000.0, "W"),    # the other end: wire misplaced
+            (-15000.0, 2.0, True, "10e", -15000.0, ""),      # 10e: the line is normalized, the same range holds
+            (-4500.0, 2.0, True, "10e", -4500.0, ""),        # a used chamber, still inside
+            (-4500.0, 2.0, True, "10d", -14850.0, ""),       # 10d: raw value of the mode, x 3.3
+            (-500.0, 2.0, True, "10d", -1650.0, "W"),        # 10d, worn chamber: x 3.3 is still outside
+            (-15000.0, 48.0, False, "10e", -15000.0, ""),    # MMC5983, normal
+            (-3000.0, 48.0, False, "10e", -3000.0, "W"),     # outside -21000 to -5000
+            (-6000.0, 48.0, True, "10d", -19800.0, ""),      # 10d, MMC5983 extended: x 3.3, inside
+            (-7000.0, 48.0, True, "10d", -23100.0, "W"),     # x 3.3, outside (the reader's factor is 3.3 so far)
+            (-15000.0, 28.0, False, "10e", -15000.0, "")]:   # board unknown: no range, no flag
+        r = flags(offset=off, repeated=repeated, extended=ext, version=ver)
+        assert r["offset_AU"] == pytest.approx(want_au, rel=1e-9), (off, ver, r["offset_AU"])
         assert ("W" in r["flags"]) == (want == "W"), (off, repeated, ext, r["flags"])
 
     S, C, E = _signal_tables(5000, 500, offset=-2000.0)      # two entries: the last one counts
@@ -2153,3 +2168,9 @@ def test_zero_position_of_the_chamber():
                   ignore_index=True)
     r = report_flags(S, C, {1: "ok"}, events=E).loc[0]
     assert r["offset_AU"] == pytest.approx(-2000) and "W" in r["flags"]
+
+    S, C, E = _signal_tables(5000, 500, offset=-15000.0)     # a programInfo line without text (real logs)
+    E = pd.concat([pd.DataFrame([{"code": "programInfo", "text": np.nan, "t_file": 0.0, "channel": 0}]), E],
+                  ignore_index=True)
+    r = report_flags(S, C, {1: "ok"}, events=E).loc[0]
+    assert r["offset_AU"] == pytest.approx(-15000) and r["flags"] == ""

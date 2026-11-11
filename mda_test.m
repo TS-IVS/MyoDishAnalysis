@@ -316,27 +316,36 @@ end
 
 
 function okZ = zeroForceExtendedTest()
-% The 'Offset' of the log is the value the controller sent in the output mode of that moment (Tom, 2026-11-11: the
-% acceptable range of an old board is -18000 to -3000 in mode 0 and -6000 to -1000 in the extended mode, i.e. it
-% scales with the factor of the mode). So mda_zeroForce converts it with the calibration factor of the time of the
-% entry, not of the time of the data: a channel zeroed in mode 0 keeps its mode-0 reference when the mode is switched
-% during the recording, because the software writes no new Offset line there.
+% Which factor belongs to the 'Offset' of the log depends on the version of the control software (Tom, 2026-11-11,
+% after the software checked its source): from lab version 10e on the line is normalized (raw x factor of the output
+% mode), so the calibration alone converts it; up to 10d it was the raw value of the mode that was active when the
+% offset was detected, so there the factor at the time of the entry belongs to it (mda_offsetNormalized).
 okZ = true;
 H = struct('calibrationApplied', true, 'calibrationLog', [-inf 1 2000], 'extendedSensorFactor', 3.3, ...
-    'offsetLog', [0 1 -15000], 'extendedSensorIntervals', [10 inf]);
+    'offsetLog', [0 1 -15000], 'extendedSensorIntervals', [10 inf], 'programVersion', 'Version 2.2.9810.33271');
 kData = mda_calibrationFactor(H, 1, [5 20]);                         %data: factor of the mode at that time
 okZ = okZ && abs(kData(1) - 0.5) < 1e-12 && abs(kData(2) - 0.5 * 3.3) < 1e-12;
-z = mda_zeroForce(H, 1, [], [5 20]);                                 %entry in mode 0: factor 1 before and after
+okZ = okZ && all(abs(mda_calibrationFactor(H, 1, [5 20], false) - 0.5) < 1e-12);     %normalized values
+okZ = okZ && ~mda_offsetNormalized(H.programVersion) && mda_offsetNormalized('Version 2.2.9811.14999');
+okZ = okZ && ~mda_offsetNormalized('') && mda_offsetNormalized('2.3.1.0') && ~mda_offsetNormalized('2.1.9999.0');
+z = mda_zeroForce(H, 1, [], [5 20]);                                 %10d, entry in mode 0: factor 1 before and after
 okZ = okZ && all(abs(z - (-15000 * 0.5)) < 1e-9);
-H.offsetLog = [15 1 -4500];                                          %zeroed while the extended mode was on
+H.offsetLog = [15 1 -4500];                                          %10d, zeroed while the extended mode was on
 z2 = mda_zeroForce(H, 1, [], [5 20]);
 okZ = okZ && all(abs(z2 - (-4500 * 0.5 * 3.3)) < 1e-9);
 H.offsetLog = [0 1 -15000; 15 1 -4500];                              %both: a step function of time
 z3 = mda_zeroForce(H, 1, [], [5 20]);
 okZ = okZ && abs(z3(1) - (-15000 * 0.5)) < 1e-9 && abs(z3(2) - (-4500 * 0.5 * 3.3)) < 1e-9;
+H.programVersion = 'Version 2.2.9811.14999';                         %10e: the line is already normalized
+H.offsetLog = [0 1 -15000];
+z4 = mda_zeroForce(H, 1, [], [5 20]);
+okZ = okZ && all(abs(z4 - (-15000 * 0.5)) < 1e-9);                   %no factor, before or after the switch
+H.offsetLog = [15 1 -15000];
+z5 = mda_zeroForce(H, 1, [], [5 20]);
+okZ = okZ && all(abs(z5 - (-15000 * 0.5)) < 1e-9);                   %also when it was written in the extended mode
 zUser = mda_zeroForce(H, 1, 40, [5 20]);                             %a zero force entered by the user stays as it is
 okZ = okZ && all(abs(zUser - 40) < 1e-12);
-fprintf('zero force and the output mode of the Offset entry: %s\n', passStr(okZ));
+fprintf('zero force and the unit of the Offset entry: %s\n', passStr(okZ));
 end
 
 
@@ -344,10 +353,11 @@ function okD = signalTest()
 % as test_sensor_value_at_the_limits in py/tests/test_mda.py (2026-11-11, Tom's rule): yellow M once the sensor value
 % of the contractions passes the first limit of its characteristic (mode 0: 60 % of the slope near the rest position;
 % extended mode: a margin below the jump of the conversion), red L at the second. Old boards only, and the extended
-% mode reaches much further. Absolute sensor values of the peak decide, in the counts of the output mode, so the
-% Offset of the channel must not change the result, and the sign must not either. The diastolic value is not
-% compared: an empty chamber reads about -12000 to -18000 counts and the preload moves the wire up from there, so a
-% diastolic value of -13000 with the peak at +2000 is a normal recording (Tom, 2026-11-11).
+% mode reaches much further. The sensor value of the peak decides, with its sign and in the counts of the output
+% mode, so the Offset of the channel must not change the result. The limits are at the upper end of the travel only:
+% an empty chamber reads about -12000 to -18000 counts and preload and contraction move the wire up from there, so a
+% weak contraction far below zero and a diastolic value of -13000 with the peak at +2000 are normal recordings (Tom,
+% 2026-11-11; the example recordings of the repository sit at -13100 with their peak at -11000).
 okD = true;
 %  peak  diastole   cal  rep %   ext  Offset  'Calibration'  code  value   comment
 cases = { 5000,   500, 1000,    2, false, -20000,  true,  '',      5000;
@@ -355,9 +365,9 @@ cases = { 5000,   500, 1000,    2, false, -20000,  true,  '',      5000;
          15000,  1500, 1000,    2, false, -20000,  true,  'L',    15000;
          15000,  1500, 1000,    2, false,   3000,  true,  'L',    15000;      %the Offset is irrelevant
          15000,  1500, 1000,    2, false,      0,  true,  'L',    15000;      %no Offset either
-        -15000, -1500, 1000,    2, false, -20000,  true,  'L',   -15000;      %the other direction
-        -13000,-14500, 1000,    2, false, -20000,  true,  'M',   -13000;      %barely contracting, low on the curve
-          2000,-13000, 1000,    2, false, -20000,  true,  '',      2000;      %normal preload: not the diastole
+        -15000,-16500, 1000,    2, false, -17000,  true,  '',    -15000;      %weak slice in a new chamber: normal
+        -11000,-13000, 1000,    2, false, -13100,  true,  '',    -11000;      %as the example recordings: normal
+          2000,-13000, 1000,    2, false, -15000,  true,  '',      2000;      %normal preload: not the diastole
          15000,  1500, 1000,    2,  true,  -8000,  true,  '',     15000;      %the extended mode reaches further
          19000,  1900, 1000,    2,  true,  -8000,  true,  'M',    19000;
          21000,  2100, 1000,    2,  true,  -8000,  true,  'L',    21000;
@@ -367,7 +377,7 @@ cases = { 5000,   500, 1000,    2, false, -20000,  true,  '',      5000;
          15000,  1500, 1000,    2, false, -20000,  false, 'L',    15000};     %no 'Calibration' line: 1000
 for i = 1:size(cases, 1)
     [pk, dia, cal, rep, ext, off, calLine, want, wantAU] = cases{i,:};
-    [S, C, E] = signalTables(pk, dia, cal, rep, ext, off, calLine);
+    [S, C, E] = signalTables(pk, dia, cal, rep, ext, off, calLine, '10e');
     R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), ...
         mda_report('defaults'), E);
     got = R.flags{1};
@@ -379,7 +389,7 @@ for i = 1:size(cases, 1)
     end
     okD = okD && okCase;
 end
-[S, C, E] = signalTables(15000, 1500, 1000, 2, false, -20000, true);     %zeroForce from another calibration
+[S, C, E] = signalTables(15000, 1500, 1000, 2, false, -20000, true, '10e');  %zeroForce: another calibration
 S.zeroForce = 3 * S.zeroForce;
 R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), mda_report('defaults'), E);
 okD = okD && isnan(R.peakSignal_AU(1)) && ~any(R.flags{1} == 'L');
@@ -392,37 +402,46 @@ function okO = offsetRangeTest()
 % position of a chamber lies outside the range of a chamber in good order, which means a worn or misplaced spring
 % wire (or a channel last zeroed in another output mode). The ranges scale with the factor of the output mode.
 okO = true;
-%  Offset  repeated %  extended  expected code
-cases = {-15000,     2,  false,  '';          %old board, normal
-          -2000,     2,  false,  'W';         %hardly any travel left
-         -19000,     2,  false,  'W';         %the other end: wire misplaced
-          -4500,     2,   true,  '';          %old board, extended mode: a third of the range
-         -15000,     2,   true,  'W';         %mode 0 value in the extended mode: stale Offset
-         -15000,    48,  false,  '';          %MMC5983, normal
-          -3000,    48,  false,  'W';
-          -7000,    48,   true,  '';          %MMC5983, extended mode: half of the range
-         -15000,    28,  false,  ''};         %board unknown: no range, no flag
+%  Offset  repeated %  extended  version  normalized  code
+cases = {-15000,     2,  false,  '10e',  -15000,  '';     %old board, normal
+          -2000,     2,  false,  '10e',   -2000,  'W';    %hardly any travel left
+         -19000,     2,  false,  '10e',  -19000,  'W';    %the other end: wire misplaced
+         -15000,     2,   true,  '10e',  -15000,  '';     %10e: the line is normalized, so the same range holds
+          -4500,     2,   true,  '10e',   -4500,  '';     %a used chamber, still inside
+          -4500,     2,   true,  '10d',  -14850,  '';     %10d: raw value of the mode, x 3.3
+           -500,     2,   true,  '10d',   -1650,  'W';    %10d, worn chamber: x 3.3 is still outside
+         -15000,    48,  false,  '10e',  -15000,  '';     %MMC5983, normal
+          -3000,    48,  false,  '10e',   -3000,  'W';    %outside -21000 to -5000
+          -6000,    48,   true,  '10d',  -19800,  '';     %10d, MMC5983 extended: x 3.3, inside
+          -7000,    48,   true,  '10d',  -23100,  'W';    %x 3.3, outside (the reader's factor is 3.3 so far)
+         -15000,    28,  false,  '10e',  -15000,  ''};    %board unknown: no range, no flag
 for i = 1:size(cases, 1)
-    [off, rep, ext, want] = cases{i,:};
-    [S, C, E] = signalTables(5000, 500, 1000, rep, ext, off, true);
+    [off, rep, ext, ver, wantAU, want] = cases{i,:};
+    [S, C, E] = signalTables(5000, 500, 1000, rep, ext, off, true, ver);
     R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), ...
         mda_report('defaults'), E);
     got = R.flags{1};
-    okCase = abs(R.offset_AU(1) - off) < 1e-6 && isequal(any(got == 'W'), strcmp(want, 'W'));
+    okCase = abs(R.offset_AU(1) - wantAU) < 1e-6 && isequal(any(got == 'W'), strcmp(want, 'W'));
     if ~okCase
-        fprintf('   case %d: offset %g, flags ''%s'' (expected ''%s'')\n', i, R.offset_AU(1), got, want);
+        fprintf('   case %d: offset %g (expected %g), flags ''%s'' (expected ''%s'')\n', i, ...
+            R.offset_AU(1), wantAU, got, want);
     end
     okO = okO && okCase;
 end
-[S, C, E] = signalTables(5000, 500, 1000, 2, false, -2000, true);        %two entries: the last one counts
+[S, C, E] = signalTables(5000, 500, 1000, 2, false, -2000, true, '10e');  %two entries: the last one counts
 E = [table({'Offset'}, {'-15000'}, 0, 1, 'VariableNames', {'code', 'text', 't_file', 'channel'}); E];
 R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), mda_report('defaults'), E);
 okO = okO && R.offset_AU(1) == -2000 && any(R.flags{1} == 'W');
+[S, C, E] = signalTables(5000, 500, 1000, 2, false, -15000, true, '10e');  %a programInfo line without text (real logs)
+E.text = string(E.text);
+E = [table({'programInfo'}, string(missing), 0, 0, 'VariableNames', {'code', 'text', 't_file', 'channel'}); E];
+R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), mda_report('defaults'), E);
+okO = okO && R.offset_AU(1) == -15000 && isempty(R.flags{1});
 fprintf('zero position of the chamber (flag W): %s\n', passStr(okO));
 end
 
 
-function [S, C, E] = signalTables(peakAU, diaAU, calibration, repeated, extended, offset, calLine)
+function [S, C, E] = signalTables(peakAU, diaAU, calibration, repeated, extended, offset, calLine, version)
 % one channel whose included stimulated contractions reach the absolute sensor value peakAU, with their diastolic
 % value at diaAU, both in the counts of the output mode. The tables hold what the reader delivers: uN = AU * k,
 % k = 1000 / calibration times the factor of the extended sensor mode (3.3), and zeroForce = offset * 1000 /
@@ -439,6 +458,10 @@ S = table(1, 0, 120, 100, 100, 0, 0, 0, 100, amp, 0.05, zero, repeated, 'Variabl
     {'channel', 'from', 'to', 'nDetected', 'nStimuli', 'nMissedBeats', 'nExtraBeats', 'nUncertain', ...
     'nContractions', 'amplitude_mean', 'amplitude_CV', 'zeroForce', 'repeatedSamples_percent'});
 E = table({'Offset'}, {sprintf('%g', offset)}, 0, 1, 'VariableNames', {'code', 'text', 't_file', 'channel'});
+if nargin >= 8 && ~isempty(version)                %10e --> 2.2.9811 (Offset normalized), 10d --> 2.2.9810
+    if strcmp(version, '10e'), vt = 'Version 2.2.9811.14999'; else, vt = 'Version 2.2.9810.33271'; end
+    E = [E; table({'programInfo'}, {vt}, 0, 0, 'VariableNames', {'code', 'text', 't_file', 'channel'})];
+end
 if calLine
     E = [E; table({'Calibration'}, {sprintf('%g', calibration)}, 0, 1, 'VariableNames', ...
         {'code', 'text', 't_file', 'channel'})];
