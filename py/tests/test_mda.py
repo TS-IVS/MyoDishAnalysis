@@ -2011,30 +2011,6 @@ def test_peak_at_measurement_limit():
     assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]
 
 
-def _deflection_tables(deflection_AU, calibration=1000.0, offset=-20000.0, repeated=2.0, extended=False):
-    # one channel whose contractions reach deflection_AU counts of the controller's output mode from the rest
-    # position (the Offset is in counts of mode 0). The tables hold what the reader delivers: uN = AU * k,
-    # k = 1000/cal times the factor of the extended sensor mode (3.3), while the zero force follows from the Offset
-    # without that factor, because the Offset is in the counts of mode 0 (zero_force)
-    f = 3.3 if extended else 1.0
-    k = f * 1000.0 / calibration                     # data: counts of the output mode --> uN
-    zero = offset * 1000.0 / calibration             # zero force (uN) of the channel
-    rest = offset / f                                # rest value in the counts of the output mode
-    raw_dia = rest + 0.1 * deflection_AU
-    raw_peak = rest + deflection_AU
-    C = pd.DataFrame({"channel": 1, "beatType": "stimulated", "uncertain": 0, "included": 1,
-                      "amplitude": (raw_peak - raw_dia) * k, "diastolicForce": raw_dia * k - zero,
-                      "diastolicSignal": raw_dia * k, "stimToOnset": 0.04}, index=range(60))
-    S = pd.DataFrame([{"channel": 1, "from": 0.0, "to": 120.0, "nDetected": 100, "nStimuli": 100, "nMissedBeats": 0,
-                       "nExtraBeats": 0, "nUncertain": 0, "nContractions": 100,
-                       "amplitude_mean": (raw_peak - raw_dia) * k, "amplitude_CV": 0.05,
-                       "zeroForce": zero, "repeatedSamples_percent": repeated}])
-    rows = [{"code": "Offset", "text": str(offset), "t_file": 0.0, "channel": 1}]
-    if extended:
-        rows.append({"code": "Event", "text": "extended sensor mode on", "t_file": 0.0, "channel": 0})
-    return S, C, pd.DataFrame(rows)
-
-
 def test_zero_force_with_the_extended_sensor_mode():
     # 2026-11-11: the zero force of a channel must not change when the extended sensor mode is switched on. The
     # Offset of the log is in the counts of mode 0, because the control software subtracts it after the factor of the
@@ -2057,51 +2033,84 @@ def test_zero_force_with_the_extended_sensor_mode():
     assert z[0] == pytest.approx(40.0) and z[1] == pytest.approx(40.0)
 
 
-def test_deflection_of_the_sensor_curve():
-    # 2026-11-11 (Tom's rule): yellow M once the deflection passes the first limit of the sensor curve (mode 0: 60 %
-    # of the slope near the rest position; extended mode: a margin below the jump of the conversion), red L at the
-    # second. Old boards only. The deflection is in the counts the controller sends in its own output mode, so the
-    # same number means a much larger travel in the extended mode.
+def _signal_tables(peak_AU, dia_AU, calibration=1000.0, repeated=2.0, extended=False, offset=-20000.0,
+                   cal_line=True):
+    # one channel whose included stimulated contractions reach the absolute sensor value peak_AU, with their
+    # diastolic value at dia_AU, both in the counts of the output mode. The tables hold what the reader delivers:
+    # uN = AU * k, k = 1000/cal times the factor of the extended sensor mode (3.3), and zeroForce = offset * 1000/cal,
+    # because the Offset of the log is in the counts of mode 0 (zero_force)
+    f = 3.3 if extended else 1.0
+    k = f * 1000.0 / calibration
+    zero = offset * 1000.0 / calibration
+    amp = (peak_AU - dia_AU) * k
+    dsig = dia_AU * k
+    C = pd.DataFrame({"channel": 1, "beatType": "stimulated", "uncertain": 0, "included": 1,
+                      "amplitude": amp, "diastolicForce": dsig - zero, "diastolicSignal": dsig,
+                      "stimToOnset": 0.04}, index=range(60))
+    S = pd.DataFrame([{"channel": 1, "from": 0.0, "to": 120.0, "nDetected": 100, "nStimuli": 100, "nMissedBeats": 0,
+                       "nExtraBeats": 0, "nUncertain": 0, "nContractions": 100, "amplitude_mean": amp,
+                       "amplitude_CV": 0.05, "zeroForce": zero, "repeatedSamples_percent": repeated}])
+    rows = [{"code": "Offset", "text": "%g" % offset, "t_file": 0.0, "channel": 1}]
+    if cal_line:
+        rows.append({"code": "Calibration", "text": "%g" % calibration, "t_file": 0.0, "channel": 1})
+    if extended:
+        rows.append({"code": "Event", "text": "extended sensor mode on", "t_file": 0.0, "channel": 0})
+    return S, C, pd.DataFrame(rows)
+
+
+def test_sensor_value_at_the_limits():
+    # 2026-11-11 (Tom's rule): yellow M once the sensor value of the contractions passes the first limit of its
+    # characteristic (mode 0: 60 % of the slope near the rest position; extended mode: a margin below the jump of
+    # the conversion), red L at the second. Old boards only. Absolute sensor values in the counts of the output mode
+    # decide, so neither the Offset of the channel nor the sign of the signal may change the result.
     from myodish_analysis.report import report_flags
-    S, C, E = _deflection_tables(5000)                       # far inside the straight part
-    R = report_flags(S, C, {1: "ok"}, events=E)
-    assert R.loc[0, "deflection_AU"] == pytest.approx(5000, rel=1e-9) and R.loc[0, "sensorBoard"] == "old"
-    assert "M" not in R.loc[0, "flags"] and "L" not in R.loc[0, "flags"]
 
-    S, C, E = _deflection_tables(12000)                      # past 10 900, before 14 300
-    R = report_flags(S, C, {1: "ok"}, events=E)
-    assert "M" in R.loc[0, "flags"] and "L" not in R.loc[0, "flags"] and R.loc[0, "level"] == "quality"
-    assert "60 %" in R.loc[0, "yellow"] and "mode 0" in R.loc[0, "yellow"]
+    def flags(**kw):
+        S, C, E = _signal_tables(**kw)
+        return report_flags(S, C, {1: "ok"}, events=E).loc[0]
 
-    S, C, E = _deflection_tables(15000)                      # past 14 300
-    R = report_flags(S, C, {1: "ok"}, events=E)
-    assert "L" in R.loc[0, "flags"] and "M" not in R.loc[0, "flags"] and R.loc[0, "level"] == "check"
-    assert "20 %" in R.loc[0, "red"]
+    r = flags(peak_AU=5000, dia_AU=500)                      # far inside the straight part
+    assert r["peakSignal_AU"] == pytest.approx(5000, rel=1e-9) and r["sensorBoard"] == "old"
+    assert "M" not in r["flags"] and "L" not in r["flags"]
 
-    S, C, E = _deflection_tables(15000, extended=True)       # the extended mode reaches much further
-    R = report_flags(S, C, {1: "ok"}, events=E)
-    assert "M" not in R.loc[0, "flags"] and "L" not in R.loc[0, "flags"]
-    S, C, E = _deflection_tables(19000, extended=True)       # past 18 000
-    R = report_flags(S, C, {1: "ok"}, events=E)
-    assert R.loc[0, "deflection_AU"] == pytest.approx(19000, rel=1e-9)   # counts of the extended mode, not x 3.3
-    assert "M" in R.loc[0, "flags"] and "extended sensor mode" in R.loc[0, "yellow"]
-    assert "jump" in R.loc[0, "yellow"] and "60 %" not in R.loc[0, "yellow"]
-    S, C, E = _deflection_tables(21000, extended=True)       # past 20 000, close to the jump
-    R = report_flags(S, C, {1: "ok"}, events=E)
-    assert "L" in R.loc[0, "flags"] and "jump" in R.loc[0, "red"]
+    r = flags(peak_AU=12000, dia_AU=1200)                    # past 10 900, before 14 300
+    assert "M" in r["flags"] and "L" not in r["flags"] and r["level"] == "quality"
+    assert "60 %" in r["yellow"] and "mode 0" in r["yellow"]
 
-    S, C, E = _deflection_tables(15000, repeated=48.0)       # MMC5983: the rule does not apply
-    R = report_flags(S, C, {1: "ok"}, events=E)
-    assert R.loc[0, "sensorBoard"] == "MMC5983" and "M" not in R.loc[0, "flags"] and "L" not in R.loc[0, "flags"]
+    r = flags(peak_AU=15000, dia_AU=1500)                    # past 14 300
+    assert "L" in r["flags"] and "M" not in r["flags"] and r["level"] == "check" and "20 %" in r["red"]
 
-    S, C, E = _deflection_tables(15000, repeated=28.0)       # board unknown: no flag
-    R = report_flags(S, C, {1: "ok"}, events=E)
-    assert R.loc[0, "sensorBoard"] == "" and "M" not in R.loc[0, "flags"]
+    for off in (3000.0, 0.0):                                # the Offset does not enter the criterion
+        r = flags(peak_AU=15000, dia_AU=1500, offset=off)
+        assert r["peakSignal_AU"] == pytest.approx(15000, rel=1e-9) and "L" in r["flags"]
 
-    S, C, E = _deflection_tables(15000, calibration=3000.0)  # another calibration: counts, not uN, decide
-    R = report_flags(S, C, {1: "ok"}, events=E)
-    assert R.loc[0, "deflection_AU"] == pytest.approx(15000, rel=1e-9) and "L" in R.loc[0, "flags"]
+    r = flags(peak_AU=-15000, dia_AU=-1500)                  # the other direction
+    assert r["peakSignal_AU"] == pytest.approx(-15000, rel=1e-9) and "L" in r["flags"]
 
-    S, C, E = _deflection_tables(15000)                      # without the Offset entry: no deflection, no flag
-    R = report_flags(S, C, {1: "ok"}, events=E[E["code"] != "Offset"])
-    assert math.isnan(R.loc[0, "deflection_AU"]) and "L" not in R.loc[0, "flags"]
+    r = flags(peak_AU=-2000, dia_AU=-15000)                  # the diastolic value lies further from zero
+    assert r["peakSignal_AU"] == pytest.approx(-15000, rel=1e-9) and "L" in r["flags"]
+
+    r = flags(peak_AU=15000, dia_AU=1500, extended=True, offset=-8000.0)   # reaches much further
+    assert r["peakSignal_AU"] == pytest.approx(15000, rel=1e-9)
+    assert "M" not in r["flags"] and "L" not in r["flags"]
+    r = flags(peak_AU=19000, dia_AU=1900, extended=True, offset=-8000.0)   # past 18 000
+    assert "M" in r["flags"] and "extended sensor mode" in r["yellow"]
+    assert "jump" in r["yellow"] and "60 %" not in r["yellow"]
+    r = flags(peak_AU=21000, dia_AU=2100, extended=True, offset=-8000.0)   # past 20 000, close to the jump
+    assert "L" in r["flags"] and "jump" in r["red"]
+
+    r = flags(peak_AU=15000, dia_AU=1500, repeated=48.0)     # MMC5983: the rule does not apply
+    assert r["sensorBoard"] == "MMC5983" and "M" not in r["flags"] and "L" not in r["flags"]
+    r = flags(peak_AU=15000, dia_AU=1500, repeated=28.0)     # board unknown: value reported, no flag
+    assert r["sensorBoard"] == "" and r["peakSignal_AU"] == pytest.approx(15000, rel=1e-9)
+    assert "M" not in r["flags"] and "L" not in r["flags"]
+
+    r = flags(peak_AU=15000, dia_AU=1500, calibration=3000.0)   # counts decide, not uN
+    assert r["peakSignal_AU"] == pytest.approx(15000, rel=1e-9) and "L" in r["flags"]
+    r = flags(peak_AU=15000, dia_AU=1500, cal_line=False)       # no 'Calibration' line: 1000 AU per mN
+    assert r["peakSignal_AU"] == pytest.approx(15000, rel=1e-9) and "L" in r["flags"]
+
+    S, C, E = _signal_tables(15000, 1500)                    # zeroForce from another calibration: no statement
+    S["zeroForce"] = 3 * S["zeroForce"]
+    r = report_flags(S, C, {1: "ok"}, events=E).loc[0]
+    assert math.isnan(r["peakSignal_AU"]) and "L" not in r["flags"]

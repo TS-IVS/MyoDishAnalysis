@@ -132,15 +132,20 @@ MATLAB and Python versions have the same version number and give the same result
   0.85 mm and then jumps by about 28 000 counts into the negative. The MMC5983 boards stay straight over the whole
   travel a slice produces; there the fold of the conversion limits, not the curve.
   - **Yellow M** at the first limit, **red L** at the second. In mode 0 these are the points with 60 % and 20 % of
-    the slope near the rest position; in the extended mode, where the curve stays straight, a margin of 7 % and 2 %
-    below the earliest jump. Limits from Tom's pull curves of six old boards and the SV2 chambers of April 2026:
-    `deflectionMode0` 10900 / 14300, `deflectionMode2000` 18000 / 20000. The second level is orange in the control
-    software, which uses the same two numbers in its live warning.
-  - New column `deflection_AU` of the flags table: median of (amplitude + diastolicForce) of the included stimulated
-    contractions from the rest position, **in the counts the controller itself sends in its output mode**
-    (mode 0 `raw - Offset`, extended mode `raw - Offset / 3.3`, because the `Offset` of the log is in the counts of
-    mode 0). The calibration factor comes from the summary's `zeroForce` and the channel's `Offset` entry of the log,
-    so no new result column is needed.
+    the slope near the rest position (medians of the six sensors 11600 and 14200, turning point 15200); in the
+    extended mode, where the curve stays straight, 13 % and 3 % below the earliest jump (20698). Limits from Tom's
+    pull curves of six old boards and the SV2 chambers of April 2026: `signalMode0` 10900 / 14300, `signalMode2000`
+    18000 / 20000. The second level is orange in the control software, which uses the same two numbers in its live
+    warning.
+  - New column `peakSignal_AU` of the flags table: median over the included stimulated contractions of
+    (amplitude + diastolicSignal), i.e. of the signal at the peak, **in the counts the controller itself sends in
+    its output mode**; the diastolic value is taken instead when it lies further from zero. These are **absolute
+    sensor values, not deflections from the rest position** (Tom, 2026-11-11): the characteristic is a function of
+    the position of the magnet, so a bent spring wire that already rests at +3000 reaches the limit at the same
+    sensor value as a straight one, and the `Offset` of the channel does not enter the criterion. The calibration
+    factor comes from the channel's `Calibration` entry of the log; if the `Offset` and the summary's `zeroForce`
+    imply a different factor (results made with `calibration`,`none` or with a zero force entered by the user),
+    `peakSignal_AU` is NaN and nothing is flagged. No new result column is needed.
   - The board type comes from the share of repeated raw values of the channel (summary column
     `repeatedSamples_percent`, < 20 % old board, > 35 % MMC5983), the output mode from the log line
     `extended sensor mode on`. Without either, `deflection_AU` is NaN and nothing is flagged. The `sensorMode` event

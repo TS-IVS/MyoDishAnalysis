@@ -302,8 +302,8 @@ ok = ok && okP;
 % peak force at the measurement limit (red flag L), 2026-11-11
 okL = peakLimitTest();
 ok = ok && okL;
-% deflection of the sensor past the limits of its curve (flags M and L), 2026-11-11
-okD = deflectionTest();
+% the sensor value of the contractions at the limits of its characteristic (flags M and L), 2026-11-11
+okD = signalTest();
 ok = ok && okD;
 % the zero force of a channel does not change with the output mode, 2026-11-11
 okZ = zeroForceExtendedTest();
@@ -334,64 +334,71 @@ fprintf('zero force with the extended sensor mode: %s\n', passStr(okZ));
 end
 
 
-function okD = deflectionTest()
-% as test_deflection_of_the_sensor_curve in py/tests/test_mda.py (2026-11-11, Tom's rule): yellow M once the
-% deflection of the sensor passes the first limit of its curve (mode 0: 60 % of the slope near the rest position;
+function okD = signalTest()
+% as test_sensor_value_at_the_limits in py/tests/test_mda.py (2026-11-11, Tom's rule): yellow M once the sensor value
+% of the contractions passes the first limit of its characteristic (mode 0: 60 % of the slope near the rest position;
 % extended mode: a margin below the jump of the conversion), red L at the second. Old boards only, and the extended
-% sensor mode reaches much further. The deflection is in the counts the controller sends in its own output mode, so
-% the same deflAU means a larger travel in the extended mode.
+% mode reaches much further. Absolute sensor values decide, in the counts of the output mode, so the Offset of the
+% channel must not change the result, and the sign must not either.
 okD = true;
-%        deflection  calibration  repeated %  extended  expected code  expected deflection
-cases = {      5000,        1000,          2,    false,          '',             5000;
-              12000,        1000,          2,    false,         'M',            12000;
-              15000,        1000,          2,    false,         'L',            15000;
-              15000,        1000,          2,     true,          '',            15000;
-              19000,        1000,          2,     true,         'M',            19000;
-              21000,        1000,          2,     true,         'L',            21000;
-              15000,        1000,         48,    false,          '',            15000;      %MMC5983: rule off
-              15000,        1000,         28,    false,          '',            15000;      %board unknown
-              15000,        3000,          2,    false,         'L',            15000};     %counts, not uN, decide
+%  peak  diastole   cal  rep %   ext  Offset  'Calibration'  code  value   comment
+cases = { 5000,   500, 1000,    2, false, -20000,  true,  '',      5000;
+         12000,  1200, 1000,    2, false, -20000,  true,  'M',    12000;
+         15000,  1500, 1000,    2, false, -20000,  true,  'L',    15000;
+         15000,  1500, 1000,    2, false,   3000,  true,  'L',    15000;      %the Offset is irrelevant
+         15000,  1500, 1000,    2, false,      0,  true,  'L',    15000;      %no Offset either
+        -15000, -1500, 1000,    2, false, -20000,  true,  'L',   -15000;      %the other direction
+         -2000,-15000, 1000,    2, false, -20000,  true,  'L',   -15000;      %diastole further out
+         15000,  1500, 1000,    2,  true,  -8000,  true,  '',     15000;      %the extended mode reaches further
+         19000,  1900, 1000,    2,  true,  -8000,  true,  'M',    19000;
+         21000,  2100, 1000,    2,  true,  -8000,  true,  'L',    21000;
+         15000,  1500, 1000,   48, false, -20000,  true,  '',     15000;      %MMC5983: the rule is off
+         15000,  1500, 1000,   28, false, -20000,  true,  '',     15000;      %board unknown
+         15000,  1500, 3000,    2, false, -20000,  true,  'L',    15000;      %counts decide, not uN
+         15000,  1500, 1000,    2, false, -20000,  false, 'L',    15000};     %no 'Calibration' line: 1000
 for i = 1:size(cases, 1)
-    [defl, cal, rep, ext, want, wantAU] = cases{i,:};
-    [S, C, E] = deflectionTables(defl, cal, rep, ext);
+    [pk, dia, cal, rep, ext, off, calLine, want, wantAU] = cases{i,:};
+    [S, C, E] = signalTables(pk, dia, cal, rep, ext, off, calLine);
     R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), ...
         mda_report('defaults'), E);
     got = R.flags{1};
-    okCase = abs(R.deflection_AU(1) - wantAU) < 1e-6;
+    okCase = abs(R.peakSignal_AU(1) - wantAU) < 1e-6;
     okCase = okCase && isequal(any(got == 'M'), strcmp(want, 'M')) && isequal(any(got == 'L'), strcmp(want, 'L'));
     if ~okCase
-        fprintf('   case %d: deflection %g (expected %g), flags ''%s'' (expected ''%s'')\n', i, ...
-            R.deflection_AU(1), wantAU, got, want);
+        fprintf('   case %d: sensor value %g (expected %g), flags ''%s'' (expected ''%s'')\n', i, ...
+            R.peakSignal_AU(1), wantAU, got, want);
     end
     okD = okD && okCase;
 end
-[S, C, E] = deflectionTables(15000, 1000, 2, false);                 %without the Offset entry: no deflection
-E = E(~strcmpi(E.code, 'Offset'), :);
+[S, C, E] = signalTables(15000, 1500, 1000, 2, false, -20000, true);     %zeroForce from another calibration
+S.zeroForce = 3 * S.zeroForce;
 R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), mda_report('defaults'), E);
-okD = okD && isnan(R.deflection_AU(1)) && ~any(R.flags{1} == 'L');
-fprintf('deflection of the sensor curve (flags M, L): %s\n', passStr(okD));
+okD = okD && isnan(R.peakSignal_AU(1)) && ~any(R.flags{1} == 'L');
+fprintf('sensor value at the limits (flags M, L): %s\n', passStr(okD));
 end
 
 
-function [S, C, E] = deflectionTables(deflAU, calibration, repeated, extended)
-% one channel whose contractions reach deflAU counts of the controller's output mode from the rest position (Offset
-% -20000, counts of mode 0). The tables hold what the reader delivers: uN = AU * k, k = 1000 / calibration times the
-% factor of the extended sensor mode (3.3), while the zero force follows from the Offset without that factor, because
-% the Offset is in the counts of mode 0 (mda_zeroForce).
-off = -20000;
+function [S, C, E] = signalTables(peakAU, diaAU, calibration, repeated, extended, offset, calLine)
+% one channel whose included stimulated contractions reach the absolute sensor value peakAU, with their diastolic
+% value at diaAU, both in the counts of the output mode. The tables hold what the reader delivers: uN = AU * k,
+% k = 1000 / calibration times the factor of the extended sensor mode (3.3), and zeroForce = offset * 1000 /
+% calibration, because the Offset of the log is in the counts of mode 0 (mda_zeroForce).
 f = 1; if extended, f = 3.3; end
-k = f * 1000 / calibration;                        %data: counts of the output mode --> uN
-zero = off * 1000 / calibration;                   %zero force (uN) of the channel
-rest = off / f;                                    %rest value in the counts of the output mode
-rawDia = rest + 0.1 * deflAU; rawPeak = rest + deflAU;
+k = f * 1000 / calibration;
+zero = offset * 1000 / calibration;
+amp = (peakAU - diaAU) * k; dsig = diaAU * k;
 n = 60;
-C = table(ones(n,1), repmat({'stimulated'}, n, 1), zeros(n,1), ones(n,1), repmat((rawPeak - rawDia) * k, n, 1), ...
-    repmat(rawDia * k - zero, n, 1), repmat(rawDia * k, n, 1), 0.04 * ones(n,1), 'VariableNames', ...
+C = table(ones(n,1), repmat({'stimulated'}, n, 1), zeros(n,1), ones(n,1), repmat(amp, n, 1), ...
+    repmat(dsig - zero, n, 1), repmat(dsig, n, 1), 0.04 * ones(n,1), 'VariableNames', ...
     {'channel', 'beatType', 'uncertain', 'included', 'amplitude', 'diastolicForce', 'diastolicSignal', 'stimToOnset'});
-S = table(1, 0, 120, 100, 100, 0, 0, 0, 100, (rawPeak - rawDia) * k, 0.05, zero, repeated, 'VariableNames', ...
+S = table(1, 0, 120, 100, 100, 0, 0, 0, 100, amp, 0.05, zero, repeated, 'VariableNames', ...
     {'channel', 'from', 'to', 'nDetected', 'nStimuli', 'nMissedBeats', 'nExtraBeats', 'nUncertain', ...
     'nContractions', 'amplitude_mean', 'amplitude_CV', 'zeroForce', 'repeatedSamples_percent'});
-E = table({'Offset'}, {sprintf('%g', off)}, 0, 1, 'VariableNames', {'code', 'text', 't_file', 'channel'});
+E = table({'Offset'}, {sprintf('%g', offset)}, 0, 1, 'VariableNames', {'code', 'text', 't_file', 'channel'});
+if calLine
+    E = [E; table({'Calibration'}, {sprintf('%g', calibration)}, 0, 1, 'VariableNames', ...
+        {'code', 'text', 't_file', 'channel'})];
+end
 if extended
     E = [E; table({'Event'}, {'extended sensor mode on'}, 0, 0, 'VariableNames', ...
         {'code', 'text', 't_file', 'channel'})];
