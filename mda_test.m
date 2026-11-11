@@ -338,8 +338,10 @@ function okD = signalTest()
 % as test_sensor_value_at_the_limits in py/tests/test_mda.py (2026-11-11, Tom's rule): yellow M once the sensor value
 % of the contractions passes the first limit of its characteristic (mode 0: 60 % of the slope near the rest position;
 % extended mode: a margin below the jump of the conversion), red L at the second. Old boards only, and the extended
-% mode reaches much further. Absolute sensor values decide, in the counts of the output mode, so the Offset of the
-% channel must not change the result, and the sign must not either.
+% mode reaches much further. Absolute sensor values of the peak decide, in the counts of the output mode, so the
+% Offset of the channel must not change the result, and the sign must not either. The diastolic value is not
+% compared: an empty chamber reads about -12000 to -18000 counts and the preload moves the wire up from there, so a
+% diastolic value of -13000 with the peak at +2000 is a normal recording (Tom, 2026-11-11).
 okD = true;
 %  peak  diastole   cal  rep %   ext  Offset  'Calibration'  code  value   comment
 cases = { 5000,   500, 1000,    2, false, -20000,  true,  '',      5000;
@@ -348,7 +350,8 @@ cases = { 5000,   500, 1000,    2, false, -20000,  true,  '',      5000;
          15000,  1500, 1000,    2, false,   3000,  true,  'L',    15000;      %the Offset is irrelevant
          15000,  1500, 1000,    2, false,      0,  true,  'L',    15000;      %no Offset either
         -15000, -1500, 1000,    2, false, -20000,  true,  'L',   -15000;      %the other direction
-         -2000,-15000, 1000,    2, false, -20000,  true,  'L',   -15000;      %diastole further out
+        -13000,-14500, 1000,    2, false, -20000,  true,  'M',   -13000;      %barely contracting, low on the curve
+          2000,-13000, 1000,    2, false, -20000,  true,  '',      2000;      %normal preload: not the diastole
          15000,  1500, 1000,    2,  true,  -8000,  true,  '',     15000;      %the extended mode reaches further
          19000,  1900, 1000,    2,  true,  -8000,  true,  'M',    19000;
          21000,  2100, 1000,    2,  true,  -8000,  true,  'L',    21000;

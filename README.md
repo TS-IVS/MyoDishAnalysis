@@ -1261,10 +1261,11 @@ thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
 * **slice quality** (yellow: possibly poor biological quality, also e.g. an effect of a treatment; the user
   decides): **M** the sensor value of the contractions has passed the first limit of its characteristic (2026-11-11),
   so the amplitude of these contractions is too small; column `peakSignal_AU` (median of amplitude + diastolic signal
-  of the included stimulated contractions, in the counts the controller itself sends in its output mode; the
-  diastolic value when that lies further from zero). Absolute sensor values, not deflections from rest: the
-  characteristic depends on where the magnet is, so a bent spring wire resting at +3000 reaches the limit at the same
-  value as a straight one. Limits per board type and output mode: old boards (FXOS8700) 10900 counts in mode 0 (60 %
+  of the included stimulated contractions, i.e. the signal at the peak, in the counts the controller itself sends in
+  its output mode). Absolute sensor values, not deflections from rest: the characteristic depends on where the magnet
+  is, so a bent spring wire resting at +3000 instead of the -12000 to -18000 of an empty chamber reaches the limit at
+  the same value, with that much less travel left. The diastolic value is not compared, since the preload moves the
+  wire up from the resting value into the straight part. Limits per board type and output mode: old boards (FXOS8700) 10900 counts in mode 0 (60 %
   of the slope near rest) and 18000 in the extended sensor mode (a margin below the jump of the conversion), red
   **L** at 14300 and 20000. Not applied to MMC5983 boards, whose curve stays straight over the whole travel a slice
   produces, nor when the board type is unknown. MDA marks this, it does not correct it. **C** capture < 90 %, **X** extra beats > 10 % (spontaneous activity; not shown with N), **A** amplitude

@@ -2061,8 +2061,10 @@ def _signal_tables(peak_AU, dia_AU, calibration=1000.0, repeated=2.0, extended=F
 def test_sensor_value_at_the_limits():
     # 2026-11-11 (Tom's rule): yellow M once the sensor value of the contractions passes the first limit of its
     # characteristic (mode 0: 60 % of the slope near the rest position; extended mode: a margin below the jump of
-    # the conversion), red L at the second. Old boards only. Absolute sensor values in the counts of the output mode
-    # decide, so neither the Offset of the channel nor the sign of the signal may change the result.
+    # the conversion), red L at the second. Old boards only. Absolute sensor values of the peak decide, in the counts
+    # of the output mode, so neither the Offset of the channel nor the sign of the signal may change the result. The
+    # diastolic value is not compared: an empty chamber reads about -12000 to -18000 counts and the preload moves the
+    # wire up from there, so a diastole of -13000 with the peak at +2000 is a normal recording (Tom, 2026-11-11).
     from myodish_analysis.report import report_flags
 
     def flags(**kw):
@@ -2087,8 +2089,12 @@ def test_sensor_value_at_the_limits():
     r = flags(peak_AU=-15000, dia_AU=-1500)                  # the other direction
     assert r["peakSignal_AU"] == pytest.approx(-15000, rel=1e-9) and "L" in r["flags"]
 
-    r = flags(peak_AU=-2000, dia_AU=-15000)                  # the diastolic value lies further from zero
-    assert r["peakSignal_AU"] == pytest.approx(-15000, rel=1e-9) and "L" in r["flags"]
+    r = flags(peak_AU=2000, dia_AU=-13000)                   # a normal preload: the diastole is not compared
+    assert r["peakSignal_AU"] == pytest.approx(2000, rel=1e-9)
+    assert "M" not in r["flags"] and "L" not in r["flags"]
+
+    r = flags(peak_AU=-13000, dia_AU=-14500)                 # barely contracting, low on the characteristic
+    assert r["peakSignal_AU"] == pytest.approx(-13000, rel=1e-9) and "M" in r["flags"]
 
     r = flags(peak_AU=15000, dia_AU=1500, extended=True, offset=-8000.0)   # reaches much further
     assert r["peakSignal_AU"] == pytest.approx(15000, rel=1e-9)

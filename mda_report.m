@@ -81,10 +81,11 @@ function varargout = mda_report(varargin)
 %     M  the sensor value of the contractions has passed the first limit of its characteristic (2026-11-11, Tom's
 %        rule): the amplitude of these contractions is too small, and the more so the further it goes. Column
 %        peakSignal_AU: median over the included stimulated contractions of (amplitude + diastolicSignal), i.e. of
-%        the signal at the peak, in the counts the controller itself sends in its output mode; the diastolic value is
-%        taken instead when it lies further from zero. Absolute values, not deflections from the rest position: the
-%        characteristic depends on where the magnet is, so a bent spring wire that already rests at +3000 reaches the
-%        limit at the same sensor value as a straight one. Limits from Tom's pull curves, per board type and output
+%        the signal at the peak of the contraction, in the counts the controller itself sends in its output mode.
+%        Absolute values, not deflections from the rest position: the characteristic depends on where the magnet is,
+%        so a bent spring wire that already rests at +3000 reaches the limit at the same sensor value as a straight
+%        one, with that much less travel left. The diastolic value is not compared: an empty chamber reads about
+%        -12000 to -18000 counts, and the preload moves the wire up from there into the straight part. Limits from Tom's pull curves, per board type and output
 %        mode: signalMode0 [10900 14300] = where the curve has only 60 % and 20 % of the slope it has near the rest
 %        position (medians of the six sensors 11600 and 14200, turning point 15200); signalMode2000 [18000 20000] =
 %        13 % and 3 % below the earliest jump of the conversion (20698), because that curve stays straight to the
@@ -213,12 +214,13 @@ end
 
 
 function [au, board, ext] = peakSignalAU(cc, s, channel, E, fl)
-% The sensor value the contractions reach, in the counts the controller itself sends in its output mode (2026-11-11,
-% Tom): median over the included stimulated contractions of (amplitude + diastolicSignal), i.e. of the signal at the
-% peak, divided by the calibration factor; the diastolic value is taken instead when it lies further from zero
-% (a bent spring wire can rest beyond the limit on the other side). This is an absolute value, not a deflection: the
-% 'Offset' of the channel does not enter it, because the characteristic depends on where the magnet is, not on where
-% the wire happens to rest without load.
+% The sensor value the contractions reach at their peak, in the counts the controller itself sends in its output mode
+% (2026-11-11, Tom): median over the included stimulated contractions of (amplitude + diastolicSignal), divided by
+% the calibration factor. This is an absolute value, not a deflection: the 'Offset' of the channel does not enter it,
+% because the characteristic depends on where the magnet is, not on where the wire rests without load. The peak is
+% the end of the travel that matters; the diastolic value legitimately sits in the lower, compressed part of the
+% characteristic (an empty chamber reads about -12000 to -18000 counts and the preload moves the wire up from there),
+% so it is not compared with the limits.
 % The calibration factor comes from the channel's 'Calibration' entry of the log (AU per mN, 1000 if there is none)
 % and, in the extended sensor mode, the factor of that mode. If the channel's 'Offset' and the summary's zeroForce
 % are both there, they must give the same factor (zeroForce = Offset x calibration); if they do not, the results were
@@ -255,8 +257,7 @@ if ~isempty(s) && height(s) > 0 && ismember('zeroForce', s.Properties.VariableNa
         if abs(kZero / k - 1) > 0.02, return; end
     end
 end
-pk = median(dia(ok) + amp(ok)) / k; dAU = median(dia(ok)) / k;
-if abs(dAU) > abs(pk), au = dAU; else, au = pk; end
+au = median(dia(ok) + amp(ok)) / k;
 end
 
 

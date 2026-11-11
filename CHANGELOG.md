@@ -138,11 +138,13 @@ MATLAB and Python versions have the same version number and give the same result
     18000 / 20000. The second level is orange in the control software, which uses the same two numbers in its live
     warning.
   - New column `peakSignal_AU` of the flags table: median over the included stimulated contractions of
-    (amplitude + diastolicSignal), i.e. of the signal at the peak, **in the counts the controller itself sends in
-    its output mode**; the diastolic value is taken instead when it lies further from zero. These are **absolute
-    sensor values, not deflections from the rest position** (Tom, 2026-11-11): the characteristic is a function of
-    the position of the magnet, so a bent spring wire that already rests at +3000 reaches the limit at the same
-    sensor value as a straight one, and the `Offset` of the channel does not enter the criterion. The calibration
+    (amplitude + diastolicSignal), i.e. of the signal at the peak of the contraction, **in the counts the controller
+    itself sends in its output mode**. These are **absolute sensor values, not deflections from the rest position**
+    (Tom, 2026-11-11): the characteristic is a function of the position of the magnet, so a bent spring wire that
+    already rests at +3000 instead of the -12000 to -18000 of an empty chamber reaches the limit at the same sensor
+    value, with that much less travel left, and the `Offset` of the channel does not enter the criterion. The
+    diastolic value is not compared with the limits: the preload moves the wire up from the resting value into the
+    straight part, so a diastolic value of -13000 with the peak at +2000 is a normal recording. The calibration
     factor comes from the channel's `Calibration` entry of the log; if the `Offset` and the summary's `zeroForce`
     imply a different factor (results made with `calibration`,`none` or with a zero force entered by the user),
     `peakSignal_AU` is NaN and nothing is flagged. No new result column is needed.
