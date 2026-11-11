@@ -8,8 +8,11 @@
 
 S          file facts / data from read_mdd (offsetLog, calibration, extended sensor mode)
 zero_user  zero force entered by the user (uN); None or NaN = 'Offset' entry of the channel in the log file (written
-           at the start of a recording, AU; 0 = not calibrated --> NaN). The log value is converted to uN like the
-           data (calibration_factor at the time of the entry).
+           at the start of a recording, AU; 0 = not calibrated --> NaN). The log value is converted to uN with the
+           calibration at the time of the entry, but without the factor of the extended sensor mode
+           (calibration_factor(..., with_sensor_mode=False)): the Offset is in the counts of mode 0, because the
+           control software subtracts it after the factor (force = (raw x factor - Offset) x calibration).
+           Otherwise the zero force of a channel would jump by that factor when the extended mode is switched on.
 z          zero force at the times t (NaN = unknown), src text ('user', 'log', 'unknown', ...)
 zeroT, zeroV  the step function (times, values)
 
@@ -49,7 +52,7 @@ def zero_force(S, channel, zero_user=None, t=None):
                 src = "log: not calibrated (0)"
             else:
                 zeroT = E[:, 0].copy()
-                zeroV = v * calibration_factor(S, channel, zeroT)
+                zeroV = v * calibration_factor(S, channel, zeroT, with_sensor_mode=False)   # mode 0 counts
                 src = "log"
     idx = np.zeros(t.shape, dtype=int)  # before the first entry: the first entry
     for j in range(1, zeroT.size):

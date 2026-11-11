@@ -58,11 +58,14 @@ Flags per channel (channels with a slice and at least min_beats (50) detected co
        protocol contractions stay more than 5 % of the amplitude below the steady peak: the channel was not in the
        same state during the protocols, so the comparison says nothing.
   slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
-    M  deflection of the sensor past the point where its curve has only 60 % of the slope it has near the rest
-       position (2026-11-11, Tom's rule): the amplitude of these contractions is too small, and the more so the
-       further the deflection goes. Column deflection_AU: median of (amplitude + diastolicForce) of the included
-       stimulated contractions, in sensor counts from the rest position. Limits per board type and output mode
-       (deflection_mode0 (10900, 14300), deflection_mode2000 (18000, 20000)); the second value is the red flag L.
+    M  deflection of the sensor past the first limit of its curve (2026-11-11, Tom's rule): the amplitude of these
+       contractions is too small, and the more so the further the deflection goes. Column deflection_AU: median of
+       (amplitude + diastolicForce) of the included stimulated contractions, from the rest position, in the counts
+       the controller itself sends in its output mode (mode 0: raw - Offset; extended mode: raw - Offset / 3.3,
+       because the Offset of the log is in the counts of mode 0). Limits per board type and output mode:
+       deflection_mode0 (10900, 14300) = the points where the curve has only 60 % and 20 % of the slope it has near
+       the rest position; deflection_mode2000 (18000, 20000) = a margin of 7 % and 2 % below the earliest jump of
+       the conversion (21 442), because that curve stays straight to the jump. The second value is the red flag L.
        Only for old sensor boards (FXOS8700): the curve of the MMC5983 boards stays straight over the whole travel a
        slice produces, and what limits them is the fold of the conversion, not the curve. The board follows from the
        share of repeated raw values of the channel (summary column repeatedSamples_percent), the mode from the log
@@ -104,7 +107,8 @@ import pandas as pd
 FLAG_DEFAULTS = dict(uncertain=25.0, irregular=15.0, artifact_share=5.0, artifact_ratio=3.0, extra=10.0, capture=90.0,
                      amplitude_change=30.0, amplitude=75.0, amplitude_cv=30.0, delay=0.15, min_beats=50,
                      stim_frequency=10.0, peak_headroom=0.15, min_protocol_beats=100, min_peak_amplitude=500.0,
-                     deflection_mode0=(10900.0, 14300.0), deflection_mode2000=(18000.0, 20000.0))
+                     deflection_mode0=(10900.0, 14300.0), deflection_mode2000=(18000.0, 20000.0),
+                     extended_sensor_factor=3.3)
 RED_CODES = (("inverted", "I"), ("noise", "N"), ("large", "S"), ("delay", "D"), ("frequency", "F"),
              ("restart", "R"), ("limit", "L"))
 YELLOW_CODES = (("deflection", "M"), ("capture", "C"), ("extra", "X"), ("amplitude", "A"), ("change", "T"),
@@ -252,20 +256,33 @@ def _mode_text(ext):
     return "extended sensor mode" if ext else "mode 0"
 
 
+def _limit_text(ext, level):
+    """why the deflection is at a limit, per output mode (2026-11-11): in mode 0 the curve of the old boards bends
+    over, in the extended mode it stays straight and ends in the jump of the conversion."""
+    if ext:
+        return "approaching the jump of the conversion" if level == 1 else "close to the jump of the conversion"
+    return "past the point where the sensor curve has only %d %% of its slope" % (60 if level == 1 else 20)
+
+
 def deflection_limits(board, ext, fl):
-    """The two deflections (counts from the rest position) at which the sensor curve has only 60 % and 20 % of its
-    slope near the rest position (Tom, 2026-11-11). Empty if the rule does not apply: on MMC5983 boards the curve
-    stays straight over the whole travel a slice produces."""
+    """The two deflections at which the sensor stops following the force, in the counts the controller sends in that
+    mode, counted from the rest position (Tom, 2026-11-11). Mode 0: 60 % and 20 % of the slope near the rest
+    position. Extended mode: a margin below the earliest jump of the conversion, because that curve stays straight up
+    to the jump. Empty if the rule does not apply: on MMC5983 boards the curve stays straight over the whole travel a
+    slice produces."""
     if board != "old":
         return ()
     return tuple(fl["deflection_mode2000"] if ext else fl["deflection_mode0"])
 
 
-def deflection_au(cc, s, channel, events):
-    """Deflection of the sensor at the peak of the contractions, in counts from the rest position (2026-11-11):
-    median of (amplitude + diastolicForce) of the included stimulated contractions, divided by the calibration
-    factor. The factor follows from the summary's zeroForce (uN) and the channel's 'Offset' entry of the log
-    (counts). Returns (deflection, board, extended mode); the board is '' when it cannot be told."""
+def deflection_au(cc, s, channel, events, fl=None):
+    """Deflection of the sensor at the peak of the contractions, in the counts the controller itself sends in its
+    output mode, counted from the rest position (2026-11-11): median of (amplitude + diastolicForce) of the included
+    stimulated contractions, divided by the calibration factor, and in the extended sensor mode divided by its factor
+    as well. The calibration factor follows from the summary's zeroForce (uN) and the channel's 'Offset' entry of the
+    log (counts of mode 0). So the result is raw - Offset in mode 0 and raw - Offset / factor in the extended mode,
+    i.e. the deflection in the counts the controller sends, which is what the limits are measured in.
+    Returns (deflection, board, extended mode); the board is '' when it cannot be told."""
     board, ext = "", False
     if cc is None or not len(cc) or s is None or not len(s):
         return math.nan, board, ext
@@ -288,10 +305,14 @@ def deflection_au(cc, s, channel, events):
     off = _offset_of(events, channel)
     if not v.size or math.isnan(zero) or math.isnan(off) or off == 0:
         return math.nan, board, ext
-    k = zero / off                                   # uN per count, including the extended sensor mode factor
+    k = zero / off                                   # uN per count of mode 0 (zeroForce = Offset x calibration)
     if not np.isfinite(k) or k == 0:
         return math.nan, board, ext
-    return float(np.median(v) / k), board, ext
+    au = float(np.median(v) / k)
+    f = float((fl or FLAG_DEFAULTS).get("extended_sensor_factor", 3.3))
+    if ext and np.isfinite(f) and f > 0:
+        au = au / f                                  # counts of the extended mode, as the controller sends them
+    return au, board, ext
 
 
 def _offset_of(events, channel):
@@ -407,7 +428,7 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
         elif "amplitude_mean" in s.columns and s["amplitude_mean"].notna().any():
             r["amplitude_uN"] = float(np.nanmedian(s["amplitude_mean"].to_numpy(float)))
         r["peakHeadroom"] = peak_headroom(cc, protocols, c, fl)   # peak force at the measurement limit (2026-11-11)
-        r["deflection_AU"], r["sensorBoard"], ext = deflection_au(cc, s, c, events)   # sensor curve (2026-11-11)
+        r["deflection_AU"], r["sensorBoard"], ext = deflection_au(cc, s, c, events, fl)   # sensor curve
         dlim = deflection_limits(r["sensorBoard"], ext, fl)
         red, yellow = [], []
         if r["status"] != "no slice" and nDet >= fl["min_beats"]:
@@ -437,9 +458,10 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
                             "amplitude above the peak of the steady contractions; extended sensor mode?)"
                             % (100 * r["peakHeadroom"])))
             elif not math.isnan(r["deflection_AU"]) and dlim and r["deflection_AU"] >= dlim[1]:
-                red.append(("limit", "peak force at the measurement limit: deflection %.0f counts, past the point "
-                            "where the sensor curve has only 20 %% of its slope (%s, %s; from %.0f)"
-                            % (r["deflection_AU"], r["sensorBoard"], _mode_text(ext), dlim[1])))
+                red.append(("limit", "peak force at the measurement limit: deflection %.0f counts, %s "
+                            "(%s, %s; from %.0f)"
+                            % (r["deflection_AU"], _limit_text(ext, 2), r["sensorBoard"], _mode_text(ext),
+                               dlim[1])))
             if r["capture_percent"] < fl["capture"] and not arr:
                 yellow.append(("capture", "capture %.0f %%" % r["capture_percent"]))
             if not noise and r["extra_percent"] > fl["extra"]:
@@ -454,9 +476,10 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
                 yellow.append(("cv", "amplitude CV %.0f %%" % r["amplitudeCV_percent"]))
             if (not math.isnan(r["deflection_AU"]) and dlim and not any(k == "limit" for k, _ in red)
                     and r["deflection_AU"] >= dlim[0]):
-                yellow.append(("deflection", "deflection %.0f counts, past the point where the sensor curve has only "
-                               "60 %% of its slope (%s, %s; from %.0f): the amplitude is too small"
-                               % (r["deflection_AU"], r["sensorBoard"], _mode_text(ext), dlim[0])))
+                yellow.append(("deflection", "deflection %.0f counts, %s (%s, %s; from %.0f): the amplitude is "
+                               "too small"
+                               % (r["deflection_AU"], _limit_text(ext, 1), r["sensorBoard"], _mode_text(ext),
+                                  dlim[0])))
         code = dict(RED_CODES + YELLOW_CODES)
         r["flags"] = "".join(code[k] for k, _ in red + yellow)
         r["red"] = "; ".join(t for _, t in red)

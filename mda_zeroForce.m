@@ -7,7 +7,10 @@ function [z, src, zeroT, zeroV] = mda_zeroForce(S, channel, zeroUser, t)
 %   S         file facts / data from mda_readMdd (offsetLog, calibration, extended sensor mode)
 %   zeroUser  zero force entered by the user (uN); [] or NaN = 'Offset' entry of the channel in the log file
 %             (written at the start of a recording, AU; 0 = not calibrated --> NaN). The log value is converted to
-%             uN like the data (mda_calibrationFactor at the time of the entry).
+%             uN with the calibration at the time of the entry, but without the factor of the extended sensor mode
+%             (mda_calibrationFactor(..., false)): the Offset is in the counts of mode 0, because the control
+%             software subtracts it after the factor (force = (raw x factor - Offset) x calibration). Otherwise the
+%             zero force of a channel would jump by that factor when the extended sensor mode is switched on.
 %   z         zero force at the times t (NaN = unknown), src text ('user', 'log', 'unknown', ...)
 %
 % TS 2026-10-04
@@ -32,7 +35,7 @@ elseif isfield(S, 'offsetLog') && ~isempty(S.offsetLog)
             src = 'log: not calibrated (0)';
         else
             zeroT = E(:,1);
-            zeroV = v .* reshape(mda_calibrationFactor(S, channel, zeroT), [], 1);
+            zeroV = v .* reshape(mda_calibrationFactor(S, channel, zeroT, false), [], 1);   %mode 0 counts
             src = 'log';
         end
     end

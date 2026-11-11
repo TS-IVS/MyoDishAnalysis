@@ -75,20 +75,23 @@ function varargout = mda_report(varargin)
 %        steady amplitude >= minPeakAmplitude (500 uN). No flag (peakHeadroom = NaN) if the protocol contractions stay
 %        more than 5 % of the amplitude below the steady peak: the channel was not in the same state during the
 %        protocols, so the comparison says nothing. L is also set when the deflection passes the second limit of the
-%        flag M (20 % of the slope): the peak then sits where the sensor hardly follows the force any more, or, in
-%        the extended mode of the old boards, close to the jump of the conversion.
+%        flag M: the peak then sits where the sensor hardly follows the force any more (mode 0), or close to the jump
+%        of the conversion (extended mode of the old boards).
 %   slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
-%     M  deflection of the sensor past the point where its curve has only 60 % of the slope it has near the rest
-%        position (2026-11-11, Tom's rule): the amplitude of these contractions is too small, and the more so the
-%        further the deflection goes. Column deflection_AU: median of (amplitude + diastolicForce) of the included
-%        stimulated contractions, in sensor counts from the rest position. Limits from Tom's pull curves, per board
-%        type and output mode (deflectionMode0 [10900 14300], deflectionMode2000 [18000 20000]); the second value is
-%        the red flag L. Only for old sensor boards (FXOS8700): the curve of the MMC5983 boards stays straight over
-%        the whole travel a slice produces, and what limits them is the fold of the conversion, not the curve. The
-%        board follows from the share of repeated raw values of the channel (summary column repeatedSamples_percent),
-%        the mode from the log line 'extended sensor mode on'; without both, or without the channel's 'Offset' entry
-%        in the events table, deflection_AU is NaN and nothing is flagged. The second level is orange in the control
-%        software (Tom, 2026-11-11), red here.
+%     M  deflection of the sensor past the first limit of its curve (2026-11-11, Tom's rule): the amplitude of these
+%        contractions is too small, and the more so the further the deflection goes. Column deflection_AU: median of
+%        (amplitude + diastolicForce) of the included stimulated contractions, from the rest position, in the counts
+%        the controller itself sends in its output mode (mode 0: raw - Offset; extended mode: raw - Offset / 3.3,
+%        because the Offset of the log is in the counts of mode 0). Limits from Tom's pull curves, per board type and
+%        output mode: deflectionMode0 [10900 14300] = the points where the curve has only 60 % and 20 % of the slope
+%        it has near the rest position; deflectionMode2000 [18000 20000] = a margin of 7 % and 2 % below the earliest
+%        jump of the conversion (21 442), because that curve stays straight to the jump. The second value is the red
+%        flag L. Only for old sensor boards (FXOS8700): the curve of the MMC5983 boards stays straight over the whole
+%        travel a slice produces, and what limits them is the fold of the conversion, not the curve. The board follows
+%        from the share of repeated raw values of the channel (summary column repeatedSamples_percent), the mode from
+%        the log line 'extended sensor mode on'; without both, or without the channel's 'Offset' entry in the events
+%        table, deflection_AU is NaN and nothing is flagged. The second level is orange in the control software
+%        (Tom, 2026-11-11), red here.
 %     C  capture < capture (90) % of the stimuli
 %     X  extra beats > extra (10) % of the detected contractions (spontaneous activity; not shown with N)
 %     A  median amplitude of the included contractions < amplitude (75 uN)
@@ -168,7 +171,7 @@ function fl = defaults()
 fl = struct('uncertain', 25, 'irregular', 15, 'artifactShare', 5, 'artifactRatio', 3, 'extra', 10, 'capture', 90, ...
     'amplitudeChange', 30, 'amplitude', 75, 'amplitudeCV', 30, 'delay', 0.15, 'minBeats', 50, 'stimFrequency', 10, ...
     'peakHeadroom', 0.15, 'minProtocolBeats', 100, 'minPeakAmplitude', 500, ...
-    'deflectionMode0', [10900 14300], 'deflectionMode2000', [18000 20000]);
+    'deflectionMode0', [10900 14300], 'deflectionMode2000', [18000 20000], 'extendedSensorFactor', 3.3);
 end
 
 
@@ -178,9 +181,24 @@ if ext, t = 'extended sensor mode'; else, t = 'mode 0'; end
 end
 
 
+function t = limitText(ext, level)
+% why the deflection is at a limit, per output mode (2026-11-11): in mode 0 the curve of the old boards bends over,
+% in the extended mode it stays straight and ends in the jump of the conversion.
+if ext
+    if level == 1, t = 'approaching the jump of the conversion'; else, t = 'close to the jump of the conversion'; end
+elseif level == 1
+    t = 'past the point where the sensor curve has only 60 % of its slope';
+else
+    t = 'past the point where the sensor curve has only 20 % of its slope';
+end
+end
+
+
 function d = deflectionLimits(board, ext, fl)
-% the two deflections (counts from the rest position) at which the sensor curve has only 60 % and 20 % of its slope
-% near the rest position (Tom, 2026-11-11; from his pull curves of six old boards and the SV2 chambers of April 2026).
+% the two deflections at which the sensor stops following the force, in the counts the controller sends in that mode,
+% counted from the rest position (Tom, 2026-11-11; from his pull curves of six old boards and the SV2 chambers of
+% April 2026). Mode 0: 60 % and 20 % of the slope near the rest position. Extended mode: a margin below the earliest
+% jump of the conversion, because that curve stays straight up to the jump.
 % Empty if the rule does not apply: on MMC5983 boards the curve stays straight over the whole travel a slice produces,
 % and what limits them is the fold of the conversion (31416 in mode 0), not the curve.
 d = [];
@@ -189,13 +207,16 @@ if ext, d = fl.deflectionMode2000; else, d = fl.deflectionMode0; end
 end
 
 
-function [au, board, ext] = deflectionAU(cc, s, channel, E)
-% Deflection of the sensor at the peak of the contractions, in counts from the rest position (2026-11-11):
-% median of (amplitude + diastolicForce) of the included stimulated contractions, divided by the calibration factor.
-% The factor follows from the summary's zeroForce (uN) and the channel's 'Offset' entry of the log (counts), so no
-% new result column is needed. board: 'old' (FXOS8700) or 'MMC5983', inferred from the share of repeated raw values
-% (mda_readMdd); '' if unknown, and then no limits are applied. ext: the extended sensor mode was on in this
-% recording (output mode 2000; the log line 'extended sensor mode on').
+function [au, board, ext] = deflectionAU(cc, s, channel, E, fl)
+% Deflection of the sensor at the peak of the contractions, in the counts the controller itself sends in its output
+% mode, counted from the rest position (2026-11-11): median of (amplitude + diastolicForce) of the included
+% stimulated contractions, divided by the calibration factor, and in the extended sensor mode divided by its factor
+% as well. The calibration factor follows from the summary's zeroForce (uN) and the channel's 'Offset' entry of the
+% log (counts of mode 0), so no new result column is needed. In mode 0 the result is raw - Offset, in the extended
+% sensor mode raw - Offset / factor, i.e. in both cases the deflection in the counts the controller sends, which is
+% what the limits below are measured in. board: 'old' (FXOS8700) or 'MMC5983', inferred from the share of repeated
+% raw values (mda_readMdd); '' if unknown, and then no limits are applied. ext: the extended sensor mode was on in
+% this recording (output mode 2000; the log line 'extended sensor mode on').
 au = NaN; board = ''; ext = false;
 if isempty(cc) || height(cc) == 0 || isempty(s) || height(s) == 0, return; end
 if ~all(ismember({'amplitude', 'diastolicForce', 'beatType'}, cc.Properties.VariableNames)), return; end
@@ -217,9 +238,12 @@ zero = NaN;
 if ismember('zeroForce', s.Properties.VariableNames), zero = median(double(s.zeroForce), 'omitnan'); end
 off = offsetOf(E, channel);
 if isnan(zero) || isnan(off) || off == 0, return; end
-k = zero / off;                                          %uN per count, including the extended sensor mode factor
+k = zero / off;                                          %uN per count of mode 0 (zeroForce = Offset x calibration)
 if ~isfinite(k) || k == 0, return; end
 au = median(v) / k;
+if ext && isfinite(fl.extendedSensorFactor) && fl.extendedSensorFactor > 0
+    au = au / fl.extendedSensorFactor;                   %counts of the extended mode, as the controller sends them
+end
 end
 
 
@@ -499,7 +523,7 @@ for k = 1:n
         R.amplitude_uN(k) = median(s.amplitude_mean, 'omitnan');
     end
     R.peakHeadroom(k) = peakHeadroom(cc, P, c, fl);      %peak force at the measurement limit (2026-11-11)
-    [R.deflection_AU(k), R.sensorBoard{k}, extMode] = deflectionAU(cc, s, c, E);   %sensor curve (2026-11-11)
+    [R.deflection_AU(k), R.sensorBoard{k}, extMode] = deflectionAU(cc, s, c, E, fl);   %sensor curve (2026-11-11)
     dLim = deflectionLimits(R.sensorBoard{k}, extMode, fl);
     red = {}; codes = '';
     yel = {}; ycodes = '';
@@ -541,9 +565,10 @@ for k = 1:n
                 'amplitude above the peak of the steady contractions; extended sensor mode?)'], ...
                 100 * R.peakHeadroom(k)); codes(end+1) = 'L'; %#ok<AGROW>
         elseif ~isnan(R.deflection_AU(k)) && ~isempty(dLim) && R.deflection_AU(k) >= dLim(2)
-            red{end+1} = sprintf(['peak force at the measurement limit: deflection %.0f counts, past the point ' ...
-                'where the sensor curve has only 20 %% of its slope (%s, %s; from %.0f)'], R.deflection_AU(k), ...
-                R.sensorBoard{k}, modeText(extMode), dLim(2)); codes(end+1) = 'L'; %#ok<AGROW>
+            red{end+1} = sprintf(['peak force at the measurement limit: deflection %.0f counts, %s ' ...
+                '(%s, %s; from %.0f)'], R.deflection_AU(k), limitText(extMode, 2), R.sensorBoard{k}, ...
+                modeText(extMode), dLim(2)); %#ok<AGROW>
+            codes(end+1) = 'L'; %#ok<AGROW>
         end
         if ~isempty(restart)
             red{end+1} = restart; codes(end+1) = 'R'; %#ok<AGROW>
@@ -567,9 +592,9 @@ for k = 1:n
             yel{end+1} = sprintf('amplitude CV %.0f %%', R.amplitudeCV_percent(k)); ycodes(end+1) = 'V'; %#ok<AGROW>
         end
         if ~isnan(R.deflection_AU(k)) && ~isempty(dLim) && ~any(codes == 'L') && R.deflection_AU(k) >= dLim(1)
-            yel{end+1} = sprintf(['deflection %.0f counts, past the point where the sensor curve has only 60 %% of ' ...
-                'its slope (%s, %s; from %.0f): the amplitude is too small'], R.deflection_AU(k), ...
-                R.sensorBoard{k}, modeText(extMode), dLim(1)); ycodes(end+1) = 'M'; %#ok<AGROW>
+            yel{end+1} = sprintf('deflection %.0f counts, %s (%s, %s; from %.0f): the amplitude is too small', ...
+                R.deflection_AU(k), limitText(extMode, 1), R.sensorBoard{k}, modeText(extMode), dLim(1)); %#ok<AGROW>
+            ycodes(end+1) = 'M'; %#ok<AGROW>
         end
     end
     R.flags{k} = [codes ycodes];

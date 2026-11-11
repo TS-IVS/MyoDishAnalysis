@@ -5,6 +5,17 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
+- **Zero force of a channel: no factor of the extended sensor mode on the `Offset`** (2026-11-11). `mda_zeroForce` /
+  `zero_force` converted the `Offset` entry of the log to uN with the same factor as the data, the factor of the
+  extended sensor mode (3.3) included. The Offset is in the counts of mode 0, because the control software subtracts
+  it after the factor (`force = (raw x factor - Offset) x calibration`), and the zero force of a channel must not
+  change when the controller changes the way it encodes the signal. In a recording that started in the extended
+  sensor mode, the zero force came out 3.3 times too large and the diastolic force was off by 2.3 x Offset x
+  calibration (with an Offset of -22750 and a calibration of 1000 AU/mN about 52 000 uN); amplitudes were not
+  affected. Only recordings in the extended sensor mode are affected, which in the lab begin on 2026-11-11 (old
+  boards). `mda_calibrationFactor` / `calibration_factor` take a new last argument `withSensorMode` /
+  `with_sensor_mode` (default true) for this. Found while answering software's question about the unit of the mode
+  2000 thresholds. Tests: `mda_test` (zero force with the extended sensor mode), `test_mda.py`.
 - **Power-on speed of the rocker: 45 rpm also for V19M and every later V19 release** (2026-11-09; firmware: 45 rpm
   from V19J on, V19M runs on the lab devices). Before, only V19J and V19K got 45 rpm, later releases 30 rpm. The test
   builds (page-0 names V19L, V19P, V19T) stay at 30 rpm. Tests: `mda_test` (paused recording, update to V19M),
@@ -120,13 +131,16 @@ MATLAB and Python versions have the same version number and give the same result
   mode of the old boards (output mode 2000, the piecewise value from X and Z) the curve stays straight to about
   0.85 mm and then jumps by about 28 000 counts into the negative. The MMC5983 boards stay straight over the whole
   travel a slice produces; there the fold of the conversion limits, not the curve.
-  - **Yellow M** once the median deflection passes the point with 60 % of the slope, **red L** at 20 %.
-    Limits as counts from the rest position, from Tom's pull curves of six old boards and the SV2 chambers of April
-    2026: `deflectionMode0` 10900 / 14300, `deflectionMode2000` 18000 / 20000. The second level is orange in the
-    control software, which uses the same two numbers in its live warning.
+  - **Yellow M** at the first limit, **red L** at the second. In mode 0 these are the points with 60 % and 20 % of
+    the slope near the rest position; in the extended mode, where the curve stays straight, a margin of 7 % and 2 %
+    below the earliest jump. Limits from Tom's pull curves of six old boards and the SV2 chambers of April 2026:
+    `deflectionMode0` 10900 / 14300, `deflectionMode2000` 18000 / 20000. The second level is orange in the control
+    software, which uses the same two numbers in its live warning.
   - New column `deflection_AU` of the flags table: median of (amplitude + diastolicForce) of the included stimulated
-    contractions, in sensor counts. The calibration factor comes from the summary's `zeroForce` and the channel's
-    `Offset` entry of the log, so no new result column is needed.
+    contractions from the rest position, **in the counts the controller itself sends in its output mode**
+    (mode 0 `raw - Offset`, extended mode `raw - Offset / 3.3`, because the `Offset` of the log is in the counts of
+    mode 0). The calibration factor comes from the summary's `zeroForce` and the channel's `Offset` entry of the log,
+    so no new result column is needed.
   - The board type comes from the share of repeated raw values of the channel (summary column
     `repeatedSamples_percent`, < 20 % old board, > 35 % MMC5983), the output mode from the log line
     `extended sensor mode on`. Without either, `deflection_AU` is NaN and nothing is flagged. The `sensorMode` event

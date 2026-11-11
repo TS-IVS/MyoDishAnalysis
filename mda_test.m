@@ -302,17 +302,44 @@ ok = ok && okP;
 % peak force at the measurement limit (red flag L), 2026-11-11
 okL = peakLimitTest();
 ok = ok && okL;
-% deflection of the sensor past the 60 % / 20 % points of its curve (flags M and L), 2026-11-11
+% deflection of the sensor past the limits of its curve (flags M and L), 2026-11-11
 okD = deflectionTest();
 ok = ok && okD;
+% the zero force of a channel does not change with the output mode, 2026-11-11
+okZ = zeroForceExtendedTest();
+ok = ok && okZ;
 if ok, disp('mda_test: all tests passed.'); else, warning('mda_test: TEST FAILED.'); end
+end
+
+
+function okZ = zeroForceExtendedTest()
+% The zero force of a channel must not change when the extended sensor mode is switched on (2026-11-11): the Offset
+% of the log is in the counts of mode 0, because the control software subtracts it after the factor of the mode
+% (force = (raw x factor - Offset) x calibration). Only the data carries the factor of the mode.
+okZ = true;
+H = struct('calibrationApplied', true, 'calibrationLog', [-inf 1 2000], 'extendedSensorFactor', 3.3, ...
+    'offsetLog', [0 1 -22750], 'extendedSensorIntervals', [10 inf]);
+kData = mda_calibrationFactor(H, 1, [5 20]);                         %data: with the factor of the mode
+kOffset = mda_calibrationFactor(H, 1, [5 20], false);                %Offset: without it
+z = mda_zeroForce(H, 1, [], [5 20]);
+okZ = okZ && abs(kData(1) - 0.5) < 1e-12 && abs(kData(2) - 0.5 * 3.3) < 1e-12;
+okZ = okZ && all(abs(kOffset - 0.5) < 1e-12);
+okZ = okZ && all(abs(z - (-22750 * 0.5)) < 1e-9);                    %no step at the switch
+H.extendedSensorIntervals = [-inf inf];                              %the recording starts in the extended mode
+z2 = mda_zeroForce(H, 1, [], [5 20]);
+okZ = okZ && all(abs(z2 - (-22750 * 0.5)) < 1e-9);
+zUser = mda_zeroForce(H, 1, 40, [5 20]);                             %a zero force entered by the user stays as it is
+okZ = okZ && all(abs(zUser - 40) < 1e-12);
+fprintf('zero force with the extended sensor mode: %s\n', passStr(okZ));
 end
 
 
 function okD = deflectionTest()
 % as test_deflection_of_the_sensor_curve in py/tests/test_mda.py (2026-11-11, Tom's rule): yellow M once the
-% deflection of the sensor passes the point where its curve has only 60 % of the slope it has near the rest position,
-% red L at 20 %. Old boards only, and the extended sensor mode reaches much further.
+% deflection of the sensor passes the first limit of its curve (mode 0: 60 % of the slope near the rest position;
+% extended mode: a margin below the jump of the conversion), red L at the second. Old boards only, and the extended
+% sensor mode reaches much further. The deflection is in the counts the controller sends in its own output mode, so
+% the same deflAU means a larger travel in the extended mode.
 okD = true;
 %        deflection  calibration  repeated %  extended  expected code  expected deflection
 cases = {      5000,        1000,          2,    false,          '',             5000;
@@ -347,16 +374,21 @@ end
 
 
 function [S, C, E] = deflectionTables(deflAU, calibration, repeated, extended)
-% one channel whose contractions reach deflAU counts from the rest position (offset -20000); uN = AU * k,
-% k = 1000 / calibration
+% one channel whose contractions reach deflAU counts of the controller's output mode from the rest position (Offset
+% -20000, counts of mode 0). The tables hold what the reader delivers: uN = AU * k, k = 1000 / calibration times the
+% factor of the extended sensor mode (3.3), while the zero force follows from the Offset without that factor, because
+% the Offset is in the counts of mode 0 (mda_zeroForce).
 off = -20000;
-k = 1000 / calibration;
-rawDia = off + 0.1 * deflAU; rawPeak = off + deflAU;
+f = 1; if extended, f = 3.3; end
+k = f * 1000 / calibration;                        %data: counts of the output mode --> uN
+zero = off * 1000 / calibration;                   %zero force (uN) of the channel
+rest = off / f;                                    %rest value in the counts of the output mode
+rawDia = rest + 0.1 * deflAU; rawPeak = rest + deflAU;
 n = 60;
 C = table(ones(n,1), repmat({'stimulated'}, n, 1), zeros(n,1), ones(n,1), repmat((rawPeak - rawDia) * k, n, 1), ...
-    repmat((rawDia - off) * k, n, 1), repmat(rawDia * k, n, 1), 0.04 * ones(n,1), 'VariableNames', ...
+    repmat(rawDia * k - zero, n, 1), repmat(rawDia * k, n, 1), 0.04 * ones(n,1), 'VariableNames', ...
     {'channel', 'beatType', 'uncertain', 'included', 'amplitude', 'diastolicForce', 'diastolicSignal', 'stimToOnset'});
-S = table(1, 0, 120, 100, 100, 0, 0, 0, 100, (rawPeak - rawDia) * k, 0.05, off * k, repeated, 'VariableNames', ...
+S = table(1, 0, 120, 100, 100, 0, 0, 0, 100, (rawPeak - rawDia) * k, 0.05, zero, repeated, 'VariableNames', ...
     {'channel', 'from', 'to', 'nDetected', 'nStimuli', 'nMissedBeats', 'nExtraBeats', 'nUncertain', ...
     'nContractions', 'amplitude_mean', 'amplitude_CV', 'zeroForce', 'repeatedSamples_percent'});
 E = table({'Offset'}, {sprintf('%g', off)}, 0, 1, 'VariableNames', {'code', 'text', 't_file', 'channel'});

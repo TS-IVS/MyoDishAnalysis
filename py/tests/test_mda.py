@@ -2012,27 +2012,56 @@ def test_peak_at_measurement_limit():
 
 
 def _deflection_tables(deflection_AU, calibration=1000.0, offset=-20000.0, repeated=2.0, extended=False):
-    # one channel whose contractions reach deflection_AU counts from the rest position. uN = AU * k, k = 1000/cal;
-    # zeroForce = offset * k, diastolicForce = (raw_dia - offset) * k, amplitude = (raw_peak - raw_dia) * k
-    k = 1000.0 / calibration
-    raw_dia = offset + 0.1 * deflection_AU
-    raw_peak = offset + deflection_AU
+    # one channel whose contractions reach deflection_AU counts of the controller's output mode from the rest
+    # position (the Offset is in counts of mode 0). The tables hold what the reader delivers: uN = AU * k,
+    # k = 1000/cal times the factor of the extended sensor mode (3.3), while the zero force follows from the Offset
+    # without that factor, because the Offset is in the counts of mode 0 (zero_force)
+    f = 3.3 if extended else 1.0
+    k = f * 1000.0 / calibration                     # data: counts of the output mode --> uN
+    zero = offset * 1000.0 / calibration             # zero force (uN) of the channel
+    rest = offset / f                                # rest value in the counts of the output mode
+    raw_dia = rest + 0.1 * deflection_AU
+    raw_peak = rest + deflection_AU
     C = pd.DataFrame({"channel": 1, "beatType": "stimulated", "uncertain": 0, "included": 1,
-                      "amplitude": (raw_peak - raw_dia) * k, "diastolicForce": (raw_dia - offset) * k,
+                      "amplitude": (raw_peak - raw_dia) * k, "diastolicForce": raw_dia * k - zero,
                       "diastolicSignal": raw_dia * k, "stimToOnset": 0.04}, index=range(60))
     S = pd.DataFrame([{"channel": 1, "from": 0.0, "to": 120.0, "nDetected": 100, "nStimuli": 100, "nMissedBeats": 0,
                        "nExtraBeats": 0, "nUncertain": 0, "nContractions": 100,
                        "amplitude_mean": (raw_peak - raw_dia) * k, "amplitude_CV": 0.05,
-                       "zeroForce": offset * k, "repeatedSamples_percent": repeated}])
+                       "zeroForce": zero, "repeatedSamples_percent": repeated}])
     rows = [{"code": "Offset", "text": str(offset), "t_file": 0.0, "channel": 1}]
     if extended:
         rows.append({"code": "Event", "text": "extended sensor mode on", "t_file": 0.0, "channel": 0})
     return S, C, pd.DataFrame(rows)
 
 
+def test_zero_force_with_the_extended_sensor_mode():
+    # 2026-11-11: the zero force of a channel must not change when the extended sensor mode is switched on. The
+    # Offset of the log is in the counts of mode 0, because the control software subtracts it after the factor of the
+    # mode (force = (raw x factor - Offset) x calibration). Only the data carries the factor of the mode.
+    from myodish_analysis._matlab import Struct
+    from myodish_analysis.calibration_factor import calibration_factor
+    from myodish_analysis.zero_force import zero_force
+    H = Struct(calibrationApplied=True, calibrationLog=[[-np.inf, 1, 2000]], extendedSensorFactor=3.3,
+               offsetLog=[[0.0, 1, -22750]], extendedSensorIntervals=[[10.0, np.inf]])
+    k_data = calibration_factor(H, 1, [5.0, 20.0])                        # data: with the factor of the mode
+    k_offset = calibration_factor(H, 1, [5.0, 20.0], with_sensor_mode=False)       # Offset: without it
+    assert k_data[0] == pytest.approx(0.5) and k_data[1] == pytest.approx(0.5 * 3.3)
+    assert k_offset[0] == pytest.approx(0.5) and k_offset[1] == pytest.approx(0.5)
+    z = zero_force(H, 1, None, [5.0, 20.0])[0]
+    assert z[0] == pytest.approx(-22750 * 0.5) and z[1] == pytest.approx(-22750 * 0.5)    # no step at the switch
+    H.extendedSensorIntervals = [[-np.inf, np.inf]]                       # the recording starts in extended mode
+    z = zero_force(H, 1, None, [5.0, 20.0])[0]
+    assert z[0] == pytest.approx(-22750 * 0.5) and z[1] == pytest.approx(-22750 * 0.5)
+    z = zero_force(H, 1, 40.0, [5.0, 20.0])[0]                            # a zero force from the user stays as it is
+    assert z[0] == pytest.approx(40.0) and z[1] == pytest.approx(40.0)
+
+
 def test_deflection_of_the_sensor_curve():
-    # 2026-11-11 (Tom's rule): yellow M once the deflection passes the point where the sensor curve has only 60 % of
-    # its slope near the rest position, red L at 20 %. Old boards only; mode 0 and the extended mode differ.
+    # 2026-11-11 (Tom's rule): yellow M once the deflection passes the first limit of the sensor curve (mode 0: 60 %
+    # of the slope near the rest position; extended mode: a margin below the jump of the conversion), red L at the
+    # second. Old boards only. The deflection is in the counts the controller sends in its own output mode, so the
+    # same number means a much larger travel in the extended mode.
     from myodish_analysis.report import report_flags
     S, C, E = _deflection_tables(5000)                       # far inside the straight part
     R = report_flags(S, C, {1: "ok"}, events=E)
@@ -2054,10 +2083,12 @@ def test_deflection_of_the_sensor_curve():
     assert "M" not in R.loc[0, "flags"] and "L" not in R.loc[0, "flags"]
     S, C, E = _deflection_tables(19000, extended=True)       # past 18 000
     R = report_flags(S, C, {1: "ok"}, events=E)
+    assert R.loc[0, "deflection_AU"] == pytest.approx(19000, rel=1e-9)   # counts of the extended mode, not x 3.3
     assert "M" in R.loc[0, "flags"] and "extended sensor mode" in R.loc[0, "yellow"]
+    assert "jump" in R.loc[0, "yellow"] and "60 %" not in R.loc[0, "yellow"]
     S, C, E = _deflection_tables(21000, extended=True)       # past 20 000, close to the jump
     R = report_flags(S, C, {1: "ok"}, events=E)
-    assert "L" in R.loc[0, "flags"]
+    assert "L" in R.loc[0, "flags"] and "jump" in R.loc[0, "red"]
 
     S, C, E = _deflection_tables(15000, repeated=48.0)       # MMC5983: the rule does not apply
     R = report_flags(S, C, {1: "ok"}, events=E)

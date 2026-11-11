@@ -1,7 +1,13 @@
-function k = mda_calibrationFactor(H, channel, t)
+function k = mda_calibrationFactor(H, channel, t, withSensorMode)
 %MDA_CALIBRATIONFACTOR  Factor AU --> uN of a data channel at the times t (step function of time).
 %
 %   k = mda_calibrationFactor(H, channel, t)     H = file facts from mda_readMdd, t = times in the file (s)
+%   k = mda_calibrationFactor(H, channel, t, withSensorMode)
+%
+%   withSensorMode  true (default): include the factor of the extended sensor mode, for values as the file stores
+%                   them (the controller's value in its current output mode). false: leave it out, for values that
+%                   are already in the counts of mode 0, such as the 'Offset' entries of the log file (the control
+%                   software subtracts the Offset after the factor: force = (raw x factor - Offset) x calibration).
 %
 %   The values in an .mdd file are arbitrary units (AU):  uN = AU * k,  k = 1000 / calibrationEff(t).
 %   calibrationEff = 'Calibration' entry of the channel in the log file (AU per mN, a kind of spring constant;
@@ -16,6 +22,7 @@ function k = mda_calibrationFactor(H, channel, t)
 % SPDX-License-Identifier: GPL-3.0-or-later
 % Additional terms (GPL-3.0 section 7): see the file NOTICE
 
+if nargin < 4, withSensorMode = true; end
 k = ones(size(t));
 if ~H.calibrationApplied, return; end
 cal = 1000 * ones(size(t));
@@ -30,9 +37,11 @@ if ~isempty(E)
         cal(t >= E(j,1)) = E(j,3);
     end
 end
-for q = 1:size(H.extendedSensorIntervals,1)
-    I = t >= H.extendedSensorIntervals(q,1) & t < H.extendedSensorIntervals(q,2);
-    cal(I) = cal(I) / H.extendedSensorFactor;
+if withSensorMode
+    for q = 1:size(H.extendedSensorIntervals,1)
+        I = t >= H.extendedSensorIntervals(q,1) & t < H.extendedSensorIntervals(q,2);
+        cal(I) = cal(I) / H.extendedSensorFactor;
+    end
 end
 k = 1000 ./ cal;
 end

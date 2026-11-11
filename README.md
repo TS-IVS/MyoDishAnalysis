@@ -1259,13 +1259,14 @@ thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
   55 %)`) and orders the trace pages. Arrhythmically paced channels (see "Arrhythmic pacing"): missed beats not counted,
   no C and V flags, capture shown with `~`.
 * **slice quality** (yellow: possibly poor biological quality, also e.g. an effect of a treatment; the user
-  decides): **M** the deflection of the sensor has passed the point where its curve has only 60 % of the slope it has
-  near the rest position (2026-11-11), so the amplitude of these contractions is too small; column `deflection_AU`
-  (median of amplitude + diastolic force of the included stimulated contractions, in sensor counts from rest).
-  Limits per board type and output mode: old boards (FXOS8700) 10900 counts in mode 0 and 18000 in the extended
-  sensor mode, red **L** at 14300 and 20000 (20 % of the slope). Not applied to MMC5983 boards, whose curve stays
-  straight over the whole travel a slice produces, nor when the board type or the channel's `Offset` entry is
-  unknown. MDA marks this, it does not correct it. **C** capture < 90 %, **X** extra beats > 10 % (spontaneous activity; not shown with N), **A** amplitude
+  decides): **M** the deflection of the sensor has passed the first limit of its curve (2026-11-11), so the amplitude
+  of these contractions is too small; column `deflection_AU` (median of amplitude + diastolic force of the included
+  stimulated contractions from rest, in the counts the controller itself sends in its output mode: `raw - Offset` in
+  mode 0, `raw - Offset / 3.3` in the extended sensor mode, because the `Offset` of the log is in counts of mode 0).
+  Limits per board type and output mode: old boards (FXOS8700) 10900 counts in mode 0 (60 % of the slope near rest)
+  and 18000 in the extended sensor mode (a margin below the jump of the conversion), red **L** at 14300 and 20000.
+  Not applied to MMC5983 boards, whose curve stays straight over the whole travel a slice produces, nor when the
+  board type or the channel's `Offset` entry is unknown. MDA marks this, it does not correct it. **C** capture < 90 %, **X** extra beats > 10 % (spontaneous activity; not shown with N), **A** amplitude
   < 75 µN, **T** amplitude change > 30 % (first → last range with ≥ 10 contractions; listed with the time span, e.g.
   "amplitude change +660 % over 24 h"), **V** amplitude CV > 30 %.
 * Rules (2026-10-12) from the overnight runs of 2024 and 2026 (4923 recordings) and visual checks: with the former
