@@ -22,9 +22,9 @@ h2 { font-size: 22px; margin: 0 0 6px; }
 .card h3 { margin: 0; font-size: 19px; }
 .card p { margin: 0; color: #3a3a3c; }
 .grow { flex: 1; }
-button.primary, button.plain { font: inherit; border-radius: 9px; padding: 11px 16px; min-height: 44px; cursor: pointer; }
+button.primary, .plain { font: inherit; border-radius: 9px; padding: 11px 16px; min-height: 44px; cursor: pointer; }
 button.primary { background: var(--blue); color: #fff; border: none; font-weight: 600; }
-button.plain { background: var(--card); color: var(--text); border: 1px solid #c7c7cc; }
+.plain { background: var(--card); color: var(--text); border: 1px solid #c7c7cc; display: inline-flex; align-items: center; text-decoration: none; }
 button:disabled { opacity: .5; cursor: default; }
 .bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .bar input[type=search], .bar input[type=text], .bar select { font: inherit; padding: 10px 12px; border: 1px solid #c7c7cc; border-radius: 9px; background: var(--card); color: var(--text); min-height: 44px; }
@@ -66,6 +66,34 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 12p
 .legend { color: var(--dim); font-size: 13px; margin-top: 10px; }
 .list button { display: block; width: 100%; text-align: left; font: inherit; background: none; border: none; padding: 9px 8px; border-radius: 8px; cursor: pointer; color: var(--blue); }
 .list button:hover { background: #f2f6fc; }
+.side { flex: 0 0 260px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+.side button { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; font: inherit; background: none; border: none; padding: 9px 10px; border-radius: 8px; cursor: pointer; color: var(--text); min-height: 40px; align-items: center; }
+.side button[aria-current="true"] { background: #e4eefa; color: #083f7d; font-weight: 600; }
+.side button:hover { background: #f2f6fc; }
+.side .cap { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding: 12px 10px 4px; }
+.side .n { color: var(--dim); font-weight: 400; font-size: 13px; white-space: nowrap; }
+.side p { font-size: 13px; padding: 4px 10px; }
+.panel { flex: 999 1 520px; min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 20px 16px; }
+.panel h3 { margin: 14px 0 2px; font-size: 18px; }
+.set { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 20px; padding: 13px 0; border-bottom: 1px solid #ececf0; align-items: start; }
+.set:last-child { border-bottom: none; }
+.set .t { font-weight: 600; } .set .d { color: #3a3a3c; font-size: 14px; max-width: 78ch; } .set .o { color: #6e6e73; font: 12px ui-monospace, Menlo, Consolas, monospace; margin-top: 2px; }
+.set .c { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.set.chg .t::after { content: "changed"; margin-left: 8px; font-size: 11px; background: #e4eefa; color: #083f7d; padding: 1px 8px; border-radius: 10px; vertical-align: 2px; }
+.set .def { font-size: 12px; color: var(--dim); text-align: right; } .set .def button { font: inherit; color: var(--blue); background: none; border: none; cursor: pointer; padding: 0 0 0 8px; text-decoration: underline; }
+.ctl { display: flex; gap: 8px; align-items: center; }
+.ctl input[type=text], .ctl select { font: inherit; padding: 8px 10px; border: 1px solid #c7c7cc; border-radius: 8px; background: var(--card); color: var(--text); min-height: 40px; }
+.ctl input[type=text] { width: 110px; text-align: right; } .ctl input.wide { width: 190px; text-align: left; }
+.ctl input[type=checkbox] { width: 22px; height: 22px; }
+.ctl .u { color: var(--dim); font-size: 12px; line-height: 1.2; flex: 0 0 82px; } .ctl .lab { color: #6e6e73; font: 12px ui-monospace, Menlo, Consolas, monospace; }
+.savebar { position: sticky; bottom: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin-top: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; box-shadow: 0 -2px 12px rgba(0, 0, 0, .08); }
+.savebar .grow { min-width: 220px; }
+.note { background: #fff7e0; border: 1px solid #ecd58a; border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; }
+.note p { margin: 4px 0; }
+.help p, .help li { max-width: 74ch; } .help h4 { margin: 18px 0 4px; font-size: 15px; } .help li { margin: 5px 0; }
+.help .mono { font: 13px ui-monospace, Menlo, Consolas, monospace; background: #f5f5f7; border-radius: 5px; padding: 1px 5px; }
+.help a { color: var(--blue); }
+@media (max-width: 760px) { .side { flex-basis: 100%; } .set { grid-template-columns: 1fr; } .set .c { align-items: flex-start; } .set .def { text-align: left; } }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -76,6 +104,8 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 12p
     <button type="button" data-page="start">Start</button>
     <button type="button" data-page="results">Results</button>
     <button type="button" data-page="watcher">Automatic analysis</button>
+    <button type="button" data-page="settings">Settings</button>
+    <button type="button" data-page="help">Help</button>
   </nav>
   <span class="folder" id="folder"></span>
 </header>
@@ -149,7 +179,7 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 12p
       <button type="button" class="plain" id="dry">Show what would be analyzed</button>
       <button type="button" class="primary" id="run">Analyze new recordings now</button>
     </div>
-    <p class="msg">A pass started here uses the standard settings of the analysis and analyzes only what is new. Results of earlier passes stay as they are.</p>
+    <p class="msg" id="passSettings"></p>
     <p class="msg" id="runMsg"></p>
     <button type="button" class="plain" id="anyway" hidden style="margin-bottom:12px">Analyze this folder anyway</button>
     <pre id="runOut" hidden></pre>
@@ -159,12 +189,123 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 12p
       <pre id="reportText" style="flex:999 1 560px;min-width:0" hidden></pre>
     </div>
   </section>
+
+  <section id="settings" hidden>
+    <h2>Settings</h2>
+    <p class="sub" id="setSub"></p>
+    <div class="note" id="setNote" hidden></div>
+    <div class="bar">
+      <label for="setSearch">Search</label>
+      <input type="search" id="setSearch" placeholder="all settings: name, option or what it does">
+    </div>
+    <div class="split">
+      <div class="side" id="setSide"></div>
+      <div class="panel" id="setPanel"></div>
+    </div>
+    <div class="savebar">
+      <span class="grow" id="setState"></span>
+      <button type="button" class="plain" id="setStd">Back to standard</button>
+      <button type="button" class="plain" id="setLast" hidden>Take the settings of the newest analysis</button>
+      <label class="plain" tabindex="0" id="setFileLabel">Load a file ...<input type="file" id="setFile" accept=".csv,text/csv" hidden></label>
+      <a class="plain" id="setDown" hidden download>Download</a>
+      <button type="button" class="primary" id="setSave">Save</button>
+    </div>
+    <p class="msg" id="setMsg"></p>
+  </section>
+
+  <section id="help" hidden>
+    <h2>Help</h2>
+    <div class="bar">
+      <label for="helpSearch">Search</label>
+      <input type="search" id="helpSearch" placeholder="search the help">
+    </div>
+    <div class="split">
+      <div class="side" id="helpSide"></div>
+      <div class="panel help" id="helpPanel">
+        <article data-title="First steps (5 minutes)">
+          <h3>First steps (5 minutes)</h3>
+          <ol>
+            <li>Open <b>Automatic analysis</b>. The raw folder is the folder that holds your recordings (.mdd), each with its log file next to it.</li>
+            <li>Click <b>Show what would be analyzed</b>. You get the list. Nothing is written.</li>
+            <li>Click <b>Analyze new recordings now</b>. The lines of the analysis appear while it runs. You can leave the page: the analysis goes on as long as the program runs.</li>
+            <li>Open <b>Results</b>. Every row is one channel of one recording. A colored note means that something deserves a second look. Click a row for the details, the course over the recording and the report.</li>
+            <li>For the traces themselves, copy the command of the row into MATLAB or a terminal. The desktop program opens at that place.</li>
+          </ol>
+        </article>
+        <article data-title="The pages">
+          <h3>The pages</h3>
+          <ul>
+            <li><b>Start</b>: what you can do, and how much is analyzed.</li>
+            <li><b>Results</b>: all analyzed recordings of the results folder, one row per channel, with notes on what needs a second look. Filter by the kind of note, or search for a recording, a label or a note.</li>
+            <li><b>Automatic analysis</b>: what the results folder holds, the reports of the last analyses, and the buttons that list or analyze what is new.</li>
+            <li><b>Settings</b>: the settings of the analyses started from this page.</li>
+            <li><b>Help</b>: this page.</li>
+          </ul>
+        </article>
+        <article data-title="What the colored notes mean">
+          <h3>What the colored notes mean</h3>
+          <p id="helpFlagsIntro"></p>
+          <h4><span class="badge check">Red: check the analysis</span></h4>
+          <p>The numbers of this channel may be wrong. Look at the traces before you use them.</p>
+          <ul id="helpCheck"></ul>
+          <h4><span class="badge sensor">Orange: sensor or chamber</span></h4>
+          <p>The hardware limits what this recording can say. The contractions are analyzed as usual, and nothing is corrected by calculation.</p>
+          <ul id="helpSensor"></ul>
+          <h4><span class="badge quality">Yellow: slice quality</span></h4>
+          <p>Possibly a weak slice, possibly the effect of a treatment. You decide.</p>
+          <ul id="helpQuality"></ul>
+          <h4>The rules in short</h4>
+          <ul id="helpRules"></ul>
+          <p>The letters in brackets are the short codes of the result files and of the overview table of the report.</p>
+        </article>
+        <article data-title="Automatic analysis of a folder">
+          <h3>Automatic analysis of a folder</h3>
+          <ul>
+            <li><b>What is analyzed</b>: every recording of the raw folder and its subfolders that is new or has changed since its analysis. A recording that is still being written waits for a later analysis. Of recordings made in parallel, the main file is analyzed.</li>
+            <li><b>What you get</b>: per recording a workbook with the results and one image per channel with the course over the recording, per experiment a report (PDF), and per analysis a short text report (list on the page <b>Automatic analysis</b>).</li>
+            <li><b>Earlier results stay</b>, also after an update of the program or a change of the settings. The lines of the analysis say so when earlier recordings were analyzed differently.</li>
+            <li><b>Another raw folder</b>: recordings are known by their path below the raw folder. From a folder one level up or down all of them would count as new, so the page asks before it analyzes from another raw folder than the last time. Look at the list first.</li>
+            <li><b>Every day without a click</b>: start the watcher on a schedule in a terminal, e.g. <span class="mono">mda-watch RAW RESULTS --schedule "daily 10:00"</span>, or in MATLAB with <span class="mono">MyoDishAnalysisWatch</span>. This page shows those results as well, and tells you when such a watcher is at work.</li>
+          </ul>
+        </article>
+        <article data-title="Settings">
+          <h3>Settings</h3>
+          <ul>
+            <li><b>Basics</b> are the settings people change, in plain words. <b>Expert</b> holds every other setting of the analysis. Most analyses never need them.</li>
+            <li>A changed setting is marked, with its standard value and a link that sets it back. Nothing is used before you click <b>Save</b>.</li>
+            <li>The settings are used by the analyses started from this page. Results of earlier analyses keep the settings they were made with.</li>
+            <li><b>Take the settings of the newest analysis</b> fills the page with the settings of the recording analyzed last, so that an experiment goes on with the settings it began with.</li>
+            <li>The settings are a file in the results folder (<span class="mono" id="helpSetFile"></span>). Other programs use it with the option settings: <span class="mono">mda-watch RAW RESULTS --settings FILE</span>, in MATLAB <span class="mono">MyoDishAnalysisWatch(raw, results, 'settings', file)</span>.</li>
+            <li>Settings of one recording (a threshold set by hand, the zero force, a reference beat) belong to the desktop program.</li>
+          </ul>
+        </article>
+        <article data-title="Looking at a recording">
+          <h3>Looking at a recording</h3>
+          <p>The traces of a recording with the detected contractions are shown by the desktop program for now. Select a row on the page <b>Results</b> and copy one of the two commands: the first for MATLAB, the second for a terminal with the Python version. The program opens the recording at the channel and the time window of the row.</p>
+          <p>The desktop program runs on the computer that holds the data.</p>
+        </article>
+        <article data-title="Who can reach this page">
+          <h3>Who can reach this page</h3>
+          <p id="helpReach"></p>
+          <p>The page has no login. Started with <span class="mono">--host 0.0.0.0</span>, every computer that reaches this one can read the results and start an analysis: use that inside a trusted network only, never on a computer that is reachable from the internet.</p>
+          <p>The page loads nothing from the internet, and it serves files of the results folder only.</p>
+        </article>
+        <article data-title="Full reference">
+          <h3>Full reference</h3>
+          <ul id="helpDocs"></ul>
+          <p>The README of the program describes every function, option and result table: <a href="https://github.com/TS-IVS/MyoDishAnalysis" target="_blank" rel="noopener">github.com/TS-IVS/MyoDishAnalysis</a> (opens the internet).</p>
+        </article>
+      </div>
+    </div>
+  </section>
 </main>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 let state = null, rows = [], shown = [], limit = 400, selected = -1, poll = null;
+let S = null, vals = {}, setTab = "basics", setBase = "", setDirty = false, helpTopic = 0, helpInfo = null;
+const PAGES = ["start", "results", "watcher", "settings", "help"];
 
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -177,6 +318,8 @@ function go(page) {
   for (const b of document.querySelectorAll("nav button")) b.toggleAttribute("aria-current", false), b.dataset.page === page && b.setAttribute("aria-current", "page");
   if (page === "results" && !rows.length) loadResults();
   if (page === "watcher") loadWatcher();
+  if (page === "settings" && !S) loadSettings();
+  if (page === "help") loadHelp();
   history.replaceState(null, "", "#" + page);
 }
 function badge(r) {
@@ -293,6 +436,8 @@ async function loadWatcher() {
     else if (w.run.error) msg = "The last pass started here failed: " + w.run.error;
     else if (w.run.finished) msg = (w.run.dry_run ? "List made at " : "Pass finished at ") + w.run.finished + ".";
     $("runMsg").textContent = msg; $("runMsg").className = "msg" + (w.run.error ? " err" : "");
+    const sc = w.settingsChanged || [];
+    $("passSettings").textContent = "An analysis started here uses " + (sc.length ? "the settings of the page Settings (" + sc.length + " changed: " + sc.slice(0, 6).join(", ") + (sc.length > 6 ? ", ..." : "") + ")" : "the standard settings (page Settings)") + " and analyzes only what is new. Results of earlier analyses stay as they are.";
     const out = [w.run.output, w.run.report].filter(Boolean).join("\n").trim();
     $("runOut").hidden = !out; $("runOut").textContent = out;
     const list = $("reports"); list.textContent = "";
@@ -315,7 +460,188 @@ async function startPass(dry, otherRaw) {
   loadWatcher();
 }
 
+// ------------------------------------------------------------------------------------------------ settings
+const sameVal = (a, b) => {
+  if (typeof a === "boolean" || typeof b === "boolean") return a === b;
+  const x = String(a).trim(), y = String(b).trim();
+  if (x !== "" && y !== "" && !isNaN(Number(x)) && !isNaN(Number(y))) return Number(x) === Number(y);
+  return x === y;
+};
+const isChanged = (f) => !sameVal(vals[f.name], f.default);
+const toPanel = (id) => { if (window.innerWidth <= 760) $(id).scrollIntoView({ block: "start" }); };   // narrow window: the list is above the panel
+const sentence = (t) => /^[a-z]+[\s,:]/.test(t) ? t.charAt(0).toUpperCase() + t.slice(1) : t;   // not for names of options (gateMax ...)
+const unitText = (f) => (f.unit || "").replace(/\buN\b/g, "\u00b5N");
+function shownText(f, v) {
+  if (f.kind === "check") return v ? "on" : "off";
+  if (f.kind === "popup") { const i = f.items.find((it) => String(it[1]) === String(v)); return i ? i[0] : String(v); }
+  return String(v) === "" ? "none" : v + (f.unit ? " " + unitText(f) : "");
+}
+function takeSettings(j, loaded) {
+  S = j; vals = {};
+  for (const f of S.fields) vals[f.name] = f.value;
+  setBase = loaded ? "standard" : ""; setDirty = !!loaded;
+  drawSettings();
+}
+async function loadSettings() {
+  try { takeSettings(await api("/api/settings"), false); $("setMsg").textContent = ""; }
+  catch (e) { $("setMsg").textContent = "Could not read the settings: " + e.message; $("setMsg").className = "msg err"; }
+}
+function control(f, row, withName) {
+  const box = el("div", "ctl"); let inp;
+  if (withName) box.append(el("span", "lab", f.name));
+  if (f.kind === "check") {
+    inp = el("input"); inp.type = "checkbox"; inp.checked = !!vals[f.name];
+    inp.addEventListener("change", () => setVal(f, inp.checked, row));
+  } else if (f.kind === "popup") {
+    inp = el("select");
+    for (const [text, v] of f.items) { const o = el("option", "", text); o.value = String(v); inp.append(o); }
+    inp.value = String(vals[f.name]);
+    inp.addEventListener("change", () => setVal(f, f.items.find((it) => String(it[1]) === inp.value)[1], row));
+  } else {
+    inp = el("input"); inp.type = "text"; inp.value = vals[f.name]; inp.autocomplete = "off"; inp.spellcheck = false;
+    if (f.kind === "vec") inp.className = "wide"; else inp.inputMode = "decimal";
+    inp.addEventListener("change", () => {
+      const t = f.kind === "vec" ? inp.value.trim() : inp.value.trim().replace(",", ".");
+      setVal(f, f.kind !== "vec" && t !== "" && !isNaN(Number(t)) ? Number(t) : t, row);
+    });
+  }
+  inp.setAttribute("aria-label", f.label + (f.unit ? " (" + f.unit + ")" : ""));
+  box.append(inp);
+  if (f.kind !== "check" && f.kind !== "popup") box.append(el("span", "u", unitText(f)));   // also empty: the fields stay in line
+  return box;
+}
+function setVal(f, v, row) { vals[f.name] = v; setDirty = true; mark(row); footer(); drawSide(); }
+function mark(row) {
+  const ch = row._fields.filter(isChanged);
+  row.classList.toggle("chg", ch.length > 0);
+  row._def.textContent = "";
+  if (!ch.length) return;
+  row._def.append("standard: " + ch.map((f) => shownText(f, f.default)).join(", "));
+  const b = el("button", "", "set back"); b.type = "button";
+  b.addEventListener("click", () => { for (const f of ch) vals[f.name] = f.default; setDirty = true; drawSettings(); });
+  row._def.append(b);
+}
+function fieldRow(title, text, fields) {
+  const row = el("div", "set"), left = el("div"), right = el("div", "c");
+  left.append(el("div", "t", title));
+  if (text) left.append(el("div", "d", text));
+  left.append(el("div", "o", fields.map((f) => f.name).join(", ")));
+  row._fields = fields; row._def = el("div", "def");
+  for (const f of fields) right.append(control(f, row, fields.length > 1));
+  right.append(row._def); row.append(left, right); mark(row);
+  return row;
+}
+function drawSide() {
+  const q = $("setSearch").value.trim(), side = $("setSide"); side.textContent = "";
+  const item = (key, title, n) => {
+    const b = el("button"); b.type = "button"; b.append(el("span", "", title));
+    if (n != null) b.append(el("span", "n", n));
+    if (!q && setTab === key) b.setAttribute("aria-current", "true");
+    b.addEventListener("click", () => { setTab = key; $("setSearch").value = ""; drawSettings(); toPanel("setPanel"); });
+    side.append(b);
+  };
+  item("basics", "Basics");
+  side.append(el("div", "cap", "Expert"));
+  for (const t of S.tabs) {
+    const fs = S.fields.filter((f) => f.tab === t.name), n = fs.filter(isChanged).length;
+    item(t.name, t.title, n ? n + " changed" : String(fs.length));
+  }
+  side.append(el("p", "msg", "Expert settings keep their standard values unless you change them. Most analyses never need them."));
+}
+function drawSettings() {
+  const words = $("setSearch").value.toLowerCase().split(/\s+/).filter(Boolean), by = {};
+  for (const f of S.fields) by[f.name] = f;
+  const titles = {}; for (const t of S.tabs) titles[t.name] = t.title;
+  drawSide();
+  const p = $("setPanel"); p.textContent = "";
+  if (words.length) {
+    const hits = S.fields.filter((f) => { const hay = [f.label, f.name, f.text, f.unit, titles[f.tab] || ""].join(" ").toLowerCase(); return words.every((w) => hay.includes(w)); });
+    p.append(el("h3", "", hits.length + " setting" + (hits.length === 1 ? "" : "s") + " found"));
+    if (!hits.length) p.append(el("p", "msg", "No setting contains these words."));
+    for (const f of hits) p.append(fieldRow(f.label, sentence(f.text), [f]));
+  } else if (setTab === "basics") {
+    p.append(el("h3", "", "Basics"));
+    p.append(el("p", "msg", "The settings people change. The gray name is the name of the option in scripts."));
+    for (const b of S.basics) p.append(fieldRow(b.title, b.text, b.names.map((n) => by[n]).filter(Boolean)));
+  } else {
+    p.append(el("h3", "", titles[setTab] || setTab));
+    for (const f of S.fields.filter((x) => x.tab === setTab)) p.append(fieldRow(f.label, sentence(f.text), [f]));
+  }
+  $("setSub").textContent = "For the analyses started from this page. Saved in " + S.file + ".";
+  const note = $("setNote"); note.textContent = "";
+  if (S.source !== "saved" && S.source !== "standard") note.append(el("p", "", "Shown: the settings of " + S.source + ". They are used once you save them."));
+  if (S.notOnPage.length) note.append(el("p", "", "Not taken over, because they belong to one recording and not to a folder: " + S.notOnPage.join(", ") + "."));
+  if (S.last && S.last.differs.length && (S.source === "saved" || S.source === "standard")) {
+    note.append(el("p", "", "The newest analysis of this results folder (" + S.last.file + ") was made with other settings than an analysis started here would use:"));
+    const ul = el("ul"); for (const d of S.last.differs.slice(0, 12)) ul.append(el("li", "", d.name + ": newest analysis " + d.last + ", this page " + d.page));
+    if (S.last.differs.length > 12) ul.append(el("li", "", "... and " + (S.last.differs.length - 12) + " more"));
+    note.append(ul);
+  }
+  note.hidden = !note.children.length;
+  footer();
+}
+function footer() {
+  const ch = S.fields.filter(isChanged);
+  let t = ch.length ? ch.length + " setting" + (ch.length === 1 ? " differs" : "s differ") + " from the standard: " + ch.slice(0, 8).map((f) => f.name).join(", ") + (ch.length > 8 ? ", ..." : "") + "." : "All settings are standard.";
+  if (setDirty) t += " Not saved yet.";
+  $("setState").textContent = t;
+  $("setSave").disabled = !setDirty; $("setStd").disabled = !ch.length;
+  $("setLast").hidden = !(S.last && S.last.canLoad);
+  $("setDown").hidden = !S.download; if (S.download) $("setDown").href = S.download;
+}
+function settingsError(e) { $("setMsg").textContent = e.message; $("setMsg").className = "msg err"; }
+function initSettings() {
+  $("setSearch").addEventListener("input", () => { if (S) drawSettings(); });
+  $("setSave").addEventListener("click", async () => {
+    try { takeSettings(await api("/api/settings", { values: vals, base: setBase }), false); $("setMsg").textContent = "Saved. The next analysis started from this page uses these settings."; $("setMsg").className = "msg"; }
+    catch (e) { settingsError(e); }
+  });
+  $("setStd").addEventListener("click", () => { for (const f of S.fields) vals[f.name] = f.default; setBase = "standard"; setDirty = true; $("setMsg").textContent = ""; drawSettings(); });
+  $("setLast").addEventListener("click", async () => {
+    try { takeSettings(await api("/api/settings/last", {}), true); $("setMsg").textContent = ""; } catch (e) { settingsError(e); }
+  });
+  $("setFileLabel").addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); $("setFile").click(); } });
+  $("setFile").addEventListener("change", async () => {
+    const file = $("setFile").files[0]; if (!file) return;
+    try { takeSettings(await api("/api/settings/file", { text: await file.text(), name: file.name }), true); $("setMsg").textContent = ""; } catch (e) { settingsError(e); }
+    $("setFile").value = "";
+  });
+}
+
+// ------------------------------------------------------------------------------------------------ help
+function drawHelp() {
+  const arts = [...document.querySelectorAll("#helpPanel article")], words = $("helpSearch").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const side = $("helpSide"); side.textContent = "";
+  let n = 0;
+  arts.forEach((a, i) => {
+    const hit = words.length ? words.every((w) => a.textContent.toLowerCase().includes(w)) : i === helpTopic;
+    a.hidden = !hit; if (hit) n++;
+    const b = el("button", "", a.dataset.title); b.type = "button";
+    if (!words.length && i === helpTopic) b.setAttribute("aria-current", "true");
+    b.addEventListener("click", () => { helpTopic = i; $("helpSearch").value = ""; drawHelp(); toPanel("helpPanel"); });
+    side.append(b);
+  });
+  if (words.length && !n) side.append(el("p", "msg", "Nothing in the help contains these words."));
+}
+async function loadHelp() {
+  drawHelp();
+  if (helpInfo) return;
+  try {
+    const h = helpInfo = await api("/api/help");
+    $("helpFlagsIntro").textContent = "The program looks at every channel with at least " + h.minBeats + " contractions and notes when something deserves a second look. There are three kinds of notes. A row shows the most serious kind first, the others in brackets. Gray means too few contractions for a note.";
+    for (const [id, g] of [["helpCheck", "check"], ["helpSensor", "sensor"], ["helpQuality", "quality"]])
+      for (const x of h.names.filter((y) => y.group === g)) $(id).append(el("li", "", x.name + " (" + x.letter + ")"));
+    for (const x of h.legend) if (x.group) $("helpRules").append(el("li", "", x.text));
+    $("helpSetFile").textContent = h.settingsFile;
+    $("helpReach").textContent = h.localOnly ? "Right now: this computer only. The program answers under http://127.0.0.1 and nowhere else." : "Right now: other computers that reach this one can open the page.";
+    for (const d of h.docs) { const li = el("li"), a = el("a", "", d.title + " (PDF)"); a.href = d.url; a.target = "_blank"; a.rel = "noopener"; li.append(a); $("helpDocs").append(li); }
+    if (!h.docs.length) $("helpDocs").append(el("li", "", "The guides (PDF) are in the folder docs of the program."));
+  } catch (e) { $("helpFlagsIntro").textContent = "Could not read the help data: " + e.message; }
+}
+
 async function init() {
+  initSettings();
+  $("helpSearch").addEventListener("input", drawHelp);
   for (const b of document.querySelectorAll("nav button")) b.addEventListener("click", () => go(b.dataset.page));
   for (const b of document.querySelectorAll("[data-go]")) b.addEventListener("click", () => go(b.dataset.go));
   $("view").addEventListener("change", filter); $("search").addEventListener("input", filter);
@@ -338,7 +664,7 @@ async function init() {
     $("startResults").textContent = w.recordings + " recordings, " + (w.counts.ok || 0) + " analyzed.";
     $("startWatcher").textContent = w.lastAnalyzed ? "Last analysis: " + w.lastAnalyzed.slice(0, 16) + "." : "Nothing analyzed yet.";
   } catch (e) { $("startSub").textContent = "The server does not answer: " + e.message; }
-  const fromHash = () => { const page = location.hash.slice(1); return ["start", "results", "watcher"].includes(page) ? page : "start"; };
+  const fromHash = () => { const page = location.hash.slice(1); return PAGES.includes(page) ? page : "start"; };
   window.addEventListener("hashchange", () => { if (document.getElementById(fromHash()).hidden) go(fromHash()); });   // Back and Forward of the browser
   go(fromHash());
 }

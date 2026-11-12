@@ -14,8 +14,9 @@ that inside a trusted network only.
 
 Pages (one file, static/index.html): the start page, the results browser (one row per recording and channel with its
 flags in words, filters, search; a row shows the texts of the flags, the trend image of the channel, the report of the
-experiment and the command that opens the place in the desktop GUI) and the watcher (what is analysed, the reports of
-the last passes, one pass now).
+experiment and the command that opens the place in the desktop GUI), the watcher (what is analysed, the reports of
+the last passes, one pass now), the settings of the passes started from the page (Basics: the settings people change,
+in plain words; Expert: every advanced setting, from the list of the desktop GUI) and the help.
 
 Interface (JSON unless noted):
     GET  /api/state                 results and raw folder, version, names of the flags, legend
@@ -27,7 +28,17 @@ Interface (JSON unless noted):
                                     (watch) with the standard options of the analysis; what it prints is in
                                     run.output of the state. A pass from another raw folder than the one of the last
                                     pass is refused (code "otherRaw") unless other_raw is true or it only lists
+    GET  /api/settings              the settings page: fields (value as shown, default), basics, what differs
+    POST /api/settings              {"values": {option: value as shown}, "base": "standard" | ""}: saves them in
+                                    <results>/mda_web_settings.csv (settings.save_settings); passes started from the
+                                    page use this file
+    POST /api/settings/last         the page filled with the settings of the newest analysis (not saved)
+    POST /api/settings/file         {"text": content of a settings file .csv, "name"}: the page filled with them
+    GET  /api/help                  flags with the thresholds in use, guides at hand
+    GET  /docs/<name>.pdf           the guides of a source checkout (docs/)
     GET  /files/<path>              a file of the results folder (images, PDF reports, tables), nothing outside it
+
+With the default host only requests addressed to this computer are answered (Host 127.0.0.1 or localhost).
 """
 from __future__ import annotations
 
@@ -50,14 +61,74 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 _STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 _REPORT_RX = re.compile(r"^mda_report_[0-9_\-]+\.txt$")
 _SERVED = {".png", ".jpg", ".pdf", ".txt", ".csv", ".gz", ".xlsx", ".json"}
+_LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+_MAX_BODY = 2000000   # bytes of a request (a settings file is a few kB)
+SETTINGS_NAME = "mda_web_settings.csv"   # settings of the passes started from the page (settings.save_settings)
+
+# the settings page. Expert: the rows of the advanced settings window of the desktop GUI (advanced.ROWS) and the
+# options of its main window (_EXTRA_ROWS, same columns); the options of one recording (threshold, zero force,
+# reference beat, calibration, ...) are not settings of a folder and keep their values. Basics (_BASICS): the settings
+# people change, in plain words: (title, what it does, option names).
+_TAB_TITLES = {"Assignment": "Stimulus and contraction", "Detection": "Detection",
+               "Noise / artifacts": "Noise and artifacts", "Rocker rules": "Rocker: which contractions to keep",
+               "Rocker filter": "Rocker: removing the wave", "Signal": "Signal and spikes",
+               "Protocols": "Stimulation protocols", "Export": "Export"}
+_EXTRA_ROWS = (
+    ("rockerFilter", "Remove the rocker artifact", "check", None,
+     "the periodic wave that the rocker adds to the signal is removed while the rocker moves (the automatic analysis "
+     "does this in chunks of 30 min; result per chunk in the table rockerFilter)", 1, "", "Rocker filter", False),
+    ("detection", "Uncertain contractions", "popup",
+     (("counted and marked (sensitive)", "sensitive"), ("not counted (specific)", "specific")),
+     "a contraction is uncertain if it is neither locked to the stimuli nor large. sensitive: uncertain contractions "
+     "are counted and marked (column uncertain); specific: they are not counted", 1, "", "Detection", False),
+    ("beats", "Contractions included", "popup",
+     (("all", "all"), ("only those that follow a stimulus", "stimulated")),
+     "the others stay in the table with included = false", 1, "", "Detection", False),
+    ("rocker", "Rocker during the included contractions", "popup",
+     (("any", "any"), ("at rest", "stopped"), ("moving", "moving")),
+     "at rest: rocker at rest from the diastolic level to 90 % relaxation; the others stay in the table with "
+     "included = false", 1, "", "Rocker rules", False),
+    ("halfRateInterpolation", "Sensors at half the recording rate", "check", None,
+     "channels whose sensor measures at half the recording rate: the repeated values are replaced by a linear "
+     "interpolation, so that the timing does not depend on the phase of the pairs", 1, "", "Signal", False),
+)
+_BASICS = (
+    ("Remove the rocker artifact", "The periodic wave of the rocker is taken out of the signal while the rocker "
+     "moves", ("rockerFilter",)),
+    ("Where the stimuli come from", "MyoDish, an external stimulator, or decided from the recording",
+     ("externalTrigger",)),
+    ("Smallest contraction that counts", "Automatic threshold as a share of the typical contraction, and its lower "
+     "end", ("relThreshold", "minThreshold")),
+    ("Uncertain contractions", "Small contractions that do not follow the pacing: counted and marked, or left out",
+     ("detection",)),
+    ("Shortest time between two contractions", "Peaks closer than this are one contraction", ("minBeatInterval",)),
+    ("Where the diastolic force is measured", "Just before the pulse, or at the lowest point before the contraction",
+     ("diastolicLevel",)),
+    ("How the program knows that the rocker moves", "From the recording, from the log, or whichever is there",
+     ("rockerSource",)),
+    ("Smoothing of the signal", "Moving median and moving mean. Zero means none",
+     ("medianFilterMs", "meanFilterMs")),
+    ("Remove spikes", "Jumps that no slice can produce, e.g. when a chamber is taken out or put in",
+     ("spikeRemoval",)),
+    ("Notice a signal that is upside down", "A sensor that does not work properly can turn the contractions over",
+     ("invertedCheck",)),
+    ("Channels paced with an irregular rhythm", "Missed beats and a variable amplitude are expected there (channel "
+     "numbers, e.g. 1 3 5)", ("arrhythmicChannels",)),
+    ("Protocols: beats per frequency step", "How many beats at the end of a step are the steady state",
+     ("steadyStateBeats",)),
+)
+_DOCS = (("MyoDishAnalysis_quickstart_watcher.pdf", "Quick start: the automatic analysis (1 page)"),
+         ("MyoDishAnalysis_quickstart_GUI.pdf", "Quick start: the desktop program (2 pages)"),
+         ("MyoDishAnalysis_settings_guide.pdf", "Settings guide: every setting, with figures"))
 
 
 class App:
     """state of one server: the folders and the pass started from the page (at most one at a time)"""
 
-    def __init__(self, results_folder, raw_folder=None):
+    def __init__(self, results_folder, raw_folder=None, host="127.0.0.1"):
         self.results = os.path.abspath(results_folder)
         self.raw = os.path.abspath(raw_folder) if raw_folder else ""
+        self.local_only = host in _LOCAL_HOSTS   # then only requests addressed to this computer are answered
         self.lock = threading.Lock()
         self.run = dict(running=False, started="", finished="", raw="", dry_run=False, report="", error="")
 
@@ -131,6 +202,135 @@ class App:
         rel = os.path.relpath(path, self.results).replace(os.sep, "/")
         return "/files/" + urllib.parse.quote(rel)
 
+    # ------------------------------------------------------------------------------------------- settings
+    def settings_file(self):
+        return os.path.join(self.results, SETTINGS_NAME)
+
+    def _options_now(self):
+        """the options a pass started from the page uses: those of the settings file of the page, else the defaults"""
+        from ..options import options
+        f = self.settings_file()
+        if os.path.isfile(f):
+            from ..settings import load_settings
+            return options(load_settings(f))
+        return options()
+
+    def pass_keywords(self):
+        """keywords of watch for a pass started from the page (the settings file of the page, if there is one)"""
+        return dict(settings=self.settings_file()) if os.path.isfile(self.settings_file()) else {}
+
+    def settings(self, opts=None, source=None):
+        """the settings page: every field with its value as shown (option x scale) and its default, the basics, what
+        differs from the defaults and from the newest analysis. opts: options to show instead of the saved ones
+        (loaded from a file or from the newest analysis, not saved yet)"""
+        from .. import advanced
+        from ..options import options
+        from ..watch import _expand_settings, _value_text, options_text
+        D = options()
+        saved = os.path.isfile(self.settings_file())
+        if opts is None:
+            opts, source = self._options_now(), "saved" if saved else "standard"
+        fields, on_page = [], set()
+        for name, label, kind, items, text, scale, unit, tab, _ in _EXTRA_ROWS + tuple(advanced.ROWS):
+            on_page.add(name)
+            fields.append(dict(name=name, label=label, kind=kind, items=[[str(a), b] for a, b in items or ()],
+                               text=text, unit=unit, tab=tab, value=_shown(opts[name], kind, scale),
+                               default=_shown(D[name], kind, scale)))
+        changed = [n for n in D if n != "referenceBeat" and _value_text(opts[n]) != _value_text(D[n])]
+        last = self.last_analysis()
+        diff = []
+        if last:
+            mine = _text_dict(options_text(_expand_settings(self.pass_keywords())))
+            theirs = _text_dict(last[1])
+            low = {r[0].lower(): r for r in _EXTRA_ROWS + tuple(advanced.ROWS)}
+
+            def show(k, d):   # the value as the page shows it; an option that is not named has its standard value
+                row = low.get(k)
+                if k in d:
+                    return _canon_shown(row, d[k]) if row else d[k]
+                return _canon_shown(row, _value_text(D[row[0]])) + " (standard)" if row else "standard"
+            diff = [dict(name=low[k][0] if k in low else k, last=show(k, theirs), page=show(k, mine))
+                    for k in sorted(set(mine) | set(theirs)) if mine.get(k) != theirs.get(k)]
+        return dict(file=self.settings_file(), saved=saved, source=source, fields=fields, changed=changed,
+                    notOnPage=[n for n in changed if n not in on_page],
+                    tabs=[dict(name=t, title=_TAB_TITLES.get(t, t)) for t in advanced.TABS],
+                    basics=[dict(title=a, text=b, names=list(c)) for a, b, c in _BASICS],
+                    download=self._url(self.settings_file()) if saved else "",
+                    last=dict(file=last[0], canLoad=bool(last[2]), differs=diff) if last else None)
+
+    def save_settings(self, values, base=None):
+        """saves the settings of the page: values = {option name: value as shown}; base = "standard": on top of the
+        defaults, otherwise on top of what is saved (options that are not on the page keep their values)"""
+        from .. import advanced
+        from ..options import options
+        from ..settings import save_settings
+        cur = options() if base == "standard" else self._options_now()
+        rows = {r[0]: r for r in _EXTRA_ROWS + tuple(advanced.ROWS)}
+        changes = {}
+        for name, v in dict(values or {}).items():
+            if name not in rows:
+                raise ValueError(f"unknown setting: {name}")
+            _, label, kind, items, _, scale = rows[name][:6]
+            if _same_shown(v, _shown(cur[name], kind, scale)):
+                continue   # unchanged: the stored value stays as it is (no rounding by the way through the page)
+            try:
+                changes[name] = _parse(v, kind, scale, items)
+            except ValueError as e:
+                raise ValueError(f"{label}: {e}") from None
+        opts = options(cur, **changes)
+        os.makedirs(self.results, exist_ok=True)
+        save_settings(self.settings_file(), opts)
+        return self.settings()
+
+    def last_analysis(self):
+        """(recording, text of its options in the index, results file that holds its settings) of the newest
+        analysis of the results folder; None without one"""
+        from ..watch import read_index, results_of
+        X = read_index(self.results)
+        X = X[X["status"].astype(str) == "ok"]
+        if not len(X):
+            return None
+        r = X.sort_values("analyzed", kind="stable").iloc[-1]
+        f = str(r["file"])
+        return f, str(r["options"] or ""), self._links(f, results_of(self.results, f)[0])["open"]
+
+    def settings_of_last_analysis(self):
+        """the settings page filled with the settings of the newest analysis (not saved)"""
+        from ..options import options
+        from ..settings import load_settings
+        last = self.last_analysis()
+        if not last or not last[2]:
+            raise ValueError("no analyzed recording with its settings in this results folder")
+        return self.settings(options(load_settings(last[2])), "the newest analysis (" + last[0] + ")")
+
+    def settings_of_text(self, text, name=""):
+        """the settings page filled with the settings of a settings file (.csv) given as text (not saved)"""
+        import tempfile
+        from ..options import options
+        from ..settings import load_settings
+        if "option_" not in str(text):
+            raise ValueError("this is not a settings file (.csv saved by MyoDishAnalysis)")
+        fd, tmp = tempfile.mkstemp(suffix=".csv")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+                fh.write(str(text))
+            opts = options(load_settings(tmp))
+        finally:
+            os.remove(tmp)
+        return self.settings(opts, "the file " + os.path.basename(str(name) or "settings.csv"))
+
+    def help(self):
+        """what the help page needs from the program: the flags with the thresholds in use, the guides at hand"""
+        from .. import report
+        fl = dict(report.FLAG_DEFAULTS)
+        d = _docs_folder()
+        return dict(names=[dict(letter=c, group=g, name=n) for c, g, n in report.FLAG_NAMES],
+                    legend=[dict(group=g or "", text=t) for g, t in report.legend_lines(fl)],
+                    minBeats=fl["min_beats"],
+                    docs=[dict(url="/docs/" + f, title=t) for f, t in _DOCS
+                          if d and os.path.isfile(os.path.join(d, f))],
+                    settingsFile=self.settings_file(), localOnly=self.local_only)
+
     def compute_flags(self):
         from ..watch import flags_table
         _, T, missing = flags_table(self.results, compute=True)
@@ -148,8 +348,12 @@ class App:
             if os.path.isdir(d) else []
         with self.lock:
             run = dict(self.run)
+        from ..options import options
+        from ..watch import _value_text
+        D, O = options(), self._options_now()
         return dict(recordings=int(len(X)), counts=counts, lastAnalyzed=last, locked=bool(busy), reports=reports,
-                    raw=self.raw or self.raw_of_last_report(), lastRaw=self.raw_of_last_report(), run=run)
+                    raw=self.raw or self.raw_of_last_report(), lastRaw=self.raw_of_last_report(), run=run,
+                    settingsChanged=[n for n in D if n != "referenceBeat" and _value_text(O[n]) != _value_text(D[n])])
 
     def raw_of_last_report(self):
         """raw folder named in the newest pass report ('' if there is none)"""
@@ -198,7 +402,7 @@ class App:
         try:
             from ..watch import watch
             with contextlib.redirect_stdout(_Tee(self, sys.stdout)):  # the lines of the pass, for the page
-                _, report = watch(raw, self.results, quiet=False, dry_run=dry_run)
+                _, report = watch(raw, self.results, quiet=False, dry_run=dry_run, **self.pass_keywords())
         except Exception as e:  # noqa: BLE001 - shown on the page
             error = f"{type(e).__name__}: {e}"
             if os.environ.get("MDA_DEBUG"):
@@ -250,6 +454,100 @@ class _Tee(io.TextIOBase):
             pass
 
 
+def _docs_folder():
+    """folder docs of a source checkout (the guides as PDF); '' in an installed package"""
+    d = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "docs"))
+    return d if os.path.isdir(d) else ""
+
+
+def _text_dict(text):
+    """'a=1; b=x' (options text of the index) --> {'a': '1', 'b': 'x'}"""
+    out = {}
+    for part in str(text or "").split("; "):
+        k, eq, v = part.partition("=")
+        if eq and k.strip():
+            out[k.strip()] = v.strip()
+    return out
+
+
+def _shown(v, kind, scale):
+    """value of an option as the settings page shows it (kind and scale of advanced.ROWS): number x scale, 'auto',
+    'inf', numbers of a vector separated by blanks, true / false"""
+    if kind == "check":
+        return v.lower() in ("on", "true", "1") if isinstance(v, str) else bool(v)
+    if kind == "popup":
+        return v if isinstance(v, (str, bool, int, float)) else str(v)
+    if kind == "vec":
+        import numpy as np
+        a = [] if v is None else np.asarray(v, dtype=float).ravel().tolist()
+        return " ".join("%.12g" % (x * scale) for x in a)
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    x = float(v) * scale
+    if math.isnan(x):
+        return ""
+    if math.isinf(x):
+        return "inf" if x > 0 else "-inf"
+    return float("%.12g" % x)
+
+
+def _canon_shown(row, text):
+    """a value of the options text of the index (option units) as the settings page shows it (with its unit)"""
+    _, _, kind, items, _, scale, unit = row[:7]
+    text = str(text).strip()
+    try:
+        if kind == "check":
+            return "on" if text.lower() in ("1", "true", "on") else "off"
+        if kind == "popup":
+            return next((str(a) for a, b in items or () if str(b) == text), text)
+        if kind in ("num", "int", "numauto") and text.lower() != "auto":
+            return ("%.12g" % (float(text) * scale)) + (" " + unit if unit else "")
+    except ValueError:
+        pass
+    return text or "none"
+
+
+def _same_shown(a, b):
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a == b
+    try:
+        return float(a) == float(b)
+    except (TypeError, ValueError):
+        return str(a).strip() == str(b).strip()
+
+
+def _parse(v, kind, scale, items):
+    """value of an option from what the settings page sends; ValueError with what is expected"""
+    if kind == "check":
+        if isinstance(v, bool):
+            return v
+        raise ValueError("on or off expected")
+    if kind == "popup":
+        for _, val in items or ():
+            if str(val) == str(v):
+                return val
+        raise ValueError("one of these is expected: " + ", ".join(str(b) for _, b in items or ()))
+    if kind == "vec":
+        try:
+            return tuple(float(x) / scale for x in re.split(r"[\s,;]+", str(v).strip()) if x)
+        except ValueError:
+            raise ValueError("numbers are expected, e.g. 1 3 5 (empty: none)") from None
+    t = str(v).strip().lower()
+    if kind == "numauto" and t == "auto":
+        return "auto"
+    try:
+        x = float(t)
+    except ValueError:
+        raise ValueError("a number is expected" + (" (or auto)" if kind == "numauto" else "")) from None
+    if math.isnan(x):
+        raise ValueError("a number is expected")
+    if kind == "int" and math.isfinite(x) and x != round(x):
+        raise ValueError("a whole number is expected")
+    return x / scale
+
+
 def _now():
     return _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -292,6 +590,19 @@ def make_handler(app):
             self.end_headers()
             self.wfile.write(body)
 
+        def _refused(self):
+            """True (and answered) for a request that is not addressed to this computer while the server is meant
+            for this computer only: a page of another site that points its own name at 127.0.0.1 could otherwise
+            read the results through the browser of the user"""
+            if not app.local_only:
+                return False
+            host = (self.headers.get("Host") or "").strip().lower()
+            name = host[1:host.index("]")] if host.startswith("[") and "]" in host else host.rsplit(":", 1)[0]
+            if name in _LOCAL_HOSTS:
+                return False
+            self._json(dict(error="this server answers on this computer only (http://127.0.0.1)"), 403)
+            return True
+
         def _do(self, fn):
             try:
                 fn()
@@ -307,6 +618,8 @@ def make_handler(app):
                 self._json(dict(error=f"{type(e).__name__}: {e}"), 500)
 
         def do_GET(self):  # noqa: N802
+            if self._refused():
+                return None
             u = urllib.parse.urlsplit(self.path)
             q = urllib.parse.parse_qs(u.query)
             path = urllib.parse.unquote(u.path)
@@ -320,12 +633,25 @@ def make_handler(app):
                 return self._do(lambda: self._json(app.watcher()))
             if path == "/api/report":
                 return self._do(lambda: self._json(dict(text=app.report_text((q.get("name") or [""])[0]))))
+            if path == "/api/settings":
+                return self._do(lambda: self._json(app.settings()))
+            if path == "/api/help":
+                return self._do(lambda: self._json(app.help()))
+            if path.startswith("/docs/"):
+                name = path[len("/docs/"):]
+                if name in [f for f, _ in _DOCS] and _docs_folder():
+                    return self._do(lambda: self._file(os.path.join(_docs_folder(), name)))
+                return self._json(dict(error="not found"), 404)
             if path.startswith("/files/"):
                 return self._do(lambda: self._file(app.file_path(path[len("/files/"):])))
             self._json(dict(error="not found"), 404)
 
         def do_POST(self):  # noqa: N802
+            if self._refused():
+                return None
             n = int(self.headers.get("Content-Length") or 0)
+            if n > _MAX_BODY:
+                return self._json(dict(error="request too large"), 413)
             try:
                 data = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if n else {}
             except ValueError:
@@ -340,6 +666,12 @@ def make_handler(app):
             if path == "/api/watcher/run":
                 return self._do(lambda: self._json(app.start_pass(data.get("raw"), bool(data.get("dry_run", False)),
                                                                 bool(data.get("other_raw", False)))))
+            if path == "/api/settings":
+                return self._do(lambda: self._json(app.save_settings(data.get("values"), data.get("base"))))
+            if path == "/api/settings/last":
+                return self._do(lambda: self._json(app.settings_of_last_analysis()))
+            if path == "/api/settings/file":
+                return self._do(lambda: self._json(app.settings_of_text(data.get("text", ""), data.get("name", ""))))
             self._json(dict(error="not found"), 404)
 
     return Handler
@@ -347,7 +679,7 @@ def make_handler(app):
 
 def make_server(results_folder, raw_folder=None, host="127.0.0.1", port=8765):
     """(server, app): the server is not started yet (serve_forever), port 0 = any free port"""
-    app = App(results_folder, raw_folder)
+    app = App(results_folder, raw_folder, host)
     return ThreadingHTTPServer((host, int(port)), make_handler(app)), app
 
 

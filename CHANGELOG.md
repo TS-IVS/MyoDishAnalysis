@@ -133,10 +133,27 @@ MATLAB and Python versions have the same version number and give the same result
   otherwise; there is no login, so `--host 0.0.0.0` is for a trusted network only. Files are served from the results
   folder only. A pass that analyzes from another raw folder than the one of the last pass is refused until confirmed
   (recordings are known by their path below the raw folder; from a folder one level up or down all of them would
-  count as new). A pass started from the page uses the standard settings of the analysis. The traces of a recording
-  stay in the desktop GUIs for now. The desktop GUIs are frozen at this state (corrections only); new functions of
-  the user interface come in the browser. New: `myodish_analysis.web` (`serve`, `make_server`, `App`),
+  count as new). A pass started from the page uses the settings of the page *Settings* (below). The traces of a
+  recording stay in the desktop GUIs for now. The desktop GUIs are frozen at this state (corrections only); new
+  functions of the user interface come in the browser. New: `myodish_analysis.web` (`serve`, `make_server`, `App`),
   `python -m myodish_analysis.web`. Tests: `test_web.py`.
+  - **Settings** (second step, 2026-11-12): the settings of the analyses started from the page. *Basics*: the twelve
+    settings people change, in plain words (rocker artifact, source of the stimuli, smallest contraction, uncertain
+    contractions, ...). *Expert*: every advanced setting of the desktop GUI in its eight groups, from the same list
+    (`advanced.ROWS`), with search over all of them. A changed setting is marked with its standard value and a link
+    that sets it back; nothing is used before *Save*. Saved as a settings file in the results folder
+    (`mda_web_settings.csv`, format of `save_settings` / `mda_settings`, so `mda-watch --settings` and MATLAB
+    `'settings'` read it). *Take the settings of the newest analysis* fills the page from the results of the recording
+    analyzed last; *Load a file ...* from a settings file; *Download*. The page says when the newest analysis of the
+    folder was made with other settings than an analysis started here would use, setting by setting. Settings of one
+    recording (threshold by hand, zero force, reference beat, calibration) are not settings of a folder and stay in
+    the desktop GUI.
+  - **Help**: first steps, the pages, the colored notes (names of the flags and the rules with the thresholds in
+    use, from `report`), the automatic analysis, the settings, who can reach the page, and the guides (PDF) of a
+    source checkout.
+  - With the default host the server answers only requests addressed to this computer (`Host` 127.0.0.1 or
+    localhost): a page of another site that points its own name at 127.0.0.1 cannot read the results through the
+    browser of the user.
 - **Flags in three groups: check the analysis (red), sensor / chamber (orange), slice quality (yellow)** (2026-11-12,
   Tom's decisions on the review of 2026-11-11).
   - New group **sensor / chamber** with the flags M, L and W (below): the hardware limits what the recording can say,

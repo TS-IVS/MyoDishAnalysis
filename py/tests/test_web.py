@@ -138,3 +138,99 @@ def test_watcher_state_reports_and_a_pass(site):
     assert w["lastRaw"] == os.path.abspath(raw)   # a list writes no report: the folder of the last pass stays
     code, j = _json(url + "/api/nothing")
     assert code == 404
+
+
+def test_settings_page_save_and_use(site):
+    url, raw, res, app = site
+    from myodish_analysis.options import options
+    from myodish_analysis.settings import load_settings
+    file = os.path.join(res, "mda_web_settings.csv")
+    code, s = _json(url + "/api/settings")
+    assert code == 200 and s["source"] == "standard" and not s["saved"] and s["changed"] == [] and s["file"] == file
+    names = [f["name"] for f in s["fields"]]
+    D, tabs = options(), {t["name"] for t in s["tabs"]}
+    assert len(names) == len(set(names)) and all(n in D for n in names) and all(f["tab"] in tabs for f in s["fields"])
+    assert all(n in names for b in s["basics"] for n in b["names"])   # every basic setting is a field of the page
+    assert s["last"]["canLoad"] and s["last"]["differs"] == []       # the analysis of the fixture: standard settings
+    # sent back unchanged: nothing differs from the defaults (no rounding by the way through the page)
+    code, s2 = _json(url + "/api/settings", {"values": {f["name"]: f["value"] for f in s["fields"]}})
+    assert code == 200 and s2["saved"] and s2["changed"] == [] and os.path.isfile(file) and s2["download"]
+    # changed values: shown in the units of the page, saved in the units of the options
+    new = {"rockerFilter": True, "gateMax": 120, "arrhythmicChannels": "1, 3", "detection": "specific"}
+    code, s3 = _json(url + "/api/settings", {"values": new})
+    assert code == 200 and sorted(s3["changed"]) == sorted(new)
+    shown = {f["name"]: f["value"] for f in s3["fields"]}
+    assert shown["gateMax"] == 120 and shown["arrhythmicChannels"] == "1 3" and shown["rockerFilter"] is True
+    O = load_settings(file)
+    assert abs(float(O["gateMax"]) - 0.12) < 1e-12 and bool(O["rockerFilter"]) and str(O["detection"]) == "specific"
+    d = {x["name"]: x for x in s3["last"]["differs"]}   # the newest analysis was made with the standard settings
+    assert sorted(d) == sorted(new) and d["gateMax"] == dict(name="gateMax", last="150 ms (standard)", page="120 ms")
+    assert d["rockerFilter"]["page"] == "on" and d["detection"]["last"].endswith("(standard)")
+    # a pass started from the page uses the file; the watcher page names what is changed
+    assert app.pass_keywords() == {"settings": file}
+    code, w = _json(url + "/api/watcher")
+    assert sorted(w["settingsChanged"]) == sorted(new)
+    code, j = _json(url + "/api/watcher/run", {"dry_run": True})
+    assert code == 200
+    for _ in range(600):
+        code, w = _json(url + "/api/watcher")
+        if not w["run"]["running"]:
+            break
+        time.sleep(0.1)
+    assert w["run"]["error"] == "" and "recording(s) to analyse" in w["run"]["output"]
+    text = W.options_text(W._expand_settings(app.pass_keywords()))   # the options such a pass records in the index
+    assert "gatemax=0.12" in text and "rockerfilter=1" in text and "detection=specific" in text
+    # what is not a value is refused with the name of the setting, and nothing is saved
+    before = open(file, encoding="utf-8").read()
+    for bad, word in (({"gateMax": "abc"}, "a number is expected"), ({"detection": "x"}, "one of these"),
+                      ({"nope": 1}, "unknown setting"), ({"steadyStateBeats": 2.5}, "whole number"),
+                      ({"rockerFilter": "yes"}, "on or off")):
+        code, j = _json(url + "/api/settings", {"values": bad})
+        assert code == 400 and word in j["error"], bad
+    assert open(file, encoding="utf-8").read() == before
+    # the settings of the newest analysis and of a settings file fill the page; saved is only what is sent to save
+    code, s4 = _json(url + "/api/settings/last", {})
+    assert code == 200 and s4["changed"] == [] and s4["source"].startswith("the newest analysis")
+    code, s5 = _json(url + "/api/settings/file", {"text": before, "name": "mine.csv"})
+    assert code == 200 and sorted(s5["changed"]) == sorted(new) and s5["source"] == "the file mine.csv"
+    code, j = _json(url + "/api/settings/file", {"text": "hello", "name": "x.csv"})
+    assert code == 400 and "not a settings file" in j["error"]
+    assert open(file, encoding="utf-8").read() == before
+    # back to the standard
+    code, s6 = _json(url + "/api/settings", {"values": {f["name"]: f["default"] for f in s["fields"]},
+                                             "base": "standard"})
+    assert code == 200 and s6["changed"] == [] and s6["last"]["differs"] == []
+
+
+def test_help_guides_and_page(site):
+    url, raw, res, app = site
+    code, h = _json(url + "/api/help")
+    assert code == 200 and len(h["names"]) == 13 and h["localOnly"] and h["minBeats"] == 50
+    assert any("150 ms" in x["text"] for x in h["legend"])   # the rules with the thresholds in use
+    assert len(h["docs"]) == 3                               # source checkout: the guides are at hand
+    for d in h["docs"]:
+        code, ctype, body = _get(url + d["url"])
+        assert code == 200 and ctype == "application/pdf" and body[:4] == b"%PDF"
+    code, j = _json(url + "/docs/..%2FREADME.md")
+    assert code == 404
+    code, ctype, body = _get(url + "/")
+    page = body.decode("utf-8")
+    for word in ('id="settings"', 'id="help"', "What the colored notes mean", "First steps"):
+        assert word in page
+    assert "<script src" not in page and "<link" not in page and 'src="http' not in page   # nothing is loaded
+
+
+def test_only_requests_to_this_computer(site):
+    # a page of another site that points its own name at 127.0.0.1 reaches the server, but under its name: refused
+    url, raw, res, app = site
+    for path, data in (("/api/state", None), ("/api/results", None), ("/", None), ("/api/settings", {"values": {}})):
+        code, j = _json(url + path, data, {"Host": "example.org:8765"})
+        assert code == 403 and "this computer only" in j["error"], path
+    code, j = _json(url + "/api/state", None, {"Host": "localhost:8765"})
+    assert code == 200
+    app.local_only = False   # started with --host 0.0.0.0: every name is answered
+    try:
+        code, j = _json(url + "/api/state", None, {"Host": "labpc.example:8765"})
+        assert code == 200
+    finally:
+        app.local_only = True

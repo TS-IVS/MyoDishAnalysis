@@ -650,16 +650,26 @@ nothing but the Python package (standard library, one HTML page, nothing loaded 
   written by an earlier version of the rules get them again with one button (from the result files, no new analysis).
 * **Automatic analysis**: how many recordings are analyzed, still being recorded, incomplete or parallel; the reports
   of the last passes; *Show what would be analyzed* (list only, nothing is written); *Analyze new recordings now*
-  (one pass with the standard settings of the analysis; results of earlier passes stay as they are). The raw folder is
+  (one pass with the settings of the page *Settings*; results of earlier passes stay as they are). The raw folder is
   the one of the last pass unless `--raw` or the field on the page says otherwise. A pass that analyzes from another
   raw folder is refused until confirmed: recordings are known by their path below the raw folder, so from a folder one
   level up or down all of them would count as new.
+* **Settings**: the settings of the analyses started from the page. *Basics* are the settings people change, in plain
+  words; *Expert* holds every advanced setting (the list of the window *Advanced ...* of the desktop GUI), with a
+  search over all of them. A changed setting is marked with its standard value; nothing is used before *Save*. The
+  settings are the file `mda_web_settings.csv` in the results folder (a settings file as in the section *Advanced
+  settings and settings files*: `mda-watch ... --settings FILE` and `MyoDishAnalysisWatch(..., 'settings', FILE)` read
+  it). *Take the settings of the newest analysis* fills the page from the results of the recording analyzed last, so
+  that an experiment goes on with the settings it began with; the page says when they differ. Settings of one
+  recording (threshold by hand, zero force, reference beat, calibration) stay in the desktop GUI.
+* **Help**: first steps, the meaning of the colored notes with the thresholds in use, the automatic analysis, and the
+  guides (PDF).
 * **Who can reach it**: this computer only (`127.0.0.1`). `--host 0.0.0.0` lets every computer that reaches this one
   read the results and start a pass. There is no login: use it inside a trusted network only, not on a computer that
   is reachable from the internet. Only files of the results folder are served (images, PDF, tables).
 * The traces of a recording with the detected contractions stay in the desktop GUIs for now. The desktop GUIs are
-  frozen at their state of 2026-11-12 (corrections only); the next steps (time points, pooling, studies, settings,
-  help) come in the browser.
+  frozen at their state of 2026-11-12 (corrections only); the next steps (time points, pooling, studies) come in
+  the browser.
 
 ## Periods without signal: chamber taken out, sensor board failures (`mda_signalGaps`; Python `signal_gaps`)
 ```matlab
