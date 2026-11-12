@@ -40,6 +40,7 @@ Interface (JSON unless noted):
     GET  /api/help                  flags with the thresholds in use, guides at hand
     GET  /api/studies               the studies of the results folder, its series, columns and settings of a design
     GET  /api/study?name=...        one study: design, images, methods text, files, tables
+    GET  /api/analysis?id=...       one analysis of timepoints outside a study or one pool (ids in /api/studies)
     POST /api/study/run             {"name", "settings": {key: value}, "rows": [slice, ...]}: study.study in the
                                     background, into <results>/studies/<name>
     POST /api/study/design          {"data": base64 of a design table .xlsx / .csv, "name"}: rows and settings
@@ -500,30 +501,40 @@ class App:
         with self.lock:
             job = dict(self.job)
         hide = ("resultsFolder", "outputFolder", "name")
-        return dict(studies=out, series=self.series_list(), columns=list(DESIGN_COLUMNS), job=job,
+        single, pools = self.other_analyses()
+        return dict(studies=out, single=single, pools=pools, series=self.series_list(),
+                    columns=list(DESIGN_COLUMNS), job=job,
                     settings=[dict(key=k, default=v, text=t) for k, v, t in SETTINGS if k not in hide])
 
     def study_view(self, name):
-        """one study: its design and settings, the images, the methods text, the files and two tables"""
-        import pandas as pd
+        """one study: its design and settings, the images, the methods text, the files and three tables"""
         d = self._study_folder(name)
         if not os.path.isdir(d):
             raise FileNotFoundError(name)
         rows, settings = self._study_design(d, name)
+        files = [("design_" + name + ".xlsx", "Design table (.xlsx)"),
+                 ("design_" + name + ".csv", "Design table (.csv)")]
+        V = self._folder_view(d, name, (("treatments", "Per treatment and time point"), ("statistics", "Statistics"),
+                                        ("excluded", "Left out")), files)
+        return dict(V, name=name, rows=rows, settings=settings)
+
+    def _folder_view(self, d, name, sheets, more_files=(), root_title="All treatments"):
+        """what a folder with the results of timepoints, pool_timepoints or study shows: its images (those of the
+        folder and of its subfolders except analyses), files, methods text and the given sheets of its workbook"""
+        import pandas as pd
         groups = []
         for sub in [""] + sorted(x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x)) and x != "analyses"):
             imgs = sorted(f for f in os.listdir(os.path.join(d, sub)) if f.lower().endswith(".png"))
             if imgs:   # the summary images first: normalized before absolute
                 imgs.sort(key=lambda f: (0 if "_figure_" in f else 1 if f.startswith("treatments") else 2,
                                          0 if "_norm" in f else 1 if "_vsControl" in f else 2, f))
-                groups.append(dict(title=sub or "All treatments",
+                groups.append(dict(title=sub or root_title,
                                    images=[dict(name=f, url=self._url(os.path.join(d, sub, f))) for f in imgs]))
         files = []
         for f, title in ((name + ".xlsx", "Workbook with all tables (.xlsx)"),
                          (name + "_prism.xlsx", "Tables for GraphPad Prism (.xlsx)"),
                          (name + "_figure_norm.pdf", "Figure (PDF)"), (name + "_methods.txt", "Methods text (.txt)"),
-                         ("design_" + name + ".xlsx", "Design table (.xlsx)"),
-                         ("design_" + name + ".csv", "Design table (.csv)")):
+                         *more_files):
             if os.path.isfile(os.path.join(d, f)):
                 files.append(dict(title=title, url=self._url(os.path.join(d, f))))
         methods = ""
@@ -535,16 +546,54 @@ class App:
         wb = os.path.join(d, name + ".xlsx")
         if os.path.isfile(wb):
             x = pd.ExcelFile(wb)
-            for sheet, title in (("treatments", "Per treatment and time point"), ("statistics", "Statistics"),
-                                 ("excluded", "Left out")):
+            for sheet, title in sheets:
                 if sheet in x.sheet_names:
                     T = x.parse(sheet)
                     if len(T):
                         tables.append(dict(title=title, sheet=sheet, columns=[str(c) for c in T.columns],
                                            rows=[[_cell(v) for v in r] for r in T.head(400).itertuples(index=False)],
                                            more=max(0, len(T) - 400)))
-        return dict(name=name, folder=d, done=os.path.isfile(wb), rows=rows, settings=settings, groups=groups,
-                    files=files, methods=methods, tables=tables)
+        return dict(folder=d, done=os.path.isfile(wb), groups=groups, files=files, methods=methods, tables=tables)
+
+    def other_analyses(self):
+        """analyses of timepoints made outside a study (<experiment>/timepoints/<label>_<time>/, by mda-timepoints or
+        mda_timepoints) and pools of them (<results>/timepoints_pooled/<name>/): id = path below the results folder"""
+        from ..watch import read_index
+        exps = {""} | {str(f).replace("\\", "/").rpartition("/")[0] for f in read_index(self.results)["file"]}
+        single = []
+        for e in sorted(exps):
+            root = os.path.join(self.results, *[x for x in e.split("/") if x], "timepoints")
+            for n in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+                wb = os.path.join(root, n, n + ".xlsx")
+                m = re.fullmatch(r"(.+)_(\d{4}-\d{2}-\d{2})-(\d{2})-(\d{2})", n)
+                if m and os.path.isfile(wb):
+                    single.append(dict(id=(e + "/" if e else "") + "timepoints/" + n, label=m.group(1), experiment=e,
+                                       time=f"{m.group(2)} {m.group(3)}:{m.group(4)}", modified=_mtime(wb)))
+        pools, root = [], os.path.join(self.results, "timepoints_pooled")
+        for n in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+            wb = os.path.join(root, n, n + ".xlsx")
+            if os.path.isfile(wb):
+                pools.append(dict(id="timepoints_pooled/" + n, name=n, modified=_mtime(wb)))
+        return single, pools
+
+    def analysis_view(self, rel):
+        """one analysis of timepoints or one pool (id of other_analyses): images, files and tables"""
+        parts = [x for x in str(rel or "").replace("\\", "/").split("/") if x]
+        if len(parts) < 2 or parts[-2] not in ("timepoints", "timepoints_pooled") or ".." in parts:
+            raise ValueError("not an analysis of this results folder")
+        d = os.path.realpath(os.path.join(self.results, *parts))
+        root = os.path.realpath(self.results)
+        name = parts[-1]
+        if os.path.commonpath([d, root]) != root or not os.path.isfile(os.path.join(d, name + ".xlsx")):
+            raise FileNotFoundError(rel)
+        if parts[-2] == "timepoints_pooled":
+            V = self._folder_view(d, name, (("treatments", "Per treatment and time point"),
+                                            ("statistics", "Statistics"), ("excluded", "Left out")))
+            return dict(V, kind="pool", name=name, title="Pooled analyses " + name)
+        m = re.fullmatch(r"(.+)_(\d{4}-\d{2}-\d{2})-(\d{2})-(\d{2})", name)
+        V = self._folder_view(d, name, (("summary", "The windows"),), root_title="All channels")
+        return dict(V, kind="timepoints", name=name,
+                    title="Treatment " + (f"{m.group(1)}, {m.group(2)} {m.group(3)}:{m.group(4)}" if m else name))
 
     def study_design_of_file(self, data, name):
         """rows and settings of a design table (.xlsx or .csv, base64) for the editor; nothing is saved"""
@@ -853,6 +902,10 @@ def _s(v):
     return "" if v is None or (isinstance(v, float) and math.isnan(v)) else str(v)
 
 
+def _mtime(f):
+    return _dt.datetime.fromtimestamp(os.path.getmtime(f)).strftime("%Y-%m-%d %H:%M")
+
+
 def _cell(v):
     """a cell of a table for the page: text, or a number with 4 significant digits; '' for nothing"""
     if v is None or (isinstance(v, float) and math.isnan(v)):
@@ -966,6 +1019,8 @@ def make_handler(app):
                 return self._do(lambda: self._json(app.studies()))
             if path == "/api/study":
                 return self._do(lambda: self._json(app.study_view((q.get("name") or [""])[0])))
+            if path == "/api/analysis":
+                return self._do(lambda: self._json(app.analysis_view((q.get("id") or [""])[0])))
             if path == "/api/study/template":
                 return self._do(lambda: self._bytes(app.study_template(), "design.xlsx"))
             if path == "/api/job":

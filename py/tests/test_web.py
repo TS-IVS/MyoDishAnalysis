@@ -377,3 +377,42 @@ def test_pass_options_and_analyzing_again(site):
     assert list(X1["status"]) == ["ok"] and X1["analyzed"][0] > X0["analyzed"][0]
     code, j = _json(url + "/api/results")
     assert code == 200 and j["missing"] == [] and len(j["rows"]) >= 1   # flags of the new analysis are there
+
+
+def test_single_treatments_and_pools_outside_a_study(tmp_path):
+    """analyses of timepoints made by themselves (<experiment>/timepoints/<label>_<time>/) and pools of them
+    (timepoints_pooled/<name>/) are listed with the studies and can be looked at"""
+    from test_timepoints import _results
+    from myodish_analysis.timepoints import pool_timepoints, timepoints
+    res = _results(tmp_path)
+    srv, app = make_server(res, port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = "http://127.0.0.1:%d" % srv.server_address[1]
+    try:
+        code, st = _json(url + "/api/studies")
+        assert code == 200 and st["single"] == [] and st["pools"] == []
+        for label in ("CTRL", "OME0.5uM"):
+            timepoints(os.path.join(res, "expT"), label, "rigT_S", [1, 2] if label == "CTRL" else [3],
+                       "2000-01-01 12:00", [-60, 10], average_beats=False)
+        pool_timepoints(res, name="p1", figures=False)
+        code, st = _json(url + "/api/studies")
+        assert [(x["id"], x["label"], x["experiment"], x["time"]) for x in st["single"]] == [
+            ("expT/timepoints/CTRL_2000-01-01-12-00", "CTRL", "expT", "2000-01-01 12:00"),
+            ("expT/timepoints/OME0.5uM_2000-01-01-12-00", "OME0.5uM", "expT", "2000-01-01 12:00")]
+        assert [(x["id"], x["name"]) for x in st["pools"]] == [("timepoints_pooled/p1", "p1")] and st["studies"] == []
+        code, v = _json(url + "/api/analysis?id=" + urllib.parse.quote(st["single"][0]["id"], safe=""))
+        assert code == 200 and v["kind"] == "timepoints" and v["title"] == "Treatment CTRL, 2000-01-01 12:00"
+        assert [t["sheet"] for t in v["tables"]] == ["summary"] and len(v["tables"][0]["rows"]) == 4
+        assert v["groups"][0]["title"] == "All channels" and v["groups"][0]["images"][0]["name"].endswith(".png")
+        code, ctype, body = _get(url + v["groups"][0]["images"][0]["url"])
+        assert code == 200 and ctype == "image/png"
+        code, v = _json(url + "/api/analysis?id=timepoints_pooled%2Fp1")
+        assert code == 200 and v["kind"] == "pool" and v["title"] == "Pooled analyses p1"
+        assert [t["sheet"] for t in v["tables"]][0] == "treatments" and v["files"][0]["title"].startswith("Workbook")
+        for bad in ("", "expT", "expT/timepoints/nope", "timepoints_pooled/..", "../timepoints/x",
+                    "expT/rigT_S/00", "studies/s1"):
+            code, j = _json(url + "/api/analysis?id=" + urllib.parse.quote(bad, safe=""))
+            assert code in (400, 404), bad
+    finally:
+        srv.shutdown()
+        srv.server_close()

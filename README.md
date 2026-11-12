@@ -663,7 +663,9 @@ nothing but the Python package (standard library, one HTML page, nothing loaded 
   measures the windows per treatment, pools the slices and writes everything into `<results>/studies/<name>/` (as
   `mda-study` and `mda_study`, which are listed here as well). A study shows its images, the methods text, the tables
   *treatments*, *statistics* and *excluded*, and links to the workbook, the Prism tables, the figure and the design;
-  *Edit the table and run again* opens its design. One treatment alone is a study with one treatment.
+  *Edit the table and run again* opens its design. One treatment alone is a study with one treatment. Treatments
+  analyzed by themselves with `mda-timepoints` / `mda_timepoints` and pools of them are listed below the studies and
+  can be looked at (images, workbook, tables).
 * **Settings**: the settings of the analyses started from the page. *Basics* are the settings people change, in plain
   words; *Expert* holds every advanced setting (the list of the window *Advanced ...* of the desktop GUI), with a
   search over all of them. A changed setting is marked with its standard value; nothing is used before *Save*. The

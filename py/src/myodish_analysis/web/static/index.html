@@ -353,6 +353,7 @@ details { margin: 8px 0; } summary { cursor: pointer; color: var(--blue); paddin
           <ul>
             <li>Images per treatment and for all treatments side by side, a figure, a workbook with one row per slice and time point, tables for GraphPad Prism, and a methods text. Check the methods text before you use it.</li>
             <li>The statistics compare each treatment with the controls at each time point, with the sample as a random effect, and only if both groups have at least 3 samples. They are exploratory and not corrected for multiple comparisons.</li>
+            <li>Treatments analyzed by themselves with <span class="mono">mda-timepoints</span> or <span class="mono">mda_timepoints</span>, and pools of them, are listed below the studies and can be looked at. They belong to no study.</li>
             <li>Everything is in the results folder under <span class="mono">studies</span>. The same table runs from the command line (<span class="mono">mda-study design.xlsx --results RESULTS --name NAME</span>) and in MATLAB (<span class="mono">mda_study</span>).</li>
           </ul>
         </article>
@@ -743,7 +744,7 @@ async function loadStudies() {
   catch (e) { $("stPanel").textContent = ""; $("stPanel").append(el("p", "msg err", "Could not read the studies: " + e.message)); return; }
   if (!stMode) { if (ST.studies.length) { stMode = "view"; stName = ST.studies[0].name; } else newStudy(); }
   drawStudySide();
-  if (stMode === "view") await showStudy(stName); else drawEditor();
+  if (stMode === "view") await showStudy(stName); else if (stMode === "other") await showOther(stName); else drawEditor();
   if (ST.job.running) pollJob();
 }
 function drawStudySide() {
@@ -761,6 +762,20 @@ function drawStudySide() {
     b.addEventListener("click", async () => { stMode = "view"; stName = x.name; drawStudySide(); await showStudy(x.name); toPanel("stPanel"); });
     side.append(b);
   }
+  const others = (cap, items, text) => {
+    if (!items.length) return;
+    side.append(el("div", "cap", cap));
+    for (const x of items) {
+      const b = el("button"), box = el("span", "two"); b.type = "button";
+      box.append(document.createTextNode(x.label || x.name), el("span", "sm", text(x)));
+      b.append(box);
+      if (stMode === "other" && stName === x.id) b.setAttribute("aria-current", "true");
+      b.addEventListener("click", async () => { stMode = "other"; stName = x.id; drawStudySide(); await showOther(x.id); toPanel("stPanel"); });
+      side.append(b);
+    }
+  };
+  others("Single treatments, no study", ST.single, (x) => (x.experiment ? x.experiment + ", " : "") + x.time);
+  others("Pooled, no study", ST.pools, (x) => x.modified);
   if (!ST.series.length) side.append(el("p", "msg", "This results folder has no analyzed recordings yet. Start with the automatic analysis."));
 }
 function tableOf(t) {
@@ -782,8 +797,11 @@ async function showStudy(name) {
   eb.addEventListener("click", () => { E = { name: v.name, settings: studySettings(v.settings), rows: v.rows.map((r) => Object.assign({}, r, { channel: String(r.channel) })), from: v.name }; if (!E.rows.length) E.rows = [emptyRow(null)]; stMode = "edit"; drawStudySide(); drawEditor(); });
   bar.append(eb); p.append(bar);
   if (!v.done) p.append(el("p", "msg err", "This study has no results yet: it was stopped or it failed. Run it again."));
+  viewBody(p, v);
+}
+function viewBody(p, v) {   // files, images, methods text and tables of a study, of one treatment or of a pool
   if (v.files.length) { const l = el("p", "linkrow"); for (const f of v.files) { const a = el("a", "", f.title); a.href = f.url; a.target = "_blank"; a.rel = "noopener"; l.append(a); } p.append(l); }
-  p.append(el("p", "msg", v.rows.length + " slice" + (v.rows.length === 1 ? "" : "s") + "; windows at " + (v.settings.offsets || "?") + " min; folder " + v.folder));
+  p.append(el("p", "msg", (v.rows ? v.rows.length + " slice" + (v.rows.length === 1 ? "" : "s") + "; windows at " + (v.settings.offsets || "?") + " min; " : "") + "folder " + v.folder));
   for (const g of v.groups) {
     p.append(el("h4", "", g.title));
     const s = el("div", "shots");
@@ -800,6 +818,16 @@ async function showStudy(name) {
   const small = el("div", "small");
   for (const t of v.tables) { small.append(el("h4", "", t.title + (t.more ? " (the first " + t.rows.length + " rows; all of them in the workbook, sheet " + t.sheet + ")" : ""))); small.append(tableOf(t)); }
   p.append(small);
+}
+async function showOther(id) {
+  const p = $("stPanel"); p.textContent = ""; p.append(el("p", "msg", "Reading the analysis ..."));
+  let v;
+  try { v = await api("/api/analysis?id=" + encodeURIComponent(id)); }
+  catch (e) { p.textContent = ""; p.append(el("p", "msg err", "Could not read the analysis: " + e.message)); return; }
+  p.textContent = "";
+  p.append(el("h3", "", v.title));
+  p.append(el("p", "msg", v.kind === "pool" ? "Analyses of single treatments pooled by treatment (mda-pool-timepoints, mda_poolTimepoints). It belongs to no study." : "One treatment analyzed by itself (mda-timepoints, mda_timepoints). It belongs to no study; to compare it with controls, make a study."));
+  viewBody(p, v);
 }
 function formRow(form, key) {
   const [label, hint, kind, ph] = STUDY_TEXT[key] || [key, "", "text", ""];

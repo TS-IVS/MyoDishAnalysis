@@ -161,7 +161,10 @@ MATLAB and Python versions have the same version number and give the same result
     figure, methods text, design), the images per treatment, the methods text with a copy button and the tables
     *treatments*, *statistics* and *excluded* of the workbook; *Edit the table and run again* opens its design. The
     studies made by `mda-study` or `mda_study` in the same results folder are listed too. A single treatment is a
-    study with one treatment; analyses of `mda-timepoints` outside a study are not shown yet.
+    study with one treatment. Treatments analyzed by themselves (`mda-timepoints`, `mda_timepoints`:
+    `<experiment>/timepoints/<label>_<time>/`) and pools of them (`timepoints_pooled/<name>/`) are listed below the
+    studies and shown with their images, files and tables (sheet *summary* of a treatment; *treatments*,
+    *statistics*, *excluded* of a pool).
   - **Which recordings a pass takes** (2026-11-12): below the raw folder of the page *Automatic analysis*: analyze
     what is new (standard), also what was analyzed with another version or other settings (`reanalyze` outdated),
     or everything again; recordings with an error again (`retry_errors`); only / not (`include`, `exclude`); changed
