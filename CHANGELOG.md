@@ -122,6 +122,21 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
+- **MyoDishAnalysis in the browser, first step: results and watcher (`mda-web`, Python)** (2026-11-12).
+  `mda-web RESULTS` starts a small web server on this computer and opens the page: a start page, the results of the
+  results folder (one row per recording and channel with its flags in words and in the color of their group, filter
+  by group, search; a row shows the texts of the flags, the sensor value and zero position, the trend image of the
+  channel, the report of the experiment, the workbook and the command that opens the place in the desktop GUI) and
+  the automatic analysis (how many recordings are analyzed, running, incomplete; the reports of the last passes;
+  *Show what would be analyzed*; *Analyze new recordings now*). No new requirements (standard library, one HTML page,
+  nothing loaded from the internet). The server answers on this computer only (127.0.0.1) unless `--host` says
+  otherwise; there is no login, so `--host 0.0.0.0` is for a trusted network only. Files are served from the results
+  folder only. A pass that analyzes from another raw folder than the one of the last pass is refused until confirmed
+  (recordings are known by their path below the raw folder; from a folder one level up or down all of them would
+  count as new). A pass started from the page uses the standard settings of the analysis. The traces of a recording
+  stay in the desktop GUIs for now. The desktop GUIs are frozen at this state (corrections only); new functions of
+  the user interface come in the browser. New: `myodish_analysis.web` (`serve`, `make_server`, `App`),
+  `python -m myodish_analysis.web`. Tests: `test_web.py`.
 - **Flags in three groups: check the analysis (red), sensor / chamber (orange), slice quality (yellow)** (2026-11-12,
   Tom's decisions on the review of 2026-11-11).
   - New group **sensor / chamber** with the flags M, L and W (below): the hardware limits what the recording can say,

@@ -40,12 +40,16 @@ mda-watch = "myodish_analysis.cli:watch_main"
 mda-timepoints = "myodish_analysis.cli:timepoints_main"
 mda-pool-timepoints = "myodish_analysis.cli:pool_timepoints_main"
 mda-study = "myodish_analysis.cli:study_main"
+mda-web = "myodish_analysis.web:main"
 
 [project.gui-scripts]
 mda-gui = "myodish_analysis.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+myodish_analysis = ["web/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

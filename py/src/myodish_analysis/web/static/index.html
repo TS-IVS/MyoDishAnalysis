@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyoDishAnalysis</title>
+<style>
+:root { --bg: #f5f5f7; --card: #fff; --line: #e3e3e8; --text: #1d1d1f; --dim: #515154; --blue: #0a5bb5;
+  --red: #f8c9c4; --redT: #8c0000; --orange: #f9cf9e; --orangeT: #7a3000; --yellow: #fbe8a6; --yellowT: #594500; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+header { display: flex; align-items: center; gap: 8px; padding: 10px 20px; background: var(--card); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header h1 { font-size: 17px; margin: 0 16px 0 0; }
+header .folder { margin-left: auto; color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
+nav button { font: inherit; border: none; background: none; padding: 10px 14px; border-radius: 8px; color: var(--text); cursor: pointer; min-height: 44px; }
+nav button[aria-current="page"] { background: #e4eefa; color: #083f7d; font-weight: 600; }
+main { padding: 24px 20px; max-width: 1500px; margin: 0 auto; }
+h2 { font-size: 22px; margin: 0 0 6px; }
+.sub { color: var(--dim); margin: 0 0 20px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 10px; }
+.card h3 { margin: 0; font-size: 19px; }
+.card p { margin: 0; color: #3a3a3c; }
+.grow { flex: 1; }
+button.primary, button.plain { font: inherit; border-radius: 9px; padding: 11px 16px; min-height: 44px; cursor: pointer; }
+button.primary { background: var(--blue); color: #fff; border: none; font-weight: 600; }
+button.plain { background: var(--card); color: var(--text); border: 1px solid #c7c7cc; }
+button:disabled { opacity: .5; cursor: default; }
+.bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.bar input[type=search], .bar input[type=text], .bar select { font: inherit; padding: 10px 12px; border: 1px solid #c7c7cc; border-radius: 9px; background: var(--card); color: var(--text); min-height: 44px; }
+.bar input[type=search] { flex: 1; min-width: 220px; }
+.split { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.tablebox { flex: 999 1 620px; min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: auto; max-height: 72vh; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #ececf0; white-space: nowrap; }
+th { position: sticky; top: 0; background: #fafafc; font-weight: 600; z-index: 1; }
+td.num, th.num { text-align: right; }
+td.file { white-space: normal; overflow-wrap: anywhere; min-width: 250px; }
+td.note { white-space: normal; min-width: 260px; }
+tr.row { cursor: pointer; }
+tr.row:hover td, tr.row:focus td { background: #f2f6fc; }
+tr.sel td { background: #e4eefa; }
+tr.na td { color: #6e6e73; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-weight: 600; font-size: 13px; white-space: normal; }
+.check { background: var(--red); color: var(--redT); } .sensor { background: var(--orange); color: var(--orangeT); }
+.quality { background: var(--yellow); color: var(--yellowT); } .none { color: var(--dim); font-weight: 400; padding-left: 0; }
+aside { flex: 1 1 380px; min-width: 300px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+aside h3 { margin: 0 0 4px; font-size: 16px; overflow-wrap: anywhere; }
+aside ul { margin: 8px 0; padding-left: 18px; } aside li { margin: 4px 0; }
+aside img { width: 100%; border: 1px solid var(--line); border-radius: 8px; margin-top: 10px; }
+aside .close { display: none; float: right; margin: -6px -6px 6px 10px; }
+button.small { font: inherit; font-size: 13px; background: var(--card); color: var(--text); border: 1px solid #c7c7cc; border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+.cmd { display: flex; gap: 8px; align-items: flex-start; } .cmd code { flex: 1; min-width: 0; } .cmd button { margin-top: 6px; white-space: nowrap; }
+@media (min-width: 1081px) { aside { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; } }
+@media (max-width: 1080px) {   /* narrow window: the details come up from below, the list stays in view */
+  aside { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; max-height: 48vh; overflow: auto; min-width: 0; border-radius: 14px 14px 0 0; box-shadow: 0 -6px 24px rgba(0, 0, 0, .2); }
+  aside.empty { display: none; } aside .close { display: block; } .tablebox { max-height: none; } main.sheet { padding-bottom: 50vh; }
+}
+aside a { color: var(--blue); }
+code { display: block; background: #f5f5f7; border-radius: 8px; padding: 8px 10px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; margin: 6px 0; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.tile b { display: block; font-size: 24px; } .tile span { color: var(--dim); font-size: 13px; }
+pre { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; overflow: auto; max-height: 60vh; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; }
+.msg { color: var(--dim); margin: 8px 0; } .err { color: var(--redT); font-weight: 600; }
+.legend { color: var(--dim); font-size: 13px; margin-top: 10px; }
+.list button { display: block; width: 100%; text-align: left; font: inherit; background: none; border: none; padding: 9px 8px; border-radius: 8px; cursor: pointer; color: var(--blue); }
+.list button:hover { background: #f2f6fc; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MyoDishAnalysis</h1>
+  <nav aria-label="Pages">
+    <button type="button" data-page="start">Start</button>
+    <button type="button" data-page="results">Results</button>
+    <button type="button" data-page="watcher">Automatic analysis</button>
+  </nav>
+  <span class="folder" id="folder"></span>
+</header>
+<main>
+  <section id="start">
+    <h2>What would you like to do?</h2>
+    <p class="sub" id="startSub"></p>
+    <div class="cards">
+      <div class="card">
+        <h3>Browse the results</h3>
+        <p>All analyzed recordings of this results folder in one list, with what needs a second look.</p>
+        <div class="grow"></div>
+        <p id="startResults" class="msg"></p>
+        <button type="button" class="primary" data-go="results">Open the results</button>
+      </div>
+      <div class="card">
+        <h3>Analyze a folder automatically</h3>
+        <p>Every new recording of the raw folder is analyzed. You get one report per experiment.</p>
+        <div class="grow"></div>
+        <p id="startWatcher" class="msg"></p>
+        <button type="button" class="primary" data-go="watcher">Open the automatic analysis</button>
+      </div>
+      <div class="card">
+        <h3>Look at a recording</h3>
+        <p>The traces of a recording, with the detected contractions, are shown by the desktop program for now. Every row of the results gives you the command that opens exactly that place.</p>
+        <div class="grow"></div>
+        <button type="button" class="plain" data-go="results">Find a recording in the results</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="results" hidden>
+    <h2>Results</h2>
+    <p class="sub" id="resSub"></p>
+    <div class="bar">
+      <label for="view">Show</label>
+      <select id="view">
+        <option value="all">all recordings</option>
+        <option value="any">everything with a note</option>
+        <option value="check">red: check the analysis</option>
+        <option value="sensor">orange: sensor or chamber</option>
+        <option value="quality">yellow: slice quality</option>
+        <option value="na">not analyzed</option>
+      </select>
+      <label for="search">Search</label>
+      <input type="search" id="search" placeholder="recording, label, note ... (several words: all must occur)">
+      <button type="button" class="plain" id="compute" hidden></button>
+      <button type="button" class="plain" id="reload">Reload</button>
+    </div>
+    <p class="msg" id="resMsg"></p>
+    <div class="split">
+      <div class="tablebox">
+        <table>
+          <thead><tr><th>Recording</th><th class="num">Ch</th><th>Label</th><th>Note</th><th class="num">Capture %</th><th class="num">Contractions</th><th>Status</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <aside id="detail" class="empty" aria-live="polite"><p class="msg">Select a row to see the details.</p></aside>
+    </div>
+    <button type="button" class="plain" id="more" hidden style="margin-top:12px"></button>
+    <p class="legend" id="legend"></p>
+  </section>
+
+  <section id="watcher" hidden>
+    <h2>Automatic analysis</h2>
+    <p class="sub">The watcher analyzes every new recording of the raw folder and writes the results into this results folder.</p>
+    <div class="tiles" id="tiles"></div>
+    <div class="bar">
+      <label for="raw">Raw folder</label>
+      <input type="text" id="raw" style="flex:1;min-width:260px" placeholder="folder with the recordings (.mdd)">
+      <button type="button" class="plain" id="dry">Show what would be analyzed</button>
+      <button type="button" class="primary" id="run">Analyze new recordings now</button>
+    </div>
+    <p class="msg">A pass started here uses the standard settings of the analysis and analyzes only what is new. Results of earlier passes stay as they are.</p>
+    <p class="msg" id="runMsg"></p>
+    <button type="button" class="plain" id="anyway" hidden style="margin-bottom:12px">Analyze this folder anyway</button>
+    <pre id="runOut" hidden></pre>
+    <h3>Reports of the last passes</h3>
+    <div class="split">
+      <div class="list" id="reports" style="flex:1 1 260px;min-width:240px"></div>
+      <pre id="reportText" style="flex:999 1 560px;min-width:0" hidden></pre>
+    </div>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+let state = null, rows = [], shown = [], limit = 400, selected = -1, poll = null;
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) { const e = new Error(j.error || r.statusText); e.code = j.code || ""; throw e; }
+  return j;
+}
+function go(page) {
+  for (const s of document.querySelectorAll("main > section")) s.hidden = s.id !== page;
+  for (const b of document.querySelectorAll("nav button")) b.toggleAttribute("aria-current", false), b.dataset.page === page && b.setAttribute("aria-current", "page");
+  if (page === "results" && !rows.length) loadResults();
+  if (page === "watcher") loadWatcher();
+  history.replaceState(null, "", "#" + page);
+}
+function badge(r) {
+  if (r.words) return el("span", "badge " + (r.level || "none"), r.words);
+  if (r.indexStatus !== "ok") return el("span", "badge none", "not analyzed");
+  if (r.note) return el("span", "badge none", r.note);
+  if (r.level === "few beats") return el("span", "badge none", "too few contractions to judge");
+  if (r.level === "no slice") return el("span", "badge none", "no slice");
+  return el("span", "badge none", "nothing to note");
+}
+function fmt(v, d) { return v == null ? "" : Number(v).toFixed(d || 0); }
+
+async function loadResults() {
+  $("resMsg").textContent = "Reading the results ..."; $("resMsg").className = "msg";
+  try {
+    const j = await api("/api/results");
+    rows = j.rows;
+    for (const r of rows) r.hay = [r.file, r.label, r.words, r.red, r.sensor, r.yellow, r.status, r.note || "", r.flags].join(" ").toLowerCase();
+    const n = j.missing.length;
+    $("compute").hidden = !n;
+    $("compute").textContent = "Work out the notes of " + n + " recording" + (n === 1 ? "" : "s");
+    $("resSub").textContent = j.recordings + " recordings in this results folder.";
+    $("resMsg").textContent = "";
+    filter();
+  } catch (e) { $("resMsg").textContent = "Could not read the results: " + e.message; $("resMsg").className = "msg err"; }
+}
+function filter() {
+  const v = $("view").value, words = $("search").value.toLowerCase().split(/\s+/).filter(Boolean);
+  shown = rows.filter((r) => {
+    if (v === "any" && !r.words) return false;
+    if (v === "na" && r.indexStatus === "ok") return false;
+    if (v === "check" && r.level !== "check") return false;
+    if (v === "sensor" && !(r.level === "sensor" || /[MLW]/.test(r.flags))) return false;
+    if (v === "quality" && !(r.level === "quality" || /[CXAV]/.test(r.flags))) return false;
+    return words.every((w) => r.hay.includes(w));
+  });
+  limit = 400; selected = -1; draw(); closeDetail();
+}
+function draw() {
+  const tb = $("rows"); tb.textContent = "";
+  shown.slice(0, limit).forEach((r, i) => {
+    const tr = el("tr", "row" + (r.indexStatus !== "ok" ? " na" : "") + (i === selected ? " sel" : ""));
+    tr.tabIndex = 0;
+    tr.append(el("td", "file", r.file), el("td", "num", r.channel == null ? "" : r.channel), el("td", "", r.label));
+    const td = el("td", "note"); td.append(badge(r)); tr.append(td);
+    tr.append(el("td", "num", fmt(r.capture)), el("td", "num", fmt(r.nDetected)), el("td", "", r.indexStatus === "ok" ? r.status : r.indexStatus));
+    const pick = () => { selected = i; draw(); detail(r); };
+    tr.addEventListener("click", pick);
+    tr.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(); } });
+    tb.append(tr);
+  });
+  const rec = new Set(shown.map((r) => r.file)).size;
+  $("resMsg").textContent = shown.length + " rows, " + rec + " recordings" + (shown.length > limit ? " (the first " + limit + " shown)" : "");
+  $("more").hidden = shown.length <= limit;
+  $("more").textContent = "Show " + Math.min(400, shown.length - limit) + " more";
+}
+function closeDetail() {
+  const d = $("detail"); d.textContent = ""; d.className = "empty"; d.append(el("p", "msg", "Select a row to see the details."));
+  document.querySelector("main").classList.remove("sheet");
+  if (selected >= 0) { selected = -1; draw(); }
+}
+function command(text) {   // a command of the desktop program with a button that copies it
+  const box = el("div", "cmd"), b = el("button", "small", "Copy"); b.type = "button";
+  b.addEventListener("click", async () => { try { await navigator.clipboard.writeText(text); b.textContent = "Copied"; } catch (e) { b.textContent = "Select and copy it"; } setTimeout(() => { b.textContent = "Copy"; }, 2000); });
+  box.append(el("code", "", text), b); return box;
+}
+function detail(r) {
+  const d = $("detail"); d.textContent = ""; d.className = ""; document.querySelector("main").classList.add("sheet");
+  const x = el("button", "small close", "Close"); x.type = "button"; x.addEventListener("click", closeDetail); d.append(x);
+  d.append(el("h3", "", r.file + (r.channel == null ? "" : "  -  channel " + r.channel + (r.label ? " (" + r.label + ")" : ""))));
+  d.append(badge(r));
+  const ul = el("ul");
+  for (const [cls, text] of [["check", r.red], ["sensor", r.sensor], ["quality", r.yellow]]) {
+    if (!text) continue;
+    const li = el("li"); li.append(el("span", "badge " + cls, cls === "check" ? "check the analysis" : cls === "sensor" ? "sensor or chamber" : "slice quality"), document.createTextNode(" " + text)); ul.append(li);
+  }
+  if (r.note) ul.append(el("li", "", r.note));
+  if (ul.children.length) d.append(ul);
+  const facts = [];
+  if (r.peakSignal != null) facts.push("sensor value at the peak " + fmt(r.peakSignal) + " counts");
+  if (r.offset != null) facts.push("zero position of the chamber " + fmt(r.offset) + " counts");
+  if (r.analyzed) facts.push("analyzed " + r.analyzed);
+  if (facts.length) d.append(el("p", "msg", facts.join("; ")));
+  const links = el("p");
+  for (const [url, text] of [[r.report, "Report of the experiment (PDF)"], [r.workbook, "Results of the recording (.xlsx)"]]) {
+    if (!url) continue;
+    const a = el("a", "", text); a.href = url; a.target = "_blank"; a.rel = "noopener"; links.append(a, document.createTextNode("   "));
+  }
+  if (links.children.length) d.append(links);
+  if (r.open && r.channel != null) {
+    const w = r.window[0] != null && r.window[1] != null;
+    d.append(el("p", "msg", "Open this place in the desktop program:"));
+    d.append(command("MyoDishAnalysisGUI('" + r.open.replace(/'/g, "''") + "', 'channel', " + r.channel + (w ? ", 'window', [" + r.window[0] + " " + r.window[1] + "]" : "") + ")"));
+    d.append(command('mda-gui "' + r.open + '" --channel ' + r.channel + (w ? " --window " + r.window[0] + " " + r.window[1] : "")));
+  }
+  if (r.image) { const a = el("a"), im = el("img"); a.href = r.image; a.target = "_blank"; a.rel = "noopener"; a.title = "Open the image in full size"; im.src = r.image; im.alt = "Course of channel " + r.channel + " over this recording"; a.append(im); d.append(a); }
+}
+
+async function loadWatcher() {
+  try {
+    const w = await api("/api/watcher");
+    const t = $("tiles"); t.textContent = "";
+    const tile = (n, text) => { const x = el("div", "tile"); x.append(el("b", "", n), el("span", "", text)); t.append(x); };
+    tile(w.recordings, "recordings known");
+    const names = { ok: "analyzed", error: "with an error", running: "still being recorded", incomplete: "incomplete", parallel: "parallel recordings", noLog: "without a log file" };
+    for (const k of Object.keys(w.counts)) tile(w.counts[k], names[k] || k);
+    tile(w.lastAnalyzed ? w.lastAnalyzed.slice(0, 16) : "-", "last analysis");
+    if (!$("raw").value) $("raw").value = w.raw || "";
+    const busy = w.run.running || w.locked;
+    $("run").disabled = $("dry").disabled = busy;
+    let msg = "";
+    if (w.run.running) msg = "A pass started here at " + w.run.started + " is running" + (w.run.dry_run ? " (list only)" : "") + " ...";
+    else if (w.locked) msg = "A watcher is running in this results folder right now (started elsewhere).";
+    else if (w.run.error) msg = "The last pass started here failed: " + w.run.error;
+    else if (w.run.finished) msg = (w.run.dry_run ? "List made at " : "Pass finished at ") + w.run.finished + ".";
+    $("runMsg").textContent = msg; $("runMsg").className = "msg" + (w.run.error ? " err" : "");
+    const out = [w.run.output, w.run.report].filter(Boolean).join("\n").trim();
+    $("runOut").hidden = !out; $("runOut").textContent = out;
+    const list = $("reports"); list.textContent = "";
+    if (!w.reports.length) list.append(el("p", "msg", "No pass has written a report yet."));
+    for (const name of w.reports) {
+      const b = el("button", "", name.replace("mda_report_", "").replace(".txt", "").replace(/_(\d\d)(\d\d)(\d\d)$/, "  $1:$2:$3").replace("_", "  "));
+      b.type = "button";
+      b.addEventListener("click", async () => { const j = await api("/api/report?name=" + encodeURIComponent(name)); $("reportText").hidden = false; $("reportText").textContent = j.text; });
+      list.append(b);
+    }
+    clearTimeout(poll);
+    if (w.run.running && !$("watcher").hidden) poll = setTimeout(loadWatcher, 3000);
+    if (!w.run.running && w.run.finished && !w.run.dry_run) rows = [];   // results changed: read again when shown
+  } catch (e) { $("runMsg").textContent = "Could not read the state of the watcher: " + e.message; $("runMsg").className = "msg err"; }
+}
+async function startPass(dry, otherRaw) {
+  $("anyway").hidden = true;
+  try { await api("/api/watcher/run", { raw: $("raw").value.trim(), dry_run: dry, other_raw: !!otherRaw }); }
+  catch (e) { $("runMsg").textContent = e.message; $("runMsg").className = "msg err"; $("anyway").hidden = e.code !== "otherRaw"; return; }
+  loadWatcher();
+}
+
+async function init() {
+  for (const b of document.querySelectorAll("nav button")) b.addEventListener("click", () => go(b.dataset.page));
+  for (const b of document.querySelectorAll("[data-go]")) b.addEventListener("click", () => go(b.dataset.go));
+  $("view").addEventListener("change", filter); $("search").addEventListener("input", filter);
+  $("reload").addEventListener("click", loadResults);
+  $("more").addEventListener("click", () => { limit += 400; draw(); });
+  $("compute").addEventListener("click", async () => {
+    $("compute").disabled = true; $("resMsg").textContent = "Working out the notes from the result files ...";
+    try { await api("/api/flags/compute", {}); await loadResults(); }
+    catch (e) { $("resMsg").textContent = e.message; $("resMsg").className = "msg err"; }
+    $("compute").disabled = false;
+  });
+  $("dry").addEventListener("click", () => startPass(true)); $("run").addEventListener("click", () => startPass(false));
+  $("anyway").addEventListener("click", () => startPass(false, true));
+  try {
+    state = await api("/api/state");
+    $("folder").textContent = state.results + "   -   version " + state.version;
+    $("startSub").textContent = state.hasIndex ? "Results folder: " + state.results : "This folder has no results yet (no mda_index.csv): start with the automatic analysis.";
+    $("legend").textContent = "Notes: " + state.legend.join("; ") + ". The letters are the short codes of the result files. Channels with fewer than " + state.minBeats + " contractions are not judged.";
+    const w = await api("/api/watcher");
+    $("startResults").textContent = w.recordings + " recordings, " + (w.counts.ok || 0) + " analyzed.";
+    $("startWatcher").textContent = w.lastAnalyzed ? "Last analysis: " + w.lastAnalyzed.slice(0, 16) + "." : "Nothing analyzed yet.";
+  } catch (e) { $("startSub").textContent = "The server does not answer: " + e.message; }
+  const fromHash = () => { const page = location.hash.slice(1); return ["start", "results", "watcher"].includes(page) ? page : "start"; };
+  window.addEventListener("hashchange", () => { if (document.getElementById(fromHash()).hidden) go(fromHash()); });   // Back and Forward of the browser
+  go(fromHash());
+}
+init();
+</script>
+</body>
+</html>

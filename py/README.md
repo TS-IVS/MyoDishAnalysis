@@ -55,6 +55,7 @@ mda-timepoints results_folder Mava100 --series Setup1_ABC000101 --channels 1 3 5
 mda-pool-timepoints results_folder --name myosinModulators   # all analyses of mda-timepoints pooled by treatment
 mda-pool-timepoints results_folder --exclude ABC000101:6::arrhythmic   # without slice ch6 of sample ABC000101
 mda-study design.xlsx --results results_folder --name OME_2026   # whole study from a design table (--template FILE)
+mda-web results_folder                                       # results and watcher in the browser (this computer only; see the main README)
 mda --help
 ```
 
@@ -112,6 +113,7 @@ in MATLAB.
 | `mda_labels`, `mda_addLabels` | `labels()`, `add_labels()` |
 | `MyoDishAnalysisWatch` (`'schedule'`, `'reanalyze'`) | `watch()`, `mda-watch` (`--schedule`, `--reanalyze`; same index `mda_index.csv` and results; see the main README). MATLAB's schedule runs as a timer in the background (`'status'`, `'stop'`); Python's `--schedule` runs in the foreground until Ctrl+C |
 | `mda_report` (`'flags'`, `'analysis'`, `'path'`, `'window'`, `'commands'`) | `report.write_report()`, `report.report_flags()`, `report.analysis_report()`, `report.report_path()`, `report.report_window()`, `report.gui_commands()`; `myodish_analysis(..., report=)`, `mda --report FILE / --no-report`, `mda-watch --no-report` |
+| - (Python only, 2026-11-12) | `web.serve()`, `mda-web`: results and watcher in the browser (local web server, standard library; `tests/test_web.py`) |
 | `mda_test`, `mda_testWatch`, `mda_testClockTime`, `mda_testSignalGaps`, `mda_testSliceRegister`, `mda_testTimepoints`, `mda_testSpikes`, `mda_testProtocolEnd`, `mda_testExtraPulses`, `mda_testGateInverted` | `selftest()`, `mda-test`, `tests/test_mda.py`, `tests/test_watch.py`, `tests/test_clock_time.py`, `tests/test_signal_gaps.py`, `tests/test_slice_register.py`, `tests/test_timepoints.py`, `tests/test_spikes.py`, `tests/test_protocol_end.py`, `selftest.extra_pulse_test()`, `tests/test_gate_inverted.py` |
 
 ## Agreement with MATLAB (R2026a), checked 2026-10-07

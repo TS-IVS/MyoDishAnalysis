@@ -634,6 +634,33 @@ watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`.
   electrode) on one Mac: MATLAB 149 s, Python 69 s; results of MATLAB and Python identical (116 result files, max. relative
   difference 3e-10).
 
+## In the browser: results and automatic analysis (`mda-web`; Python; 2026-11-12, first step)
+```
+mda-web /data/myodish/results                              # opens http://127.0.0.1:8765 in the browser
+mda-web /data/myodish/results --raw /data/myodish/raw --port 8080 --no-browser
+python -m myodish_analysis.web /data/myodish/results       # the same without the installed command
+```
+A small web server on the computer that holds the data shows a results folder of the watcher in the browser. It needs
+nothing but the Python package (standard library, one HTML page, nothing loaded from the internet). Ctrl+C stops it.
+* **Results**: one row per recording and channel with its flags in words, in the color of their group (red: check the
+  analysis, orange: sensor / chamber, yellow: slice quality). Filter by group, search by recording, label or flag.
+  A row shows the texts of the flags, the sensor value at the peak and the zero position of the chamber, the trend
+  image of the channel, links to the report of the experiment (PDF) and to the workbook, and the command that opens
+  this place in the desktop GUI (MATLAB and Python, with a button that copies it). Recordings whose flags were
+  written by an earlier version of the rules get them again with one button (from the result files, no new analysis).
+* **Automatic analysis**: how many recordings are analyzed, still being recorded, incomplete or parallel; the reports
+  of the last passes; *Show what would be analyzed* (list only, nothing is written); *Analyze new recordings now*
+  (one pass with the standard settings of the analysis; results of earlier passes stay as they are). The raw folder is
+  the one of the last pass unless `--raw` or the field on the page says otherwise. A pass that analyzes from another
+  raw folder is refused until confirmed: recordings are known by their path below the raw folder, so from a folder one
+  level up or down all of them would count as new.
+* **Who can reach it**: this computer only (`127.0.0.1`). `--host 0.0.0.0` lets every computer that reaches this one
+  read the results and start a pass. There is no login: use it inside a trusted network only, not on a computer that
+  is reachable from the internet. Only files of the results folder are served (images, PDF, tables).
+* The traces of a recording with the detected contractions stay in the desktop GUIs for now. The desktop GUIs are
+  frozen at their state of 2026-11-12 (corrections only); the next steps (time points, pooling, studies, settings,
+  help) come in the browser.
+
 ## Periods without signal: chamber taken out, sensor board failures (`mda_signalGaps`; Python `signal_gaps`)
 ```matlab
 G = mda_signalGaps('recording.mdd')          % one row per period and channel
