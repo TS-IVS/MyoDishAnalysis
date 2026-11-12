@@ -94,6 +94,25 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 12p
 .help .mono { font: 13px ui-monospace, Menlo, Consolas, monospace; background: #f5f5f7; border-radius: 5px; padding: 1px 5px; }
 .help a { color: var(--blue); }
 @media (max-width: 760px) { .side { flex-basis: 100%; } .set { grid-template-columns: 1fr; } .set .c { align-items: flex-start; } .set .def { text-align: left; } }
+.side button.new { color: var(--blue); font-weight: 600; }
+.side .sm { display: block; color: var(--dim); font-size: 12px; font-weight: 400; }
+.side button .two { display: block; }
+.form { display: grid; grid-template-columns: minmax(180px, 300px) minmax(0, 1fr); gap: 10px 16px; align-items: center; margin: 10px 0 6px; }
+.form label { font-weight: 600; } .form .hint { display: block; color: var(--dim); font-size: 13px; font-weight: 400; }
+.form input[type=text], .form select, .grid input, .grid select { font: inherit; padding: 8px 10px; border: 1px solid #c7c7cc; border-radius: 8px; background: var(--card); color: var(--text); min-height: 40px; width: 100%; }
+.form input[type=text].short { width: 130px; } .form input[type=checkbox] { width: 22px; height: 22px; }
+.gridbox { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; margin: 8px 0; }
+.grid { min-width: 980px; } .grid th { position: static; font-size: 13px; } .grid td { padding: 4px 5px; white-space: nowrap; } .grid td.n { width: 76px; } .grid td.s { min-width: 200px; } .grid td.b { width: 84px; }
+.grid input, .grid select { padding: 6px 8px; min-height: 36px; font-size: 14px; }
+.grid button { font: inherit; border: 1px solid #c7c7cc; background: var(--card); border-radius: 7px; min-width: 34px; min-height: 34px; cursor: pointer; }
+details { margin: 8px 0; } summary { cursor: pointer; color: var(--blue); padding: 6px 0; }
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; margin: 8px 0 4px; }
+.shots a { display: block; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+.shots img { width: 100%; display: block; } .shots span { display: block; font-size: 12px; color: var(--dim); padding: 4px 8px; overflow-wrap: anywhere; }
+.panel h4 { margin: 20px 0 4px; font-size: 15px; }
+.linkrow a { color: var(--blue); margin-right: 18px; white-space: nowrap; display: inline-block; padding: 4px 0; }
+.panel pre { background: #f5f5f7; white-space: pre-wrap; max-height: 320px; }
+.small table { font-size: 13px; } .small .tablebox { max-height: 420px; }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -104,6 +123,7 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 12p
     <button type="button" data-page="start">Start</button>
     <button type="button" data-page="results">Results</button>
     <button type="button" data-page="watcher">Automatic analysis</button>
+    <button type="button" data-page="studies">Studies</button>
     <button type="button" data-page="settings">Settings</button>
     <button type="button" data-page="help">Help</button>
   </nav>
@@ -127,6 +147,13 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 12p
         <div class="grow"></div>
         <p id="startWatcher" class="msg"></p>
         <button type="button" class="primary" data-go="watcher">Open the automatic analysis</button>
+      </div>
+      <div class="card">
+        <h3>Measure a treatment</h3>
+        <p>The contraction in windows before and after a treatment, for all slices of an experiment, pooled per treatment and compared with the controls.</p>
+        <div class="grow"></div>
+        <p id="startStudies" class="msg"></p>
+        <button type="button" class="primary" data-go="studies">Open the studies</button>
       </div>
       <div class="card">
         <h3>Look at a recording</h3>
@@ -190,6 +217,15 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 12p
     </div>
   </section>
 
+  <section id="studies" hidden>
+    <h2>Studies</h2>
+    <p class="sub">The contraction before and after a treatment. One table says which slice got what and when; the program measures the windows, pools the slices per treatment and compares them with the controls.</p>
+    <div class="split">
+      <div class="side" id="stSide"></div>
+      <div class="panel" id="stPanel"><p class="msg">Reading the studies ...</p></div>
+    </div>
+  </section>
+
   <section id="settings" hidden>
     <h2>Settings</h2>
     <p class="sub" id="setSub"></p>
@@ -238,6 +274,7 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 12p
             <li><b>Start</b>: what you can do, and how much is analyzed.</li>
             <li><b>Results</b>: all analyzed recordings of the results folder, one row per channel, with notes on what needs a second look. Filter by the kind of note, or search for a recording, a label or a note.</li>
             <li><b>Automatic analysis</b>: what the results folder holds, the reports of the last analyses, and the buttons that list or analyze what is new.</li>
+            <li><b>Studies</b>: the contraction before and after a treatment, for all slices of an experiment.</li>
             <li><b>Settings</b>: the settings of the analyses started from this page.</li>
             <li><b>Help</b>: this page.</li>
           </ul>
@@ -266,6 +303,30 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 12p
             <li><b>Earlier results stay</b>, also after an update of the program or a change of the settings. The lines of the analysis say so when earlier recordings were analyzed differently.</li>
             <li><b>Another raw folder</b>: recordings are known by their path below the raw folder. From a folder one level up or down all of them would count as new, so the page asks before it analyzes from another raw folder than the last time. Look at the list first.</li>
             <li><b>Every day without a click</b>: start the watcher on a schedule in a terminal, e.g. <span class="mono">mda-watch RAW RESULTS --schedule "daily 10:00"</span>, or in MATLAB with <span class="mono">MyoDishAnalysisWatch</span>. This page shows those results as well, and tells you when such a watcher is at work.</li>
+          </ul>
+        </article>
+        <article data-title="Studies: before and after a treatment">
+          <h3>Studies: before and after a treatment</h3>
+          <p>A study answers one question: what did a treatment do to the contraction? It needs the results of the automatic analysis and one table.</p>
+          <h4>The table of slices</h4>
+          <ul>
+            <li>One row per slice: the <b>series</b> (the recordings of one setup: the file name up to its number), the <b>channel</b>, the <b>treatment</b>, and the <b>time</b> of the treatment (<span class="mono">2000-01-01 12:00</span>).</li>
+            <li>The name of a treatment has letters, digits, <span class="mono">.</span> <span class="mono">-</span> <span class="mono">_</span> and no blanks. Substance and concentration are read from it: <span class="mono">OME0.5uM</span> is OME, 0.5 uM. Names that start with CTRL, control, vehicle or DMSO are controls, unless you name the controls yourself.</li>
+            <li><b>Sample</b> is the heart or tissue a slice comes from. Slices of one sample are not independent, so the statistics need it.</li>
+            <li><b>Leave out</b>: empty, <span class="mono">all</span> for the whole slice, or the minutes from which on its windows are left out, with the reason. The table is the record of what was analyzed and why slices were left out.</li>
+          </ul>
+          <h4>The windows</h4>
+          <ul>
+            <li>Every window starts exactly at the treatment time plus one of the given minutes (negative: before) and lasts 120 s unless you say otherwise. Windows are never shifted.</li>
+            <li>Values are also given in percent of the reference window, which is the last window before the treatment. The diastolic force can be near zero, so it is given as a change in &micro;N instead.</li>
+            <li>In a paced window only the contractions that follow a stimulus are averaged. A recorded window without contractions counts as amplitude 0.</li>
+            <li><b>Time zero</b> can be the time of the table, or the moment the chamber was put back nearest to it (chamber in), which is the moment the slice met the substance.</li>
+          </ul>
+          <h4>What you get</h4>
+          <ul>
+            <li>Images per treatment and for all treatments side by side, a figure, a workbook with one row per slice and time point, tables for GraphPad Prism, and a methods text. Check the methods text before you use it.</li>
+            <li>The statistics compare each treatment with the controls at each time point, with the sample as a random effect, and only if both groups have at least 3 samples. They are exploratory and not corrected for multiple comparisons.</li>
+            <li>Everything is in the results folder under <span class="mono">studies</span>. The same table runs from the command line (<span class="mono">mda-study design.xlsx --results RESULTS --name NAME</span>) and in MATLAB (<span class="mono">mda_study</span>).</li>
           </ul>
         </article>
         <article data-title="Settings">
@@ -305,7 +366,8 @@ const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 let state = null, rows = [], shown = [], limit = 400, selected = -1, poll = null;
 let S = null, vals = {}, setTab = "basics", setBase = "", setDirty = false, helpTopic = 0, helpInfo = null;
-const PAGES = ["start", "results", "watcher", "settings", "help"];
+let ST = null, stMode = "", stName = "", E = null, stPoll = null, stSeen = "", stView = null;
+const PAGES = ["start", "results", "watcher", "studies", "settings", "help"];
 
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -317,7 +379,9 @@ function go(page) {
   for (const s of document.querySelectorAll("main > section")) s.hidden = s.id !== page;
   for (const b of document.querySelectorAll("nav button")) b.toggleAttribute("aria-current", false), b.dataset.page === page && b.setAttribute("aria-current", "page");
   if (page === "results" && !rows.length) loadResults();
+  if (page === "start" && state) loadStart();
   if (page === "watcher") loadWatcher();
+  if (page === "studies") { if (!ST) loadStudies(); else pollJob(); }
   if (page === "settings" && !S) loadSettings();
   if (page === "help") loadHelp();
   history.replaceState(null, "", "#" + page);
@@ -608,6 +672,199 @@ function initSettings() {
   });
 }
 
+// ------------------------------------------------------------------------------------------------ studies
+const STUDY_TEXT = {   // the settings of a study in plain words: [label, hint, kind, placeholder]
+  offsets: ["Windows start at", "minutes after the treatment, negative = before", "text", "-30 10 60 180"],
+  seconds: ["Length of every window", "seconds", "short", "120"],
+  baseline: ["Reference window", "minutes; empty = the last window before the treatment; none = no reference", "short", ""],
+  t0: ["Time zero", "", "t0", ""],
+  t0Window: ["Chamber put back within", "minutes around the given time (only for time zero = chamber put back)", "short", "90"],
+  averageBeats: ["Average beats", "from the recordings: needs the raw folder and takes longer", "check", ""],
+  figures: ["Images", "", "check", ""],
+  control: ["Control treatments", "separated by blanks; empty = names starting with CTRL, control, vehicle or DMSO", "text", ""],
+  order: ["Order of the treatments in the images", "separated by blanks", "text", ""],
+  parameters: ["Parameters", "separated by blanks; empty = the usual ones", "text", ""],
+  rawFolder: ["Raw folder", "only if the recordings are elsewhere than during the analysis", "text", ""],
+};
+const STUDY_MORE = ["control", "order", "parameters", "rawFolder"];
+const truthy = (v) => v === true || ["true", "1", "yes", "on"].includes(String(v).toLowerCase());
+function emptyRow(prev) {
+  const r = { series: ST.series.length ? ST.series[0].series : "", channel: "", treatment: "", time: "", sampleID: "", group: "", exclude: "", excludeReason: "" };
+  if (prev) { Object.assign(r, prev, { exclude: "", excludeReason: "" }); const c = parseInt(prev.channel, 10); r.channel = isNaN(c) ? "" : String(c + 1); }
+  return r;
+}
+function studySettings(from) {
+  const out = {};
+  for (const x of ST.settings) {
+    let v = from && from[x.key] != null && String(from[x.key]) !== "" ? from[x.key] : x.default;
+    if (STUDY_TEXT[x.key] && STUDY_TEXT[x.key][2] === "check") v = truthy(v);
+    out[x.key] = v;
+  }
+  return out;
+}
+function newStudy() { E = { name: "", settings: studySettings(null), rows: [emptyRow(null)], from: "" }; stMode = "edit"; stName = ""; }
+async function loadStudies() {
+  try { ST = await api("/api/studies"); }
+  catch (e) { $("stPanel").textContent = ""; $("stPanel").append(el("p", "msg err", "Could not read the studies: " + e.message)); return; }
+  if (!stMode) { if (ST.studies.length) { stMode = "view"; stName = ST.studies[0].name; } else newStudy(); }
+  drawStudySide();
+  if (stMode === "view") await showStudy(stName); else drawEditor();
+  if (ST.job.running) pollJob();
+}
+function drawStudySide() {
+  const side = $("stSide"); side.textContent = "";
+  const nb = el("button", "new", "+ New study"); nb.type = "button";
+  if (stMode === "edit" && !E.from) nb.setAttribute("aria-current", "true");
+  nb.addEventListener("click", () => { newStudy(); drawStudySide(); drawEditor(); toPanel("stPanel"); });
+  side.append(nb);
+  if (ST.studies.length) side.append(el("div", "cap", "Studies of this results folder"));
+  for (const x of ST.studies) {
+    const b = el("button"), box = el("span", "two"); b.type = "button";
+    box.append(document.createTextNode(x.name), el("span", "sm", x.slices + " slice" + (x.slices === 1 ? "" : "s") + (x.treatments.length ? ": " + x.treatments.join(", ") : "") + (x.done ? "" : " (not finished)")), el("span", "sm", x.modified));
+    b.append(box);
+    if ((stMode === "view" && stName === x.name) || (stMode === "edit" && E.from === x.name)) b.setAttribute("aria-current", "true");
+    b.addEventListener("click", async () => { stMode = "view"; stName = x.name; drawStudySide(); await showStudy(x.name); toPanel("stPanel"); });
+    side.append(b);
+  }
+  if (!ST.series.length) side.append(el("p", "msg", "This results folder has no analyzed recordings yet. Start with the automatic analysis."));
+}
+function tableOf(t) {
+  const box = el("div", "tablebox"), tb = el("table"), th = el("tr");
+  for (const c of t.columns) th.append(el("th", "", c));
+  const head = el("thead"); head.append(th); tb.append(head);
+  const body = el("tbody");
+  for (const r of t.rows) { const tr = el("tr"); for (const v of r) tr.append(el("td", typeof v === "number" ? "num" : "", String(v))); body.append(tr); }
+  tb.append(body); box.append(tb); return box;
+}
+async function showStudy(name) {
+  const p = $("stPanel"); p.textContent = ""; p.append(el("p", "msg", "Reading the study ..."));
+  let v;
+  try { v = stView = await api("/api/study?name=" + encodeURIComponent(name)); }
+  catch (e) { p.textContent = ""; p.append(el("p", "msg err", "Could not read the study: " + e.message)); return; }
+  p.textContent = "";
+  p.append(el("h3", "", "Study " + v.name));
+  const bar = el("div", "bar"), eb = el("button", "plain", "Edit the table and run again"); eb.type = "button";
+  eb.addEventListener("click", () => { E = { name: v.name, settings: studySettings(v.settings), rows: v.rows.map((r) => Object.assign({}, r, { channel: String(r.channel) })), from: v.name }; if (!E.rows.length) E.rows = [emptyRow(null)]; stMode = "edit"; drawStudySide(); drawEditor(); });
+  bar.append(eb); p.append(bar);
+  if (!v.done) p.append(el("p", "msg err", "This study has no results yet: it was stopped or it failed. Run it again."));
+  if (v.files.length) { const l = el("p", "linkrow"); for (const f of v.files) { const a = el("a", "", f.title); a.href = f.url; a.target = "_blank"; a.rel = "noopener"; l.append(a); } p.append(l); }
+  p.append(el("p", "msg", v.rows.length + " slice" + (v.rows.length === 1 ? "" : "s") + "; windows at " + (v.settings.offsets || "?") + " min; folder " + v.folder));
+  for (const g of v.groups) {
+    p.append(el("h4", "", g.title));
+    const s = el("div", "shots");
+    for (const im of g.images) { const a = el("a"), i = el("img"); a.href = im.url; a.target = "_blank"; a.rel = "noopener"; a.title = "Open the image in full size"; i.src = im.url; i.alt = im.name; i.loading = "lazy"; a.append(i, el("span", "", im.name)); s.append(a); }
+    p.append(s);
+  }
+  if (v.methods) {
+    p.append(el("h4", "", "Methods text"));
+    p.append(el("p", "msg", "Written from the settings, the groups and the slices left out. Check it before you use it."));
+    const pre = el("pre", "", v.methods), cb = el("button", "small", "Copy the text"); cb.type = "button";
+    cb.addEventListener("click", async () => { try { await navigator.clipboard.writeText(v.methods); cb.textContent = "Copied"; } catch (e) { cb.textContent = "Select and copy it"; } setTimeout(() => { cb.textContent = "Copy the text"; }, 2000); });
+    p.append(pre, cb);
+  }
+  const small = el("div", "small");
+  for (const t of v.tables) { small.append(el("h4", "", t.title + (t.more ? " (the first " + t.rows.length + " rows; all of them in the workbook, sheet " + t.sheet + ")" : ""))); small.append(tableOf(t)); }
+  p.append(small);
+}
+function formRow(form, key) {
+  const [label, hint, kind, ph] = STUDY_TEXT[key] || [key, "", "text", ""];
+  const lab = el("label", "", label); if (hint) lab.append(el("span", "hint", hint));
+  let inp;
+  if (kind === "check") { inp = el("input"); inp.type = "checkbox"; inp.checked = !!E.settings[key]; inp.addEventListener("change", () => { E.settings[key] = inp.checked; }); }
+  else if (kind === "t0") {
+    inp = el("select");
+    for (const [v, t] of [["given", "the time given in the table"], ["chamberIn", "the moment the chamber was put back (nearest to that time)"]]) { const o = el("option", "", t); o.value = v; inp.append(o); }
+    inp.value = E.settings[key] === "chamberIn" ? "chamberIn" : "given"; inp.addEventListener("change", () => { E.settings[key] = inp.value; });
+  } else { inp = el("input"); inp.type = "text"; inp.value = E.settings[key] == null ? "" : E.settings[key]; inp.placeholder = ph; if (kind === "short") inp.className = "short"; inp.autocomplete = "off"; inp.addEventListener("input", () => { E.settings[key] = inp.value; }); }
+  inp.id = "st_" + key; lab.htmlFor = inp.id;
+  const cell = el("div"); cell.append(inp); form.append(lab, cell);
+}
+function drawRows() {
+  const body = $("stRows"); body.textContent = "";
+  E.rows.forEach((r, i) => {
+    const tr = el("tr");
+    const cell = (key, cls, ph, list) => {
+      const td = el("td", cls || ""), inp = el("input"); inp.type = "text"; inp.value = r[key] == null ? "" : r[key]; inp.placeholder = ph || ""; inp.autocomplete = "off";
+      inp.setAttribute("aria-label", key + " of slice " + (i + 1)); if (list) inp.setAttribute("list", list);
+      inp.addEventListener("input", () => { r[key] = inp.value; if (key === "treatment") treatList(); }); td.append(inp); tr.append(td);
+    };
+    const td = el("td", "s"), sel = el("select"); sel.setAttribute("aria-label", "series of slice " + (i + 1));
+    const names = ST.series.map((x) => x.series); if (r.series && !names.includes(r.series)) names.unshift(r.series);
+    for (const n of names) { const o = el("option", "", n); o.value = n; sel.append(o); }
+    sel.value = r.series; sel.addEventListener("change", () => { r.series = sel.value; }); td.append(sel); tr.append(td);
+    cell("channel", "n", "1"); cell("treatment", "", "CTRL", "stTreat"); cell("time", "", "2000-01-01 12:00"); cell("sampleID", "", ""); cell("group", "n", ""); cell("exclude", "n", ""); cell("excludeReason", "", "");
+    const tb = el("td", "b"), dup = el("button", "", "+"), del = el("button", "", "\u00d7"); dup.type = del.type = "button";
+    dup.title = "Add a row like this one for the next channel"; dup.setAttribute("aria-label", "Add a row like slice " + (i + 1));
+    del.title = "Remove this row"; del.setAttribute("aria-label", "Remove slice " + (i + 1));
+    dup.addEventListener("click", () => { E.rows.splice(i + 1, 0, emptyRow(r)); drawRows(); });
+    del.addEventListener("click", () => { E.rows.splice(i, 1); if (!E.rows.length) E.rows.push(emptyRow(null)); drawRows(); });
+    tb.append(dup, document.createTextNode(" "), del); tr.append(tb); body.append(tr);
+  });
+  treatList();
+}
+function treatList() { const dl = $("stTreat"); if (!dl) return; dl.textContent = ""; for (const t of new Set(E.rows.map((r) => String(r.treatment || "").trim()).filter(Boolean))) { const o = el("option"); o.value = t; dl.append(o); } }
+function drawEditor() {
+  const p = $("stPanel"); p.textContent = "";
+  p.append(el("h3", "", E.from ? "Study " + E.from + ": edit and run again" : "New study"));
+  const f1 = el("div", "form"), nl = el("label", "", "Name of the study"), ni = el("input"); nl.append(el("span", "hint", "letters, digits, . - _ (name of its folder and workbook)"));
+  ni.type = "text"; ni.id = "st_name"; nl.htmlFor = "st_name"; ni.value = E.name; ni.placeholder = "OME_2026"; ni.autocomplete = "off"; ni.addEventListener("input", () => { E.name = ni.value; });
+  const nc = el("div"); nc.append(ni); f1.append(nl, nc);
+  for (const x of ST.settings) if (!STUDY_MORE.includes(x.key)) formRow(f1, x.key);
+  p.append(f1);
+  const det = el("details"), f2 = el("div", "form"); det.append(el("summary", "", "More settings (controls, order, parameters, raw folder)"));
+  for (const x of ST.settings) if (STUDY_MORE.includes(x.key)) formRow(f2, x.key);
+  det.append(f2); if (STUDY_MORE.some((k) => String(E.settings[k] || "") !== "")) det.open = true; p.append(det);
+  p.append(el("h4", "", "The slices"));
+  p.append(el("p", "msg", "One row per slice. Leave out: empty, all, or the minutes from which on the windows of the slice are left out, with the reason."));
+  const gb = el("div", "gridbox"), tb = el("table", "grid"), hr = el("tr");
+  for (const h of ["Series", "Channel", "Treatment", "Time of the treatment", "Sample", "Group", "Leave out", "Reason", ""]) hr.append(el("th", "", h));
+  const head = el("thead"); head.append(hr); const body = el("tbody"); body.id = "stRows"; tb.append(head, body); gb.append(tb); p.append(gb);
+  const dl = el("datalist"); dl.id = "stTreat"; p.append(dl);
+  const bar = el("div", "bar"), add = el("button", "plain", "Add a slice"); add.type = "button";
+  add.addEventListener("click", () => { E.rows.push(emptyRow(E.rows[E.rows.length - 1])); drawRows(); });
+  const fl = el("label", "plain", "Load a design table ..."), fi = el("input"); fl.tabIndex = 0; fi.type = "file"; fi.accept = ".xlsx,.csv"; fi.hidden = true; fl.append(fi);
+  fl.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); fi.click(); } });
+  fi.addEventListener("change", async () => {
+    const file = fi.files[0]; if (!file) return;
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer()); let bin = "";
+      for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+      const j = await api("/api/study/design", { data: btoa(bin), name: file.name });
+      E.rows = j.rows.map((r) => Object.assign({}, r, { channel: String(r.channel) }));
+      if (!E.name && j.settings.name) E.name = j.settings.name;
+      E.settings = studySettings(Object.assign({}, E.settings, j.settings));
+      drawEditor(); studyMsg("Table " + file.name + " loaded: " + E.rows.length + " slices. Nothing is run before you click Run the study.", false);
+    } catch (e) { studyMsg(e.message, true); }
+  });
+  const tl = el("a", "plain", "Empty design table (.xlsx)"); tl.href = "/api/study/template"; tl.setAttribute("download", "design.xlsx");
+  bar.append(add, fl, tl); p.append(bar);
+  const run = el("div", "bar"), rb = el("button", "primary", "Run the study"); rb.type = "button"; rb.id = "stRun";
+  rb.addEventListener("click", runStudy); run.append(rb); p.append(run);
+  const m = el("p", "msg"); m.id = "stMsg"; const o = el("pre"); o.id = "stOut"; o.hidden = true; p.append(m, o);
+  drawRows();
+}
+function studyMsg(text, bad) { const m = $("stMsg"); if (m) { m.textContent = text; m.className = "msg" + (bad ? " err" : ""); } }
+async function runStudy() {
+  try { await api("/api/study/run", { name: E.name.trim(), settings: E.settings, rows: E.rows }); }
+  catch (e) { studyMsg(e.message, true); return; }
+  pollJob();
+}
+async function pollJob() {
+  clearTimeout(stPoll);
+  let j;
+  try { j = await api("/api/job"); } catch (e) { return; }
+  const rb = $("stRun"); if (rb) rb.disabled = !!j.running;
+  if (j.running) {
+    studyMsg("The study " + j.name + " is running since " + j.started.slice(11) + ". You can leave the page.", false);
+    const o = $("stOut"); if (o) { o.hidden = !j.output; o.textContent = j.output; }
+    stPoll = setTimeout(pollJob, 2000);
+  } else if (j.finished && stSeen !== j.started) {
+    stSeen = j.started;
+    if (j.error) { studyMsg("The study " + j.name + " failed: " + j.error, true); const o = $("stOut"); if (o) { o.hidden = !j.output; o.textContent = j.output; } }
+    else { stMode = "view"; stName = j.name; await loadStudies(); }
+  }
+}
+
 // ------------------------------------------------------------------------------------------------ help
 function drawHelp() {
   const arts = [...document.querySelectorAll("#helpPanel article")], words = $("helpSearch").value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -639,6 +896,19 @@ async function loadHelp() {
   } catch (e) { $("helpFlagsIntro").textContent = "Could not read the help data: " + e.message; }
 }
 
+async function loadStart() {   // the numbers of the start page: read whenever it is shown
+  try {
+    state = await api("/api/state");
+    $("folder").textContent = state.results + "   -   version " + state.version;
+    $("startSub").textContent = state.hasIndex ? "Results folder: " + state.results : "This folder has no results yet (no mda_index.csv): start with the automatic analysis.";
+    $("legend").textContent = "Notes: " + state.legend.join("; ") + ". The letters are the short codes of the result files. Channels with fewer than " + state.minBeats + " contractions are not judged.";
+    const w = await api("/api/watcher");
+    $("startResults").textContent = w.recordings + " recordings, " + (w.counts.ok || 0) + " analyzed.";
+    $("startWatcher").textContent = w.lastAnalyzed ? "Last analysis: " + w.lastAnalyzed.slice(0, 16) + "." : "Nothing analyzed yet.";
+    $("startStudies").textContent = state.studies + (state.studies === 1 ? " study" : " studies") + " in this results folder.";
+  } catch (e) { $("startSub").textContent = "The server does not answer: " + e.message; }
+}
+
 async function init() {
   initSettings();
   $("helpSearch").addEventListener("input", drawHelp);
@@ -655,15 +925,7 @@ async function init() {
   });
   $("dry").addEventListener("click", () => startPass(true)); $("run").addEventListener("click", () => startPass(false));
   $("anyway").addEventListener("click", () => startPass(false, true));
-  try {
-    state = await api("/api/state");
-    $("folder").textContent = state.results + "   -   version " + state.version;
-    $("startSub").textContent = state.hasIndex ? "Results folder: " + state.results : "This folder has no results yet (no mda_index.csv): start with the automatic analysis.";
-    $("legend").textContent = "Notes: " + state.legend.join("; ") + ". The letters are the short codes of the result files. Channels with fewer than " + state.minBeats + " contractions are not judged.";
-    const w = await api("/api/watcher");
-    $("startResults").textContent = w.recordings + " recordings, " + (w.counts.ok || 0) + " analyzed.";
-    $("startWatcher").textContent = w.lastAnalyzed ? "Last analysis: " + w.lastAnalyzed.slice(0, 16) + "." : "Nothing analyzed yet.";
-  } catch (e) { $("startSub").textContent = "The server does not answer: " + e.message; }
+  await loadStart();
   const fromHash = () => { const page = location.hash.slice(1); return PAGES.includes(page) ? page : "start"; };
   window.addEventListener("hashchange", () => { if (document.getElementById(fromHash()).hidden) go(fromHash()); });   // Back and Forward of the browser
   go(fromHash());

@@ -151,6 +151,17 @@ MATLAB and Python versions have the same version number and give the same result
   - **Help**: first steps, the pages, the colored notes (names of the flags and the rules with the thresholds in
     use, from `report`), the automatic analysis, the settings, who can reach the page, and the guides (PDF) of a
     source checkout.
+  - **Studies** (third step, 2026-11-12): time points, pooling and study in one page. The table of slices of
+    `mda_study` / `study` (series, channel, treatment, time, sample, group, leave out, reason) is edited on the page
+    (series from the results folder, a row copied for the next channel) or loaded from a design table (.xlsx, .csv;
+    empty table as download), with the settings in plain words (windows, length, reference window, time zero = given
+    time or chamber put back, average beats, images; more: controls, order, parameters, raw folder). Mistakes of the
+    table are named before anything runs (slice and column). *Run the study* runs `study` in the background into
+    `<results>/studies/<name>/`; one study or pass at a time. A study shows its files (workbook, Prism tables,
+    figure, methods text, design), the images per treatment, the methods text with a copy button and the tables
+    *treatments*, *statistics* and *excluded* of the workbook; *Edit the table and run again* opens its design. The
+    studies made by `mda-study` or `mda_study` in the same results folder are listed too. A single treatment is a
+    study with one treatment; analyses of `mda-timepoints` outside a study are not shown yet.
   - With the default host the server answers only requests addressed to this computer (`Host` 127.0.0.1 or
     localhost): a page of another site that points its own name at 127.0.0.1 cannot read the results through the
     browser of the user.

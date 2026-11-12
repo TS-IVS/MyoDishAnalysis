@@ -35,6 +35,13 @@ Interface (JSON unless noted):
     POST /api/settings/last         the page filled with the settings of the newest analysis (not saved)
     POST /api/settings/file         {"text": content of a settings file .csv, "name"}: the page filled with them
     GET  /api/help                  flags with the thresholds in use, guides at hand
+    GET  /api/studies               the studies of the results folder, its series, columns and settings of a design
+    GET  /api/study?name=...        one study: design, images, methods text, files, tables
+    POST /api/study/run             {"name", "settings": {key: value}, "rows": [slice, ...]}: study.study in the
+                                    background, into <results>/studies/<name>
+    POST /api/study/design          {"data": base64 of a design table .xlsx / .csv, "name"}: rows and settings
+    GET  /api/study/template        an empty design table (.xlsx)
+    GET  /api/job                   state of the study started here (running, error, what it printed)
     GET  /docs/<name>.pdf           the guides of a source checkout (docs/)
     GET  /files/<path>              a file of the results folder (images, PDF reports, tables), nothing outside it
 
@@ -131,6 +138,7 @@ class App:
         self.local_only = host in _LOCAL_HOSTS   # then only requests addressed to this computer are answered
         self.lock = threading.Lock()
         self.run = dict(running=False, started="", finished="", raw="", dry_run=False, report="", error="")
+        self.job = dict(running=False, kind="", name="", started="", finished="", error="", output="")   # a study
 
     # ------------------------------------------------------------------------------------------- data
     def state(self):
@@ -138,6 +146,7 @@ class App:
         from ..write_results import mda_version
         return dict(results=self.results, raw=self.raw or self.raw_of_last_report(), version=mda_version(),
                     hasIndex=os.path.isfile(os.path.join(self.results, "mda_index.csv")),
+                    studies=self._n_studies(),
                     names=[dict(letter=c, group=g, name=n) for c, g, n in report.FLAG_NAMES],
                     legend=report.short_legend(), minBeats=report.FLAG_DEFAULTS["min_beats"])
 
@@ -392,6 +401,8 @@ class App:
         with self.lock:
             if self.run["running"]:
                 raise ValueError("a pass started here is still running")
+            if self.job["running"]:
+                raise ValueError("the study " + self.job["name"] + " started here is still running")
             self.run = dict(running=True, started=_now(), finished="", raw=raw, dry_run=bool(dry_run), report="",
                             error="", output="")
         threading.Thread(target=self._pass, args=(raw, bool(dry_run)), daemon=True).start()
@@ -401,7 +412,7 @@ class App:
         report, error = "", ""
         try:
             from ..watch import watch
-            with contextlib.redirect_stdout(_Tee(self, sys.stdout)):  # the lines of the pass, for the page
+            with contextlib.redirect_stdout(_Tee(self, self.run, sys.stdout)):  # the lines of the pass, for the page
                 _, report = watch(raw, self.results, quiet=False, dry_run=dry_run, **self.pass_keywords())
         except Exception as e:  # noqa: BLE001 - shown on the page
             error = f"{type(e).__name__}: {e}"
@@ -409,6 +420,230 @@ class App:
                 traceback.print_exc()
         with self.lock:
             self.run.update(running=False, finished=_now(), report=str(report or ""), error=error)
+
+    # ------------------------------------------------------------------------------------------- studies
+    def series_list(self):
+        """the series of the results folder (recordings of one setup: the file name up to its number), each with its
+        experiment, the number of analysed recordings and the channels with their labels (newest flags)"""
+        from ..timepoints import _series_info
+        from ..watch import flags_table
+        X, T, _ = flags_table(self.results, compute=False)
+        out = {}
+        for f, st in zip(X["file"].astype(str), X["status"].astype(str)):
+            if not st.startswith("ok"):
+                continue
+            rel = f.replace("\\", "/")
+            s, _, main = _series_info(re.sub(r"\.mdd$", "", rel.rsplit("/", 1)[-1], flags=re.I))
+            if not main:
+                continue
+            d = out.setdefault(s, dict(series=s, experiment=rel.rpartition("/")[0], recordings=0, channels={}))
+            d["recordings"] += 1
+        for r in T.to_dict("records"):
+            rel = str(r["file"]).replace("\\", "/")
+            s = _series_info(re.sub(r"\.mdd$", "", rel.rsplit("/", 1)[-1], flags=re.I))[0]
+            if s in out and _s(r["status"]) != "no slice":
+                out[s]["channels"][int(r["channel"])] = _s(r["label"])
+        return [dict(d, channels=[dict(channel=c, label=d["channels"][c]) for c in sorted(d["channels"])])
+                for d in sorted(out.values(), key=lambda d: d["series"])]
+
+    def _n_studies(self):
+        root = os.path.join(self.results, "studies")
+        return sum(1 for x in os.listdir(root) if os.path.isdir(os.path.join(root, x))) if os.path.isdir(root) else 0
+
+    def _study_folder(self, name):
+        name = str(name or "")
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", name) or name.strip(".") == "":
+            raise ValueError("name of the study: letters, digits, '.', '-' and '_' expected")
+        return os.path.join(self.results, "studies", name)
+
+    def _study_design(self, folder, name):
+        """(rows, settings) of the design kept in the study folder; ([], {}) without one"""
+        from ..study import _read_design
+        for ext in (".xlsx", ".csv"):
+            f = os.path.join(folder, "design_" + name + ext)
+            if os.path.isfile(f):
+                D, settings = _read_design(f)
+                return D.to_dict("records"), settings
+        return [], {}
+
+    def studies(self):
+        """the studies of the results folder (<results>/studies/<name>/), newest first, and what the editor needs"""
+        from ..study import DESIGN_COLUMNS, SETTINGS
+        root, out = os.path.join(self.results, "studies"), []
+        for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+            d = os.path.join(root, name)
+            wb = os.path.join(d, name + ".xlsx")
+            if not os.path.isdir(d) or not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+                continue
+            try:
+                rows, _ = self._study_design(d, name)
+            except Exception:  # noqa: BLE001 - a design that cannot be read: the study is listed without it
+                rows = []
+            out.append(dict(name=name, done=os.path.isfile(wb), slices=len(rows),
+                            treatments=list(dict.fromkeys(r["treatment"] for r in rows)),
+                            modified=_dt.datetime.fromtimestamp(os.path.getmtime(wb if os.path.isfile(wb) else d)
+                                                                ).strftime("%Y-%m-%d %H:%M")))
+        out.sort(key=lambda x: x["modified"], reverse=True)
+        with self.lock:
+            job = dict(self.job)
+        hide = ("resultsFolder", "outputFolder", "name")
+        return dict(studies=out, series=self.series_list(), columns=list(DESIGN_COLUMNS), job=job,
+                    settings=[dict(key=k, default=v, text=t) for k, v, t in SETTINGS if k not in hide])
+
+    def study_view(self, name):
+        """one study: its design and settings, the images, the methods text, the files and two tables"""
+        import pandas as pd
+        d = self._study_folder(name)
+        if not os.path.isdir(d):
+            raise FileNotFoundError(name)
+        rows, settings = self._study_design(d, name)
+        groups = []
+        for sub in [""] + sorted(x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x)) and x != "analyses"):
+            imgs = sorted(f for f in os.listdir(os.path.join(d, sub)) if f.lower().endswith(".png"))
+            if imgs:   # the summary images first: normalized before absolute
+                imgs.sort(key=lambda f: (0 if "_figure_" in f else 1 if f.startswith("treatments") else 2,
+                                         0 if "_norm" in f else 1 if "_vsControl" in f else 2, f))
+                groups.append(dict(title=sub or "All treatments",
+                                   images=[dict(name=f, url=self._url(os.path.join(d, sub, f))) for f in imgs]))
+        files = []
+        for f, title in ((name + ".xlsx", "Workbook with all tables (.xlsx)"),
+                         (name + "_prism.xlsx", "Tables for GraphPad Prism (.xlsx)"),
+                         (name + "_figure_norm.pdf", "Figure (PDF)"), (name + "_methods.txt", "Methods text (.txt)"),
+                         ("design_" + name + ".xlsx", "Design table (.xlsx)"),
+                         ("design_" + name + ".csv", "Design table (.csv)")):
+            if os.path.isfile(os.path.join(d, f)):
+                files.append(dict(title=title, url=self._url(os.path.join(d, f))))
+        methods = ""
+        mf = os.path.join(d, name + "_methods.txt")
+        if os.path.isfile(mf):
+            with open(mf, encoding="utf-8", errors="replace") as fh:
+                methods = fh.read().strip()
+        tables = []
+        wb = os.path.join(d, name + ".xlsx")
+        if os.path.isfile(wb):
+            x = pd.ExcelFile(wb)
+            for sheet, title in (("treatments", "Per treatment and time point"), ("statistics", "Statistics"),
+                                 ("excluded", "Left out")):
+                if sheet in x.sheet_names:
+                    T = x.parse(sheet)
+                    if len(T):
+                        tables.append(dict(title=title, sheet=sheet, columns=[str(c) for c in T.columns],
+                                           rows=[[_cell(v) for v in r] for r in T.head(400).itertuples(index=False)],
+                                           more=max(0, len(T) - 400)))
+        return dict(name=name, folder=d, done=os.path.isfile(wb), rows=rows, settings=settings, groups=groups,
+                    files=files, methods=methods, tables=tables)
+
+    def study_design_of_file(self, data, name):
+        """rows and settings of a design table (.xlsx or .csv, base64) for the editor; nothing is saved"""
+        import base64
+        import tempfile
+        from ..study import _read_design
+        ext = os.path.splitext(str(name or ""))[1].lower()
+        if ext not in (".xlsx", ".csv"):
+            raise ValueError("a design table is an .xlsx or a .csv file")
+        try:
+            raw = base64.b64decode(str(data or ""), validate=True)
+        except ValueError:
+            raise ValueError("the file did not arrive complete") from None
+        fd, tmp = tempfile.mkstemp(suffix=ext)
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(raw)
+            D, settings = _read_design(tmp)
+        except Exception as e:  # noqa: BLE001 - what the design lacks (study: design: ...), or not a table at all
+            if isinstance(e, ValueError) and str(e).startswith("study: design: "):
+                raise ValueError("Design table: " + str(e)[len("study: design: "):]) from None
+            raise ValueError(f"this file cannot be read as a design table ({type(e).__name__})") from None
+        finally:
+            os.remove(tmp)
+        return dict(rows=D.to_dict("records"), settings=settings)
+
+    def study_template(self):
+        """bytes of an empty design table (.xlsx) with an example row"""
+        import tempfile
+        from ..study import study_template
+        fd, tmp = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        try:
+            study_template(tmp)
+            with open(tmp, "rb") as fh:
+                return fh.read()
+        finally:
+            os.remove(tmp)
+
+    def start_study(self, name, settings, rows):
+        """runs a study in the background: design = rows (one per slice), settings = those of study.SETTINGS; the
+        results folder is this one and the study folder <results>/studies/<name>. Refused while a pass or a study
+        started here runs. The design is checked before the start, so that a mistake is shown at once."""
+        import pandas as pd
+        from ..study import DESIGN_COLUMNS, SETTINGS, _read_design
+        self._study_folder(name)
+        known = {k for k, _, _ in SETTINGS} - {"resultsFolder", "outputFolder", "name"}
+        P = {}
+        for k, v in dict(settings or {}).items():
+            if k not in known:
+                raise ValueError(f"unknown setting of a study: {k}")
+            P[k] = ("true" if v else "false") if isinstance(v, bool) else str(v).strip()
+        if not P.get("offsets", "").strip():
+            raise ValueError("Windows: give the minutes after the treatment at which the windows start, e.g. -30 10 60")
+        try:
+            [float(x) for x in re.split(r"[\s,;]+", P["offsets"]) if x]
+        except ValueError:
+            raise ValueError("Windows: numbers (minutes) expected, e.g. -30 10 60") from None
+        P["offsets"] = " ".join(x for x in re.split(r"[\s,;]+", P["offsets"]) if x)
+        rows = [r for r in (rows or []) if str(r.get("series", "")).strip()]
+        if not rows:
+            raise ValueError("The table of slices is empty: every slice needs its series, channel, treatment and time")
+        D = pd.DataFrame([{c: ("" if r.get(c) is None else str(r.get(c)).strip()) for c in DESIGN_COLUMNS}
+                          for r in rows], columns=DESIGN_COLUMNS)
+        for i, r in enumerate(D.to_dict("records"), 1):
+            for c in ("channel", "treatment", "time"):
+                if not r[c]:
+                    raise ValueError(f"Slice {i} ({r['series']}): {c} is missing")
+            try:
+                int(float(r["channel"]))
+            except ValueError:
+                raise ValueError(f"Slice {i} ({r['series']}): channel '{r['channel']}' is not a number") from None
+            if r["exclude"] and r["exclude"].lower() != "all":
+                try:
+                    float(r["exclude"])
+                except ValueError:
+                    raise ValueError(f"Slice {i} ({r['series']}): leave out from '{r['exclude']}': empty, all or "
+                                     "the minutes from which on the windows are left out") from None
+            try:
+                pd.Timestamp(r["time"])
+            except (ValueError, TypeError):
+                raise ValueError(f"Slice {i} ({r['series']}): time '{r['time']}' is not a date and time "
+                                 "(yyyy-mm-dd HH:MM)") from None
+        known_series = {x["series"] for x in self.series_list()}
+        miss = sorted(set(D["series"]) - known_series)
+        if miss:
+            raise ValueError("No analysed recording of the series " + ", ".join(miss) + " in this results folder")
+        try:
+            D, _ = _read_design(D)
+        except ValueError as e:
+            raise ValueError(str(e).replace("study: design: ", "")) from None
+        with self.lock:
+            if self.run["running"]:
+                raise ValueError("a pass started here is still running")
+            if self.job["running"]:
+                raise ValueError("the study " + self.job["name"] + " started here is still running")
+            self.job = dict(running=True, kind="study", name=name, started=_now(), finished="", error="", output="")
+        threading.Thread(target=self._study, args=(name, D, P), daemon=True).start()
+        return dict(started=True)
+
+    def _study(self, name, D, P):
+        error = ""
+        try:
+            from ..study import study
+            with contextlib.redirect_stdout(_Tee(self, self.job, sys.stdout)):
+                study(D, resultsFolder=self.results, name=name, **P)
+        except Exception as e:  # noqa: BLE001 - shown on the page
+            error = f"{type(e).__name__}: {e}" if not isinstance(e, ValueError) else str(e)
+            if os.environ.get("MDA_DEBUG"):
+                traceback.print_exc()
+        with self.lock:
+            self.job.update(running=False, finished=_now(), error=error)
 
     def file_path(self, rel):
         """absolute path of a file of the results folder; ValueError for anything outside it or of another kind"""
@@ -432,15 +667,15 @@ def _same_folder(a, b):
 
 
 class _Tee(io.TextIOBase):
-    """what a pass prints goes to the terminal as before and, for the page, into the state of the pass (the last
-    20000 characters)"""
+    """what a pass or a study prints goes to the terminal as before and, for the page, into its state (run or job;
+    the last 20000 characters)"""
 
-    def __init__(self, app, out):
-        self.app, self.out = app, out
+    def __init__(self, app, state, out):
+        self.app, self.state, self.out = app, state, out
 
     def write(self, s):
         with self.app.lock:
-            self.app.run["output"] = (self.app.run.get("output", "") + s)[-20000:]
+            self.state["output"] = (self.state.get("output", "") + s)[-20000:]
         try:
             self.out.write(s)
         except (OSError, ValueError):
@@ -556,6 +791,23 @@ def _s(v):
     return "" if v is None or (isinstance(v, float) and math.isnan(v)) else str(v)
 
 
+def _cell(v):
+    """a cell of a table for the page: text, or a number with 4 significant digits; '' for nothing"""
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return ""
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if isinstance(v, str):
+        return v
+    if math.isnan(x) or math.isinf(x):
+        return ""
+    return int(x) if x == round(x) and abs(x) < 1e15 else float("%.4g" % x)
+
+
 def _n(v):
     try:
         v = float(v)
@@ -603,6 +855,15 @@ def make_handler(app):
             self._json(dict(error="this server answers on this computer only (http://127.0.0.1)"), 403)
             return True
 
+        def _bytes(self, body, filename):
+            self.send_response(200)
+            self.send_header("Content-Type", mimetypes.guess_type(filename)[0] or "application/octet-stream")
+            self.send_header("Content-Disposition", 'attachment; filename="%s"' % filename)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
         def _do(self, fn):
             try:
                 fn()
@@ -637,6 +898,16 @@ def make_handler(app):
                 return self._do(lambda: self._json(app.settings()))
             if path == "/api/help":
                 return self._do(lambda: self._json(app.help()))
+            if path == "/api/studies":
+                return self._do(lambda: self._json(app.studies()))
+            if path == "/api/study":
+                return self._do(lambda: self._json(app.study_view((q.get("name") or [""])[0])))
+            if path == "/api/study/template":
+                return self._do(lambda: self._bytes(app.study_template(), "design.xlsx"))
+            if path == "/api/job":
+                with app.lock:
+                    job = dict(app.job)
+                return self._json(job)
             if path.startswith("/docs/"):
                 name = path[len("/docs/"):]
                 if name in [f for f, _ in _DOCS] and _docs_folder():
@@ -670,6 +941,11 @@ def make_handler(app):
                 return self._do(lambda: self._json(app.save_settings(data.get("values"), data.get("base"))))
             if path == "/api/settings/last":
                 return self._do(lambda: self._json(app.settings_of_last_analysis()))
+            if path == "/api/study/run":
+                return self._do(lambda: self._json(app.start_study(data.get("name"), data.get("settings"),
+                                                                    data.get("rows"))))
+            if path == "/api/study/design":
+                return self._do(lambda: self._json(app.study_design_of_file(data.get("data"), data.get("name"))))
             if path == "/api/settings/file":
                 return self._do(lambda: self._json(app.settings_of_text(data.get("text", ""), data.get("name", ""))))
             self._json(dict(error="not found"), 404)

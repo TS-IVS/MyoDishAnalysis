@@ -654,6 +654,13 @@ nothing but the Python package (standard library, one HTML page, nothing loaded 
   the one of the last pass unless `--raw` or the field on the page says otherwise. A pass that analyzes from another
   raw folder is refused until confirmed: recordings are known by their path below the raw folder, so from a folder one
   level up or down all of them would count as new.
+* **Studies** (the contraction before and after a treatment; `study`, section *A study from one design table*): the
+  table of slices is edited on the page or loaded from a design table (.xlsx, .csv), with the settings of the study
+  in plain words. A mistake in the table is named with its slice and column before anything runs. *Run the study*
+  measures the windows per treatment, pools the slices and writes everything into `<results>/studies/<name>/` (as
+  `mda-study` and `mda_study`, which are listed here as well). A study shows its images, the methods text, the tables
+  *treatments*, *statistics* and *excluded*, and links to the workbook, the Prism tables, the figure and the design;
+  *Edit the table and run again* opens its design. One treatment alone is a study with one treatment.
 * **Settings**: the settings of the analyses started from the page. *Basics* are the settings people change, in plain
   words; *Expert* holds every advanced setting (the list of the window *Advanced ...* of the desktop GUI), with a
   search over all of them. A changed setting is marked with its standard value; nothing is used before *Save*. The
@@ -668,8 +675,7 @@ nothing but the Python package (standard library, one HTML page, nothing loaded 
   read the results and start a pass. There is no login: use it inside a trusted network only, not on a computer that
   is reachable from the internet. Only files of the results folder are served (images, PDF, tables).
 * The traces of a recording with the detected contractions stay in the desktop GUIs for now. The desktop GUIs are
-  frozen at their state of 2026-11-12 (corrections only); the next steps (time points, pooling, studies) come in
-  the browser.
+  frozen at their state of 2026-11-12 (corrections only); the next steps come in the browser.
 
 ## Periods without signal: chamber taken out, sensor board failures (`mda_signalGaps`; Python `signal_gaps`)
 ```matlab
