@@ -650,7 +650,10 @@ nothing but the Python package (standard library, one HTML page, nothing loaded 
   written by an earlier version of the rules get them again with one button (from the result files, no new analysis).
 * **Automatic analysis**: how many recordings are analyzed, still being recorded, incomplete or parallel; the reports
   of the last passes; *Show what would be analyzed* (list only, nothing is written); *Analyze new recordings now*
-  (one pass with the settings of the page *Settings*; results of earlier passes stay as they are). The raw folder is
+  (one pass with the settings of the page *Settings*; results of earlier passes stay as they are). *Which recordings*
+  opens the choices of the watcher for this pass: also recordings analyzed with another version or other settings, or
+  everything again (asked before the results are replaced), recordings with an error again, only / not (wildcard
+  patterns), changed since a date, at most n recordings, minutes to wait, recordings in parallel. The raw folder is
   the one of the last pass unless `--raw` or the field on the page says otherwise. A pass that analyzes from another
   raw folder is refused until confirmed: recordings are known by their path below the raw folder, so from a folder one
   level up or down all of them would count as new.

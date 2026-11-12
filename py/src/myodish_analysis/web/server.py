@@ -24,10 +24,13 @@ Interface (JSON unless noted):
     POST /api/flags/compute         computes the missing flags from the result files (flags_table(compute=True))
     GET  /api/watcher               counts of the index by status, reports of the passes, state of a pass started here
     GET  /api/report?name=...       text of one pass report (results/reports/<name>)
-    POST /api/watcher/run           {"raw": folder, "dry_run": bool, "other_raw": bool}: one pass in the background
-                                    (watch) with the standard options of the analysis; what it prints is in
-                                    run.output of the state. A pass from another raw folder than the one of the last
-                                    pass is refused (code "otherRaw") unless other_raw is true or it only lists
+    POST /api/watcher/run           {"raw": folder, "dry_run": bool, "other_raw": bool, "options": {...}, "again":
+                                    bool}: one pass in the background (watch) with the settings of the page; what it
+                                    prints is in run.output of the state. options: which recordings (reanalyze,
+                                    retry_errors, include, exclude, from_date, max_files, min_file_age_minutes,
+                                    workers). Refused until confirmed, unless it only lists: a pass from another raw
+                                    folder than the one of the last pass (code "otherRaw", other_raw) and a pass that
+                                    analyzes recordings again (code "again", again)
     GET  /api/settings              the settings page: fields (value as shown, default), basics, what differs
     POST /api/settings              {"values": {option: value as shown}, "base": "standard" | ""}: saves them in
                                     <results>/mda_web_settings.csv (settings.save_settings); passes started from the
@@ -385,15 +388,23 @@ class App:
         with open(os.path.join(self.results, "reports", name), encoding="utf-8", errors="replace") as fh:
             return fh.read()
 
-    def start_pass(self, raw, dry_run=False, other_raw=False):
+    def start_pass(self, raw, dry_run=False, other_raw=False, options=None, again=False):
         """one pass of the watcher in the background; refused while one runs (here or elsewhere: lock file). A pass
         that analyzes is also refused (OtherRaw) when the results folder was filled from another raw folder, unless
         other_raw is set: the recordings are known by their path below the raw folder, so from a folder one level
-        up or down every recording counts as new and is analyzed a second time."""
+        up or down every recording counts as new and is analyzed a second time. options: which recordings the pass
+        takes (_pass_options); a pass that analyzes recordings again (reanalyze 'outdated' or 'all') replaces their
+        results and is refused (Again) unless again is set."""
+        opts = _pass_options(options)
         last = self.raw_of_last_report()
         raw = os.path.abspath(raw or self.raw or last or "")
         if not raw or not os.path.isdir(raw):
             raise ValueError("raw folder not found: " + (raw or "(none given)"))
+        if not dry_run and not again and opts.get("reanalyze", "new") != "new":
+            raise Again("This analyzes recordings again and replaces their results"
+                        + (": all recordings of the raw folder that match." if opts["reanalyze"] == "all" else
+                           ": those analyzed with another version of the program or with other settings.")
+                        + " Look at the list first ('Show what would be analyzed').")
         if last and not dry_run and not other_raw and not _same_folder(last, raw):
             raise OtherRaw(f"This results folder was filled from another raw folder ({last}). From {raw} the "
                            "recordings may count as new and be analyzed a second time. Look at the list first "
@@ -404,16 +415,18 @@ class App:
             if self.job["running"]:
                 raise ValueError("the study " + self.job["name"] + " started here is still running")
             self.run = dict(running=True, started=_now(), finished="", raw=raw, dry_run=bool(dry_run), report="",
-                            error="", output="")
-        threading.Thread(target=self._pass, args=(raw, bool(dry_run)), daemon=True).start()
+                            error="", output="", options=dict(opts, from_date=str(opts.get("from_date", ""))[:10])
+                            if "from_date" in opts else dict(opts))
+        threading.Thread(target=self._pass, args=(raw, bool(dry_run), opts), daemon=True).start()
         return dict(started=True)
 
-    def _pass(self, raw, dry_run):
+    def _pass(self, raw, dry_run, opts=None):
         report, error = "", ""
         try:
             from ..watch import watch
             with contextlib.redirect_stdout(_Tee(self, self.run, sys.stdout)):  # the lines of the pass, for the page
-                _, report = watch(raw, self.results, quiet=False, dry_run=dry_run, **self.pass_keywords())
+                _, report = watch(raw, self.results, quiet=False, dry_run=dry_run, **(opts or {}),
+                                  **self.pass_keywords())
         except Exception as e:  # noqa: BLE001 - shown on the page
             error = f"{type(e).__name__}: {e}"
             if os.environ.get("MDA_DEBUG"):
@@ -660,6 +673,55 @@ class OtherRaw(ValueError):
     """a pass from another raw folder than the one of the last pass (the page asks before it goes on)"""
 
 
+class Again(ValueError):
+    """a pass that analyzes recordings again and replaces their results (the page asks before it goes on)"""
+
+
+def _pass_options(options):
+    """which recordings a pass started from the page takes: keywords of watch from what the page sends (reanalyze
+    'new' | 'outdated' | 'all', retry_errors, include, exclude, from_date, max_files, min_file_age_minutes, workers);
+    empty values are left out, so the defaults of the watcher hold. ValueError with what is expected."""
+    from ..watch import parse_date
+    out = {}
+    for k, v in dict(options or {}).items():
+        if v is None or (isinstance(v, str) and not v.strip()):
+            continue
+        if k == "reanalyze":
+            if str(v) not in ("new", "outdated", "all"):
+                raise ValueError("which recordings: new, outdated or all expected")
+            out[k] = str(v)
+        elif k == "retry_errors":
+            if not isinstance(v, bool):
+                raise ValueError("recordings with an error: on or off expected")
+            if v:
+                out[k] = True
+        elif k in ("include", "exclude"):
+            out[k] = str(v).strip()
+        elif k == "from_date":
+            try:
+                out[k] = parse_date(str(v).strip())
+            except ValueError:
+                raise ValueError(f"changed since: a date is expected (yyyy-mm-dd), not '{v}'") from None
+        elif k in ("max_files", "workers", "min_file_age_minutes"):
+            name = {"max_files": "at most", "workers": "at the same time", "min_file_age_minutes": "wait"}[k]
+            try:
+                x = float(str(v).strip().replace(",", "."))
+            except ValueError:
+                raise ValueError(f"{name}: a number is expected, not '{v}'") from None
+            if k == "min_file_age_minutes":
+                if not (0 <= x <= 100000):
+                    raise ValueError("wait: minutes from 0 on expected")
+                out[k] = x
+            else:
+                if x != round(x) or not (1 <= x <= (100000 if k == "max_files" else 16)):
+                    raise ValueError(f"{name}: a whole number from 1 on expected"
+                                     + ("" if k == "max_files" else " (at most 16)"))
+                out[k] = int(x)
+        else:
+            raise ValueError(f"unknown option of a pass: {k}")
+    return out
+
+
 def _same_folder(a, b):
     def norm(p):
         return os.path.normcase(os.path.realpath(os.path.abspath(p))).rstrip("\\/")
@@ -869,6 +931,8 @@ def make_handler(app):
                 fn()
             except OtherRaw as e:
                 self._json(dict(error=str(e), code="otherRaw"), 400)
+            except Again as e:
+                self._json(dict(error=str(e), code="again"), 400)
             except ValueError as e:
                 self._json(dict(error=str(e)), 400)
             except FileNotFoundError:
@@ -935,8 +999,9 @@ def make_handler(app):
             if path == "/api/flags/compute":
                 return self._do(lambda: self._json(app.compute_flags()))
             if path == "/api/watcher/run":
-                return self._do(lambda: self._json(app.start_pass(data.get("raw"), bool(data.get("dry_run", False)),
-                                                                bool(data.get("other_raw", False)))))
+                return self._do(lambda: self._json(app.start_pass(
+                    data.get("raw"), bool(data.get("dry_run", False)), bool(data.get("other_raw", False)),
+                    data.get("options"), bool(data.get("again", False)))))
             if path == "/api/settings":
                 return self._do(lambda: self._json(app.save_settings(data.get("values"), data.get("base"))))
             if path == "/api/settings/last":

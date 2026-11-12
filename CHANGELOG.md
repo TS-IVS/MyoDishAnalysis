@@ -162,6 +162,13 @@ MATLAB and Python versions have the same version number and give the same result
     *treatments*, *statistics* and *excluded* of the workbook; *Edit the table and run again* opens its design. The
     studies made by `mda-study` or `mda_study` in the same results folder are listed too. A single treatment is a
     study with one treatment; analyses of `mda-timepoints` outside a study are not shown yet.
+  - **Which recordings a pass takes** (2026-11-12): below the raw folder of the page *Automatic analysis*: analyze
+    what is new (standard), also what was analyzed with another version or other settings (`reanalyze` outdated),
+    or everything again; recordings with an error again (`retry_errors`); only / not (`include`, `exclude`); changed
+    since a date (`from_date`); at most n recordings (`max_files`); minutes to wait since the last change
+    (`min_file_age_minutes`); recordings analyzed at the same time (`workers`). A pass that analyzes recordings again
+    replaces their results and is refused until confirmed; the list (*Show what would be analyzed*) is always
+    allowed. Test: one real pass through the page.
   - With the default host the server answers only requests addressed to this computer (`Host` 127.0.0.1 or
     localhost): a page of another site that points its own name at 127.0.0.1 cannot read the results through the
     browser of the user.

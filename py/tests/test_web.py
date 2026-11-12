@@ -327,3 +327,53 @@ def test_studies_design_run_and_view(tmp_path):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def _wait_pass(url):
+    for _ in range(3000):
+        code, w = _json(url + "/api/watcher")
+        if not w["run"]["running"]:
+            return w
+        time.sleep(0.1)
+    raise AssertionError("the pass did not end")
+
+
+def test_pass_options_and_analyzing_again(site):
+    """which recordings a pass takes (options of the watcher from the page), and a pass that analyzes again: asked
+    first, then one real pass through the page"""
+    url, raw, res, app = site
+    run = url + "/api/watcher/run"
+    for opts, word in (({"reanalyze": "some"}, "new, outdated or all"), ({"max_files": "0"}, "whole number"),
+                       ({"workers": "many"}, "a number is expected"), ({"workers": 99}, "at most 16"),
+                       ({"from_date": "soon"}, "a date is expected"), ({"retry_errors": "yes"}, "on or off"),
+                       ({"min_file_age_minutes": -1}, "minutes from 0"), ({"nope": 1}, "unknown option")):
+        code, j = _json(run, {"dry_run": True, "options": opts})
+        assert code == 400 and word in j["error"], opts
+    again = {"reanalyze": "all", "min_file_age_minutes": "0", "include": "", "max_files": "", "retry_errors": False}
+    code, j = _json(run, {"dry_run": True, "options": again})   # empty fields of the page: defaults of the watcher
+    assert code == 200
+    w = _wait_pass(url)
+    assert w["run"]["error"] == "" and "1 recording(s) to analyse" in w["run"]["output"]
+    assert "(reanalyze all)" in w["run"]["output"] and w["run"]["options"] == {"reanalyze": "all",
+                                                                              "min_file_age_minutes": 0.0}
+    code, j = _json(run, {"dry_run": True, "options": dict(again, include="nothing*")})
+    assert code == 200 and "0 recording(s) to analyse" in _wait_pass(url)["run"]["output"]
+    code, j = _json(run, {"dry_run": True, "options": dict(again, from_date="2999-01-01")})
+    assert code == 200 and "0 recording(s) to analyse" in _wait_pass(url)["run"]["output"]
+    # analyzing again replaces results: refused until confirmed, the list is always allowed
+    X0 = W.read_index(res)
+    code, j = _json(run, {"options": again})
+    assert code == 400 and j["code"] == "again" and "replaces their results" in j["error"]
+    code, j = _json(run, {"options": {"reanalyze": "outdated"}})
+    assert code == 400 and j["code"] == "again"
+    assert len(_json(url + "/api/watcher")[1]["reports"]) == 1
+    time.sleep(1.1)   # the time of the analysis in the index has seconds
+    code, j = _json(run, {"options": again, "again": True})
+    assert code == 200 and j["started"]
+    w = _wait_pass(url)
+    assert w["run"]["error"] == "" and not w["run"]["dry_run"] and "watcher report" in w["run"]["report"]
+    assert len(w["reports"]) == 2 and w["counts"] == {"ok": 1}
+    X1 = W.read_index(res)
+    assert list(X1["status"]) == ["ok"] and X1["analyzed"][0] > X0["analyzed"][0]
+    code, j = _json(url + "/api/results")
+    assert code == 200 and j["missing"] == [] and len(j["rows"]) >= 1   # flags of the new analysis are there

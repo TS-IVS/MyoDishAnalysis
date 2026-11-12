@@ -206,9 +206,35 @@ details { margin: 8px 0; } summary { cursor: pointer; color: var(--blue); paddin
       <button type="button" class="plain" id="dry">Show what would be analyzed</button>
       <button type="button" class="primary" id="run">Analyze new recordings now</button>
     </div>
+    <details id="passMore">
+      <summary>Which recordings (standard: everything that is new)</summary>
+      <div class="form">
+        <label for="po_reanalyze">Analyze<span class="hint">recordings that are already analyzed keep their results unless you choose otherwise</span></label>
+        <div><select id="po_reanalyze">
+          <option value="new">what is new or has changed (standard)</option>
+          <option value="outdated">also what was analyzed with another version or other settings</option>
+          <option value="all">everything again</option>
+        </select></div>
+        <label for="po_retry_errors">Recordings with an error<span class="hint">try them again</span></label>
+        <div><input type="checkbox" id="po_retry_errors"></div>
+        <label for="po_include">Only<span class="hint">names of folders or files, * for any characters, several separated by commas, e.g. ABC00*</span></label>
+        <div><input type="text" id="po_include" autocomplete="off"></div>
+        <label for="po_exclude">Not<span class="hint">the same, e.g. *test*</span></label>
+        <div><input type="text" id="po_exclude" autocomplete="off"></div>
+        <label for="po_from_date">Changed since<span class="hint">date, yyyy-mm-dd</span></label>
+        <div><input type="text" class="short" id="po_from_date" placeholder="2026-11-01" autocomplete="off"></div>
+        <label for="po_max_files">At most<span class="hint">recordings in this analysis</span></label>
+        <div><input type="text" class="short" id="po_max_files" inputmode="numeric" autocomplete="off"></div>
+        <label for="po_min_file_age_minutes">Wait<span class="hint">minutes since the last change of a recording (standard 10): a recording that still grows is left for later</span></label>
+        <div><input type="text" class="short" id="po_min_file_age_minutes" placeholder="10" inputmode="decimal" autocomplete="off"></div>
+        <label for="po_workers">At the same time<span class="hint">recordings analyzed in parallel (standard 1; more is faster and needs more memory)</span></label>
+        <div><input type="text" class="short" id="po_workers" placeholder="1" inputmode="numeric" autocomplete="off"></div>
+      </div>
+    </details>
     <p class="msg" id="passSettings"></p>
     <p class="msg" id="runMsg"></p>
     <button type="button" class="plain" id="anyway" hidden style="margin-bottom:12px">Analyze this folder anyway</button>
+    <button type="button" class="plain" id="again" hidden style="margin-bottom:12px">Analyze them again and replace their results</button>
     <pre id="runOut" hidden></pre>
     <h3>Reports of the last passes</h3>
     <div class="split">
@@ -301,6 +327,7 @@ details { margin: 8px 0; } summary { cursor: pointer; color: var(--blue); paddin
             <li><b>What is analyzed</b>: every recording of the raw folder and its subfolders that is new or has changed since its analysis. A recording that is still being written waits for a later analysis. Of recordings made in parallel, the main file is analyzed.</li>
             <li><b>What you get</b>: per recording a workbook with the results and one image per channel with the course over the recording, per experiment a report (PDF), and per analysis a short text report (list on the page <b>Automatic analysis</b>).</li>
             <li><b>Earlier results stay</b>, also after an update of the program or a change of the settings. The lines of the analysis say so when earlier recordings were analyzed differently.</li>
+            <li><b>Which recordings</b> (below the raw folder): analyze again what was analyzed with another version or other settings, or everything; try recordings with an error again; take only some folders or files, or only what changed since a date. Analyzing again replaces the results of those recordings, so the page asks first. The list shows what would be taken.</li>
             <li><b>Another raw folder</b>: recordings are known by their path below the raw folder. From a folder one level up or down all of them would count as new, so the page asks before it analyzes from another raw folder than the last time. Look at the list first.</li>
             <li><b>Every day without a click</b>: start the watcher on a schedule in a terminal, e.g. <span class="mono">mda-watch RAW RESULTS --schedule "daily 10:00"</span>, or in MATLAB with <span class="mono">MyoDishAnalysisWatch</span>. This page shows those results as well, and tells you when such a watcher is at work.</li>
           </ul>
@@ -501,7 +528,7 @@ async function loadWatcher() {
     else if (w.run.finished) msg = (w.run.dry_run ? "List made at " : "Pass finished at ") + w.run.finished + ".";
     $("runMsg").textContent = msg; $("runMsg").className = "msg" + (w.run.error ? " err" : "");
     const sc = w.settingsChanged || [];
-    $("passSettings").textContent = "An analysis started here uses " + (sc.length ? "the settings of the page Settings (" + sc.length + " changed: " + sc.slice(0, 6).join(", ") + (sc.length > 6 ? ", ..." : "") + ")" : "the standard settings (page Settings)") + " and analyzes only what is new. Results of earlier analyses stay as they are.";
+    $("passSettings").textContent = "An analysis started here uses " + (sc.length ? "the settings of the page Settings (" + sc.length + " changed: " + sc.slice(0, 6).join(", ") + (sc.length > 6 ? ", ..." : "") + ")" : "the standard settings (page Settings)") + ". Results of earlier analyses stay as they are unless you choose to analyze again.";
     const out = [w.run.output, w.run.report].filter(Boolean).join("\n").trim();
     $("runOut").hidden = !out; $("runOut").textContent = out;
     const list = $("reports"); list.textContent = "";
@@ -517,10 +544,18 @@ async function loadWatcher() {
     if (!w.run.running && w.run.finished && !w.run.dry_run) rows = [];   // results changed: read again when shown
   } catch (e) { $("runMsg").textContent = "Could not read the state of the watcher: " + e.message; $("runMsg").className = "msg err"; }
 }
-async function startPass(dry, otherRaw) {
-  $("anyway").hidden = true;
-  try { await api("/api/watcher/run", { raw: $("raw").value.trim(), dry_run: dry, other_raw: !!otherRaw }); }
-  catch (e) { $("runMsg").textContent = e.message; $("runMsg").className = "msg err"; $("anyway").hidden = e.code !== "otherRaw"; return; }
+const PASS_OPTIONS = ["reanalyze", "retry_errors", "include", "exclude", "from_date", "max_files", "min_file_age_minutes", "workers"];
+let passOK = { other_raw: false, again: false };   // what the user confirmed for the pass that is being started
+function passOptions() {
+  const o = {};
+  for (const k of PASS_OPTIONS) { const e = $("po_" + k); o[k] = e.type === "checkbox" ? e.checked : e.value.trim(); }
+  return o;
+}
+async function startPass(dry, confirmed) {
+  $("anyway").hidden = true; $("again").hidden = true;
+  passOK = dry ? { other_raw: false, again: false } : Object.assign({ other_raw: false, again: false }, confirmed || {});
+  try { await api("/api/watcher/run", { raw: $("raw").value.trim(), dry_run: dry, options: passOptions(), other_raw: passOK.other_raw, again: passOK.again }); }
+  catch (e) { $("runMsg").textContent = e.message; $("runMsg").className = "msg err"; $("anyway").hidden = e.code !== "otherRaw"; $("again").hidden = e.code !== "again"; return; }
   loadWatcher();
 }
 
@@ -924,7 +959,8 @@ async function init() {
     $("compute").disabled = false;
   });
   $("dry").addEventListener("click", () => startPass(true)); $("run").addEventListener("click", () => startPass(false));
-  $("anyway").addEventListener("click", () => startPass(false, true));
+  $("anyway").addEventListener("click", () => startPass(false, Object.assign({}, passOK, { other_raw: true })));
+  $("again").addEventListener("click", () => startPass(false, Object.assign({}, passOK, { again: true })));
   await loadStart();
   const fromHash = () => { const page = location.hash.slice(1); return PAGES.includes(page) ? page : "start"; };
   window.addEventListener("hashchange", () => { if (document.getElementById(fromHash()).hidden) go(fromHash()); });   // Back and Forward of the browser
