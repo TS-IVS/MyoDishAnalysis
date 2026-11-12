@@ -5,6 +5,15 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
+- **MATLAB GUI: numbers of two axes could not be read** (2026-11-12). Lower plot: the exponent of the y axis
+  (x 10^4) sat hidden under the list *Lower plot*, so an amplitude of 11000 µN read 1.1; the axis now shows the full
+  numbers. Stimulus plot: the tick labels of the right axis (interval to the previous pulse, ms) ran under the panel
+  *Analysis*, so 2000 ms read 200; the plots now end where the labels of the right axis fit. The Python GUI was not
+  affected.
+- **GUI, flag line: an error is shown** (2026-11-12, both GUIs). When the flags could not be computed, the line
+  stayed empty, which looked like "no flags" (on 2026-11-11 a log line without text did that for a whole
+  recording). It now says *Flags: could not be computed (error, see the tooltip)* in red, with the error as tooltip
+  (MATLAB: also in the error log of the GUI).
 - **Power-on speed of the rocker: 45 rpm also for V19M and every later V19 release** (2026-11-09; firmware: 45 rpm
   from V19J on, V19M runs on the lab devices). Before, only V19J and V19K got 45 rpm, later releases 30 rpm. The test
   builds (page-0 names V19L, V19P, V19T) stay at 30 rpm. Tests: `mda_test` (paused recording, update to V19M),
@@ -113,7 +122,46 @@ MATLAB and Python versions have the same version number and give the same result
   `S2 207 ms` / `S2 208 ms`, which depended on rounding). RP results change by at most 0.5 ms.
 
 ### Added
-- **Yellow flag W: the zero position of a chamber lies outside the range of a chamber in good order** (2026-11-11,
+- **Flags in three groups: check the analysis (red), sensor / chamber (orange), slice quality (yellow)** (2026-11-12,
+  Tom's decisions on the review of 2026-11-11).
+  - New group **sensor / chamber** with the flags M, L and W (below): the hardware limits what the recording can say,
+    the contractions are analysed as usual. Orange, as in the control software. New level `sensor` between `check` and
+    `quality` (a channel has the level of its most severe group) and new column `sensor` with the texts, in the flags
+    table of `mda_report('flags', ...)` / `report_flags` and in `mda_flags.csv`. PDF report: orange cells, an own
+    line in the legend, an own list "Sensor / chamber (orange)"; detail pages with traces stay for the red channels.
+    GUI: flag line orange (slice quality now dark yellow), results browser with orange rows and the list entry
+    *orange flags (sensor / chamber)*.
+  - **L is no red flag any more, and only the fixed limits set it.** The rule of 2026-11-11 that compared the peaks
+    of the stimulation protocols with the steady peak (`peakHeadroom`, `minProtocolBeats`, `minPeakAmplitude`, the
+    argument `P` / `protocols`) is removed before it was released: it concluded from the shape of the data that the
+    sensor was at its limit and flagged two of the example recordings of the repository, which are not. Nothing is
+    concluded from the shape of the contractions (Tom); a negative contraction is the flag I.
+  - **No flag T.** The change of the amplitude from the first to the last range is what an experiment is about, not
+    a sign of quality. The values stay (columns `amplitudeChange_percent`, `amplitudeChange_hours`; watcher text
+    report). The flag option `amplitudeChange` / `amplitude_change` is gone; the watcher option
+    `'flagAmplitudeChange'` / `flag_amplitude_change` is ignored.
+  - **No flag W without an Offset.** An `Offset` of 0 means the offset was not determined, which is common;
+    `offset_AU` is then NaN. All that is missing is the absolute diastolic force: amplitudes and changes of the
+    diastolic force do not need it.
+  - **Version of the flag rules**: `mda_report('rules')` / `report.FLAG_RULES` (now 2), written to the new column
+    `rules` of `mda_flags.csv`. Flags made with older rules (or by a version without the column) are not used: the
+    watcher computes them again for its experiment reports, the results browser lists their recordings under
+    **Compute flags (n)**, and `MyoDishAnalysisWatch('flags', res, true)` / `flags_table(res, compute=True)` does it
+    for a whole results folder. This reads the result files; nothing is analysed again.
+  - **The two numbers behind M, L and W in `mda_flags.csv`**: new columns `peakSignal_AU` (sensor value at the peak
+    of the contractions, raw counts of the output mode) and `offset_AU` (zero position of the chamber, normalized
+    counts; empty if not determined), so that they can be sorted and filtered, e.g. to see how close the channels of a
+    setup are to the limit.
+  - **One legend for all places**: `mda_report('legend')` / `report.short_legend()` gives the three groups with their
+    letters; the flag line, the results browser and the help of both GUIs use it (they still listed the flags of
+    October).
+  - Tests: `mda_test` (groups of flags), `mda_testWatch` (flags of older rules), `test_mda.py`, `test_watch.py`.
+- **`mda_testAll`: all MATLAB test suites and a smoke test of the GUI in one call** (2026-11-12), to be run before
+  every commit. It puts its folder on the path itself, runs every `mda_test*.m` and opens every example recording in
+  the GUI (all channels, the checkboxes, the side windows); a new entry in the error log of the GUI, a flag line
+  without flags or a button it no longer finds fails it. Python: `py/tests/test_gui_smoke.py` (every example
+  recording, every channel, the flag line, the legends) runs with the other tests of `pytest`.
+- **Flag W: the zero position of a chamber lies outside the range of a chamber in good order** (2026-11-11,
   Tom's ranges). New column `offset_AU` of the flags table: the channel's last `Offset` entry of the log, i.e. the
   sensor value without load, in **normalized counts** (raw x factor of the output mode). An empty chamber reads about
   -12000 to -18000 counts after production; as a chamber is used, that value drifts towards zero and beyond, and the
@@ -141,7 +189,7 @@ MATLAB and Python versions have the same version number and give the same result
   mode of the old boards (output mode 2000, the piecewise value from X and Z) the curve stays straight to about
   0.85 mm and then jumps by about 28 000 counts into the negative. The MMC5983 boards stay straight over the whole
   travel a slice produces; there the fold of the conversion limits, not the curve.
-  - **Yellow M** at the first limit, **red L** at the second. In mode 0 these are the points with 60 % and 20 % of
+  - **M** at the first limit, **L** at the second (both orange, group sensor / chamber, see above). In mode 0 these are the points with 60 % and 20 % of
     the slope near the rest position (medians of the six sensors 11600 and 14200, turning point 15200); in the
     extended mode, where the curve stays straight, 13 % and 3 % below the earliest jump (20698). Limits from Tom's
     pull curves of six old boards and the SV2 chambers of April 2026: `signalMode0` 10900 / 14300, `signalMode2000`
@@ -162,27 +210,11 @@ MATLAB and Python versions have the same version number and give the same result
     `peakSignal_AU` is NaN and nothing is flagged. No new result column is needed.
   - The board type comes from the share of repeated raw values of the channel (summary column
     `repeatedSamples_percent`, < 20 % old board, > 35 % MMC5983), the output mode from the log line
-    `extended sensor mode on`. Without either, `deflection_AU` is NaN and nothing is flagged. The `sensorMode` event
+    `extended sensor mode on`. Without the board type nothing is flagged. The `sensorMode` event
     of the control software (lab version 10e) will take precedence once MDA reads it.
   - **MDA does not correct anything** (Tom, 2026-11-11): the limitation of the old sensors is marked so that it can
     be excluded in the analysis, not compensated by calculation.
-  - Tests: `mda_test` (deflection of the sensor curve), `test_mda.py`.
-- **Red flag L: peak force at the measurement limit** (2026-11-11). A channel whose slice shortens far enough can reach
-  the end of the measurement range of its chamber; the signal then has a flat top, the amplitude is only a lower bound,
-  and because the peak is fixed, every rise of the diastolic force lowers the amplitude one to one (apparent loss of
-  force, apparent negative force-frequency relation). Seen in human recordings on a myosin activator, in 6 of 8
-  channels of one setup with old sensor boards and old chambers, with nominal amplitudes of 14.5 to 28.3 mN.
-  The check uses the contractions of the stimulation protocols, which must be stronger than the steady ones (low
-  frequencies, the beat after a rest): `peakHeadroom` = (highest peak signal of the protocols - median peak signal of
-  the steady contractions) / median amplitude of the steady contractions, flagged below `peakHeadroom` (0.15). Needs at
-  least `minProtocolBeats` (100) protocol contractions, `minBeats` steady ones and a steady amplitude of at least
-  `minPeakAmplitude` (500 uN); no flag if the protocol contractions stay more than 5 % of the amplitude below the
-  steady peak (the channel was not in the same state). In a human experiment with 189 channel-days the criterion
-  flagged none of the 108 channel-days of channels that were never at the limit. Remedy for the user: the extended
-  sensor mode of the control software (old sensor boards) or a controller mode with a wider range.
-  `mda_report('flags', S, C, status, fl, E, P)` / `report_flags(..., protocols=P)` take the protocol contractions as a
-  new argument; the watcher passes them. New column `peakHeadroom` in the flags table (`mda_flags.csv` is unchanged).
-  Tests: `mda_test` (peak force at the measurement limit), `test_mda.py`.
+  - Tests: `mda_test` (sensor value at the limits), `test_mda.py`.
 - **Control software lab round 5 (2.2.9804.25352): power-on phases of the rocker, socket tests, red flag R**
   (2026-11-05).
   - Rocker after a controller restart: from 3 s before the warning `Controller restart suspected: ...` (the software

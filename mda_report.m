@@ -8,10 +8,12 @@ function varargout = mda_report(varargin)
 %                                       first page (overview image of an experiment)
 %   R = mda_report('analysis', pdfFile, mddFile, C, S, info, resultsFile, fl)   report of one analysis (MyoDishAnalysis,
 %                                       GUI); the GUI commands open resultsFile (or the recording if it is empty)
-%   R = mda_report('flags', S, C, status, fl, E, P)   flags per channel (table), no PDF; E (optional, 2026-10-21): events
-%                                       table of the recording (mda_logEntries / <name>_events.csv): red flag R;
-%                                       P (optional, 2026-11-11): contractions of the stimulation protocols
-%                                       (<name>_protocols_contractions.csv): red flag L
+%   R = mda_report('flags', S, C, status, fl, E)   flags per channel (table), no PDF; E (optional, 2026-10-21): events
+%                                       table of the recording (mda_logEntries / <name>_events.csv): red flag R,
+%                                       sensor flags M, L, W
+%   L = mda_report('legend')            the flags in three lines (cellstr: red, orange, yellow), for the GUI
+%   v = mda_report('rules')             version of the flag rules (number, column rules of mda_flags.csv; flags
+%                                       computed with an older version are computed again; 2026-11-12)
 %                                       'controller restart suspected' (warning of the control software 2.2, code
 %                                       warning: after it the controller may have run with its power-on settings),
 %                                       firmware update (event firmwareUpdate, done or failed) and recording stopped by
@@ -63,21 +65,8 @@ function varargout = mda_report(varargin)
 %     F  stimulus frequency > stimFrequency (10 Hz) in a range (median stimulus interval; 2026-10-13): pulse pairs or
 %        groups (e.g. CCM pulses without the extra-pulse bit), bursts, pulses over consecutive samples or a misread
 %        status channel; the contractions are analysed as usual (check the stimulation)
-%     L  peak force at the measurement limit (2026-11-11, needs the protocol contractions P): the highest peak signal
-%        (diastolicSignal + amplitude) of the stimulation protocols lies less than peakHeadroom (15) % of the amplitude
-%        above the median peak signal of the steady contractions (column peakHeadroom). The protocols contain
-%        contractions that must be stronger than the steady ones (low frequencies, the beat after a rest); a channel
-%        whose signal cannot rise above its own steady peak has reached the end of its measurement range. Its amplitude
-%        is then only a lower bound, and because the peak is fixed, every rise of the diastolic force lowers the
-%        amplitude one to one (apparent loss of force, apparent negative force-frequency relation). Remedy: the
-%        extended sensor mode of the control software (old sensor boards) or a controller mode with a wider range.
-%        Needs at least minProtocolBeats (100) protocol contractions of the channel, minBeats steady contractions and a
-%        steady amplitude >= minPeakAmplitude (500 uN). No flag (peakHeadroom = NaN) if the protocol contractions stay
-%        more than 5 % of the amplitude below the steady peak: the channel was not in the same state during the
-%        protocols, so the comparison says nothing. L is also set when the sensor value passes the second limit of the
-%        flag M: the peak then sits where the sensor hardly follows the force any more (mode 0), or close to the jump
-%        of the conversion (extended mode of the old boards).
-%   slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
+%   sensor / chamber (orange, as in the control software: the hardware limits what the recording can say, the
+%   contractions are analysed as usual; own group 2026-11-12):
 %     M  the sensor value of the contractions has passed the first limit of its characteristic (2026-11-11, Tom's
 %        rule): the amplitude of these contractions is too small, and the more so the further it goes. Column
 %        peakSignal_AU: median over the included stimulated contractions of (amplitude + diastolicSignal), i.e. of
@@ -92,12 +81,16 @@ function varargout = mda_report(varargin)
 %        signalMode0 [10900 14300] = where the curve has only 60 % and 20 % of the slope it has near the rest
 %        position (medians of the six sensors 11600 and 14200, turning point 15200); signalMode2000 [18000 20000] =
 %        13 % and 3 % below the earliest jump of the conversion (20698), because that curve stays straight to the
-%        jump. The second value is the red flag L. Only for old sensor boards (FXOS8700): the curve of the MMC5983
+%        jump. The second value is the flag L. Only for old sensor boards (FXOS8700): the curve of the MMC5983
 %        boards stays straight over the whole travel a slice produces, and what limits them is the fold of the
 %        conversion, not the curve. The board follows from the share of repeated raw values of the channel (summary
 %        column repeatedSamples_percent), the mode from the log line 'extended sensor mode on'; without the board,
-%        peakSignal_AU is still reported but nothing is flagged. The second level is orange in the control software
-%        (Tom, 2026-11-11), red here.
+%        peakSignal_AU is still reported but nothing is flagged.
+%     L  peak force at the measurement limit: the sensor value has passed the second limit of M. The peak then sits
+%        where the sensor hardly follows the force any more (mode 0), or close to the jump of the conversion (extended
+%        mode of the old boards); the amplitude is only a lower bound. Shown instead of M. Fixed limits only: nothing
+%        is concluded from the shape of the contractions or from the protocols (Tom, 2026-11-12; the rule that
+%        compared the peaks of the protocols with the steady peak was removed).
 %     W  zero position of the chamber outside the range of a chamber in good order (Tom, 2026-11-11): offsetOld
 %        [-18000 -3000] for old boards, offsetNew [-21000 -5000] for MMC5983 boards. Column offset_AU: the channel's
 %        last 'Offset' entry of the log in normalized counts (raw x factor of the output mode), which is how the
@@ -106,24 +99,30 @@ function varargout = mda_report(varargin)
 %        version 10d the line held the raw value of its mode, so there the factor is applied first). This is about
 %        the hardware, not the tissue: the spring wire is worn or out of place, which costs that much of the travel
 %        to the limits above, and the text says how much is left, in the counts of the output mode. No flag if the
-%        board type is unknown.
+%        board type is unknown, and none if the Offset is 0: that means it was not determined (common), offset_AU is
+%        NaN, and all that is missing is the absolute diastolic force - amplitudes and changes of the diastolic force
+%        do not need it (Tom, 2026-11-12).
+%   slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
 %     C  capture < capture (90) % of the stimuli
 %     X  extra beats > extra (10) % of the detected contractions (spontaneous activity; not shown with N)
 %     A  median amplitude of the included contractions < amplitude (75 uN)
-%     T  amplitude change > amplitudeChange (30) % from the first to the last range with >= 10 included contractions
-%        (shown with the time between the start of the first and the end of the last of these ranges, e.g. 'amplitude
-%        change +660 % over 24 h')
 %     V  median amplitude CV of the ranges > amplitudeCV (30) %
+%   Not a flag: the change of the amplitude from the first to the last range with >= 10 included contractions (columns
+%   amplitudeChange_percent, amplitudeChange_hours). That the amplitude changes is what an experiment is about (flag T
+%   removed 2026-11-12).
+%   Level of a channel: 'check' (red) before 'sensor' (orange) before 'quality' (yellow); the texts in the columns
+%   red, sensor and yellow.
 % Arrhythmic pacing (summary column arrhythmicPacing: option arrhythmicChannels or detected, see mda_options;
 % 2026-10-13): capture and amplitude CV are not flagged (C, V) and the missed beats do not count in the noise index (N:
 % extra beats only); missed beats, uncertain contractions and a variable amplitude are expected. The capture is still
 % shown (overview: '~' after it).
 % Channel label (lists and trace pages, e.g. 'ch 7 (PMA)'): the values of the label treatment (with concentration and
 % unit), otherwise sliceGroup, otherwise sampleGroup of the summary, if given.
-% Pages: overview (recordings x channels: capture % and codes), list of the channels to check (red) and of those with
-% slice-quality flags (yellow), one page per recording with red flags (at most maxPages, the recordings with the
-% most red flags and the highest noise index first; up to 4 channels with a window of windowSeconds at the most
-% uncertain / extra beats (N) or large extra beats (S)) with the commands to open them:
+% Pages: overview (recordings x channels: capture % and codes), list of the channels to check (red), of those with
+% sensor / chamber flags (orange) and of those with slice-quality flags (yellow), one page per recording with red
+% flags (at most maxPages, the recordings with the most red flags and the highest noise index first; up to 4
+% channels with a window of windowSeconds at the most uncertain / extra beats (N) or large extra beats (S)) with the
+% commands to open them:
 %     MATLAB  MyoDishAnalysisGUI(file, 'channel', c, 'window', [from to])
 %     Python  mda-gui file --channel c --window from to
 % Needs MATLAB R2021b or newer (exportgraphics with 'Append').
@@ -141,8 +140,12 @@ if ischar(varargin{1}) || isstring(varargin{1})
         case 'defaults'
             varargout{1} = defaults();
         case 'flags'
-            a = [varargin(2:end), cell(1, 6)];
-            varargout{1} = reportFlags(a{1}, a{2}, a{3}, flagsOf(a{4}), a{5}, a{6});
+            a = [varargin(2:end), cell(1, 5)];
+            varargout{1} = reportFlags(a{1}, a{2}, a{3}, flagsOf(a{4}), a{5});
+        case 'rules'
+            varargout{1} = rulesVersion();
+        case 'legend'
+            varargout{1} = shortLegend();
         case 'window'
             [varargout{1}, varargout{2}] = reportWindow(varargin{2:5});
         case 'commands'
@@ -184,10 +187,28 @@ end
 % =====================================================================================================
 function fl = defaults()
 fl = struct('uncertain', 25, 'irregular', 15, 'artifactShare', 5, 'artifactRatio', 3, 'extra', 10, 'capture', 90, ...
-    'amplitudeChange', 30, 'amplitude', 75, 'amplitudeCV', 30, 'delay', 0.15, 'minBeats', 50, 'stimFrequency', 10, ...
-    'peakHeadroom', 0.15, 'minProtocolBeats', 100, 'minPeakAmplitude', 500, ...
+    'amplitude', 75, 'amplitudeCV', 30, 'delay', 0.15, 'minBeats', 50, 'stimFrequency', 10, ...
     'signalMode0', [10900 14300], 'signalMode2000', [18000 20000], 'extendedSensorFactor', 3.3, ...
     'offsetOld', [-18000 -3000], 'offsetNew', [-21000 -5000]);
+end
+
+
+function v = rulesVersion()
+% version of the flag rules: raised whenever a rule changes what a channel is flagged with, so that flags stored in
+% mda_flags.csv are computed again (MyoDishAnalysisWatch, column rules). 2: 2026-11-12 (group sensor / chamber with
+% M, L, W; protocol rule of L and flag T removed; no W without an Offset). 1: everything before (no column).
+v = 2;
+end
+
+
+function L = shortLegend()
+% the three groups of flags with their letters, one line each (GUI: flag line, results browser, help), so that every
+% place that explains the letters says the same (2026-11-12)
+L = {['red = check the analysis: I inverted signal, N noise, S large extra beats, D delay, F stimulus frequency, ' ...
+    'R controller restart, firmware update or recording stopped']
+    ['orange = sensor / chamber: M sensor near its limit, L sensor at its limit, W zero position of the chamber ' ...
+    'out of range']
+    'yellow = slice quality: C capture, X extra beats, A amplitude, V amplitude CV'};
 end
 
 
@@ -224,8 +245,10 @@ function off = offsetNormalized(E, channel, ext, fl)
 % zero position of the channel in normalized counts (raw x factor of the output mode), from the last 'Offset' entry
 % of the log (2026-11-11). From lab version 10e on the line is already normalized; up to 10d it was the raw value of
 % the mode that was active then, so in a recording with the extended sensor mode on the factor belongs to it
-% (mda_offsetNormalized). Without a version MDA reads the file as it always did.
+% (mda_offsetNormalized). Without a version MDA reads the file as it always did. NaN if there is no entry or if it is
+% 0, which is what the control software writes as long as the offset has not been determined.
 off = offsetOf(E, channel);
+if off == 0, off = NaN; end                         %0 = not determined (Tom, 2026-11-12)
 if isnan(off) || mda_offsetNormalized(versionOf(E)), return; end
 if ext && isfinite(fl.extendedSensorFactor) && fl.extendedSensorFactor > 0
     off = off * fl.extendedSensorFactor;
@@ -359,28 +382,6 @@ off = v(end);
 end
 
 
-function h = peakHeadroom(cc, P, channel, fl)
-% Peak force at the measurement limit (red flag L, 2026-11-11): how far the highest peak signal (diastolicSignal +
-% amplitude) of the stimulation protocols lies above the median peak signal of the steady contractions of the same
-% channel, in units of their median amplitude. See the help of mda_report for the criterion and the limits.
-h = NaN;
-need = {'channel', 'amplitude', 'diastolicSignal', 'beatType'};
-if isempty(cc) || isempty(P) || height(cc) == 0 || height(P) == 0, return; end
-if ~all(ismember(need, cc.Properties.VariableNames)) || ~all(ismember(need, P.Properties.VariableNames)), return; end
-st = cc(double(cc.channel) == channel & strcmp(cellstr(string(cc.beatType)), 'stimulated'), :);
-if ismember('included', st.Properties.VariableNames), st = st(truthy(st.included), :); end
-pp = P(double(P.channel) == channel & strcmp(cellstr(string(P.beatType)), 'stimulated'), :);
-if ismember('uncertain', pp.Properties.VariableNames), pp = pp(~truthy(pp.uncertain), :); end
-if height(st) < fl.minBeats || height(pp) < fl.minProtocolBeats, return; end
-a = double(st.amplitude); p = double(st.diastolicSignal) + a;
-ok = ~isnan(a) & ~isnan(p); a = a(ok); p = p(ok);
-q = double(pp.diastolicSignal) + double(pp.amplitude); q = q(~isnan(q));
-if isempty(a) || isempty(q) || median(a) < fl.minPeakAmplitude, return; end
-h = (max(q) - median(p)) / median(a);
-if h < -0.05, h = NaN; end              %the protocols stayed below the steady peak: not the same state, no statement
-end
-
-
 function s = restartWarnings(E)
 % red flag R from the events table E of a recording: 'Controller restart suspected ...' (code warning, control software
 % 2.2, F-90; 2026-10-21), firmware updates ('system' event firmwareUpdate with phase done or failed, lab round 5) and
@@ -511,27 +512,15 @@ if numel(txt) > 40, txt = [txt(1:39) char(8230)]; end
 end
 
 
-function s = durationText(h)
-% '45 min', '5.5 h', '24 h', '3.5 d'
-if isnan(h), s = '';
-elseif h < 1.5, s = sprintf('%.0f min', 60 * h);
-elseif h < 10, s = sprintf('%.1f h', h);
-elseif h < 72, s = sprintf('%.0f h', h);
-else, s = sprintf('%.1f d', h / 24);
-end
-end
-
-
 function s = labelOf(R, r)
 s = '';
 if ismember('label', R.Properties.VariableNames) && ~isempty(R.label{r}), s = [' (' R.label{r} ')']; end
 end
 
 
-function R = reportFlags(S, C, status, fl, E, P)
-% one row per channel: counts, values and flags (flags = codes, red / yellow = descriptions)
+function R = reportFlags(S, C, status, fl, E)
+% one row per channel: counts, values and flags (flags = codes, red / sensor / yellow = descriptions)
 if nargin < 5, E = []; end
-if nargin < 6, P = []; end
 restart = restartWarnings(E);                       %controller restart suspected (red flag R, 2026-10-21)
 chans = [];
 if ~isempty(S) && height(S) > 0, chans = double(S.channel(:)); end
@@ -544,14 +533,13 @@ chans = unique(chans);
 n = numel(chans);
 R = table(chans, repmat({''}, n, 1), repmat({''}, n, 1), zeros(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), ...
     nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), false(n, 1), ...
-    false(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), repmat({''}, n, 1), repmat({''}, n, 1), ...
-    repmat({''}, n, 1), repmat({''}, n, 1), repmat({''}, n, 1), ...
+    false(n, 1), nan(n, 1), nan(n, 1), nan(n, 1), repmat({''}, n, 1), repmat({''}, n, 1), ...
+    repmat({''}, n, 1), repmat({''}, n, 1), repmat({''}, n, 1), repmat({''}, n, 1), ...
     'VariableNames', {'channel', 'label', 'status', 'nDetected', 'capture_percent', 'extra_percent', ...
     'uncertain_percent', 'extraMissed_percent', 'noiseIndex', 'largeExtra_percent', 'largeExtra_ratio', ...
     'amplitude_uN', 'amplitudeChange_percent', 'amplitudeChange_hours', 'amplitudeCV_percent', 'delay_ms', ...
-    'invertedSignal', 'arrhythmicPacing', 'stimFrequency_Hz', 'peakHeadroom', 'peakSignal_AU', 'offset_AU', ...
-    'sensorBoard', ...
-    'flags', 'level', 'red', 'yellow'});
+    'invertedSignal', 'arrhythmicPacing', 'stimFrequency_Hz', 'peakSignal_AU', 'offset_AU', 'sensorBoard', ...
+    'flags', 'level', 'red', 'sensor', 'yellow'});
 for k = 1:n
     c = chans(k);
     if isKey(st, c), R.status{k} = st(c); end
@@ -620,12 +608,12 @@ for k = 1:n
     elseif ~isempty(s) && ismember('amplitude_mean', s.Properties.VariableNames) && any(~isnan(s.amplitude_mean))
         R.amplitude_uN(k) = median(s.amplitude_mean, 'omitnan');
     end
-    R.peakHeadroom(k) = peakHeadroom(cc, P, c, fl);      %peak force at the measurement limit (2026-11-11)
     [R.peakSignal_AU(k), R.sensorBoard{k}, extMode] = peakSignalAU(cc, s, c, E, fl);   %sensor curve (2026-11-11)
     sLim = signalLimits(R.sensorBoard{k}, extMode, fl);
     R.offset_AU(k) = offsetNormalized(E, c, extMode, fl);   %zero position of the chamber (2026-11-11)
     oRange = offsetRange(R.sensorBoard{k}, fl);
     red = {}; codes = '';
+    sen = {}; scodes = '';                         %sensor / chamber (2026-11-12)
     yel = {}; ycodes = '';
     if ~strcmp(R.status{k}, 'no slice') && nDet >= fl.minBeats
         if nInv >= fl.minBeats                     %ranges with an inverted signal and enough contractions
@@ -660,16 +648,6 @@ for k = 1:n
         if R.stimFrequency_Hz(k) > fl.stimFrequency
             red{end+1} = sprintf('stimulus frequency %.0f Hz', R.stimFrequency_Hz(k)); codes(end+1) = 'F'; %#ok<AGROW>
         end
-        if ~isnan(R.peakHeadroom(k)) && R.peakHeadroom(k) < fl.peakHeadroom
-            red{end+1} = sprintf(['peak force at the measurement limit (the protocols reach only %+.0f %% of the ' ...
-                'amplitude above the peak of the steady contractions; extended sensor mode?)'], ...
-                100 * R.peakHeadroom(k)); codes(end+1) = 'L'; %#ok<AGROW>
-        elseif ~isnan(R.peakSignal_AU(k)) && ~isempty(sLim) && R.peakSignal_AU(k) >= sLim(2)
-            red{end+1} = sprintf(['peak force at the measurement limit: sensor value %.0f counts, %s ' ...
-                '(%s, %s; from %.0f)'], R.peakSignal_AU(k), limitText(extMode, 2), R.sensorBoard{k}, ...
-                modeText(extMode), sLim(2)); %#ok<AGROW>
-            codes(end+1) = 'L'; %#ok<AGROW>
-        end
         if ~isempty(restart)
             red{end+1} = restart; codes(end+1) = 'R'; %#ok<AGROW>
         end
@@ -682,19 +660,18 @@ for k = 1:n
         if ~R.invertedSignal(k) && R.amplitude_uN(k) < fl.amplitude
             yel{end+1} = sprintf('amplitude %.0f uN', R.amplitude_uN(k)); ycodes(end+1) = 'A'; %#ok<AGROW>
         end
-        if abs(R.amplitudeChange_percent(k)) > fl.amplitudeChange
-            d = durationText(R.amplitudeChange_hours(k));
-            if isempty(d), d = '(first vs. last range)'; else, d = ['over ' d]; end
-            yel{end+1} = sprintf('amplitude change %+.0f %% %s', R.amplitudeChange_percent(k), d); %#ok<AGROW>
-            ycodes(end+1) = 'T'; %#ok<AGROW>
-        end
         if R.amplitudeCV_percent(k) > fl.amplitudeCV && ~arr
             yel{end+1} = sprintf('amplitude CV %.0f %%', R.amplitudeCV_percent(k)); ycodes(end+1) = 'V'; %#ok<AGROW>
         end
-        if ~isnan(R.peakSignal_AU(k)) && ~isempty(sLim) && ~any(codes == 'L') && R.peakSignal_AU(k) >= sLim(1)
-            yel{end+1} = sprintf('sensor value %.0f counts, %s (%s, %s; from %.0f): the amplitude is too small', ...
+        if ~isnan(R.peakSignal_AU(k)) && ~isempty(sLim) && R.peakSignal_AU(k) >= sLim(2)
+            sen{end+1} = sprintf(['peak force at the measurement limit: sensor value %.0f counts, %s ' ...
+                '(%s, %s; from %.0f)'], R.peakSignal_AU(k), limitText(extMode, 2), R.sensorBoard{k}, ...
+                modeText(extMode), sLim(2)); %#ok<AGROW>
+            scodes(end+1) = 'L'; %#ok<AGROW>
+        elseif ~isnan(R.peakSignal_AU(k)) && ~isempty(sLim) && R.peakSignal_AU(k) >= sLim(1)
+            sen{end+1} = sprintf('sensor value %.0f counts, %s (%s, %s; from %.0f): the amplitude is too small', ...
                 R.peakSignal_AU(k), limitText(extMode, 1), R.sensorBoard{k}, modeText(extMode), sLim(1)); %#ok<AGROW>
-            ycodes(end+1) = 'M'; %#ok<AGROW>
+            scodes(end+1) = 'M'; %#ok<AGROW>
         end
         if ~isnan(R.offset_AU(k)) && ~isempty(oRange) && ...
                 (R.offset_AU(k) < oRange(1) || R.offset_AU(k) > oRange(2))
@@ -704,16 +681,18 @@ for k = 1:n
                 end
                 travel = sprintf(', %.0f counts of travel left to the limit', sLim(2) - R.offset_AU(k) / f);
             end
-            yel{end+1} = sprintf(['zero position of the chamber %.0f normalized counts, outside %.0f to %.0f ' ...
+            sen{end+1} = sprintf(['zero position of the chamber %.0f normalized counts, outside %.0f to %.0f ' ...
                 '(%s)%s: the spring wire is worn or out of place'], R.offset_AU(k), oRange(1), oRange(2), ...
                 R.sensorBoard{k}, travel); %#ok<AGROW>
-            ycodes(end+1) = 'W'; %#ok<AGROW>
+            scodes(end+1) = 'W'; %#ok<AGROW>
         end
     end
-    R.flags{k} = [codes ycodes];
+    R.flags{k} = [codes scodes ycodes];
     R.red{k} = strjoin(red, '; ');
+    R.sensor{k} = strjoin(sen, '; ');
     R.yellow{k} = strjoin(yel, ', ');
     if ~isempty(red), R.level{k} = 'check';
+    elseif ~isempty(sen), R.level{k} = 'sensor';
     elseif ~isempty(yel), R.level{k} = 'quality';
     elseif strcmp(R.status{k}, 'no slice'), R.level{k} = 'no slice';
     elseif nDet < fl.minBeats, R.level{k} = 'few beats';
@@ -853,7 +832,7 @@ cols = [{'recording'}, full.Properties.VariableNames, {'window_from', 'window_to
 for i = 1:nR, Rs{i} = alignFlags(Rs{i}, cols, full); end   %fewer columns; 2026-11-01)
 if nR, Rall = vertcat(Rs{:}); else, Rall = alignFlags(full, cols, full); end
 isCheck = cellfun(@(R) any(strcmp(R.level, 'check')), Rs);
-nRed = cellfun(@(R) sum(cellfun(@(x) sum(ismember(x, 'INSDFRL')), R.flags(strcmp(R.level, 'check')))), Rs);
+nRed = cellfun(@(R) sum(cellfun(@(x) sum(ismember(x, 'INSDFR')), R.flags(strcmp(R.level, 'check')))), Rs);
 maxNI = cellfun(@(R) max([0; R.noiseIndex(strcmp(R.level, 'check') & ~isnan(R.noiseIndex))]), Rs);
 check = find(isCheck | arrayfun(@(r) ~isempty(r.notes), recs(:)));
 det = find(isCheck);
@@ -964,6 +943,7 @@ pg0 = pg;
 isNew = false(1, numel(recs));
 if isfield(recs, 'new'), isNew = arrayfun(@(r) isequal(r.new, true), recs); end
 nRed = sum(cellfun(@(R) sum(strcmp(R.level, 'check')), Rs));
+nSen = sum(cellfun(@(R) sum(strcmp(R.level, 'sensor')), Rs));
 nYel = sum(cellfun(@(R) sum(strcmp(R.level, 'quality')), Rs));
 nSl = sum(cellfun(@(R) sum(~strcmp(R.status, 'no slice')), Rs));
 chans = unique(cell2mat(cellfun(@(R) double(R.channel(:)), Rs(:), 'UniformOutput', false)))';
@@ -991,7 +971,8 @@ for p = 1:nP
     if any(isNew), s = sprintf('%d recording(s) (%d new = bold), %d channel(s) with a slice: %d to check (red', ...
             numel(recs), sum(isNew), nSl, nRed); end
     if nDetail, s = sprintf('%s, traces on %d page(s)', s, nDetail); end
-    txt(ax, 0.05, y - 0.004, sprintf('%s), %d with slice-quality flags (yellow)', s, nYel), 8);
+    s = sprintf('%s), %d sensor / chamber (orange), %d slice quality (yellow)', s, nSen, nYel);
+    txt(ax, 0.05, y - 0.004, s, 8);
     top = y - 0.02;
     % matrix: axes coordinates 0..1 in [0.05 0.10 0.92 top-0.10] of the page
     X = @(x) 0.05 + 0.92 * x; Y = @(v) 0.10 + (top - 0.10) * v;
@@ -1025,6 +1006,7 @@ for p = 1:nP
                     if isKey(m, R.status{r}), s = m(R.status{r}); else, s = sprintf('%d', R.nDetected(r)); end
                 otherwise
                     if strcmp(R.level{r}, 'check'), col = hex('#f8c9c4');
+                    elseif strcmp(R.level{r}, 'sensor'), col = hex('#f9cf9e');
                     elseif strcmp(R.level{r}, 'quality'), col = hex('#fbe8a6');
                     else, col = [1 1 1]; end
                     s = R.flags{r};
@@ -1055,9 +1037,10 @@ L = {'', ['Each cell: capture (% of the stimuli followed by a contraction; ~ arr
         char(8805), fl.uncertain, char(8805), fl.irregular, fl.artifactRatio, 1000 * fl.delay, fl.stimFrequency)
     '#f8c9c4', ['R controller restart or firmware update (power-on settings, not those in the log), recording ' ...
         'stopped (low disk space), file named after another MyoDish']
+    '#f9cf9e', ['Orange = sensor / chamber:  M sensor near its limit (amplitude too small),  L at its limit ' ...
+        '(amplitude is a lower bound),  W zero position of the chamber out of range']
     '#fbe8a6', sprintf(['Yellow = slice quality:  C capture < %g %%,  X extra beats > %g %%,  A amplitude < %g %sN,  ' ...
-        'T amplitude changes by > %g %% during the recording,  V amplitude CV > %g %%'], fl.capture, fl.extra, ...
-        fl.amplitude, mu, fl.amplitudeChange, fl.amplitudeCV)
+        'V amplitude CV > %g %%'], fl.capture, fl.extra, fl.amplitude, mu, fl.amplitudeCV)
     '#eeeeee', sprintf(['Grey = fewer than %g contractions:  b beating, nb not beating, rm removed, otherwise the ' ...
         'number of contractions'], fl.minBeats)
     '', ['Red letter left of the cells:  P a stimulation protocol was not analysed,  E analysis error  (details in ' ...
@@ -1067,7 +1050,7 @@ end
 
 function legendLines(ax, fl)
 L = legendText(fl);
-y = 0.085;
+y = 0.088;
 for i = 1:size(L, 1)
     x = 0.05;
     if ~isempty(L{i, 1})
@@ -1075,7 +1058,7 @@ for i = 1:size(L, 1)
         x = 0.066;
     end
     txt(ax, x, y, L{i, 2}, 6.5);
-    y = y - 0.0125;
+    y = y - 0.0115;
 end
 end
 
@@ -1091,7 +1074,8 @@ for i = check(:)'
     R = Rs{i};
     for r = find(strcmp(R.level, 'check'))'
         s = sprintf('ch %d%s: %s', R.channel(r), labelOf(R, r), R.red{r});
-        if ~isempty(R.yellow{r}), s = sprintf('%s   (%s)', s, R.yellow{r}); end
+        more = [R.sensor(r), R.yellow(r)]; more = more(~cellfun(@isempty, more));
+        if ~isempty(more), s = sprintf('%s   (%s)', s, strjoin(more, '; ')); end
         L(end+1, :) = {s, 'n', 0}; %#ok<AGROW>
     end
     for m = 1:numel(recs(i).notes)
@@ -1099,19 +1083,23 @@ for i = check(:)'
         for j = 1:min(3, numel(w)), L(end+1, :) = {w{j}, 'o', 0}; end %#ok<AGROW>
     end
 end
-L(end+1, :) = {'', 'n', 0};
-L(end+1, :) = {'Slice quality (yellow)', 'h', 0};
-nQ = 0;
-for i = 1:numel(recs)
-    R = Rs{i};
-    q = find(strcmp(R.level, 'quality'));
-    if isempty(q), continue; end
-    nQ = nQ + numel(q);
-    parts = arrayfun(@(r) sprintf('ch %d%s: %s', R.channel(r), labelOf(R, r), R.yellow{r}), q, 'UniformOutput', false);
-    w = wrapText([shortName(recs(i).name, 80) ' - ' strjoin(parts', '; ')], 150);
-    for j = 1:numel(w), L(end+1, :) = {w{j}, 's', 0}; end %#ok<AGROW>
+groups = {'sensor', 'Sensor / chamber (orange)'; 'quality', 'Slice quality (yellow)'};
+for g = 1:size(groups, 1)
+    L(end+1, :) = {'', 'n', 0}; %#ok<AGROW>
+    L(end+1, :) = {groups{g, 2}, 'h', 0}; %#ok<AGROW>
+    nQ = 0;
+    for i = 1:numel(recs)
+        R = Rs{i};
+        q = find(strcmp(R.level, groups{g, 1}));
+        if isempty(q), continue; end
+        nQ = nQ + numel(q);
+        parts = arrayfun(@(r) sprintf('ch %d%s: %s', R.channel(r), labelOf(R, r), groupText(R, r)), q, ...
+            'UniformOutput', false);
+        w = wrapText([shortName(recs(i).name, 80) ' - ' strjoin(parts', '; ')], 150);
+        for j = 1:numel(w), L(end+1, :) = {w{j}, 's', 0}; end %#ok<AGROW>
+    end
+    if ~nQ, L(end+1, :) = {'none', 'n', 0}; end %#ok<AGROW>
 end
-if ~nQ, L(end+1, :) = {'none', 'n', 0}; end
 perPage = 78;
 nP = ceil(size(L, 1) / perPage);
 first = pg + nP + 1;
@@ -1139,6 +1127,13 @@ end
 end
 
 
+function s = groupText(R, r)
+% texts of a channel below the level 'check': sensor / chamber first, then slice quality
+p = [R.sensor(r), R.yellow(r)];
+s = strjoin(p(~cellfun(@isempty, p)), '; ');
+end
+
+
 function detailPage(out, rec, R)
 GREEN = hex('#2e7d32'); ORANGE = hex('#e65100'); BLUE = hex('#1565c0'); RED = hex('#c62828'); GREY = [0.33 0.33 0.33];
 rows = find(strcmp(R.level, 'check'));
@@ -1161,7 +1156,7 @@ opts = mda_options();
 for k = 1:numel(rows)
     r = rows(k); a = R.window_from(r); b = R.window_to(r); c = R.channel(r);
     tt = sprintf('channel %d%s: %s', c, labelOf(R, r), ...
-        strjoin(R{r, {'red', 'yellow'}}(~cellfun(@isempty, R{r, {'red', 'yellow'}})), '; '));
+        strjoin(R{r, {'red', 'sensor', 'yellow'}}(~cellfun(@isempty, R{r, {'red', 'sensor', 'yellow'}})), '; '));
     axk = axes(fig, 'Position', [0.09, top - k * h + 0.045, 0.86, h - 0.075], 'FontSize', 6, 'Box', 'on');
     hold(axk, 'on');
     title(axk, tt, 'FontSize', 8, 'FontWeight', 'normal', 'HorizontalAlignment', 'left', 'Units', 'normalized', ...

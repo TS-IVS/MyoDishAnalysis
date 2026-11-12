@@ -50,6 +50,7 @@ addpath('/path/to/MyoDishAnalysis')
 MyoDishAnalysisGUI('examples/example3_humanVentricle.mdd')                   % interactive
 [c, s] = MyoDishAnalysis('examples/example3_humanVentricle.mdd', 6, 0, 120);  % channel 6, 0–120 s
 mda_test                                                                       % self test
+mda_testAll                                                                    % all test suites and the GUI
 MyoDishAnalysisWatch('raw', 'results')                                         % new recordings of a folder
 ```
 More examples: `example_MyoDishAnalysis.m`. Help: `help MyoDishAnalysis`, `help mda_options`.
@@ -66,17 +67,20 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    remembered. A recording opens with its first window (From / To: 0–120 s) loaded and analysed (2026-10-14).
    **Results ...**: results browser of a results folder of the watcher (`mda_index.csv`, `mda_flags.csv`; the last
    folder opens again directly, **Folder ...** chooses another one): one row per recording and channel with label,
-   flags of the analysis report (red background = check the analysis, yellow = slice quality, see "Analysis
-   report"), capture, contractions, channel status and the flag texts; recordings that were not analysed (status and
-   message of the index) in grey. List *all recordings / with flags / red flags / not analysed* and a search field
+   flags of the analysis report (red background = check the analysis, orange = sensor / chamber, yellow = slice
+   quality, see "Analysis report"), capture, contractions, channel status and the flag texts; recordings that were not
+   analysed (status and message of the index) in grey. List *all recordings / with flags / red flags / orange flags /
+   not analysed* and a search field
    (all typed words must occur). **Double-click** a row (or **Open**): the channel with the settings of its analysis,
    at the window of the red flags, otherwise the first 120 s of its analysis (results file `<name>.xlsx` or
    `<name>_info.csv`, see below); a parallel recording that was not analysed: its main file at its time. **Compute flags (n)**: flags of
-   recordings analysed by an older watcher (computed from their result files, saved in `mda_flags.csv`).
+   recordings that have none or whose flags were made with older flag rules (computed from their result files,
+   without a new analysis, and saved in `mda_flags.csv`).
    **Main file** (button next to the file name, shown for a parallel recording such as a schedule file or snapshot
    started from the main recording; see "Watcher"): opens the main recording at the window shown, same channel.
    **Flags** (grey line above the table): the flags of the analysis report for the analysed range of the channel
-   (red = check the analysis, orange = slice quality; the pointer shows the codes).
+   (red = check the analysis, orange = sensor / chamber, dark yellow = slice quality; the pointer shows the codes;
+   an error is shown in the line).
    **Comments ...**: searchable list of the comments in the log file (# = number in the force plot, date and time,
    time in the file, text; option "all log entries" adds events and settings). Search: all typed words must occur.
    Select a row: the comment is highlighted in the force plot; double-click a row (or select it and press **Go to**)
@@ -548,8 +552,8 @@ watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`.
   version, the options or the core functions change, or with `'retryErrors',true`.
 * **Report** `reports/mda_report_<date>_<time>.txt` per pass: for every analysed recording and channel the number of
   contractions, capture (% of the stimuli followed by a contraction), extra beats (% of the detected contractions),
-  mean amplitude in the first and last bin with ≥ 10 contractions and flags (no contractions, capture < 90 %, extra
-  beats > 10 %, amplitude change > 30 %; `'flagCapture'`, `'flagExtraBeats'`, `'flagAmplitudeChange'`); periods
+  mean amplitude in the first and last bin with ≥ 10 contractions with its change, and flags (no contractions,
+  capture < 90 %, extra beats > 10 %; `'flagCapture'`, `'flagExtraBeats'`); periods
   without signal by type and the channels that do not end beating.
   The txt report lists the PDF reports of the experiments.
 * **PDF report per experiment** `<experiment>/<experiment>_report.pdf` (`'report'`, default true; Python
@@ -561,12 +565,15 @@ watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`.
   pass. See "Analysis report"; the GUI commands open the `<name>.xlsx` (csv results: `<name>_info.csv`) of the
   recording (settings of the watcher). MATLAB also prints the channels to check as links in the command window.
 * **Flags** `mda_flags.csv` (2026-10-14; with the PDF report): the flags of the analysis report per recording and
-  channel (file, analyzed, channel, label, status, nDetected, capture_percent, flags, level, red, yellow, from / to =
-  window of the red flags) of all analysed recordings, updated after every pass; read by the results browser of the
+  channel (file, analyzed, channel, label, status, nDetected, capture_percent, flags, level, red, sensor, yellow,
+  from / to = window of the red flags, peakSignal_AU / offset_AU = sensor value at the peak and zero position of the
+  chamber in counts, the numbers behind M, L and W; rules = version of the flag rules) of all analysed recordings,
+  updated after every pass; read by the results browser of the
   GUI (**Results ...**), the experiment reports and the overview images.
   `[T, missing] = MyoDishAnalysisWatch('flags', resultsFolder, compute)` (Python `X, T, missing =
   flags_table(results_folder, compute)`) returns the flags of the current analyses; `compute = true` computes the
-  missing ones (results of older versions) from the result files and saves them (not while a watcher is running).
+  missing ones and those made with older flag rules (column `rules`, `mda_report('rules')`) from the result files and
+  saves them (not while a watcher is running; nothing is analysed again).
 * **Skipped** while written or copied (2026-10-13): files changed in the last 10 min (`'minFileAgeMinutes'`), names
   starting with `.` (rsync temporary files, hidden folders), and:
   * `running`: no `Recording stopped` in the log file yet; analysed when the end of the data (start of the recording
@@ -1244,22 +1251,12 @@ thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
   software 2.2 in the log, read from the events table: after it the controller may have run with its power-on
   settings instead of those in the log; all channels of the recording), also for a firmware update (event
   `firmwareUpdate`, done or failed) and a recording stopped by the software for lack of disk space (2026-11-05;
-  e.g. *controller restart suspected (2, first at 1234 s); firmware update (1, first at 5 s)*); **L** peak force at
-  the measurement limit (2026-11-11): the highest peak signal (diastolic signal + amplitude) of the stimulation
-  protocols reaches less than 15 % of the amplitude above the peak signal of the steady contractions (column
-  `peakHeadroom`). The protocols contain contractions that must be stronger than the steady ones (low frequencies, the
-  beat after a rest); a channel whose signal cannot rise above its own steady peak has reached the end of its
-  measurement range: the amplitude is then only a lower bound, and because the peak is fixed, every rise of the
-  diastolic force lowers it one to one (apparent loss of force, apparent negative force-frequency relation). Remedy:
-  the extended sensor mode of the control software (old sensor boards) or a controller mode with a wider range. Needs
-  the protocol contractions (at least 100 of the channel), at least 50 steady ones and a steady amplitude ≥ 500 µN; no
-  flag if the protocol contractions stay more than 5 % of the amplitude below the steady peak (the channel was not in
-  the same state during the protocols). Noise index =
+  e.g. *controller restart suspected (2, first at 1234 s); firmware update (1, first at 5 s)*). Noise index =
   uncertain % × (extra % + missed %) / 100; it is listed (e.g. `noise index 54 (uncertain 98 %, extra 0 %, missed
   55 %)`) and orders the trace pages. Arrhythmically paced channels (see "Arrhythmic pacing"): missed beats not counted,
   no C and V flags, capture shown with `~`.
-* **slice quality** (yellow: possibly poor biological quality, also e.g. an effect of a treatment; the user
-  decides): **M** the sensor value of the contractions has passed the first limit of its characteristic (2026-11-11),
+* **sensor / chamber** (orange, as in the control software: the hardware limits what the recording can say, the
+  contractions are analysed as usual; 2026-11-12): **M** the sensor value of the contractions has passed the first limit of its characteristic (2026-11-11),
   so the amplitude of these contractions is too small; column `peakSignal_AU` (median of amplitude + diastolic signal
   of the included stimulated contractions, i.e. the signal at the peak, in the counts the controller itself sends in
   its output mode). Absolute sensor values, not deflections from rest: the characteristic depends on where the magnet
@@ -1271,11 +1268,18 @@ thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
   the range of a chamber in good order (old boards -18000 to -3000, MMC5983 -21000 to -5000, one range per board
   because the normalized value does not depend on the mode): the spring wire is worn or out of place, which costs
   that much of the travel. Limits per board type and output mode: old boards (FXOS8700) 10900 counts in mode 0 (60 %
-  of the slope near rest) and 18000 in the extended sensor mode (a margin below the jump of the conversion), red
-  **L** at 14300 and 20000. Not applied to MMC5983 boards, whose curve stays straight over the whole travel a slice
-  produces, nor when the board type is unknown. MDA marks this, it does not correct it. **C** capture < 90 %, **X** extra beats > 10 % (spontaneous activity; not shown with N), **A** amplitude
-  < 75 µN, **T** amplitude change > 30 % (first → last range with ≥ 10 contractions; listed with the time span, e.g.
-  "amplitude change +660 % over 24 h"), **V** amplitude CV > 30 %.
+  of the slope near rest) and 18000 in the extended sensor mode (a margin below the jump of the conversion); **L**
+  (peak force at the measurement limit, shown instead of M: the amplitude is only a lower bound) at 14300 and 20000.
+  Fixed limits only, nothing is concluded from the shape of the contractions. Not applied to MMC5983 boards, whose
+  curve stays straight over the whole travel a slice produces, nor when the board type is unknown. No W if the
+  `Offset` is 0: it was not determined then, and only the absolute diastolic force is missing. MDA marks all this, it
+  does not correct it.
+* **slice quality** (yellow: possibly poor biological quality, also e.g. an effect of a treatment; the user
+  decides): **C** capture < 90 %, **X** extra beats > 10 % (spontaneous activity; not shown with N), **A** amplitude
+  < 75 µN, **V** amplitude CV > 30 %. The change of the amplitude during the recording is a value of the flags table
+  (`amplitudeChange_percent`), not a flag (2026-11-12): that the amplitude changes is what an experiment is about.
+* A channel has the level of its most severe group: `check` before `sensor` before `quality` (columns `level`, `red`,
+  `sensor`, `yellow`).
 * Rules (2026-10-12) from the overnight runs of 2024 and 2026 (4923 recordings) and visual checks: with the former
   rules (U > 10 % or X > 10 % red) 14–19 % of the channels with a slice were red, half of them only for uncertain
   contractions. In a sample of 400 recordings of 2026 (2143 channels), 228 channels (11 %) have N (former rules: 367,
@@ -1283,8 +1287,8 @@ thresholds: watcher options `'flag...'`, `mda_report('defaults')`):
   vs. real small contractions near the threshold with regular capture).
 
 Page 1: recordings × channels (capture % and the codes; grey: < 50 contractions; red letter P: a stimulation protocol
-was not analysed, E: analysis error; legend below the table); page 2: the channels to check and those with
-slice-quality flags, with the channel label in parentheses if given (treatment with concentration, otherwise
+was not analysed, E: analysis error; legend below the table); page 2: the channels to check, those with sensor /
+chamber flags and those with slice-quality flags, with the channel label in parentheses if given (treatment with concentration, otherwise
 sliceGroup or sampleGroup, e.g. `ch 7 (PMA 100 nM): extra beats 30 %`); then one page per recording with red
 flags (at most 8, the most flags and the highest noise index first) with traces of up to 4 channels (20 s at the most
 uncertain / extra beats or large extra beats, markers of the analysis) and the commands that open exactly this place in the GUI:
@@ -1513,6 +1517,7 @@ lower plot, the trend and all exports.
 | `mda_summarize.m`, `mda_writeResults.m` | summary table, Excel/CSV export (info table: version and all settings) |
 | `mda_readResults.m` | read a results file again (settings, analysis windows, contractions; GUI: Open ...) |
 | `mda_labels.m`, `mda_addLabels.m` | labels per channel (metadata) |
+| `mda_testAll.m` | all test suites `mda_test*.m` and a smoke test of the GUI in one call (before every commit) |
 | `mda_test.m` | self test (parameters, rocker filter) |
 | `mda_testWatch.m` | test of the watcher with example recordings |
 | `mda_testClockTime.m`, `mda_testSignalGaps.m`, `mda_testSliceRegister.m` | tests of the clock-time correction, the periods without signal and the slice register |

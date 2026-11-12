@@ -663,6 +663,24 @@ def test_parallel_recordings(tmp_path):
     a = T.sort_values(["file", "channel"]).reset_index(drop=True)[["file", "analyzed", "channel", "flags", "level"]]
     b = T2.sort_values(["file", "channel"]).reset_index(drop=True)[["file", "analyzed", "channel", "flags", "level"]]
     pd.testing.assert_frame_equal(a, b, check_dtype=False)
+    # version of the flag rules (column rules, 2026-11-12): flags made with older rules, or by a version that wrote no
+    # such column, are not used and are computed again from the result files, without a new analysis
+    from myodish_analysis.report import FLAG_RULES
+    Fo = W.read_flags(res)
+    assert list(Fo.columns) == W.FLAG_COLUMNS and W.FLAG_COLUMNS[-3:] == ["peakSignal_AU", "offset_AU", "rules"]
+    assert (Fo["rules"] == FLAG_RULES).all() and Fo["peakSignal_AU"].dtype.kind == 'f'
+    Fo = Fo.assign(rules=FLAG_RULES - 1, flags="T", level="quality")
+    Fo.to_csv(os.path.join(res, W.FLAGS_NAME), index=False)
+    X, T3, missing = W.flags_table(res)
+    assert len(T3) == 0 and len(missing) == 3
+    Fo.drop(columns=["rules", "sensor"]).to_csv(os.path.join(res, W.FLAGS_NAME), index=False)
+    X, T4, missing = W.flags_table(res)
+    assert len(T4) == 0 and len(missing) == 3
+    X, T5, missing = W.flags_table(res, compute=True)
+    c = T5.sort_values(["file", "channel"]).reset_index(drop=True)[["file", "analyzed", "channel", "flags", "level"]]
+    pd.testing.assert_frame_equal(a, c, check_dtype=False)
+    Fn = W.read_flags(res)
+    assert missing == [] and (Fn["rules"] == FLAG_RULES).all() and not (Fn["flags"] == "T").any()
     with pytest.raises(ValueError):
         _wcsv(raw, str(tmp_path / "r3"), parallel="sometimes")
     assert watch_main([raw, str(tmp_path / "r4"), "--dry-run", "--quiet", "--parallel", "analyze",
@@ -717,7 +735,7 @@ def test_gui_results_browser_parallel(tmp_path):
         r = D[D["file"] == "P/S1_X_1_scheduleFile.mdd"].iloc[0]
         assert r["indexStatus"] == "parallel" and r["main"] == "P/S1_X_1.mdd" and (r["a"], r["b"]) == (100, 400)
         assert D.loc[D["file"] == "P/S1_X_1.mdd", "channel"].tolist() == [1]  # one data channel
-        B.dd.setCurrentIndex(3)  # not analysed: the parallel recording, opened in its main file at its time
+        B.dd.setCurrentIndex(B.VIEWS.index("not analysed"))  # the parallel recording, opened in its main file at its time
         assert B.model.rowCount() == 1 and B.model.rows[0][0] == "P/S1_X_1_scheduleFile.mdd"
         assert B.open_row(0)
         assert w.H.file == m and (w.S.fromSeconds, w.S.toSeconds) == (100, 220) and w.ch == 1

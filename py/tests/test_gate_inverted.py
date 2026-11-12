@@ -154,9 +154,10 @@ def test_analysis_report(tmp_path):
 
 
 def test_report_label_and_amplitude_change():
-    """channel label in the lists and amplitude change with its time span (report.py, 2026-10-12)"""
+    """channel label in the lists and amplitude change with its time span (report.py, 2026-10-12; a value, no flag
+    since 2026-11-12)"""
     import pandas as pd
-    from myodish_analysis.report import duration_text, legend_lines, report_flags, FLAG_DEFAULTS
+    from myodish_analysis.report import legend_lines, report_flags, FLAG_DEFAULTS
     rows = []
     for c, a1, tr, conc, grp in ((1, 100.0, "PMA", 100.0, ""), (2, 300.0, "", math.nan, "control"),
                                  (3, 300.0, "", math.nan, "")):
@@ -168,9 +169,9 @@ def test_report_label_and_amplitude_change():
                          "sliceGroup": grp, "sampleGroup": ""})
     R = report_flags(pd.DataFrame(rows))
     assert list(R["label"]) == ["PMA 100 nM", "control", ""]
-    assert R.loc[0, "yellow"] == "amplitude change +660 % over 24 h" and R.loc[0, "amplitudeChange_hours"] == 24
-    assert R.loc[1, "yellow"] == "extra beats 30 %" and list(R["flags"]) == ["T", "X", ""]  # X: slice quality
-    assert [duration_text(h) for h in (0.75, 5.5, 24, 84, math.nan)] == ["45 min", "5.5 h", "24 h", "3.5 d", ""]
+    assert R.loc[0, "yellow"] == "" and R.loc[0, "amplitudeChange_hours"] == 24
+    assert abs(R.loc[0, "amplitudeChange_percent"] - 660) < 1e-9
+    assert R.loc[1, "yellow"] == "extra beats 30 %" and list(R["flags"]) == ["", "X", ""]  # X: slice quality
     inv = [{"channel": 1, "from": 3600.0 * k, "to": 3600.0 * (k + 1), "nDetected": n, "nStimuli": n, "nMissedBeats": 0,
             "nExtraBeats": 0, "nUncertain": 0, "nContractions": n, "amplitude_mean": a, "amplitude_CV": 0.1,
             "invertedSignal": k == 0} for k, n, a in ((0, 60, math.nan), (1, 9940, 300.0))]
@@ -181,9 +182,9 @@ def test_report_label_and_amplitude_change():
                                "controller restart suspected: no data for 5.0 s, 20 ms blocks although 2.5 ms was set",
                                "something else"], "t_file": [10.0, 1234.5, 2000.0, 3000.0]})
     RR = report_flags(pd.DataFrame(rows), events=E)
-    assert list(RR["flags"]) == ["RT", "RX", "R"] and list(RR["level"]) == ["check"] * 3
+    assert list(RR["flags"]) == ["R", "RX", "R"] and list(RR["level"]) == ["check"] * 3
     assert RR.loc[2, "red"] == "controller restart suspected (2, first at 1234 s)"
-    assert report_flags(pd.DataFrame(rows), events=E.iloc[[0, 3]])["flags"].tolist() == ["T", "X", ""]
+    assert report_flags(pd.DataFrame(rows), events=E.iloc[[0, 3]])["flags"].tolist() == ["", "X", ""]
     # red flag R also for a firmware update (done or failed; its start line alone not) and a recording stopped by the
     # software for lack of disk space (control software lab round 5, 2026-11-05)
     E2 = pd.DataFrame({"code": ["system", "system", "warning"],
@@ -194,11 +195,12 @@ def test_report_label_and_amplitude_change():
     RF = report_flags(pd.DataFrame(rows), events=pd.concat([E, E2], ignore_index=True))
     assert RF.loc[2, "red"] == ("controller restart suspected (2, first at 1234 s); firmware update (1, first at 5 s); "
                                 "recording stopped by the software (low disk space) (1, first at 3500 s)")
-    assert list(RF["flags"]) == ["RT", "RX", "R"]
-    assert report_flags(pd.DataFrame(rows), events=E2.iloc[[0]])["flags"].tolist() == ["T", "X", ""]
+    assert list(RF["flags"]) == ["R", "RX", "R"]
+    assert report_flags(pd.DataFrame(rows), events=E2.iloc[[0]])["flags"].tolist() == ["", "X", ""]
     assert report_flags(pd.DataFrame(rows), events=E2.iloc[[1]]).loc[2, "red"] == "firmware update (1, first at 5 s)"
     L = legend_lines(FLAG_DEFAULTS)
-    assert len(L) == 6 and all(len(t) <= 170 for _, t in L) and "T amplitude changes by > 30 %" in L[3][1]
+    assert len(L) == 7 and all(len(t) <= 170 for _, t in L) and not any("T amplitude" in t for _, t in L)
+    assert L[3][0] == "sensor" and L[3][1].startswith("Orange = sensor / chamber") and L[4][0] == "quality"
     assert L[2][0] == "check" and L[2][1].startswith("R controller restart")
 
 

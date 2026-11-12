@@ -551,6 +551,25 @@ pass = isempty(missing) && height(T) > 0 && height(T0) == 0 && numel(missing0) =
     isfile(fullfile(r2, 'mda_flags.csv')) && isequal(T.file, T2.file) && isequal(T.channel, T2.channel) && ...
     isequal(T.flags, T2.flags) && isequal(T.level, T2.level);
 ok = check(ok, pass, 'flags table mda_flags.csv: written by the watcher, computed again from the results');
+% version of the flag rules (column rules, 2026-11-12): flags made with older rules, or by a version that wrote no
+% such column, are not used and are computed again from the result files, without a new analysis
+Fo = readFlagsCsv(fullfile(r2, 'mda_flags.csv'));
+cols = {'file', 'analyzed', 'channel', 'label', 'status', 'nDetected', 'capture_percent', 'flags', 'level', 'red', ...
+    'sensor', 'yellow', 'from', 'to', 'peakSignal_AU', 'offset_AU', 'rules'};
+pass = isequal(Fo.Properties.VariableNames, cols) && all(Fo.rules == mda_report('rules')) && ...
+    isnumeric(Fo.peakSignal_AU) && isnumeric(Fo.offset_AU);
+Fo.rules(:) = mda_report('rules') - 1; Fo.flags(:) = {'T'}; Fo.level(:) = {'quality'};
+writetable(Fo, fullfile(r2, 'mda_flags.csv'));
+[T3, missing3] = MyoDishAnalysisWatch('flags', r2);
+writetable(removevars(Fo, {'rules', 'sensor'}), fullfile(r2, 'mda_flags.csv'));
+[T4, missing4] = MyoDishAnalysisWatch('flags', r2);
+[T5, missing5] = MyoDishAnalysisWatch('flags', r2, true);
+Fn = readFlagsCsv(fullfile(r2, 'mda_flags.csv'));
+T5 = sortrows(T5, {'file', 'channel'});
+pass = pass && height(T3) == 0 && numel(missing3) == 6 && height(T4) == 0 && numel(missing4) == 6 && ...
+    isempty(missing5) && isequal(T5.file, T.file) && isequal(T5.flags, T.flags) && isequal(T5.level, T.level) && ...
+    isequal(Fn.Properties.VariableNames, cols) && all(Fn.rules == mda_report('rules')) && ~any(strcmp(Fn.flags, 'T'));
+ok = check(ok, pass, 'flags of older rules (column rules of mda_flags.csv): not used, computed again');
 M = MyoDishAnalysisWatch('mainRecording', fullfile(rawP, 'P', 'S1_X_1_scheduleFile.mdd'));
 M2 = MyoDishAnalysisWatch('mainRecording', fullfile(rawP, 'Q', 'S1_X_1_scheduleFile.mdd'));
 ok = check(ok, ~isempty(M) && endsWith(M.main, 'S1_X_1.mdd') && M.a == 100 && M.b == 400 && isempty(M2), ...
@@ -627,7 +646,7 @@ function T = readFlagsCsv(f)
 % mda_flags.csv with the text columns as text
 o = detectImportOptions(f, 'FileType', 'text', 'Delimiter', ',');
 o = setvartype(o, intersect(o.VariableNames, {'file', 'analyzed', 'label', 'status', 'flags', 'level', 'red', ...
-    'yellow'}), 'char');
+    'sensor', 'yellow'}), 'char');
 T = readtable(f, o);
 end
 

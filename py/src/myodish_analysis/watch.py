@@ -95,9 +95,13 @@ Slice register (register=True, gaps=True; after each pass with analysed recordin
   another sliceID label start a new slice.
 results_folder/mda_flags.csv (report=True, 2026-10-14)
   flags of the analysis report per recording and channel (file, analyzed, channel, label, status, nDetected,
-  capture_percent, flags, level, red, yellow, from, to = window to open for the channels to check) of all analysed
-  recordings (also of earlier passes); read by the results browser of the GUI (flags_table), the experiment reports
-  and the overview images.
+  capture_percent, flags, level, red, sensor, yellow, from, to = window to open for the channels to check,
+  peakSignal_AU = sensor value at the peak of the contractions and offset_AU = zero position of the chamber, the two
+  numbers behind the flags M, L and W (counts, see report.py; 2026-11-12), rules = version of the flag rules,
+  report.FLAG_RULES) of all analysed recordings (also of earlier passes); read by the
+  results browser of the GUI (flags_table), the experiment reports and the overview images. Flags written with older
+  rules are not used: they are computed again from the result files, without a new analysis (experiment reports;
+  flags_table(results_folder, compute=True); 2026-11-12).
 results_folder/mda_index.csv
   one row per recording: file (path relative to raw_folder), bytes, modified (time of the .mdd file, UTC), logBytes,
   status (ok / error / running / incomplete / parallel / noLog), version, implementation (MATLAB / Python), code
@@ -107,20 +111,22 @@ results_folder/reports/mda_report_<date>_<time>.txt
   report of a pass with analysed recordings: per channel contractions, capture (% of the stimuli followed by a
   contraction), extra beats (% of the detected contractions), mean amplitude in the first and last range (>= 10
   included contractions) and flags (no contractions, capture < flag_capture % (not with arrhythmic pacing, summary
-  column arrhythmicPacing: 'arrhythmic pacing'), extra beats > flag_extra_beats %, amplitude change >
-  flag_amplitude_change %). It lists the PDF reports of the experiments with analysed recordings.
+  column arrhythmicPacing: 'arrhythmic pacing'), extra beats > flag_extra_beats %) and the change of the amplitude (a
+  value, no flag). It lists the PDF reports of the experiments with analysed recordings.
 results_folder/<experiment>/<experiment>_report.pdf (report=True, 2026-10-11; one report per experiment instead of one
   per pass since 2026-10-15; mda_report_root.pdf for recordings directly in raw_folder)
   analysis report of all analysed recordings of the experiment (report.py), made again after every pass with analysed
   recordings of the experiment: first page the overview image of the experiment, then the recordings x channels with
   flags (recordings of the last pass bold, earlier ones with the flags of mda_flags.csv: flags of earlier days stay
-  visible), the list of the channels to check and those with slice-quality flags, and pages with traces of the red
-  channels of the last pass. Flags: the channels whose analysis should be checked (red: inverted signal; noise
+  visible), the list of the channels to check, of those with sensor / chamber flags and of those with slice-quality
+  flags, and pages with traces of the red channels of the last pass. Flags: the channels whose analysis should be checked (red: inverted signal; noise
   suspected = uncertain >= flag_uncertain % and extra + missed beats >= flag_irregular %; large extra beats; delay
-  pulse -> onset > flag_delay s; stimulus frequency > flag_stim_frequency Hz) and those with slice-quality flags
-  (yellow: capture < flag_capture %, extra beats > flag_extra_beats %, amplitude < flag_amplitude uN, amplitude change
-  > flag_amplitude_change %, amplitude CV > flag_amplitude_cv %; arrhythmic pacing: no capture and amplitude CV flags);
-  channels with fewer than flag_min_beats detected contractions are not flagged. The commands that open the red
+  pulse -> onset > flag_delay s; stimulus frequency > flag_stim_frequency Hz), those where the sensor or the chamber
+  limits the recording (orange: sensor value near or at its limit, zero position of the chamber out of range; fixed
+  limits per sensor board, see report.py) and those with slice-quality flags (yellow: capture < flag_capture %, extra
+  beats > flag_extra_beats %, amplitude < flag_amplitude uN, amplitude CV > flag_amplitude_cv %; arrhythmic pacing:
+  no capture and amplitude CV flags; flag_amplitude_change was removed 2026-11-12 and is ignored); channels with
+  fewer than flag_min_beats detected contractions are not flagged. The commands that open the red
   channels in the GUI (MyoDishAnalysisGUI(<name>.xlsx, 'channel', c, 'window', [a b]) / mda-gui <name>.xlsx --channel
   c --window a b).
 
@@ -195,7 +201,7 @@ protocol_margin_seconds (0: excluded after the end of a protocol as well), proto
 thin_factor (10), thin_mode ('nth'), result_format ('xlsx' | 'csv'), folders ('series' | 'flat'), compress (False;
 format 'csv'), overview_seconds (60), trends (True), trend_parameters, events (True), gaps (True: gaps and channels
 tables, summary columns noSignal_s, nChamberOut), register (True: slice register), new_slice_hours (2), workers (1;
-> 1: recordings analysed in parallel processes), flag_capture (90), flag_extra_beats (10), flag_amplitude_change (30),
+> 1: recordings analysed in parallel processes), flag_capture (90), flag_extra_beats (10),
 report (True: PDF report per experiment and mda_flags.csv), flag_uncertain (25), flag_irregular (15), flag_amplitude
 (75 uN), flag_amplitude_cv (30), flag_delay (0.15 s), flag_min_beats (50), flag_stim_frequency (10 Hz), quiet. All
 other keywords are analysis options of myodish_analysis (e.g. rockerFilter=True, rocker='stopped', threshold=300),
@@ -257,7 +263,7 @@ WATCH_DEFAULTS = dict(interval=0.0, schedule=None, reanalyze="new", retry_errors
                       events=True, gaps=True, register=True, new_slice_hours=2.0, workers=1,
                       result_format="xlsx", folders="series", trends=True,
                       trend_parameters=("amplitude", "diastolicForce", "TTP90", "TTR90"),
-                      flag_capture=90.0, flag_extra_beats=10.0, flag_amplitude_change=30.0, report=True,
+                      flag_capture=90.0, flag_extra_beats=10.0, report=True,
                       flag_uncertain=25.0, flag_irregular=15.0, flag_amplitude=75.0, flag_amplitude_cv=30.0,
                       flag_delay=0.15, flag_min_beats=50, flag_stim_frequency=10.0, quiet=False)
 _TIME_FMT = "%Y-%m-%d %H:%M:%S"
@@ -272,6 +278,7 @@ _STIM_CODES = ("stimfrequency", "stimcurrent", "chargeduration", "dechargedurati
 def watch(raw_folder, results_folder, **kw):
     """One pass, repeated passes on a schedule (schedule='daily 10:00', 'weekly Sun 05:00', 'every 120 min', ...; until
     Ctrl+C) or every interval hours; returns (index, report) of the (last) pass."""
+    kw.pop("flag_amplitude_change", None)   # removed 2026-11-12 (no flag any more): ignored
     wopts = {k: kw.pop(k) for k in list(kw) if k in WATCH_DEFAULTS}
     o = dict(WATCH_DEFAULTS, **wopts)
     if str(o["reanalyze"]).lower() not in ("outdated", "new", "all"):
@@ -752,7 +759,7 @@ def _scan_and_analyse(raw, res, o, aopts, lock=None):
 def _report_flag_options(o):
     return dict(uncertain=float(o["flag_uncertain"]), irregular=float(o["flag_irregular"]),
                 extra=float(o["flag_extra_beats"]), capture=float(o["flag_capture"]),
-                amplitude_change=float(o["flag_amplitude_change"]), amplitude=float(o["flag_amplitude"]),
+                amplitude=float(o["flag_amplitude"]),
                 amplitude_cv=float(o["flag_amplitude_cv"]), delay=float(o["flag_delay"]),
                 min_beats=float(o["flag_min_beats"]), stim_frequency=float(o["flag_stim_frequency"]))
 
@@ -764,7 +771,6 @@ def _report_records(raw, res, rows, fl):
     from .report import report_flags, report_window
     ccols = {"channel", "t_peak", "beatType", "uncertain", "included", "amplitude", "stimToOnset",
              "diastolicSignal"}
-    pcols = {"channel", "beatType", "uncertain", "amplitude", "diastolicSignal"}   # red flag L (2026-11-11)
     recs = []
     for row in rows:
         rel = str(row["file"]).replace("\\", "/")
@@ -778,7 +784,6 @@ def _report_records(raw, res, rows, fl):
             continue
         rec["S"] = result_table(d, n, "summary")
         C = _read_result(os.path.join(d, n + "_contractions.csv"), usecols=lambda c: c in ccols)
-        Pc = _read_result(os.path.join(d, n + "_protocols_contractions.csv"), usecols=lambda c: c in pcols)
         CH = result_table(d, n, "channels", usecols=lambda c: c in ("channel", "status"))
         if os.path.isfile(os.path.join(d, n + ".xlsx")):  # results as .xlsx (2026-10-14)
             rec["open"] = os.path.join(d, n + ".xlsx")
@@ -786,7 +791,7 @@ def _report_records(raw, res, rows, fl):
             rec["status"] = {int(c): str(st) for c, st in zip(CH["channel"], CH["status"])}
         rec["notes"] = [m for m in str(row["message"]).split(" | ") if m.startswith("protocols:")]
         R = report_flags(rec["S"], C, rec["status"], events=result_table(d, n, "events", usecols=lambda c: c in (
-            "code", "text", "t_file", "channel")), protocols=Pc, **fl)   # events: red flags R and M/L
+            "code", "text", "t_file", "channel")), **fl)   # events: red flag R, sensor flags M, L, W
         R["window_from"], R["window_to"] = math.nan, math.nan
         for i in np.flatnonzero((R["level"] == "check").to_numpy()):
             R.at[i, "window_from"], R.at[i, "window_to"] = report_window(C, int(R.at[i, "channel"]), R.at[i, "flags"])
@@ -801,7 +806,7 @@ def _flags_frame(Fr):
     """flags of one recording for write_report from rows of mda_flags.csv (windows of the channels to check)"""
     D = pd.DataFrame({c: pd.to_numeric(Fr[c], errors="coerce").to_numpy(float)
                       for c in ("channel", "nDetected", "capture_percent")})
-    for c in ("label", "status", "flags", "level", "red", "yellow"):
+    for c in ("label", "status", "flags", "level", "red", "sensor", "yellow"):
         D[c] = Fr[c].fillna("").astype(str).to_numpy()
     D["window_from"] = pd.to_numeric(Fr["from"], errors="coerce").to_numpy(float)
     D["window_to"] = pd.to_numeric(Fr["to"], errors="coerce").to_numpy(float)
@@ -837,7 +842,9 @@ def _experiment_report(raw, res, e, new, fl, version, otext, now_, notice=()):
     X = read_index(res)
     files = [str(f).replace("\\", "/") for f in X["file"]]
     sel = [i for i, f in enumerate(files) if f.rpartition("/")[0] == e and X["status"].iloc[i] in ("ok", "error")]
+    from .report import FLAG_RULES
     F = read_flags(res)
+    cur = (F["rules"] == FLAG_RULES).to_numpy()   # flags of older rules: computed again (2026-11-12)
     by_name = {r["name"]: r for r in new}
     recs, add = [], []
     for i in sel:
@@ -855,8 +862,8 @@ def _experiment_report(raw, res, e, new, fl, version, otext, now_, notice=()):
         d, _ = results_of(res, rel)
         n = os.path.splitext(os.path.basename(rel))[0]
         rec["open"] = os.path.join(d, n + (".xlsx" if os.path.isfile(os.path.join(d, n + ".xlsx")) else "_info.csv"))
-        Fr = F[(F["file"] == x["file"]) & (F["analyzed"].astype(str) == str(x["analyzed"]))]
-        if not len(Fr):  # flags missing (older watcher versions): from the result files
+        Fr = F[cur & (F["file"] == x["file"]).to_numpy() & (F["analyzed"].astype(str) == str(x["analyzed"])).to_numpy()]
+        if not len(Fr):  # flags missing or of older rules: from the result files
             try:
                 Fr = flags_of(res, x["file"], str(x["analyzed"]))
                 add.append(Fr)
@@ -889,18 +896,20 @@ def _experiment_report(raw, res, e, new, fl, version, otext, now_, notice=()):
 # ------------------------------------------------------------------------------------------------ flags table
 FLAGS_NAME = "mda_flags.csv"
 FLAG_COLUMNS = ["file", "analyzed", "channel", "label", "status", "nDetected", "capture_percent", "flags", "level",
-                "red", "yellow", "from", "to"]
-_FLAG_TEXT = ("file", "analyzed", "label", "status", "flags", "level", "red", "yellow")
+                "red", "sensor", "yellow", "from", "to", "peakSignal_AU", "offset_AU", "rules"]
+_FLAG_TEXT = ("file", "analyzed", "label", "status", "flags", "level", "red", "sensor", "yellow")
 
 
 def read_flags(results_folder):
     """results_folder/mda_flags.csv (flags of the analysis report per recording and channel, written by the watcher;
-    2026-10-14); empty table with FLAG_COLUMNS if missing."""
+    2026-10-14); empty table with FLAG_COLUMNS if missing. Columns that an older file does not have: '' or NaN (rules
+    = NaN: written before the flag rules had a version)."""
     f = os.path.join(results_folder, FLAGS_NAME)
     if not os.path.isfile(f):
         return pd.DataFrame(columns=FLAG_COLUMNS)
     T = pd.read_csv(f, dtype={c: str for c in _FLAG_TEXT}, keep_default_na=False, na_values={"channel": [""],
-                    "nDetected": [""], "capture_percent": [""], "from": [""], "to": [""]})
+                    "nDetected": [""], "capture_percent": [""], "from": [""], "to": [""], "peakSignal_AU": [""],
+                    "offset_AU": [""], "rules": [""]})
     for c in FLAG_COLUMNS:
         if c not in T.columns:
             T[c] = "" if c in _FLAG_TEXT else math.nan
@@ -908,13 +917,18 @@ def read_flags(results_folder):
 
 
 def _flag_rows(R, analyzed):
-    """rows of mda_flags.csv from flags of write_report (column recording = file); analyzed: {file: time}"""
+    """rows of mda_flags.csv from flags of write_report (column recording = file); analyzed: {file: time}; rules: the
+    version of the flag rules they were computed with (this one)"""
+    from .report import FLAG_RULES
     if R is None or not len(R):
         return pd.DataFrame(columns=FLAG_COLUMNS)
     T = pd.DataFrame({"file": R["recording"].astype(str), "channel": R["channel"].astype(int)})
     T["analyzed"] = T["file"].map(lambda f: str(analyzed.get(f, "")))
-    for c in ("label", "status", "flags", "level", "red", "yellow"):
-        T[c] = R[c].fillna("").astype(str).to_numpy()
+    for c in ("label", "status", "flags", "level", "red", "sensor", "yellow"):
+        T[c] = R[c].fillna("").astype(str).to_numpy() if c in R.columns else ""
+    T["rules"] = float(FLAG_RULES)
+    for c in ("peakSignal_AU", "offset_AU"):   # sensor value at the peak, zero position (counts; 2026-11-12)
+        T[c] = np.round(R[c].to_numpy(float)) if c in R.columns else math.nan
     T["nDetected"] = R["nDetected"].to_numpy()
     T["capture_percent"] = np.round(R["capture_percent"].to_numpy(float), 1)
     T["from"] = R["window_from"].to_numpy(float) if "window_from" in R.columns else math.nan
@@ -951,12 +965,10 @@ def flags_of(results_folder, rel, analyzed="", **flags):
         return pd.DataFrame(columns=FLAG_COLUMNS)
     C = _read_result(os.path.join(d, n + "_contractions.csv"), usecols=lambda c: c in {
         "channel", "t_peak", "beatType", "uncertain", "included", "amplitude", "stimToOnset", "diastolicSignal"})
-    Pc = _read_result(os.path.join(d, n + "_protocols_contractions.csv"), usecols=lambda c: c in {
-        "channel", "beatType", "uncertain", "amplitude", "diastolicSignal"})   # red flag L (2026-11-11)
     CH = result_table(d, n, "channels", usecols=lambda c: c in ("channel", "status"))
     st = {int(c): str(s) for c, s in zip(CH["channel"], CH["status"])} if CH is not None else None
     E = result_table(d, n, "events", usecols=lambda c: c in ("code", "text", "t_file", "channel"))
-    R = report_flags(S, C, st, events=E, protocols=Pc, **flags)
+    R = report_flags(S, C, st, events=E, **flags)
     R.insert(0, "recording", rel)
     R["window_from"], R["window_to"] = math.nan, math.nan
     for i in np.flatnonzero((R["level"] == "check").to_numpy()):
@@ -966,12 +978,14 @@ def flags_of(results_folder, rel, analyzed="", **flags):
 
 def flags_table(results_folder, compute=False, progress=None, **flags):
     """flags of the analysis report per recording and channel for the results browser (2026-10-14): mda_flags.csv
-    (written by the watcher) and the index; recordings with the status ok whose flags are missing or older than their
-    analysis are computed from their result files if compute=True (and written to mda_flags.csv unless a watcher is
-    running). Returns (index, flags of the current analyses, missing = files without current flags). progress:
+    (written by the watcher) and the index; recordings with the status ok whose flags are missing, older than their
+    analysis or made with older flag rules (column rules, 2026-11-12) are computed from their result files if
+    compute=True (and written to mda_flags.csv unless a watcher is running). Returns (index, flags of the current analyses, missing = files without current flags). progress:
     f(k, n)."""
+    from .report import FLAG_RULES
     X = read_index(results_folder)
     T = read_flags(results_folder)
+    T = T[(T["rules"] == FLAG_RULES).to_numpy()]
     have = {(f, a) for f, a in zip(T["file"], T["analyzed"])}
     ok = X[X["status"] == "ok"]
     missing = [f for f, a in zip(ok["file"], ok["analyzed"]) if (f, str(a)) not in have]
@@ -2150,8 +2164,6 @@ def _report_block(rel, H, S, o, CH=None, G=None):
             flags.append("capture < %s %%" % _g(o["flag_capture"]))
         if extra > o["flag_extra_beats"]:
             flags.append("extra beats > %s %%" % _g(o["flag_extra_beats"]))
-        if abs(chg) > o["flag_amplitude_change"]:
-            flags.append("amplitude change > %s %%" % _g(o["flag_amplitude_change"]))
         lines.append("  %7d  %12d  %8s  %6s  %15s / %-15s  %7s  %s" % (
             ch, nInc, _f1(cap), _f1(extra), _f1(a1), _f1(a2), _f1(chg), ", ".join(flags)))
     return "\n".join(lines + _gap_lines(CH, G)) + "\n"

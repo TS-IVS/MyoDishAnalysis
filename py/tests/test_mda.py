@@ -1961,54 +1961,39 @@ def test_anonymize_myodish_names_and_firmware():
     assert "dishA" not in txt and "dishB" not in txt
 
 
-def _flag_tables(steadyPeak, protocolPeak, nProtocol=150, amplitude=10000.0):
-    # steady contractions of one channel (peak signal = diastolicSignal + amplitude) and contractions of the
-    # stimulation protocols whose highest peak signal is protocolPeak
-    dia = np.linspace(-200.0, 200.0, 80)                     # the diastolic level drifts, the peak does not
-    C = pd.DataFrame({"channel": 1, "beatType": "stimulated", "uncertain": 0, "included": 1,
-                      "amplitude": amplitude - dia, "diastolicSignal": steadyPeak - amplitude + dia,
-                      "stimToOnset": 0.04})
-    pk = np.full(nProtocol, protocolPeak - 500.0)      # the highest peak of the protocols is protocolPeak
-    pk[0] = protocolPeak
-    P = pd.DataFrame({"channel": 1, "beatType": "stimulated", "uncertain": 0,
-                      "amplitude": amplitude, "diastolicSignal": pk - amplitude})
-    S = pd.DataFrame([{"channel": 1, "from": 0.0, "to": 120.0, "nDetected": 100, "nStimuli": 100, "nMissedBeats": 0,
-                       "nExtraBeats": 0, "nUncertain": 0, "nContractions": 100, "amplitude_mean": amplitude,
-                       "amplitude_CV": 0.05}])
-    return S, C, P
-
-
-def test_peak_at_measurement_limit():
-    # 2026-11-11: red flag L. The stimulation protocols (low frequencies, the beat after a rest) must reach above the
-    # peak of the steady contractions; a channel that cannot is at the end of its measurement range.
+def test_flag_groups():
+    # 2026-11-12 (Tom's decisions on the review): three groups with one level each, 'check' (red) before 'sensor'
+    # (orange: M, L, W) before 'quality' (yellow); the letters in that order; the change of the amplitude is a value,
+    # no flag (T removed); L only from the fixed limits; version of the rules and the legend of the GUI.
+    from myodish_analysis import report
     from myodish_analysis.report import report_flags
-    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=5050.0)        # +0.5 % of the amplitude: at the limit
-    R = report_flags(S, C, {1: "ok"}, protocols=P)
-    assert R.loc[0, "peakHeadroom"] == pytest.approx(0.005, abs=1e-6)
-    assert "L" in R.loc[0, "flags"] and R.loc[0, "level"] == "check"
-    assert "peak force at the measurement limit" in R.loc[0, "red"]
-    assert "+1 %" in R.loc[0, "red"] or "+0 %" in R.loc[0, "red"]
-
-    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=9000.0)        # +40 %: normal headroom
-    R = report_flags(S, C, {1: "ok"}, protocols=P)
-    assert R.loc[0, "peakHeadroom"] == pytest.approx(0.4, abs=1e-6)
-    assert "L" not in R.loc[0, "flags"]
-
-    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=5050.0, nProtocol=50)   # too few protocol contractions
-    R = report_flags(S, C, {1: "ok"}, protocols=P)
-    assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]
-
-    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=4000.0)        # -10 %: not the same state, no statement
-    R = report_flags(S, C, {1: "ok"}, protocols=P)
-    assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]
-
-    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=5050.0, amplitude=300.0)  # below min_peak_amplitude
-    R = report_flags(S, C, {1: "ok"}, protocols=P)
-    assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]
-
-    S, C, P = _flag_tables(steadyPeak=5000.0, protocolPeak=5050.0)        # without the protocols: no flag
-    R = report_flags(S, C, {1: "ok"})
-    assert math.isnan(R.loc[0, "peakHeadroom"]) and "L" not in R.loc[0, "flags"]
+    S, C, E = _signal_tables(15000, 1500, offset=-2000.0)            # L and W, nothing else
+    r = report_flags(S, C, {1: "ok"}, events=E).loc[0]
+    assert r["flags"] == "LW" and r["level"] == "sensor" and r["red"] == "" and r["yellow"] == ""
+    assert "peak force at the measurement limit" in r["sensor"] and "zero position" in r["sensor"]
+    S2 = S.assign(nMissedBeats=30)                                    # capture 70 %: sensor before quality
+    r = report_flags(S2, C, {1: "ok"}, events=E).loc[0]
+    assert r["flags"] == "LWC" and r["level"] == "sensor" and r["yellow"] == "capture 70 %"
+    r = report_flags(S2, C.assign(stimToOnset=0.3), {1: "ok"}, events=E).loc[0]   # delay 300 ms: check before sensor
+    assert r["flags"] == "DLWC" and r["level"] == "check" and r["red"] == "delay 300 ms" and r["sensor"] != ""
+    R = report_flags(S, C, {1: "ok"}, events=E)
+    assert "peakHeadroom" not in R.columns
+    with pytest.raises(TypeError):                                    # the contractions of the protocols: no argument
+        report_flags(S, C, {1: "ok"}, E, C)
+    for gone in ("amplitude_change", "peak_headroom", "min_protocol_beats", "min_peak_amplitude"):
+        assert gone not in report.FLAG_DEFAULTS
+        with pytest.raises(ValueError):
+            report_flags(S, C, {1: "ok"}, events=E, **{gone: 1})
+    S, C, E = _signal_tables(5000, 0, offset=-15000.0)
+    S4 = pd.concat([S, S.assign(**{"from": 86280.0, "to": 86400.0, "amplitude_mean": 7.6 * S["amplitude_mean"]})],
+                   ignore_index=True)                                 # +660 % over 24 h: a value, no flag
+    r = report_flags(S4, None, {1: "ok"}, events=E).loc[0]
+    assert r["flags"] == "" and r["level"] == "" and r["amplitudeChange_percent"] == pytest.approx(660)
+    assert r["amplitudeChange_hours"] == pytest.approx(24)
+    L = " ".join(report.short_legend())
+    assert report.FLAG_RULES == 2 and len(report.short_legend()) == 3 and " T " not in L
+    assert all(f" {c} " in L for c in "INSDFRMLWCXAV")
+    assert set(dict(report.RED_CODES + report.SENSOR_CODES + report.YELLOW_CODES).values()) == set("INSDFRMLWCXAV")
 
 
 def test_zero_force_and_the_unit_of_the_offset_entry():
@@ -2073,9 +2058,10 @@ def _signal_tables(peak_AU, dia_AU, calibration=1000.0, repeated=2.0, extended=F
 
 
 def test_sensor_value_at_the_limits():
-    # 2026-11-11 (Tom's rule): yellow M once the sensor value of the contractions passes the first limit of its
+    # 2026-11-11 (Tom's rule): M once the sensor value of the contractions passes the first limit of its
     # characteristic (mode 0: 60 % of the slope near the rest position; extended mode: a margin below the jump of
-    # the conversion), red L at the second. Old boards only. The sensor value of the peak decides, with its sign and
+    # the conversion), L at the second; both in the group sensor / chamber (orange, level 'sensor', text in the
+    # column sensor; 2026-11-12). Old boards only. The sensor value of the peak decides, with its sign and
     # in the counts of the output mode, so the Offset of the channel must not change the result. The limits are at
     # the upper end of the travel only: an empty chamber reads about -12000 to -18000 counts and preload and
     # contraction move the wire up from there (Tom, 2026-11-11).
@@ -2090,11 +2076,12 @@ def test_sensor_value_at_the_limits():
     assert "M" not in r["flags"] and "L" not in r["flags"]
 
     r = flags(peak_AU=12000, dia_AU=1200)                    # past 10 900, before 14 300
-    assert "M" in r["flags"] and "L" not in r["flags"] and r["level"] == "quality"
-    assert "60 %" in r["yellow"] and "mode 0" in r["yellow"]
+    assert "M" in r["flags"] and "L" not in r["flags"] and r["level"] == "sensor"
+    assert "60 %" in r["sensor"] and "mode 0" in r["sensor"] and r["red"] == "" and r["yellow"] == ""
 
     r = flags(peak_AU=15000, dia_AU=1500)                    # past 14 300
-    assert "L" in r["flags"] and "M" not in r["flags"] and r["level"] == "check" and "20 %" in r["red"]
+    assert "L" in r["flags"] and "M" not in r["flags"] and r["level"] == "sensor" and "20 %" in r["sensor"]
+    assert r["red"] == ""
 
     for off in (3000.0, 0.0):                                # the Offset does not enter the criterion
         r = flags(peak_AU=15000, dia_AU=1500, offset=off)
@@ -2112,10 +2099,10 @@ def test_sensor_value_at_the_limits():
     assert r["peakSignal_AU"] == pytest.approx(15000, rel=1e-9)
     assert "M" not in r["flags"] and "L" not in r["flags"]
     r = flags(peak_AU=19000, dia_AU=1900, extended=True, offset=-8000.0)   # past 18 000
-    assert "M" in r["flags"] and "extended sensor mode" in r["yellow"]
-    assert "jump" in r["yellow"] and "60 %" not in r["yellow"]
+    assert "M" in r["flags"] and "extended sensor mode" in r["sensor"]
+    assert "jump" in r["sensor"] and "60 %" not in r["sensor"]
     r = flags(peak_AU=21000, dia_AU=2100, extended=True, offset=-8000.0)   # past 20 000, close to the jump
-    assert "L" in r["flags"] and "jump" in r["red"]
+    assert "L" in r["flags"] and "jump" in r["sensor"]
 
     r = flags(peak_AU=15000, dia_AU=1500, repeated=48.0)     # MMC5983: the rule does not apply
     assert r["sensorBoard"] == "MMC5983" and "M" not in r["flags"] and "L" not in r["flags"]
@@ -2135,8 +2122,8 @@ def test_sensor_value_at_the_limits():
 
 
 def test_zero_position_of_the_chamber():
-    # 2026-11-11 (Tom's ranges): yellow W when the zero position of a chamber lies outside the range of a chamber in
-    # good order, which means a worn or misplaced spring wire (or a channel last zeroed in another output mode). The
+    # 2026-11-11 (Tom's ranges): W (group sensor / chamber) when the zero position of a chamber lies outside the range
+    # of a chamber in good order (an Offset of 0 means it was not determined: no value, no flag; Tom, 2026-11-12), which means a worn or misplaced spring wire (or a channel last zeroed in another output mode). The
     # value compared is normalized (raw x factor of the output mode), so there is one range per board type: old
     # boards -18000 to -3000, MMC5983 boards -21000 to -5000. From lab version 10e on the Offset line of the log is
     # already normalized; up to 10d it was the raw value of its mode, so there the factor is applied first.
@@ -2158,10 +2145,15 @@ def test_zero_position_of_the_chamber():
             (-3000.0, 48.0, False, "10e", -3000.0, "W"),     # outside -21000 to -5000
             (-6000.0, 48.0, True, "10d", -19800.0, ""),      # 10d, MMC5983 extended: x 3.3, inside
             (-7000.0, 48.0, True, "10d", -23100.0, "W"),     # x 3.3, outside (the reader's factor is 3.3 so far)
-            (-15000.0, 28.0, False, "10e", -15000.0, "")]:   # board unknown: no range, no flag
+            (-15000.0, 28.0, False, "10e", -15000.0, ""),    # board unknown: no range, no flag
+            (0.0, 2.0, False, "10e", math.nan, ""),          # 0 = not determined: no value, no flag
+            (0.0, 2.0, True, "10d", math.nan, ""),
+            (0.0, 48.0, False, "10e", math.nan, "")]:
         r = flags(offset=off, repeated=repeated, extended=ext, version=ver)
-        assert r["offset_AU"] == pytest.approx(want_au, rel=1e-9), (off, ver, r["offset_AU"])
+        assert r["offset_AU"] == pytest.approx(want_au, rel=1e-9, nan_ok=True), (off, ver, r["offset_AU"])
         assert ("W" in r["flags"]) == (want == "W"), (off, repeated, ext, r["flags"])
+        if want == "W":
+            assert r["level"] == "sensor" and "zero position" in r["sensor"]
 
     S, C, E = _signal_tables(5000, 500, offset=-2000.0)      # two entries: the last one counts
     E = pd.concat([pd.DataFrame([{"code": "Offset", "text": "-15000", "t_file": 0.0, "channel": 1}]), E],

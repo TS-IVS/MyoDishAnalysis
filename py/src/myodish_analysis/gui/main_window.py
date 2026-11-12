@@ -12,8 +12,8 @@
    the folder is remembered (2026-10-14). Results ...: results browser of a results folder of the watcher
    (mda_index.csv, mda_flags.csv): one row per recording and channel with the flags of the watcher report (list: all /
    with flags / red flags / not analysed; search); double-click opens the channel with the settings of its analysis
-   (red flags: the window of the flags, otherwise the first 120 s); Compute flags for results of older watcher
-   versions (dialogs.ResultsBrowser). Main file (shown for a parallel recording, e.g. a schedule file): the main
+   (red flags: the window of the flags, otherwise the first 120 s); Compute flags for results whose flags are missing
+   or were made with older flag rules (dialogs.ResultsBrowser). Main file (shown for a parallel recording, e.g. a schedule file): the main
    recording at the window shown. Grey line above the table: flags of the watcher report for the analysed range.
    Comments ...: searchable list of the comments of the log file (number, time, text); a selected row is highlighted
    in the force plot, double-click (or Go to) loads the data around it. Comments are numbered purple marks in the
@@ -2092,12 +2092,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def show_flags(self):
         """flags of the analysis report for the analysed range of this channel (as in the watcher report; 2026-10-14):
-        red = check the analysis, orange = slice quality, grey = none / too few contractions; descriptions as tool
-        tip"""
+        red = check the analysis, orange = sensor / chamber, dark yellow = slice quality, grey = none / too few
+        contractions; descriptions as tool tip. An error is shown in the line (2026-11-12: the line stayed empty, so
+        that flags that could not be computed looked like no flags)"""
         self.lFlags.setText("")
         self.lFlags.setToolTip("")
         try:
-            from ..report import FLAG_DEFAULTS, report_flags
+            from ..report import FLAG_DEFAULTS, report_flags, short_legend
             Sm = self.summary_row()
             Tc = self.range_table()
             if "channel" not in Sm.columns:
@@ -2109,19 +2110,21 @@ class MainWindow(QtWidgets.QMainWindow):
             if not len(R):
                 return
             r = R.iloc[0]
-            col = {"check": "#bf0000", "quality": "#bf6b00"}.get(str(r["level"]), "#737373")
+            col = {"check": "#bf0000", "sensor": "#d95e00", "quality": "#997800"}.get(str(r["level"]), "#737373")
             if not r["flags"]:
                 txt = (f"Flags: - (fewer than {FLAG_DEFAULTS['min_beats']} contractions)"
                        if r["nDetected"] < FLAG_DEFAULTS["min_beats"] else "Flags: none")
             else:
-                txt = f"Flags {r['flags']}: " + "; ".join(x for x in (str(r["red"]), str(r["yellow"])) if x)
+                txt = f"Flags {r['flags']}: " + "; ".join(
+                    x for x in (str(r["red"]), str(r["sensor"]), str(r["yellow"])) if x)
             self.lFlags.setText(txt)
             self.lFlags.setStyleSheet(f"color: {col}")
             self.lFlags.setToolTip("flags of the analysis report for this range (watcher report, report.py):\n"
-                                   "red: check the analysis (I inverted signal, N noise, S large extra beats, D delay, "
-                                   "F stimulus frequency)\norange: slice quality (C capture, X extra beats, A "
-                                   f"amplitude, T amplitude change, V amplitude CV)\n{txt}")
-        except Exception:  # noqa: BLE001 - the flags line is optional
+                                   + "\n".join(short_legend()) + f"\n{txt}")
+        except Exception as err:  # noqa: BLE001 - shown in the line: no flags and no result must not look alike
+            self.lFlags.setText("Flags: could not be computed (error, see the tool tip)")
+            self.lFlags.setStyleSheet("color: #bf0000")
+            self.lFlags.setToolTip(f"{type(err).__name__}: {err}")
             if os.environ.get("MDA_DEBUG"):
                 traceback.print_exc()
 

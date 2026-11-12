@@ -299,8 +299,8 @@ ok = ok && okW;
 % its new opening) and lines after its end (left out), 2026-11-09
 okP = pausedRecordingTest();
 ok = ok && okP;
-% peak force at the measurement limit (red flag L), 2026-11-11
-okL = peakLimitTest();
+% groups of flags: check before sensor / chamber before slice quality; no flag T; version of the rules, 2026-11-12
+okL = flagGroupsTest();
 ok = ok && okL;
 % the sensor value of the contractions at the limits of its characteristic (flags M and L), 2026-11-11
 okD = signalTest();
@@ -350,9 +350,10 @@ end
 
 
 function okD = signalTest()
-% as test_sensor_value_at_the_limits in py/tests/test_mda.py (2026-11-11, Tom's rule): yellow M once the sensor value
+% as test_sensor_value_at_the_limits in py/tests/test_mda.py (2026-11-11, Tom's rule): M once the sensor value
 % of the contractions passes the first limit of its characteristic (mode 0: 60 % of the slope near the rest position;
-% extended mode: a margin below the jump of the conversion), red L at the second. Old boards only, and the extended
+% extended mode: a margin below the jump of the conversion), L at the second; both in the group sensor / chamber
+% (orange, level 'sensor', text in the column sensor; 2026-11-12). Old boards only, and the extended
 % mode reaches much further. The sensor value of the peak decides, with its sign and in the counts of the output
 % mode, so the Offset of the channel must not change the result. The limits are at the upper end of the travel only:
 % an empty chamber reads about -12000 to -18000 counts and preload and contraction move the wire up from there, so a
@@ -383,6 +384,7 @@ for i = 1:size(cases, 1)
     got = R.flags{1};
     okCase = abs(R.peakSignal_AU(1) - wantAU) < 1e-6;
     okCase = okCase && isequal(any(got == 'M'), strcmp(want, 'M')) && isequal(any(got == 'L'), strcmp(want, 'L'));
+    if ~isempty(want), okCase = okCase && strcmp(R.level{1}, 'sensor') && isempty(R.red{1}) && ~isempty(R.sensor{1}); end
     if ~okCase
         fprintf('   case %d: sensor value %g (expected %g), flags ''%s'' (expected ''%s'')\n', i, ...
             R.peakSignal_AU(1), wantAU, got, want);
@@ -398,9 +400,10 @@ end
 
 
 function okO = offsetRangeTest()
-% as test_zero_position_of_the_chamber in py/tests/test_mda.py (2026-11-11, Tom's ranges): yellow W when the zero
-% position of a chamber lies outside the range of a chamber in good order, which means a worn or misplaced spring
-% wire (or a channel last zeroed in another output mode). The ranges scale with the factor of the output mode.
+% as test_zero_position_of_the_chamber in py/tests/test_mda.py (2026-11-11, Tom's ranges): W (group sensor / chamber)
+% when the zero position of a chamber lies outside the range of a chamber in good order, which means a worn or
+% misplaced spring wire (or a channel last zeroed in another output mode). The ranges scale with the factor of the
+% output mode. An Offset of 0 means it was not determined: no value, no flag (Tom, 2026-11-12).
 okO = true;
 %  Offset  repeated %  extended  version  normalized  code
 cases = {-15000,     2,  false,  '10e',  -15000,  '';     %old board, normal
@@ -414,14 +417,19 @@ cases = {-15000,     2,  false,  '10e',  -15000,  '';     %old board, normal
           -3000,    48,  false,  '10e',   -3000,  'W';    %outside -21000 to -5000
           -6000,    48,   true,  '10d',  -19800,  '';     %10d, MMC5983 extended: x 3.3, inside
           -7000,    48,   true,  '10d',  -23100,  'W';    %x 3.3, outside (the reader's factor is 3.3 so far)
-         -15000,    28,  false,  '10e',  -15000,  ''};    %board unknown: no range, no flag
+         -15000,    28,  false,  '10e',  -15000,  '';     %board unknown: no range, no flag
+              0,     2,  false,  '10e',     NaN,  '';     %0 = not determined: no value, no flag
+              0,     2,   true,  '10d',     NaN,  '';
+              0,    48,  false,  '10e',     NaN,  ''};
 for i = 1:size(cases, 1)
     [off, rep, ext, ver, wantAU, want] = cases{i,:};
     [S, C, E] = signalTables(5000, 500, 1000, rep, ext, off, true, ver);
     R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), ...
         mda_report('defaults'), E);
     got = R.flags{1};
-    okCase = abs(R.offset_AU(1) - wantAU) < 1e-6 && isequal(any(got == 'W'), strcmp(want, 'W'));
+    okCase = (abs(R.offset_AU(1) - wantAU) < 1e-6 || (isnan(wantAU) && isnan(R.offset_AU(1)))) && ...
+        isequal(any(got == 'W'), strcmp(want, 'W'));
+    if strcmp(want, 'W'), okCase = okCase && strcmp(R.level{1}, 'sensor') && contains(R.sensor{1}, 'zero position'); end
     if ~okCase
         fprintf('   case %d: offset %g (expected %g), flags ''%s'' (expected ''%s'')\n', i, ...
             R.offset_AU(1), wantAU, got, want);
@@ -473,49 +481,37 @@ end
 end
 
 
-function okL = peakLimitTest()
-% as test_peak_at_measurement_limit in py/tests/test_mda.py (2026-11-11): red flag L. The contractions of the
-% stimulation protocols (low frequencies, the beat after a rest) must reach above the peak signal of the steady
-% contractions; a channel whose signal cannot is at the end of its measurement range.
-okL = true;
-cases = {5050, 150, 10000, 0.005, true;      %+0.5 % of the amplitude above the steady peak: at the limit
-         9000, 150, 10000, 0.4,  false;      %+40 %: normal headroom
-         5050,  50, 10000, NaN,  false;      %too few protocol contractions
-         4000, 150, 10000, NaN,  false;      %the protocols stay below the steady peak: not the same state
-         5050, 150,   300, NaN,  false};     %steady amplitude below minPeakAmplitude
-for i = 1:size(cases, 1)
-    [pkProt, nProt, amp, want, flag] = cases{i,:};
-    [S, C, P] = peakLimitTables(5000, pkProt, nProt, amp);
-    R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), ...
-        mda_report('defaults'), [], P);
-    got = R.peakHeadroom(1);
-    okCase = (isnan(want) && isnan(got)) || (~isnan(want) && abs(got - want) < 1e-9);
-    okCase = okCase && (any(R.flags{1} == 'L') == flag);
-    if flag, okCase = okCase && contains(R.red{1}, 'peak force at the measurement limit') && ...
-            strcmp(R.level{1}, 'check'); end
-    if ~okCase
-        fprintf('   case %d: peakHeadroom %g (expected %g), flags ''%s''\n', i, got, want, R.flags{1});
-    end
-    okL = okL && okCase;
-end
-R = mda_report('flags', S, C, table(1, {'ok'}, 'VariableNames', {'channel', 'status'}), mda_report('defaults'));
-okL = okL && isnan(R.peakHeadroom(1)) && ~any(R.flags{1} == 'L');       %without the protocols: no flag
-fprintf('peak force at the measurement limit (flag L): %s\n', passStr(okL));
-end
-
-
-function [S, C, P] = peakLimitTables(pkSteady, pkProt, nProt, amp)
-% steady contractions of one channel whose peak signal is pkSteady while the diastolic level drifts, and protocol
-% contractions whose highest peak signal is pkProt
-dia = linspace(-200, 200, 80)';
-C = table(ones(80,1), repmat({'stimulated'}, 80, 1), zeros(80,1), ones(80,1), amp - dia, ...
-    pkSteady - amp + dia, 0.04 * ones(80,1), 'VariableNames', {'channel', 'beatType', 'uncertain', 'included', ...
-    'amplitude', 'diastolicSignal', 'stimToOnset'});
-pk = (pkProt - 500) * ones(nProt, 1); pk(1) = pkProt;
-P = table(ones(nProt,1), repmat({'stimulated'}, nProt, 1), zeros(nProt,1), amp * ones(nProt,1), pk - amp, ...
+function okL = flagGroupsTest()
+% as test_flag_groups in py/tests/test_mda.py (2026-11-12, Tom's decisions on the review): three groups with one level
+% each, 'check' (red) before 'sensor' (orange: M, L, W) before 'quality' (yellow); the letters in that order; the
+% change of the amplitude is a value, no flag (T removed); L only from the fixed limits (the contractions of the
+% protocols, formerly a seventh argument, change nothing); version of the rules and the legend of the GUI.
+st = table(1, {'ok'}, 'VariableNames', {'channel', 'status'});
+fl = mda_report('defaults');
+[S, C, E] = signalTables(15000, 1500, 1000, 2, false, -2000, true, '10e');     %L and W, nothing else
+R = mda_report('flags', S, C, st, fl, E);
+okL = strcmp(R.flags{1}, 'LW') && strcmp(R.level{1}, 'sensor') && isempty(R.red{1}) && isempty(R.yellow{1}) && ...
+    contains(R.sensor{1}, 'peak force at the measurement limit') && contains(R.sensor{1}, 'zero position');
+S2 = S; S2.nMissedBeats = 30;                                                  %capture 70 %: sensor before quality
+R = mda_report('flags', S2, C, st, fl, E);
+okL = okL && strcmp(R.flags{1}, 'LWC') && strcmp(R.level{1}, 'sensor') && strcmp(R.yellow{1}, 'capture 70 %');
+C3 = C; C3.stimToOnset(:) = 0.3;                                               %delay 300 ms: check before sensor
+R = mda_report('flags', S2, C3, st, fl, E);
+okL = okL && strcmp(R.flags{1}, 'DLWC') && strcmp(R.level{1}, 'check') && strcmp(R.red{1}, 'delay 300 ms') && ...
+    ~isempty(R.sensor{1});
+P = table(ones(150,1), repmat({'stimulated'}, 150, 1), zeros(150,1), 5000 * ones(150,1), zeros(150,1), ...
     'VariableNames', {'channel', 'beatType', 'uncertain', 'amplitude', 'diastolicSignal'});
-S = table(1, 0, 120, 100, 100, 0, 0, 0, 100, amp, 0.05, 'VariableNames', {'channel', 'from', 'to', 'nDetected', ...
-    'nStimuli', 'nMissedBeats', 'nExtraBeats', 'nUncertain', 'nContractions', 'amplitude_mean', 'amplitude_CV'});
+[S, C, E] = signalTables(5000, 0, 1000, 2, false, -15000, true, '10e');        %the protocols reach no higher: no L
+R = mda_report('flags', S, C, st, fl, E, P);
+okL = okL && isempty(R.flags{1}) && isempty(R.level{1}) && ~ismember('peakHeadroom', R.Properties.VariableNames);
+S4 = [S; S]; S4.from(2) = 86280; S4.to(2) = 86400; S4.amplitude_mean(2) = 7.6 * S.amplitude_mean(1);   %+660 %
+R = mda_report('flags', S4, [], st, fl, E);
+okL = okL && isempty(R.flags{1}) && abs(R.amplitudeChange_percent(1) - 660) < 1e-6 && ...
+    abs(R.amplitudeChange_hours(1) - 24) < 1e-9 && ~isfield(fl, 'amplitudeChange') && ~isfield(fl, 'peakHeadroom');
+L = mda_report('legend');
+okL = okL && mda_report('rules') == 2 && numel(L) == 3 && all(cellfun(@(x) contains(strjoin(L, ' '), [' ' x ' ']), ...
+    num2cell('INSDFRMLWCXAV'))) && ~contains(strjoin(L, ' '), ' T ');
+fprintf('groups of flags (check, sensor / chamber, slice quality): %s\n', passStr(okL));
 end
 
 

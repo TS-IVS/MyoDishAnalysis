@@ -127,9 +127,13 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   series and experiments of these recordings.
 % resultsFolder/mda_flags.csv ('report', true; 2026-10-14)
 %   flags of the analysis report per recording and channel (file, analyzed, channel, label, status, nDetected,
-%   capture_percent, flags, level, red, yellow, from, to = window to open for the channels to check) of all analysed
-%   recordings (also of earlier passes); read by the results browser of the GUI (MyoDishAnalysisWatch('flags',
-%   resultsFolder)), the experiment reports and the overview images.
+%   capture_percent, flags, level, red, sensor, yellow, from, to = window to open for the channels to check,
+%   peakSignal_AU = sensor value at the peak of the contractions and offset_AU = zero position of the chamber, the two
+%   numbers behind the flags M, L and W (counts, see mda_report; 2026-11-12), rules = version of the flag rules,
+%   mda_report('rules')) of all analysed recordings (also of earlier passes); read by the
+%   results browser of the GUI (MyoDishAnalysisWatch('flags', resultsFolder)), the experiment reports and the overview
+%   images. Flags written with older rules are not used: they are computed again from the result files, without a new
+%   analysis (experiment reports; MyoDishAnalysisWatch('flags', resultsFolder, true); 2026-11-12).
 % resultsFolder/mda_index.csv
 %   one row per recording: file (path relative to rawFolder), bytes, modified (time of the .mdd file, UTC), logBytes, status (ok / error /
 %   running / incomplete / parallel / noLog), version, implementation (MATLAB / Python), code (fingerprint of the core functions), options,
@@ -138,21 +142,23 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   report of a pass with analysed recordings: per channel contractions, capture (% of the stimuli followed by a
 %   contraction), extra beats (% of the detected contractions), mean amplitude in the first and last range (>= 10
 %   included contractions) and flags (no contractions, capture < flagCapture % (not with arrhythmic pacing, summary
-%   column arrhythmicPacing: 'arrhythmic pacing'), extra beats > flagExtraBeats %, amplitude change >
-%   flagAmplitudeChange %).
+%   column arrhythmicPacing: 'arrhythmic pacing'), extra beats > flagExtraBeats %) and the change of the amplitude
+%   (a value, no flag).
 %   It lists the PDF reports of the experiments with analysed recordings.
 % resultsFolder/<experiment>/<experiment>_report.pdf ('report', true; 2026-10-11; one report per experiment instead of
 %   one per pass since 2026-10-15; mda_report_root.pdf for recordings directly in rawFolder)
 %   analysis report of all analysed recordings of the experiment (mda_report), made again after every pass with
 %   analysed recordings of the experiment: first page the overview image of the experiment, then the recordings x
 %   channels with flags (recordings of the last pass bold, earlier ones with the flags of mda_flags.csv: flags of
-%   earlier days stay visible), the list of the channels to check and those with slice-quality flags, and pages with
-%   traces of the red channels of the last pass. Flags: the channels whose
+%   earlier days stay visible), the list of the channels to check, of those with sensor / chamber flags and of those
+%   with slice-quality flags, and pages with traces of the red channels of the last pass. Flags: the channels whose
 %   analysis should be checked (red: inverted signal; noise suspected = uncertain >= flagUncertain % and extra +
 %   missed beats >= flagIrregular %; large extra beats; delay pulse -> onset > flagDelay s; stimulus frequency >
-%   flagStimFrequency Hz) and those with slice-quality flags (yellow: capture < flagCapture %, extra beats >
-%   flagExtraBeats %, amplitude < flagAmplitude uN, amplitude change > flagAmplitudeChange %, amplitude CV >
-%   flagAmplitudeCV %; arrhythmic pacing: no capture and amplitude CV flags); channels with fewer than
+%   flagStimFrequency Hz), those where the sensor or the chamber limits the recording (orange: sensor value near or
+%   at its limit, zero position of the chamber out of range; fixed limits per sensor board, see mda_report) and those
+%   with slice-quality flags (yellow: capture < flagCapture %, extra beats > flagExtraBeats %, amplitude <
+%   flagAmplitude uN, amplitude CV > flagAmplitudeCV %; arrhythmic pacing: no capture and amplitude CV flags;
+%   'flagAmplitudeChange' was removed 2026-11-12 and is ignored); channels with fewer than
 %   flagMinBeats detected contractions are not flagged. The commands that open the red channels in the GUI
 %   (MyoDishAnalysisGUI(<name>.xlsx, 'channel', c, 'window', [a b]); without 'quiet' also as links in the command
 %   window).
@@ -222,7 +228,7 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %   'gaps', tf               gaps and channels tables, summary columns noSignal_s, nChamberOut (default true)
 %   'register', tf           slice register (default true)
 %   'newSliceHours', h       slice register: new slice after >= h without signal (default 2)
-%   'flagCapture', 'flagExtraBeats', 'flagAmplitudeChange'   report flags (default 90, 10, 30 %)
+%   'flagCapture', 'flagExtraBeats'   report flags (default 90, 10 %)
 %   'report', tf             PDF report per experiment and mda_flags.csv (default true)
 %   'flagUncertain', 'flagIrregular', 'flagAmplitude', 'flagAmplitudeCV', 'flagDelay', 'flagMinBeats',
 %   'flagStimFrequency'      flags of the PDF report (default 25 %, 15 %, 75 uN, 30 %, 0.15 s, 50 contractions,
@@ -312,7 +318,7 @@ W = struct('interval', 0, 'schedule', '', 'reanalyze', 'new', 'retryErrors', fal
     'thinFactor', 10, 'thinMode', 'nth', 'compress', false, 'overviewSeconds', 60, 'events', true, 'gaps', true, ...
     'register', true, 'newSliceHours', 2, 'resultFormat', 'xlsx', 'folders', 'series', 'trends', true, ...
     'trendParameters', {{'amplitude', 'diastolicForce', 'TTP90', 'TTR90'}}, ...
-    'flagCapture', 90, 'flagExtraBeats', 10, 'flagAmplitudeChange', 30, 'report', true, 'flagUncertain', 25, ...
+    'flagCapture', 90, 'flagExtraBeats', 10, 'report', true, 'flagUncertain', 25, ...
     'flagIrregular', 15, 'flagAmplitude', 75, 'flagAmplitudeCV', 30, 'flagDelay', 0.15, 'flagMinBeats', 50, ...
     'flagStimFrequency', 10, 'quiet', false);
 wNames = fieldnames(W);
@@ -322,6 +328,7 @@ for i = 1:2:numel(varargin)
     k = find(strcmpi(wNames, char(varargin{i})), 1);
     if ~isempty(k)
         W.(wNames{k}) = varargin{i+1};
+    elseif strcmpi(char(varargin{i}), 'flagAmplitudeChange')   %removed 2026-11-12 (no flag any more): ignored
     elseif ismember(lower(char(varargin{i})), {'output', 'labels', 'metadata', 'protocol', 'groupby'})
         error('MyoDishAnalysisWatch: ''%s'' is set by the watcher (labels per channel: <name>_labels.csv).', varargin{i});
     else
@@ -548,7 +555,7 @@ if size(todo, 1) > 0 || ~isempty(par)                 %index in the order of the
     writeIndex(res, X);
 end
 fl = struct('uncertain', W.flagUncertain, 'irregular', W.flagIrregular, 'extra', W.flagExtraBeats, 'capture', ...
-    W.flagCapture, 'amplitudeChange', W.flagAmplitudeChange, 'amplitude', W.flagAmplitude, 'amplitudeCV', ...
+    W.flagCapture, 'amplitude', W.flagAmplitude, 'amplitudeCV', ...
     W.flagAmplitudeCV, 'delay', W.flagDelay, 'minBeats', W.flagMinBeats, 'stimFrequency', W.flagStimFrequency);
 recs = []; flagMsg = '';
 if ~isempty(done) && W.report                        %flags of the analysis report -> mda_flags.csv (2026-10-14), before
@@ -637,7 +644,6 @@ function recs = reportRecords(raw, res, rows, fl)
 % the channels to check), contractions C only for recordings with channels to check (detail pages; memory of passes
 % with thousands of recordings), pulses read later (P_file)
 ccols = {'channel', 't_peak', 'beatType', 'uncertain', 'included', 'amplitude', 'stimToOnset', 'diastolicSignal'};
-pcols = {'channel', 'beatType', 'uncertain', 'amplitude', 'diastolicSignal'};   %red flag L (2026-11-11)
 recs = repmat(reportRecord(), 0, 1);
 for i = 1:numel(rows)
     row = rows{i};
@@ -654,13 +660,12 @@ for i = 1:numel(rows)
     end
     rec.S = resultTable(d, n, 'summary', {});
     C = readResult(fullfile(d, [n '_contractions.csv']), ccols);
-    Pc = readResult(fullfile(d, [n '_protocols_contractions.csv']), pcols);   %red flag L (2026-11-11)
     rec.status = resultTable(d, n, 'channels', {'channel', 'status'});
     if isfile(fullfile(d, [n '.xlsx'])), rec.open = fullfile(d, [n '.xlsx']); end   %results as .xlsx (2026-10-14)
     m = strtrim(strsplit(row.message, ' | '));
     rec.notes = m(startsWith(m, 'protocols:'));
     E = resultTable(d, n, 'events', {'code', 'text', 't_file', 'channel'});   %red flag R: controller restart suspected (2026-10-21)
-    R = mda_report('flags', rec.S, C, rec.status, fl, E, Pc);
+    R = mda_report('flags', rec.S, C, rec.status, fl, E);
     R.window_from = nan(height(R), 1); R.window_to = nan(height(R), 1);
     for j = find(strcmp(R.level, 'check'))'
         [R.window_from(j), R.window_to(j)] = mda_report('window', C, R.channel(j), R.flags{j}, 20);
@@ -714,6 +719,7 @@ X = readIndex(res);
 X = X(ismember(X.status, {'ok', 'error'}) & strcmp(cellfun(@folderOf, strrep(X.file, '\', '/'), ...
     'UniformOutput', false), e), :);
 F = readFlags(res);
+cur = F.rules == mda_report('rules');                %flags of older rules: computed again (2026-11-12)
 newNames = {recsNew.name};
 recs = repmat(reportRecord(), 0, 1);
 add = emptyFlags();
@@ -732,8 +738,8 @@ for i = 1:height(X)
     [~, n] = fileparts(rel);
     rec.open = fullfile(d, [n '_info.csv']);
     if isfile(fullfile(d, [n '.xlsx'])), rec.open = fullfile(d, [n '.xlsx']); end
-    Fr = F(strcmp(F.file, X.file{i}) & strcmp(F.analyzed, X.analyzed{i}), :);
-    if height(Fr) == 0                                 %flags missing (older watcher versions): from the result files
+    Fr = F(cur & strcmp(F.file, X.file{i}) & strcmp(F.analyzed, X.analyzed{i}), :);
+    if height(Fr) == 0                                 %flags missing or of older rules: from the result files
         try
             Fr = flagsOf(res, X.file{i}, X.analyzed{i});
             add = [add; Fr]; %#ok<AGROW>
@@ -741,8 +747,8 @@ for i = 1:height(X)
         end
     end
     rec.R = table(Fr.channel, Fr.label, Fr.status, Fr.nDetected, Fr.capture_percent, Fr.flags, Fr.level, Fr.red, ...
-        Fr.yellow, Fr.from, Fr.to, 'VariableNames', {'channel', 'label', 'status', 'nDetected', 'capture_percent', ...
-        'flags', 'level', 'red', 'yellow', 'window_from', 'window_to'});
+        Fr.sensor, Fr.yellow, Fr.from, Fr.to, 'VariableNames', {'channel', 'label', 'status', 'nDetected', ...
+        'capture_percent', 'flags', 'level', 'red', 'sensor', 'yellow', 'window_from', 'window_to'});
     m = strtrim(strsplit(X.message{i}, ' | '));
     rec.notes = m(startsWith(m, 'protocols:'));
     recs(end+1) = rec; %#ok<AGROW>
@@ -2064,7 +2070,6 @@ for ch = unique(S.channel)'
         flags{end+1} = sprintf('capture < %g %%', W.flagCapture); %#ok<AGROW>
     end
     if extra > W.flagExtraBeats, flags{end+1} = sprintf('extra beats > %g %%', W.flagExtraBeats); end %#ok<AGROW>
-    if abs(chg) > W.flagAmplitudeChange, flags{end+1} = sprintf('amplitude change > %g %%', W.flagAmplitudeChange); end %#ok<AGROW>
     lines{end+1} = sprintf('  %7d  %12d  %8s  %6s  %15s / %-15s  %7s  %s', ch, nInc, f1(cap), f1(extra), f1(a1), ...
         f1(a2), f1(chg), strjoin(flags, ', ')); %#ok<AGROW>
 end
@@ -2097,23 +2102,25 @@ end
 % ===================================================================================================== flags table
 function c = flagColumns()
 c = {'file', 'analyzed', 'channel', 'label', 'status', 'nDetected', 'capture_percent', 'flags', 'level', 'red', ...
-    'yellow', 'from', 'to'};
+    'sensor', 'yellow', 'from', 'to', 'peakSignal_AU', 'offset_AU', 'rules'};
 end
 
 function T = emptyFlags()
 T = table(cell(0,1), cell(0,1), zeros(0,1), cell(0,1), cell(0,1), zeros(0,1), zeros(0,1), cell(0,1), cell(0,1), ...
-    cell(0,1), cell(0,1), zeros(0,1), zeros(0,1), 'VariableNames', flagColumns());
+    cell(0,1), cell(0,1), cell(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), 'VariableNames', ...
+    flagColumns());
 end
 
 function T = readFlags(res)
-% resultsFolder/mda_flags.csv (flags of the analysis report per recording and channel; 2026-10-14)
+% resultsFolder/mda_flags.csv (flags of the analysis report per recording and channel; 2026-10-14). Columns that an
+% older file does not have: '' or NaN (rules = NaN: written before the flag rules had a version)
 T = emptyFlags();
 f = fullfile(res, 'mda_flags.csv');
 if ~isfile(f), return; end
 if numel(regexp(fileread(f), '\n', 'match')) < 2, return; end   %header only
 o = detectImportOptions(f, 'FileType', 'text', 'Delimiter', ',');
 cols = flagColumns();
-txt = {'file', 'analyzed', 'label', 'status', 'flags', 'level', 'red', 'yellow'};
+txt = {'file', 'analyzed', 'label', 'status', 'flags', 'level', 'red', 'sensor', 'yellow'};
 present = intersect(o.VariableNames, cols, 'stable');
 o.SelectedVariableNames = present;
 o = setvartype(o, intersect(present, txt), 'char');
@@ -2136,7 +2143,8 @@ movefile(tmp, f, 'f');
 end
 
 function T = flagRows(R, files, analyzed)
-% rows of mda_flags.csv from the flags of mda_report (column recording = file); files / analyzed: cellstr
+% rows of mda_flags.csv from the flags of mda_report (column recording = file); files / analyzed: cellstr; rules:
+% the version of the flag rules they were computed with (this one)
 T = emptyFlags();
 if isempty(R) || height(R) == 0, return; end
 n = height(R);
@@ -2147,8 +2155,12 @@ for i = 1:n
 end
 wf = nan(n, 1); wt = nan(n, 1);
 if ismember('window_from', R.Properties.VariableNames), wf = R.window_from; wt = R.window_to; end
+pk = nan(n, 1); of = nan(n, 1);                      %sensor value at the peak, zero position (counts; 2026-11-12)
+if ismember('peakSignal_AU', R.Properties.VariableNames), pk = round(double(R.peakSignal_AU)); end
+if ismember('offset_AU', R.Properties.VariableNames), of = round(double(R.offset_AU)); end
 T = table(R.recording, ana, double(R.channel), R.label, R.status, double(R.nDetected), ...
-    round(double(R.capture_percent) * 10) / 10, R.flags, R.level, R.red, R.yellow, wf, wt, 'VariableNames', flagColumns());
+    round(double(R.capture_percent) * 10) / 10, R.flags, R.level, R.red, R.sensor, R.yellow, wf, wt, ...
+    pk, of, repmat(mda_report('rules'), n, 1), 'VariableNames', flagColumns());
 end
 
 function updateFlags(res, R, done)
@@ -2173,11 +2185,9 @@ S = resultTable(d, n, 'summary', {});
 if isempty(S), return; end
 C = readResult(fullfile(d, [n '_contractions.csv']), {'channel', 't_peak', 'beatType', 'uncertain', 'included', ...
     'amplitude', 'stimToOnset', 'diastolicSignal'});
-Pc = readResult(fullfile(d, [n '_protocols_contractions.csv']), {'channel', 'beatType', 'uncertain', 'amplitude', ...
-    'diastolicSignal'});                                                      %red flag L (2026-11-11)
 st = resultTable(d, n, 'channels', {'channel', 'status'});
 E = resultTable(d, n, 'events', {'code', 'text', 't_file', 'channel'});
-R = mda_report('flags', S, C, st, mda_report('defaults'), E, Pc);
+R = mda_report('flags', S, C, st, mda_report('defaults'), E);
 R = addvars(R, repmat({rel}, height(R), 1), 'Before', 1, 'NewVariableNames', 'recording');
 R.window_from = nan(height(R), 1); R.window_to = nan(height(R), 1);
 for j = find(strcmp(R.level, 'check'))'
@@ -2188,11 +2198,13 @@ end
 
 function [T, missing] = flagsTable(res, compute, progressFcn)
 % flags of the analysis report per recording and channel for the results browser of the GUI (2026-10-14):
-% mda_flags.csv (written by the watcher); recordings with the status ok whose flags are missing or older than their
-% analysis (index column analyzed) are computed from their result files if compute is true (and written to
-% mda_flags.csv unless a watcher is running). missing: files still without current flags.
+% mda_flags.csv (written by the watcher); recordings with the status ok whose flags are missing, older than their
+% analysis (index column analyzed) or made with older flag rules (column rules, 2026-11-12) are computed from their
+% result files if compute is true (and written to mda_flags.csv unless a watcher is running). missing: files still
+% without current flags.
 X = readIndex(res);
 T = readFlags(res);
+T = T(T.rules == mda_report('rules'), :);
 ok = X(strcmp(X.status, 'ok'), :);
 key = strcat(T.file, '|', T.analyzed);
 isMissing = ~ismember(strcat(ok.file, '|', ok.analyzed), key);

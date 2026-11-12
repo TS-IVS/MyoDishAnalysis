@@ -24,6 +24,7 @@ from ..analyze_ap import AP_PARAMETERS
 from ..analysis import datenum_to_timestamps
 from ..labels import labels as make_labels
 from ..parameters import PARAMETERS
+from ..report import short_legend
 from ..zero_force import zero_force
 from .timeaxis import fmt_clock
 from .widgets import BLUE, UI_BLUE_DARK, ElidedLabel, TwinPlot, pref_set, primary, runs, time_plot
@@ -581,11 +582,12 @@ def results_rows(X, T):
             ptxt[i] = "parallel recording of " + os.path.basename(r.group(1))
     T = T[T["file"].isin(pos)].reset_index(drop=True)
     rows = []
-    for f, c, lab, fl, cap, nd, st, red, yel, lev, a, b in zip(
+    sensor = T["sensor"] if "sensor" in T.columns else [""] * len(T)   # red, sensor / chamber, slice quality
+    for f, c, lab, fl, cap, nd, st, red, sen, yel, lev, a, b in zip(
             T["file"], T["channel"], T["label"], T["flags"], T["capture_percent"], T["nDetected"], T["status"],
-            T["red"], T["yellow"], T["level"], T["from"], T["to"]):
+            T["red"], sensor, T["yellow"], T["level"], T["from"], T["to"]):
         i = pos[f]
-        note = "; ".join(x for x in (ptxt[i], str(red), str(yel)) if x)
+        note = "; ".join(x for x in (ptxt[i], str(red), str(sen), str(yel)) if x)
         if str(lev) == "few beats" and not note:
             note = "too few contractions for the flags"
         rows.append((f, float(c), str(lab), str(fl), float(cap), float(nd), str(st), note, str(lev), X["status"].iat[i],
@@ -656,12 +658,12 @@ class ResultsBrowser(QtWidgets.QWidget):
     that was not analysed: its main file at its window. As the results browser of MyoDishAnalysisGUI.m."""
 
     COLS = ["recording", "ch", "label", "flags", "capture %", "contractions", "status", "note"]
-    VIEWS = ["all recordings", "with flags", "red flags (check the analysis)", "not analysed"]
+    VIEWS = ["all recordings", "with flags", "red flags (check the analysis)", "orange flags (sensor / chamber)",
+             "not analysed"]
     HINT = ("Double-click a row (or Open): the channel with the settings of its analysis (red flags: the window of the "
             "flags, otherwise the first 120 s of its analysis); a parallel recording that was not analysed: its main "
-            "file at that time. Flags (as in the watcher report): red = check the analysis (I inverted signal, N "
-            "noise, S large extra beats, D delay, F stimulus frequency), yellow = slice quality (C capture, X extra "
-            "beats, A amplitude, T amplitude change, V amplitude CV); ? = not computed yet.")
+            "file at that time. Flags (as in the watcher report): " + "; ".join(short_legend())
+            + "; ? = not computed yet.")
 
     def __init__(self, win):
         super().__init__()
@@ -701,8 +703,9 @@ class ResultsBrowser(QtWidgets.QWidget):
         g.addWidget(self.lc, 1, 3)
         self.bc = QtWidgets.QPushButton("Compute flags")
         self.bc.setEnabled(False)
-        self.bc.setToolTip("recordings analysed without flags (older watcher versions): flags computed from their "
-                           "result files and saved in mda_flags.csv")
+        self.bc.setToolTip("recordings without current flags (analysed by an older version, or flags made with older "
+                           "rules): computed from their result files, without a new analysis, and saved in "
+                           "mda_flags.csv")
         self.bc.clicked.connect(self.compute)
         g.addWidget(self.bc, 1, 4)
         bo = primary(QtWidgets.QPushButton("Open"))
@@ -799,7 +802,7 @@ class ResultsBrowser(QtWidgets.QWidget):
         self.load()
 
     def filter(self):
-        """rows shown: list (all / with flags / red flags / not analysed) and search text (all words,
+        """rows shown: list (all / with flags / red flags / orange flags / not analysed) and search text (all words,
         case-insensitive)"""
         D = self.D
         if D is None or not len(D):
@@ -809,10 +812,12 @@ class ResultsBrowser(QtWidgets.QWidget):
             return
         k = self.dd.currentIndex()
         if k == 1:
-            m = D["level"].isin(["check", "quality"]).to_numpy()
+            m = D["level"].isin(["check", "sensor", "quality"]).to_numpy()
         elif k == 2:
             m = (D["level"] == "check").to_numpy()
         elif k == 3:
+            m = (D["level"] == "sensor").to_numpy() | D["flags"].astype(str).str.contains("[MLW]").to_numpy()
+        elif k == 4:
             m = (D["indexStatus"] != "ok").to_numpy()
         else:
             m = np.ones(len(D), bool)
@@ -825,8 +830,9 @@ class ResultsBrowser(QtWidgets.QWidget):
             return ["" if not math.isfinite(v) else format(v, fmt) for v in x]
         rows = list(zip(V["file"], num(V["channel"], ".0f"), V["label"], V["flags"], num(V["capture"], ".0f"),
                         num(V["nDetected"], ".0f"), V["status"], V["note"]))
-        red, yel, grey = QtGui.QColor("#f8c9c4"), QtGui.QColor("#fbe8a6"), QtGui.QColor("#737373")
-        bg = [red if lv == "check" else (yel if lv == "quality" else None) for lv in V["level"]]
+        grey = QtGui.QColor("#737373")
+        cell = {"check": QtGui.QColor("#f8c9c4"), "sensor": QtGui.QColor("#f9cf9e"), "quality": QtGui.QColor("#fbe8a6")}
+        bg = [cell.get(lv) for lv in V["level"]]
         fg = [None if st == "ok" else grey for st in V["indexStatus"]]
         self.model.set_rows(rows, bg, fg)
         self.lc.setText(f"{len(V)} row(s), {V['file'].nunique()} recording(s)")
@@ -1375,15 +1381,15 @@ def help_text():
         "Open ...: a recording (.mdd) or results of an analysis (.xlsx, <name>_info.csv, ...; see below). The folder "
         "is remembered. A recording opens with its first 120 s loaded and analysed (From / To).",
         "Results ...: results browser of a results folder of the watcher (mda_index.csv): one row per recording and "
-        "channel with the flags of the watcher report (red = check the analysis, yellow = slice quality; list: all / "
-        "with flags / red flags / not analysed; search). Double-click a row (or Open): the channel with the settings "
-        "of its analysis (red flags: the window of the flags, otherwise the first 120 s). Compute flags: for results "
-        "of older watcher versions. The last folder opens again directly (Folder ... = another one).",
+        "channel with the flags of the watcher report (red = check the analysis, orange = sensor / chamber, yellow = "
+        "slice quality; list: all / with flags / red flags / orange flags / not analysed; search). Double-click a row "
+        "(or Open): the channel with the settings of its analysis (red flags: the window of the flags, otherwise the "
+        "first 120 s). Compute flags: for results whose flags are missing or were made with older flag rules. The last "
+        "folder opens again directly (Folder ... = another one).",
         "Main file (button next to the file name): the open file is a parallel recording (e.g. schedule file or "
         "snapshot started from the main recording); opens the main file at the window shown, same channel.",
-        "Flags (grey line above the table): flags of the watcher report for the analysed range of the channel (red = "
-        "check the analysis: I inverted signal, N noise, S large extra beats, D delay, F stimulus frequency; orange = "
-        "slice quality: C capture, X extra beats, A amplitude, T amplitude change, V amplitude CV).", "",
+        "Flags (grey line above the table): flags of the watcher report for the analysed range of the channel: "
+        + "; ".join(short_legend()) + ".", "",
         "Comments ...: searchable list of the comments in the log file (# = number in the force plot, date / time, "
         "time in the file, text; option: all log entries). Select a row: the comment is highlighted in the force plot; "
         "double-click (or Go to): loads the data around it. Force plot: comments as numbered purple marks at the top "

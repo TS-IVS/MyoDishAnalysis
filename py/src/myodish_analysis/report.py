@@ -5,7 +5,10 @@
 """Analysis report (PDF): which analyses should be checked, with traces and the commands to open them in the GUI.
 Port of mda_report.m (same flags and pages).
 
-    R = report_flags(S, C, status=None, **flags)         flags per channel (DataFrame)
+    R = report_flags(S, C, status=None, events=None, **flags)   flags per channel (DataFrame)
+    FLAG_RULES                                            version of the flag rules (column rules of mda_flags.csv;
+                                                          flags of an older version are computed again; 2026-11-12)
+    short_legend()                                        the flags in three lines (red, orange, yellow), for the GUI
     R = write_report(recordings, 'report.pdf', title=..., subtitle=[...], notice=[...], image=png, **flags)
     f = trend_image('trend.png', D)                       trend image of one channel (watcher, slice register;
                                                           2026-10-14): one panel per parameter, see trend_image
@@ -45,19 +48,8 @@ Flags per channel (channels with a slice and at least min_beats (50) detected co
     F  stimulus frequency > stim_frequency (10 Hz) in a range (median stimulus interval; 2026-10-13): pulse pairs or
        groups (e.g. CCM pulses without the extra-pulse bit), bursts, pulses over consecutive samples or a misread
        status channel; the contractions are analysed as usual (check the stimulation)
-    L  peak force at the measurement limit (2026-11-11, needs the protocol contractions, argument protocols): the
-       highest peak signal (diastolicSignal + amplitude) of the stimulation protocols lies less than peak_headroom
-       (15) % of the amplitude above the median peak signal of the steady contractions (column peakHeadroom). The
-       protocols contain contractions that must be stronger than the steady ones (low frequencies, the beat after a
-       rest); a channel whose signal cannot rise above its own steady peak has reached the end of its measurement
-       range. Its amplitude is then only a lower bound, and because the peak is fixed, every rise of the diastolic
-       force lowers the amplitude one to one (apparent loss of force, apparent negative force-frequency relation).
-       Remedy: the extended sensor mode of the control software (old sensor boards) or a controller mode with a wider
-       range. Needs at least min_protocol_beats (100) protocol contractions of the channel, min_beats steady
-       contractions and a steady amplitude >= min_peak_amplitude (500 uN). No flag (peakHeadroom = NaN) if the
-       protocol contractions stay more than 5 % of the amplitude below the steady peak: the channel was not in the
-       same state during the protocols, so the comparison says nothing.
-  slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
+  sensor / chamber (orange, as in the control software: the hardware limits what the recording can say, the
+  contractions are analysed as usual; own group 2026-11-12):
     M  the sensor value of the contractions has passed the first limit of its characteristic (2026-11-11, Tom's
        rule): the amplitude of these contractions is too small, and the more so the further it goes. Column
        peakSignal_AU: median over the included stimulated contractions of (amplitude + diastolicSignal), i.e. of the
@@ -71,12 +63,16 @@ Flags per channel (channels with a slice and at least min_beats (50) detected co
        (10900, 14300) = where the curve has only 60 % and 20 % of the slope it has near the rest position (medians of
        the six sensors 11600 and 14200, turning point 15200); signal_mode2000 (18000, 20000) = 13 % and 3 % below the
        earliest jump of the conversion (20698), because that curve stays straight to the jump. The second value is
-       the red flag L.
+       the flag L.
        Only for old sensor boards (FXOS8700): the curve of the MMC5983 boards stays straight over the whole travel a
        slice produces, and what limits them is the fold of the conversion, not the curve. The board follows from the
        share of repeated raw values of the channel (summary column repeatedSamples_percent), the mode from the log
        line 'extended sensor mode on'; without the board, peakSignal_AU is still reported but nothing is flagged.
-       The second level is orange in the control software, red here.
+    L  peak force at the measurement limit: the sensor value has passed the second limit of M. The peak then sits
+       where the sensor hardly follows the force any more (mode 0), or close to the jump of the conversion (extended
+       mode of the old boards); the amplitude is only a lower bound. Shown instead of M. Fixed limits only: nothing
+       is concluded from the shape of the contractions or from the protocols (Tom, 2026-11-12; the rule that
+       compared the peaks of the protocols with the steady peak was removed).
     W  zero position of the chamber outside the range of a chamber in good order (Tom, 2026-11-11): offset_old
        (-18000, -3000) for old boards, offset_new (-21000, -5000) for MMC5983 boards. Column offset_AU: the
        channel's last 'Offset' entry of the log in normalized counts (raw x factor of the output mode), which is how
@@ -85,24 +81,30 @@ Flags per channel (channels with a slice and at least min_beats (50) detected co
        10d the line held the raw value of its mode, so there the factor is applied first). This is about the
        hardware, not the tissue: the spring wire is worn or out of place, which costs that much of the travel to the
        limits above, and the text says how much is left, in the counts of the output mode. No flag if the board type
-       is unknown.
+       is unknown, and none if the Offset is 0: that means it was not determined (common), offset_AU is NaN, and all
+       that is missing is the absolute diastolic force - amplitudes and changes of the diastolic force do not need it
+       (Tom, 2026-11-12).
+  slice quality (yellow: possibly poor biological quality, e.g. also an effect of a treatment; the user decides):
     C  capture < capture (90) % of the stimuli
     X  extra beats > extra (10) % of the detected contractions (spontaneous activity; not shown with N)
     A  median amplitude of the included contractions < amplitude (75 uN)
-    T  amplitude change > amplitude_change (30) % from the first to the last range with >= 10 included contractions
-       (shown with the time between the start of the first and the end of the last of these ranges, e.g. 'amplitude
-       change +660 % over 24 h')
     V  median amplitude CV of the ranges > amplitude_cv (30) %
+  Not a flag: the change of the amplitude from the first to the last range with >= 10 included contractions (columns
+  amplitudeChange_percent, amplitudeChange_hours). That the amplitude changes is what an experiment is about (flag T
+  removed 2026-11-12).
+  Level of a channel: 'check' (red) before 'sensor' (orange) before 'quality' (yellow); the texts in the columns red,
+  sensor and yellow.
 Arrhythmic pacing (summary column arrhythmicPacing: option arrhythmicChannels or detected, see options; 2026-10-13):
 capture and amplitude CV are not flagged (C, V) and the missed beats do not count in the noise index (N: extra beats
 only); missed beats, uncertain contractions and a variable amplitude are expected. The capture is still shown
 (overview: '~' after it).
 Channel label (lists and trace pages, e.g. 'ch 7 (PMA)'): the values of the label treatment (with concentration and
 unit), otherwise sliceGroup, otherwise sampleGroup of the summary, if given.
-Pages: overview (recordings x channels: capture % and codes), list of the channels to check (red) and of those with
-slice-quality flags (yellow), one page per recording with red flags (at most max_pages (8), the recordings with
-the most red flags and the highest noise index first; up to 4 channels with a window of window_s (20 s) at the most
-uncertain / extra beats (N) or large extra beats (S)) with the commands to open them:
+Pages: overview (recordings x channels: capture % and codes), list of the channels to check (red), of those with
+sensor / chamber flags (orange) and of those with slice-quality flags (yellow), one page per recording with red
+flags (at most max_pages (8), the recordings with the most red flags and the highest noise index first; up to 4
+channels with a window of window_s (20 s) at the most uncertain / extra beats (N) or large extra beats (S)) with the
+commands to open them:
     MATLAB  MyoDishAnalysisGUI(file, 'channel', c, 'window', [from to])
     Python  mda-gui file --channel c --window from to
 
@@ -122,20 +124,33 @@ import pandas as pd
 from .calibration_factor import offset_normalized
 
 FLAG_DEFAULTS = dict(uncertain=25.0, irregular=15.0, artifact_share=5.0, artifact_ratio=3.0, extra=10.0, capture=90.0,
-                     amplitude_change=30.0, amplitude=75.0, amplitude_cv=30.0, delay=0.15, min_beats=50,
-                     stim_frequency=10.0, peak_headroom=0.15, min_protocol_beats=100, min_peak_amplitude=500.0,
+                     amplitude=75.0, amplitude_cv=30.0, delay=0.15, min_beats=50, stim_frequency=10.0,
                      signal_mode0=(10900.0, 14300.0), signal_mode2000=(18000.0, 20000.0),
                      extended_sensor_factor=3.3, offset_old=(-18000.0, -3000.0), offset_new=(-21000.0, -5000.0))
+# version of the flag rules: raised whenever a rule changes what a channel is flagged with, so that flags stored in
+# mda_flags.csv are computed again (watch.flags_table, column rules). 2: 2026-11-12 (group sensor / chamber with M, L,
+# W; protocol rule of L and flag T removed; no W without an Offset). 1: everything before (no column).
+FLAG_RULES = 2
 RED_CODES = (("inverted", "I"), ("noise", "N"), ("large", "S"), ("delay", "D"), ("frequency", "F"),
-             ("restart", "R"), ("limit", "L"))
-YELLOW_CODES = (("signal", "M"), ("offset", "W"), ("capture", "C"), ("extra", "X"), ("amplitude", "A"), ("change", "T"),
-                ("cv", "V"))
+             ("restart", "R"))
+SENSOR_CODES = (("limit", "L"), ("signal", "M"), ("offset", "W"))
+YELLOW_CODES = (("capture", "C"), ("extra", "X"), ("amplitude", "A"), ("cv", "V"))
 RED_LETTERS = "".join(c for _, c in RED_CODES)
-_CELL_RED, _CELL_YELLOW, _CELL_GREY = "#f8c9c4", "#fbe8a6", "#eeeeee"
+_CELL_RED, _CELL_ORANGE, _CELL_YELLOW, _CELL_GREY = "#f8c9c4", "#f9cf9e", "#fbe8a6", "#eeeeee"
 _GREEN, _ORANGE, _BLUE, _RED, _GREY = "#2e7d32", "#e65100", "#1565c0", "#c62828", "#555555"
 _A4 = (8.27, 11.69)
 _ROWS_PER_PAGE = 48
 _LINES_PER_PAGE = 78
+
+
+def short_legend():
+    """the three groups of flags with their letters, one line each (GUI: flag line, results browser, help), so that
+    every place that explains the letters says the same (2026-11-12)"""
+    return ["red = check the analysis: I inverted signal, N noise, S large extra beats, D delay, F stimulus frequency, "
+            "R controller restart, firmware update or recording stopped",
+            "orange = sensor / chamber: M sensor near its limit, L sensor at its limit, W zero position of the chamber "
+            "out of range",
+            "yellow = slice quality: C capture, X extra beats, A amplitude, V amplitude CV"]
 
 
 def _flags(kw):
@@ -192,19 +207,6 @@ def channel_label(s):
             vals = _texts(s[col])
     txt = " / ".join(vals[:3]) + (" / …" if len(vals) > 3 else "")
     return txt if len(txt) <= 40 else txt[:39] + "…"
-
-
-def duration_text(hours):
-    """'45 min', '5.5 h', '24 h', '3.5 d'"""
-    if hours is None or not hours == hours:
-        return ""
-    if hours < 1.5:
-        return "%.0f min" % (60 * hours)
-    if hours < 10:
-        return "%.1f h" % hours
-    if hours < 72:
-        return "%.0f h" % hours
-    return "%.1f d" % (hours / 24)
 
 
 def _label(r):
@@ -309,8 +311,12 @@ def offset_normalized_au(events, channel, ext, fl):
     """Zero position of the channel in normalized counts (raw x factor of the output mode), from the last 'Offset'
     entry of the log (2026-11-11). From lab version 10e on the line is already normalized; up to 10d it was the raw
     value of the mode that was active then, so in a recording with the extended sensor mode on the factor belongs to
-    it (offset_normalized). Without a version MDA reads the file as it always did."""
+    it (offset_normalized). Without a version MDA reads the file as it always did. NaN if there is no entry or if it
+    is 0, which is what the control software writes as long as the offset has not been determined (Tom,
+    2026-11-12)."""
     off = _offset_of(events, channel)
+    if off == 0:
+        return math.nan
     if math.isnan(off) or offset_normalized(_version_of(events)):
         return off
     f = float((fl or FLAG_DEFAULTS).get("extended_sensor_factor", 3.3))
@@ -421,40 +427,10 @@ def _offset_of(events, channel):
     return float(v[-1]) if v.size else math.nan
 
 
-def peak_headroom(cc, protocols, channel, fl):
-    """Peak force at the measurement limit (red flag L, 2026-11-11): how far the highest peak signal
-    (diastolicSignal + amplitude) of the stimulation protocols lies above the median peak signal of the steady
-    contractions of the same channel, in units of their median amplitude. See the module help for the criterion."""
-    need = {"channel", "amplitude", "diastolicSignal", "beatType"}
-    if cc is None or not len(cc) or protocols is None or not len(protocols):
-        return math.nan
-    if not need <= set(cc.columns) or not need <= set(protocols.columns):
-        return math.nan
-    st = cc[cc["beatType"].astype(str) == "stimulated"]
-    if "included" in st.columns:
-        st = st[st["included"].astype(bool)]
-    pp = protocols[(protocols["channel"] == channel) & (protocols["beatType"].astype(str) == "stimulated")]
-    if "uncertain" in pp.columns:
-        pp = pp[~pp["uncertain"].astype(bool)]
-    if len(st) < fl["min_beats"] or len(pp) < fl["min_protocol_beats"]:
-        return math.nan
-    a = st["amplitude"].to_numpy(float)
-    p = st["diastolicSignal"].to_numpy(float) + a
-    ok = ~np.isnan(a) & ~np.isnan(p)
-    a, p = a[ok], p[ok]
-    q = pp["diastolicSignal"].to_numpy(float) + pp["amplitude"].to_numpy(float)
-    q = q[~np.isnan(q)]
-    if not a.size or not q.size or float(np.median(a)) < fl["min_peak_amplitude"]:
-        return math.nan
-    h = float((q.max() - np.median(p)) / np.median(a))
-    return math.nan if h < -0.05 else h   # the protocols stayed below the steady peak: not the same state
-
-
-def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
-    """one row per channel: counts, values and flags (columns flags = codes, red / yellow = descriptions). events
-    (2026-10-21): events table of the recording (log_entries / <name>_events.csv) for the red flag R (controller
-    restart suspected). protocols (2026-11-11): contractions of the stimulation protocols
-    (<name>_protocols_contractions.csv) for the red flag L (peak force at the measurement limit)."""
+def report_flags(S, C=None, status=None, events=None, **flags):
+    """one row per channel: counts, values and flags (columns flags = codes, red / sensor / yellow = descriptions).
+    events (2026-10-21): events table of the recording (log_entries / <name>_events.csv) for the red flag R
+    (controller restart suspected) and the sensor flags M, L, W (calibration, offset, output mode)."""
     fl = _flags(flags)
     status = dict(status or {})
     restart = restart_warnings(events)
@@ -521,12 +497,11 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
                     r["largeExtra_ratio"] = float(np.median(ae) / np.median(asx))
         elif "amplitude_mean" in s.columns and s["amplitude_mean"].notna().any():
             r["amplitude_uN"] = float(np.nanmedian(s["amplitude_mean"].to_numpy(float)))
-        r["peakHeadroom"] = peak_headroom(cc, protocols, c, fl)   # peak force at the measurement limit (2026-11-11)
         r["peakSignal_AU"], r["sensorBoard"], ext = peak_signal_au(cc, s, c, events, fl)   # sensor curve
         slim = signal_limits(r["sensorBoard"], ext, fl)
         r["offset_AU"] = offset_normalized_au(events, c, ext, fl)   # zero position of the chamber (2026-11-11)
         orange = offset_range(r["sensorBoard"], fl)
-        red, yellow = [], []
+        red, sensor, yellow = [], [], []
         if r["status"] != "no slice" and nDet >= fl["min_beats"]:
             if nInv >= fl["min_beats"]:  # ranges with an inverted signal and enough contractions
                 share = 100 * nInv / nDet
@@ -549,30 +524,21 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
                 red.append(("frequency", "stimulus frequency %.0f Hz" % r["stimFrequency_Hz"]))
             if restart:
                 red.append(("restart", restart))
-            if not math.isnan(r["peakHeadroom"]) and r["peakHeadroom"] < fl["peak_headroom"]:
-                red.append(("limit", "peak force at the measurement limit (the protocols reach only %+.0f %% of the "
-                            "amplitude above the peak of the steady contractions; extended sensor mode?)"
-                            % (100 * r["peakHeadroom"])))
-            elif not math.isnan(r["peakSignal_AU"]) and slim and r["peakSignal_AU"] >= slim[1]:
-                red.append(("limit", "peak force at the measurement limit: sensor value %.0f counts, %s "
-                            "(%s, %s; from %.0f)"
-                            % (r["peakSignal_AU"], _limit_text(ext, 2), r["sensorBoard"], _mode_text(ext),
-                               slim[1])))
             if r["capture_percent"] < fl["capture"] and not arr:
                 yellow.append(("capture", "capture %.0f %%" % r["capture_percent"]))
             if not noise and r["extra_percent"] > fl["extra"]:
                 yellow.append(("extra", "extra beats %.0f %%" % r["extra_percent"]))
             if not r["invertedSignal"] and r["amplitude_uN"] < fl["amplitude"]:
                 yellow.append(("amplitude", "amplitude %.0f uN" % r["amplitude_uN"]))
-            if abs(r["amplitudeChange_percent"]) > fl["amplitude_change"]:
-                d = duration_text(r["amplitudeChange_hours"])
-                yellow.append(("change", "amplitude change %+.0f %% " % r["amplitudeChange_percent"]
-                               + (f"over {d}" if d else "(first vs. last range)")))
             if r["amplitudeCV_percent"] > fl["amplitude_cv"] and not arr:
                 yellow.append(("cv", "amplitude CV %.0f %%" % r["amplitudeCV_percent"]))
-            if (not math.isnan(r["peakSignal_AU"]) and slim and not any(k == "limit" for k, _ in red)
-                    and r["peakSignal_AU"] >= slim[0]):
-                yellow.append(("signal", "sensor value %.0f counts, %s (%s, %s; from %.0f): the amplitude is "
+            if not math.isnan(r["peakSignal_AU"]) and slim and r["peakSignal_AU"] >= slim[1]:
+                sensor.append(("limit", "peak force at the measurement limit: sensor value %.0f counts, %s "
+                               "(%s, %s; from %.0f)"
+                               % (r["peakSignal_AU"], _limit_text(ext, 2), r["sensorBoard"], _mode_text(ext),
+                                  slim[1])))
+            elif not math.isnan(r["peakSignal_AU"]) and slim and r["peakSignal_AU"] >= slim[0]:
+                sensor.append(("signal", "sensor value %.0f counts, %s (%s, %s; from %.0f): the amplitude is "
                                "too small"
                                % (r["peakSignal_AU"], _limit_text(ext, 1), r["sensorBoard"], _mode_text(ext),
                                   slim[0])))
@@ -582,22 +548,22 @@ def report_flags(S, C=None, status=None, events=None, protocols=None, **flags):
                 f = f if (ext and np.isfinite(f) and f > 0) else 1.0
                 travel = "" if not slim else (", %.0f counts of travel left to the limit"
                                               % (slim[1] - r["offset_AU"] / f))
-                yellow.append(("offset", "zero position of the chamber %.0f normalized counts, outside %.0f to %.0f "
+                sensor.append(("offset", "zero position of the chamber %.0f normalized counts, outside %.0f to %.0f "
                                "(%s)%s: the spring wire is worn or out of place"
                                % (r["offset_AU"], orange[0], orange[1], r["sensorBoard"], travel)))
-        code = dict(RED_CODES + YELLOW_CODES)
-        r["flags"] = "".join(code[k] for k, _ in red + yellow)
+        code = dict(RED_CODES + SENSOR_CODES + YELLOW_CODES)
+        r["flags"] = "".join(code[k] for k, _ in red + sensor + yellow)
         r["red"] = "; ".join(t for _, t in red)
+        r["sensor"] = "; ".join(t for _, t in sensor)
         r["yellow"] = ", ".join(t for _, t in yellow)
-        r["level"] = "check" if red else ("quality" if yellow else
-                                          ("no slice" if r["status"] == "no slice" else
-                                           ("few beats" if nDet < fl["min_beats"] else "")))
+        r["level"] = "check" if red else "sensor" if sensor else "quality" if yellow else \
+            "no slice" if r["status"] == "no slice" else "few beats" if nDet < fl["min_beats"] else ""
         rows.append(r)
     cols = ["channel", "label", "status", "nDetected", "capture_percent", "extra_percent", "uncertain_percent",
             "extraMissed_percent", "noiseIndex", "largeExtra_percent", "largeExtra_ratio", "amplitude_uN",
             "amplitudeChange_percent", "amplitudeChange_hours", "amplitudeCV_percent", "delay_ms", "invertedSignal",
-            "arrhythmicPacing", "stimFrequency_Hz", "peakHeadroom", "peakSignal_AU", "offset_AU", "sensorBoard", "flags",
-            "level", "red", "yellow"]
+            "arrhythmicPacing", "stimFrequency_Hz", "peakSignal_AU", "offset_AU", "sensorBoard", "flags", "level",
+            "red", "sensor", "yellow"]
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -652,7 +618,7 @@ def write_report(recordings, out, title="MyoDishAnalysis report", subtitle=(), m
         R = rec.get("R")  # flags computed by the caller (e.g. the watcher: C kept only for channels to check)
         R = report_flags(rec.get("S"), rec.get("C"), rec.get("status"), **fl) if R is None else R.copy()
         R = R.reset_index(drop=True)
-        for c, v in (("noiseIndex", math.nan), ("arrhythmicPacing", False)):
+        for c, v in (("noiseIndex", math.nan), ("arrhythmicPacing", False), ("sensor", "")):
             if c not in R.columns:
                 R[c] = v
         R.insert(0, "recording", rec["name"])
@@ -779,6 +745,7 @@ def _image_page(pdf, image, title, subtitle, notice=()):
 def _overview_pages(pdf, recs, title, subtitle, fl, nDetail, notice=()):
     nRed = sum(int((r["R"]["level"] == "check").sum()) for r in recs)
     nNew = sum(1 for r in recs if r.get("new") is True)
+    nSen = sum(int((r["R"]["level"] == "sensor").sum()) for r in recs)
     nYel = sum(int((r["R"]["level"] == "quality").sum()) for r in recs)
     nSl = sum(int((r["R"]["status"] != "no slice").sum()) for r in recs)
     chans = sorted({int(c) for r in recs for c in r["R"]["channel"]}) or list(range(1, 9))
@@ -800,7 +767,8 @@ def _overview_pages(pdf, recs, title, subtitle, fl, nDetail, notice=()):
                     y -= 0.012
         fig.text(0.05, y - 0.004, f"{len(recs)} recording(s)" + (f" ({nNew} new = bold)" if nNew else "")
                  + f", {nSl} channel(s) with a slice: {nRed} to check (red"
-                 + (f", traces on {nDetail} page(s)" if nDetail else "") + f"), {nYel} with slice-quality flags (yellow)",
+                 + (f", traces on {nDetail} page(s)" if nDetail else "")
+                 + f"), {nSen} sensor / chamber (orange), {nYel} slice quality (yellow)",
                  fontsize=8)
         top = y - 0.02
         ax = fig.add_axes([0.05, 0.10, 0.92, top - 0.10])
@@ -832,7 +800,7 @@ def _overview_pages(pdf, recs, title, subtitle, fl, nDetail, notice=()):
                     txt = {"beating": "b", "not beating": "nb", "removed": "rm", "signal lost": "lost",
                            "protocols only": "prot"}.get(r["status"], str(r["nDetected"]))
                 else:
-                    col = _CELL_RED if r["level"] == "check" else (_CELL_YELLOW if r["level"] == "quality" else "white")
+                    col = {"check": _CELL_RED, "sensor": _CELL_ORANGE, "quality": _CELL_YELLOW}.get(r["level"], "white")
                     cap = "" if math.isnan(r["capture_percent"]) else "%.0f" % r["capture_percent"] \
                         + ("~" if r.get("arrhythmicPacing", False) else "")
                     txt = (cap + " " + r["flags"]).strip()
@@ -853,9 +821,10 @@ def legend_lines(fl):
                   f"paced),  D delay > {1000 * fl['delay']:g} ms,  F pacing > {fl['stim_frequency']:g} Hz"),
         ("check", "R controller restart or firmware update (power-on settings, not those in the log), recording "
                   "stopped (low disk space), file named after another MyoDish"),
+        ("sensor", "Orange = sensor / chamber:  M sensor near its limit (amplitude too small),  L at its limit "
+                   "(amplitude is a lower bound),  W zero position of the chamber out of range"),
         ("quality", f"Yellow = slice quality:  C capture < {fl['capture']:g} %,  X extra beats > {fl['extra']:g} %,  "
-                    f"A amplitude < {fl['amplitude']:g} {mu}N,  T amplitude changes by > {fl['amplitude_change']:g} % "
-                    f"during the recording,  V amplitude CV > {fl['amplitude_cv']:g} %"),
+                    f"A amplitude < {fl['amplitude']:g} {mu}N,  V amplitude CV > {fl['amplitude_cv']:g} %"),
         ("few beats", f"Grey = fewer than {fl['min_beats']:g} contractions:  b beating, nb not beating, rm removed, "
                       "otherwise the number of contractions"),
         (None, "Red letter left of the cells:  P a stimulation protocol was not analysed,  E analysis error  "
@@ -864,8 +833,8 @@ def legend_lines(fl):
 
 
 def _legend(fig, fl):
-    col = {"check": _CELL_RED, "quality": _CELL_YELLOW, "few beats": _CELL_GREY}
-    y = 0.085
+    col = {"check": _CELL_RED, "sensor": _CELL_ORANGE, "quality": _CELL_YELLOW, "few beats": _CELL_GREY}
+    y = 0.088
     for c, t in legend_lines(fl):
         x = 0.05
         if c is not None:
@@ -873,12 +842,17 @@ def _legend(fig, fl):
                                                figure=fig))
             x = 0.066
         fig.text(x, y, t, fontsize=6.5)
-        y -= 0.0125
+        y -= 0.0115
 
 
 def matplotlib_rect(x, y, w, h, color, **kw):
     from matplotlib.patches import Rectangle
     return Rectangle((x, y), w, h, color=color, lw=0, **kw)
+
+
+def _group_text(r):
+    """texts of a channel below the level 'check': sensor / chamber first, then slice quality"""
+    return "; ".join(str(x) for x in (r.get("sensor", ""), r["yellow"]) if isinstance(x, str) and x)
 
 
 def _list_pages(pdf, recs, check, detail):
@@ -891,24 +865,25 @@ def _list_pages(pdf, recs, check, detail):
         lines.append((_short(rec["name"], 110) + ("  (new)" if rec.get("new") is True else ""), "b"))
         lines_detail[len(lines) - 1] = rec
         for _, r in rec["R"][rec["R"]["level"] == "check"].iterrows():
-            lines.append((f"ch {int(r['channel'])}{_label(r)}: {r['red']}" + (f"   ({r['yellow']})" if r["yellow"] else ""),
-                          "n"))
+            more = _group_text(r)
+            lines.append((f"ch {int(r['channel'])}{_label(r)}: {r['red']}" + (f"   ({more})" if more else ""), "n"))
         for m in rec["notes"]:
             for ln in textwrap.wrap(str(m), 140)[:3]:
                 lines.append((ln, "o"))
-    lines.append(("", "n"))
-    lines.append(("Slice quality (yellow)", "h"))
-    nQ = 0
-    for rec in recs:
-        q = rec["R"][rec["R"]["level"] == "quality"]
-        if len(q):
-            nQ += len(q)
-            txt = _short(rec["name"], 80) + " - " + "; ".join(f"ch {int(r['channel'])}{_label(r)}: {r['yellow']}"
-                                                              for _, r in q.iterrows())
-            for ln in textwrap.wrap(txt, 150):
-                lines.append((ln, "s"))
-    if not nQ:
-        lines.append(("none", "n"))
+    for level, head in (("sensor", "Sensor / chamber (orange)"), ("quality", "Slice quality (yellow)")):
+        lines.append(("", "n"))
+        lines.append((head, "h"))
+        nQ = 0
+        for rec in recs:
+            q = rec["R"][rec["R"]["level"] == level]
+            if len(q):
+                nQ += len(q)
+                txt = _short(rec["name"], 80) + " - " + "; ".join(
+                    f"ch {int(r['channel'])}{_label(r)}: {_group_text(r)}" for _, r in q.iterrows())
+                for ln in textwrap.wrap(txt, 150):
+                    lines.append((ln, "s"))
+        if not nQ:
+            lines.append(("none", "n"))
     # pages of the list, then the page numbers of the detail pages
     chunks = [lines[i:i + _LINES_PER_PAGE] for i in range(0, len(lines), _LINES_PER_PAGE)]
     first = page0 + len(chunks) + 1
@@ -956,7 +931,8 @@ def _detail_page(pdf, rec):
     for k, (_, r) in enumerate(rows.iterrows()):
         a, b = float(r["window_from"]), float(r["window_to"])
         ax = fig.add_axes([0.09, top - (k + 1) * h + 0.045, 0.86, h - 0.075])
-        ax.set_title(f"channel {int(r['channel'])}{_label(r)}: " + "; ".join(x for x in (r["red"], r["yellow"]) if x),
+        ax.set_title(f"channel {int(r['channel'])}{_label(r)}: " + "; ".join(
+            x for x in (r["red"], r.get("sensor", ""), r["yellow"]) if isinstance(x, str) and x),
                      fontsize=8, loc="left")
         ax.tick_params(labelsize=6)
         ax.set_xlim(a, b)

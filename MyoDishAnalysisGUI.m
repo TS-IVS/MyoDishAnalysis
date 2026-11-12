@@ -266,7 +266,7 @@ uicontrol(fig, nb{:}, 'String', char([8594 8592]), 'Position', [0.373 0.4485 0.0
     'TooltipString', 'loaded window (selection): zoom in to half its length around the centre (key: up arrow)');
 uicontrol(fig, nb{:}, 'String', char([8592 8594]), 'Position', [0.401 0.4485 0.026 0.026], 'Callback', guard(@(~,~) onNavButton('downarrow')), ...
     'TooltipString', 'loaded window (selection): zoom out to twice its length (key: down arrow)');
-uicontrol(fig, nb{:}, 'String', char(9654), 'Position', [0.728 0.4485 0.022 0.026], 'Callback', guard(@(~,~) onNavButton('rightarrow')), ...
+hNavR = uicontrol(fig, nb{:}, 'String', char(9654), 'Position', [0.728 0.4485 0.022 0.026], 'Callback', guard(@(~,~) onNavButton('rightarrow')), ...
     'TooltipString', 'loaded window (selection): move it to the right by half its length (shift + click: extend it to the right; key: right arrow)');
 uicontrol(fig, 'Style', 'text', 'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w', 'String', 'Lower plot:', ...
     'HorizontalAlignment', 'right', 'Position', [0.05 0.272 0.05 0.025]);
@@ -761,12 +761,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         uilabel(g, 'Text', 'Search:');
         ef = uieditfield(g, 'text', 'ValueChangedFcn', guard(@(~,~) browserFilter()));
         try ef.Placeholder = 'recording, label, status, flag text ... (several words: all must occur)'; catch, end
-        dd = uidropdown(g, 'Items', {'all recordings', 'with flags', 'red flags (check the analysis)', 'not analysed'}, ...
-            'ValueChangedFcn', guard(@(~,~) browserFilter()));
+        dd = uidropdown(g, 'Items', {'all recordings', 'with flags', 'red flags (check the analysis)', ...
+            'orange flags (sensor / chamber)', 'not analysed'}, 'ValueChangedFcn', guard(@(~,~) browserFilter()));
         lc = uilabel(g, 'Text', '', 'HorizontalAlignment', 'right');
         bc = uibutton(g, 'Text', 'Compute flags', 'Enable', 'off', 'ButtonPushedFcn', @(~,~) browserCompute());
-        setTip(bc, ['recordings analysed without flags (older watcher versions): flags computed from their result ' ...
-            'files and saved in mda_flags.csv']);
+        setTip(bc, ['recordings without current flags (analysed by an older version, or flags made with older rules): ' ...
+            'computed from their result files, without a new analysis, and saved in mda_flags.csv']);
         bo = uibutton(g, 'Text', 'Open', 'ButtonPushedFcn', @(~,~) browserOpen(), 'BackgroundColor', uiBlue, ...
             'FontColor', [1 1 1], 'FontWeight', 'bold');
         ut = uitable(g, 'RowName', {}, 'ColumnName', {'recording', 'ch', 'label', 'flags', 'capture %', ...
@@ -817,9 +817,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         browserFilter();
         hBrw.lm.Text = ['Double-click a row (or Open): the channel with the settings of its analysis (red flags: the ' ...
             'window of the flags, otherwise the first 120 s of its analysis); a parallel recording that was not ' ...
-            'analysed: its main file at that time. Flags (as in the watcher report): red = check the analysis (I ' ...
-            'inverted signal, N noise, S large extra beats, D delay, F stimulus frequency), yellow = slice quality (C ' ...
-            'capture, X extra beats, A amplitude, T amplitude change, V amplitude CV); ? = not computed yet.'];
+            'analysed: its main file at that time. Flags (as in the watcher report): ' ...
+            strjoin(mda_report('legend')', '; ') '; ? = not computed yet.'];
     end
 
     function browserCompute()
@@ -838,16 +837,18 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function browserFilter()
-        % rows shown: list (all / with flags / red flags / not analysed) and search text (all words, case-insensitive)
+        % rows shown: list (all / with flags / red flags / orange flags / not analysed) and search text (all words,
+        % case-insensitive)
         if isempty(hBrw) || ~isvalid(hBrw.fig), return; end
         D = hBrw.D;
         if isempty(D)
             hBrw.view = []; hBrw.ut.Data = cell(0, 8); hBrw.lc.Text = ''; return;
         end
         switch find(strcmp(hBrw.dd.Items, hBrw.dd.Value))
-            case 2, m = ismember(D.level, {'check', 'quality'});
+            case 2, m = ismember(D.level, {'check', 'sensor', 'quality'});
             case 3, m = strcmp(D.level, 'check');
-            case 4, m = ~strcmp(D.indexStatus, 'ok');
+            case 4, m = strcmp(D.level, 'sensor') | contains(D.flags, {'M', 'L', 'W'});
+            case 5, m = ~strcmp(D.indexStatus, 'ok');
             otherwise, m = true(height(D), 1);
         end
         words = strsplit(lower(strtrim(char(hBrw.ef.Value))));
@@ -862,6 +863,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             removeStyle(hBrw.ut);
             r = find(strcmp(V.level, 'check'));
             if ~isempty(r), addStyle(hBrw.ut, uistyle('BackgroundColor', [0.973 0.788 0.769]), 'row', r); end
+            r = find(strcmp(V.level, 'sensor'));
+            if ~isempty(r), addStyle(hBrw.ut, uistyle('BackgroundColor', [0.976 0.812 0.620]), 'row', r); end
             r = find(strcmp(V.level, 'quality'));
             if ~isempty(r), addStyle(hBrw.ut, uistyle('BackgroundColor', [0.984 0.910 0.651]), 'row', r); end
             r = find(~strcmp(V.indexStatus, 'ok'));
@@ -4547,12 +4550,17 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         mainTicks();
         xlim(axPar, xlim(axMain));
         grid(axPar, 'on');
-        linkaxes([axMain axStim axPar], 'x');
+        axPar.YAxis.Exponent = 0;                           %full numbers: the exponent (x 10^4) sat hidden under the
+        linkaxes([axMain axStim axPar], 'x');               %list 'Lower plot', so 11000 uN read 1.1 (2026-11-12)
+        fitMargins();
     end
 
     function updateSummary()
-        if isempty(B)
-            hTable.Data = {}; hCounts.String = ''; hFlags.String = ''; return;
+        if isempty(B)                                      %no contractions: said so, as in the Python GUI, not an
+            fl0 = mda_report('defaults');                  %empty line (2026-11-12)
+            hTable.Data = {}; hCounts.String = '';
+            hFlags.String = sprintf('Flags: - (fewer than %d contractions)', fl0.minBeats);
+            hFlags.ForegroundColor = [0.45 0.45 0.45]; hFlags.TooltipString = ''; return;
         end
         Sm = summaryRow();
         sel = selected();                                  %median of the selected contractions (2026-10-21)
@@ -4631,7 +4639,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function showFlags(Sm)
         % flags of the analysis report for the analysed range of this channel (as in the watcher report; 2026-10-14):
-        % red = check the analysis, orange = slice quality, grey = none / too few contractions; descriptions as tooltip
+        % red = check the analysis, orange = sensor / chamber, dark yellow = slice quality, grey = none / too few
+        % contractions; descriptions as tooltip. An error is shown in the line and logged (2026-11-12: the line stayed
+        % empty, so that flags that could not be computed looked like no flags)
         hFlags.String = ''; hFlags.TooltipString = '';
         try
             fl = mda_report('defaults');
@@ -4643,21 +4653,24 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             if isempty(R), return; end
             switch R.level{1}
                 case 'check', col = [0.75 0 0];
-                case 'quality', col = [0.75 0.42 0];
+                case 'sensor', col = [0.85 0.37 0];
+                case 'quality', col = [0.60 0.47 0];
                 otherwise, col = [0.45 0.45 0.45];
             end
             if isempty(R.flags{1})
                 if R.nDetected(1) < fl.minBeats, txt = sprintf('Flags: - (fewer than %d contractions)', fl.minBeats);
                 else, txt = 'Flags: none'; end
             else
-                txt = sprintf('Flags %s: %s', R.flags{1}, strjoin([R.red(~cellfun(@isempty, R.red)) ...
-                    R.yellow(~cellfun(@isempty, R.yellow))], '; '));
+                parts = [R.red(1), R.sensor(1), R.yellow(1)];
+                txt = sprintf('Flags %s: %s', R.flags{1}, strjoin(parts(~cellfun(@isempty, parts)), '; '));
             end
             hFlags.String = txt; hFlags.ForegroundColor = col;
-            hFlags.TooltipString = sprintf(['flags of the analysis report for this range (watcher report, mda_report):\n' ...
-                'red: check the analysis (I inverted signal, N noise, S large extra beats, D delay, F stimulus frequency, R controller restart suspected)\n' ...
-                'orange: slice quality (C capture, X extra beats, A amplitude, T amplitude change, V amplitude CV)\n%s'], txt);
-        catch
+            hFlags.TooltipString = sprintf('flags of the analysis report for this range (watcher report, mda_report):\n%s\n%s', ...
+                strjoin(mda_report('legend')', newline), txt);
+        catch ME
+            hFlags.String = 'Flags: could not be computed (error, see the tooltip)'; hFlags.ForegroundColor = [0.75 0 0];
+            hFlags.TooltipString = ME.message;
+            try guiError(ME, 'showFlags'); catch, end
         end
     end
 
@@ -5114,30 +5127,31 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function fitMargins()
         % left edge of the plots: room for the tick labels and y labels of all plots (with wide tick labels or the
         % two-line label 'zero force unknown' they were cut off at the figure edge) and for the time unit of the
-        % overview; the right edge stays (2026-10-14)
+        % overview (2026-10-14). Right edge: room for the tick labels and the label of the right axis of the stimulus
+        % plot, which ran under the panel 'Analysis', so that an interval of 2000 ms read 200 (2026-11-12)
         if ~isvalid(fig) || ~isvalid(axMain), return; end
         axs = [axOv axMain axStim axPar];
         if epFrac > 0 && ~isempty(axEPv) && isvalid(axEPv), axs = [axs axEPv axEPs]; end
-        need = 0.05;
+        need = 0.05; needR = 0;
         try
             for a = axs
-                ti = a.TightInset; need = max(need, ti(1) + 0.008);
+                ti = a.TightInset; need = max(need, ti(1) + 0.008); needR = max(needR, ti(3));
             end
             hu = findobj(axOv, 'Tag', 'mdaOvUnit');
             if ~isempty(hu) && isgraphics(hu(1))
                 e = hu(1).Extent;                           %axes-normalized: left edge negative
                 need = max(need, -e(1) * axOv.Position(3) + 0.006);
             end
+            x1 = min(0.75, max(0.70, pnl.Position(1) - 0.004 - needR));   %right edge of the plots, left of the panel
         catch
             return;
         end
         need = min(need, 0.15);
-        if abs(axMain.Position(1) - need) < 0.002, return; end
-        x1 = axMain.Position(1) + axMain.Position(3);       %right edge of the plots
+        if abs(axMain.Position(1) - need) < 0.002 && abs(axMain.Position(1) + axMain.Position(3) - x1) < 0.002, return; end
         for a = axs
             p = a.Position; a.Position = [need p(2) x1 - need p(4)];
         end
-        hNavL.Position(1) = need;
+        hNavL.Position(1) = need; hNavR.Position(1) = x1 - hNavR.Position(3);
     end
 
     function emptyPlots()
@@ -5682,14 +5696,17 @@ function D = browserRows(X, T)
 % channel. Columns main, a, b: main file of a parallel recording (index message 'parallel recording of ...')
 [inX, loc] = ismember(T.file, X.file);
 T = T(inX, :); loc = loc(inX);
-red = ~cellfun(@isempty, T.red); yel = ~cellfun(@isempty, T.yellow);
-note = T.red;
-note(red & yel) = strcat(T.red(red & yel), {'; '}, T.yellow(red & yel));
-note(~red & yel) = T.yellow(~red & yel);
+if ~ismember('sensor', T.Properties.VariableNames), T.sensor = repmat({''}, height(T), 1); end
+note = repmat({''}, height(T), 1);                      %red, sensor / chamber, slice quality
+for q = 1:height(T)
+    parts = {T.red{q}, T.sensor{q}, T.yellow{q}};
+    note{q} = strjoin(parts(~cellfun(@isempty, parts)), '; ');
+end
+has = ~cellfun(@isempty, note);
 [pm, pa, pb, ptxt] = parallelOf(X.message);
 isP = ~cellfun(@isempty, ptxt(loc));                   %analysed parallel recordings: marked in the note
 note(isP) = strcat(ptxt(loc(isP)), {'; '}, note(isP));
-note(isP & ~(red | yel)) = ptxt(loc(isP & ~(red | yel)));
+note(isP & ~has) = ptxt(loc(isP & ~has));
 few = strcmp(T.level, 'few beats') & cellfun(@isempty, note);
 note(few) = {'too few contractions for the flags'};
 A = table(T.file, T.channel, T.label, T.flags, T.capture_percent, T.nDetected, T.status, note, T.level, ...
@@ -6007,9 +6024,9 @@ end
 function t = helpText()
 P = mda_parameters();
 t = [{'Open ...: a recording (.mdd) or results of an analysis (.xlsx, <name>_info.csv, ...; see below). The folder is remembered. A recording opens with its first 120 s loaded and analysed (From / To).', ...
-      'Results ...: results browser of a results folder of the watcher (mda_index.csv): one row per recording and channel with the flags of the watcher report (red = check the analysis, yellow = slice quality; list: all / with flags / red flags / not analysed; search). Double-click a row (or Open): the channel with the settings of its analysis (red flags: the window of the flags, otherwise the first 120 s). Compute flags: for results of older watcher versions. The last folder opens again directly (Folder ... = another one).', ...
+      'Results ...: results browser of a results folder of the watcher (mda_index.csv): one row per recording and channel with the flags of the watcher report (red = check the analysis, orange = sensor / chamber, yellow = slice quality; list: all / with flags / red flags / orange flags / not analysed; search). Double-click a row (or Open): the channel with the settings of its analysis (red flags: the window of the flags, otherwise the first 120 s). Compute flags: for results whose flags are missing or were made with older flag rules. The last folder opens again directly (Folder ... = another one).', ...
       'Main file (button next to the file name): the open file is a parallel recording (e.g. schedule file or snapshot started from the main recording); opens the main file at the window shown, same channel.', ...
-      'Flags (grey line above the table): flags of the watcher report for the analysed range of the channel (red = check the analysis: I inverted signal, N noise, S large extra beats, D delay, F stimulus frequency; orange = slice quality: C capture, X extra beats, A amplitude, T amplitude change, V amplitude CV).', ...
+      ['Flags (grey line above the table): flags of the watcher report for the analysed range of the channel: ' strjoin(mda_report('legend')', '; ') '.'], ...
       '', ...
       'Comments ...: searchable list of the comments in the log file (# = number in the force plot, date / time, time in the file, text; option: all log entries). Select a row: the comment is highlighted in the force plot; double-click (or Go to): loads the data around it. Force plot: comments as numbered purple marks at the top (pointer on a mark: its text; click: highlighted and selected in the list).', ...
       '', ...
