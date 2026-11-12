@@ -390,7 +390,7 @@ hFlags = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlign
     'FontSize', 9, 'ForegroundColor', [0.45 0.45 0.45]);   %flags of the analysis report for this range (2026-10-14), in
                                                            %words on the color of their group (2026-11-12)
 hTable = uitable(pnl, 'Units', 'normalized', 'Position', [0.03 0.215 0.94 0.245], 'RowName', [], ...
-    'ColumnName', {'parameter','mean','median','SD','n','unit'}, 'ColumnWidth', {80, 46, 62, 40, 26, 34}, 'FontSize', 9);
+    'ColumnName', {'parameter','mean','median','SD','n','unit'}, 'ColumnWidth', {84, 52, 66, 52, 24, 40}, 'FontSize', 9);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Overlay contractions', 'Position', [0.03 0.165 0.46 0.04], 'Callback', guard(@onOverlay), ...
     'TooltipString', ['overlay of the selected contractions (mean beat or time course); press again (or Add in the overlay window) to add ' ...
     'another selection as a new group; other channels of the same range: Channels ... in the overlay window']);
@@ -4647,9 +4647,9 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             rc = repmat({''}, size(d, 1), 1);
             for k = 1:size(PI, 1), rc{k} = relCell(Sm, PI{k,1}); end
             d = [d(:,1:2), rc, d(:,3:end)];
-            cn = {'parameter', 'mean', '%ref', 'median', 'SD', 'n', 'unit'}; cw = {84, 48, 42, 48, 46, 26, 40};
+            cn = {'parameter', 'mean', '%ref', 'median', 'SD', 'n', 'unit'}; cw = {76, 46, 40, 68, 42, 24, 32};
         else
-            cn = {'parameter', 'mean', 'median', 'SD', 'n', 'unit'}; cw = {96, 58, 58, 52, 32, 40};
+            cn = {'parameter', 'mean', 'median', 'SD', 'n', 'unit'}; cw = {84, 52, 66, 52, 24, 40};   %('median' was cut off)
         end
         if numel(hTable.ColumnName) ~= numel(cn)        %column count changes: new table (the header is not redrawn reliably)
             pT = hTable.Position; delete(hTable);

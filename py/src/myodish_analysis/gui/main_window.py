@@ -2442,7 +2442,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 hl.addStretch(1)
                 continue
             b = QtWidgets.QPushButton(text)
-            b.setFixedSize(34, 22)
+            b.setFixedSize(34 if len(text) < 3 else 72, 22)     # (the zoom buttons carry words since 2026-11-12)
             b.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)  # the arrow keys stay with the plots
             b.setStyleSheet("QPushButton { background: white; border: 1px solid #aaa; border-radius: 3px; font-size: 9pt }"
                             " QPushButton:pressed { background: #ddd }")
