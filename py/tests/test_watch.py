@@ -735,7 +735,7 @@ def test_gui_results_browser_parallel(tmp_path):
         r = D[D["file"] == "P/S1_X_1_scheduleFile.mdd"].iloc[0]
         assert r["indexStatus"] == "parallel" and r["main"] == "P/S1_X_1.mdd" and (r["a"], r["b"]) == (100, 400)
         assert D.loc[D["file"] == "P/S1_X_1.mdd", "channel"].tolist() == [1]  # one data channel
-        B.dd.setCurrentIndex(B.VIEWS.index("not analysed"))  # the parallel recording, opened in its main file at its time
+        B.dd.setCurrentIndex(B.VIEWS.index("not analyzed"))  # the parallel recording, opened in its main file at its time
         assert B.model.rowCount() == 1 and B.model.rows[0][0] == "P/S1_X_1_scheduleFile.mdd"
         assert B.open_row(0)
         assert w.H.file == m and (w.S.fromSeconds, w.S.toSeconds) == (100, 220) and w.ch == 1

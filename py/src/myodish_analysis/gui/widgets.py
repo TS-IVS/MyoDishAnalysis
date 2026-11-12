@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Thomas Seidel
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Additional terms (GPL-3.0 section 7): see the file NOTICE
-"""pyqtgraph building blocks of the GUI: a view box with the mouse behaviour of the MATLAB GUI (wheel = zoom the time
+"""pyqtgraph building blocks of the GUI: a view box with the mouse behavior of the MATLAB GUI (wheel = zoom the time
 axis, shift + wheel = move, drag, click, double-click, right click = context menu), plot items with a time axis, a plot
 with a second y axis, and drawing helpers (vertical ticks, rectangles).
 

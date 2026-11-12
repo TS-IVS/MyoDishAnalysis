@@ -33,7 +33,7 @@ from .timeaxis import fmt_clock
 from .widgets import PURPLE, primary, rects, time_plot
 
 MU = "µ"
-# colours of the channels when several channels are overlaid (MATLAB default line colours + grey; trendColors in
+# colors of the channels when several channels are overlaid (MATLAB default line colors + gray; trendColors in
 # MyoDishAnalysisGUI.m)
 TREND_COLORS = [(0, 0.447, 0.741), (0.85, 0.325, 0.098), (0.929, 0.694, 0.125), (0.494, 0.184, 0.556),
                 (0.466, 0.674, 0.188), (0.301, 0.745, 0.933), (0.635, 0.078, 0.184), (0.35, 0.35, 0.35)]
@@ -44,7 +44,7 @@ def _rgb(c):
 
 
 def rolling(t, v, w_s, use_median):
-    """rolling mean / median over a time window of w_s seconds centred at every point ([t - w/2, t + w/2), as MATLAB
+    """rolling mean / median over a time window of w_s seconds centered at every point ([t - w/2, t + w/2), as MATLAB
     movmean / movmedian with 'SamplePoints'); NaN values omitted."""
     o = np.argsort(t, kind="stable")
     t = np.asarray(t, float)[o]
@@ -137,7 +137,7 @@ class TrendWindow(QtWidgets.QWidget):
         g = QtWidgets.QGridLayout()
         g.addWidget(QtWidgets.QLabel("Channel"), 0, 0)
         self.pC = QtWidgets.QComboBox()
-        self.pC.setToolTip("channel of the trend; 'several channels ...' = several channels overlaid (one colour per "
+        self.pC.setToolTip("channel of the trend; 'several channels ...' = several channels overlaid (one color per "
                            "channel)")
         self._channel_items()
         self.pC.activated.connect(self.on_channel)
@@ -149,7 +149,7 @@ class TrendWindow(QtWidgets.QWidget):
         self.pM = QtWidgets.QComboBox()
         self.pM.addItems(["all contractions", "short windows (W s every T min)", "rocker stops only (log file)"])
         self.pM.setCurrentIndex(1)
-        self.pM.setToolTip("short windows: only W s every T min are read and analysed (much faster for 24-h files, the "
+        self.pM.setToolTip("short windows: only W s every T min are read and analyzed (much faster for 24-h files, the "
                            "reading dominates); rocker stops: only the rocker stops of the log files (contractions with "
                            "the rocker at rest)")
         self.pM.currentIndexChanged.connect(self._sampling_controls)
@@ -260,7 +260,7 @@ class TrendWindow(QtWidgets.QWidget):
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("Trend: channels")
         lay = QtWidgets.QVBoxLayout(dlg)
-        lay.addWidget(QtWidgets.QLabel("Channels of the trend (several: overlaid, one colour per channel):"))
+        lay.addWidget(QtWidgets.QLabel("Channels of the trend (several: overlaid, one color per channel):"))
         cbs = []
         for c in w.H.dataChannels:
             cb = QtWidgets.QCheckBox(f"Channel {int(c)}")
@@ -595,7 +595,7 @@ class TrendWindow(QtWidgets.QWidget):
                 p.addItem(tg)
                 tg.setPos((g0 + Fk.offset) / 2, sum(yl0) / 2)
         self.roll = np.zeros((0, 3))  # channel, time since start, rolling mean / median
-        multi = len(w.tr_chans) > 1  # several channels: overlaid, one colour per channel
+        multi = len(w.tr_chans) > 1  # several channels: overlaid, one color per channel
         try:
             wMin = float(self.eW.text())
             if wMin <= 0:

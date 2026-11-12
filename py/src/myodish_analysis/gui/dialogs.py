@@ -386,7 +386,7 @@ def export_plot_data(win, which):
             man = win.is_manual()
             sel = win.selected()
             inc = B["included"].to_numpy(bool)
-            st = np.array(["outside the analysed range"] * J.size, dtype=object)
+            st = np.array(["outside the analyzed range"] * J.size, dtype=object)
             st[inR[J] & ~inc[J]] = "excluded by filter"
             st[inR[J] & man[J]] = "excluded by user"
             st[sel[J]] = "selected"
@@ -566,8 +566,8 @@ _PARALLEL_RX = re.compile(r"^parallel recording of (.+?\.mdd) \((?:from )?([\d.]
 
 
 def results_rows(X, T):
-    """rows of the results browser (2026-10-14): one per analysed recording and channel with flags (mda_flags.csv), one
-    per recording without (not analysed: status and message of the index; flags not computed yet: '?'); sorted by
+    """rows of the results browser (2026-10-14): one per analyzed recording and channel with flags (mda_flags.csv), one
+    per recording without (not analyzed: status and message of the index; flags not computed yet: '?'); sorted by
     recording and channel. Columns main, a, b: main file of a parallel recording (index message 'parallel recording of
     ...'). As browserRows in MyoDishAnalysisGUI.m."""
     X = X.reset_index(drop=True)
@@ -612,7 +612,7 @@ def results_rows(X, T):
 
 
 class _RowsModel(QtCore.QAbstractTableModel):
-    """table model of the results browser (many rows: texts, row colours)"""
+    """table model of the results browser (many rows: texts, row colors)"""
 
     def __init__(self, cols):
         super().__init__()
@@ -655,13 +655,13 @@ class ResultsBrowser(QtWidgets.QWidget):
     """results browser (2026-10-14): recordings and channels of a results folder of the watcher (mda_index.csv) with
     the flags of the analysis report (mda_flags.csv). Double-click a row (or Open): the channel with the settings of
     its analysis (red flags: the window of the flags, otherwise the first 120 s of its analysis); a parallel recording
-    that was not analysed: its main file at its window. As the results browser of MyoDishAnalysisGUI.m."""
+    that was not analyzed: its main file at its window. As the results browser of MyoDishAnalysisGUI.m."""
 
     COLS = ["recording", "ch", "label", "flags", "capture %", "contractions", "status", "note"]
     VIEWS = ["all recordings", "with flags", "red flags (check the analysis)", "orange flags (sensor / chamber)",
-             "not analysed"]
+             "not analyzed"]
     HINT = ("Double-click a row (or Open): the channel with the settings of its analysis (red flags: the window of the "
-            "flags, otherwise the first 120 s of its analysis); a parallel recording that was not analysed: its main "
+            "flags, otherwise the first 120 s of its analysis); a parallel recording that was not analyzed: its main "
             "file at that time. Flags (as in the watcher report): " + "; ".join(short_legend())
             + "; ? = not computed yet.")
 
@@ -703,7 +703,7 @@ class ResultsBrowser(QtWidgets.QWidget):
         g.addWidget(self.lc, 1, 3)
         self.bc = QtWidgets.QPushButton("Compute flags")
         self.bc.setEnabled(False)
-        self.bc.setToolTip("recordings without current flags (analysed by an older version, or flags made with older "
+        self.bc.setToolTip("recordings without current flags (analyzed by an older version, or flags made with older "
                            "rules): computed from their result files, without a new analysis, and saved in "
                            "mda_flags.csv")
         self.bc.clicked.connect(self.compute)
@@ -802,7 +802,7 @@ class ResultsBrowser(QtWidgets.QWidget):
         self.load()
 
     def filter(self):
-        """rows shown: list (all / with flags / red flags / orange flags / not analysed) and search text (all words,
+        """rows shown: list (all / with flags / red flags / orange flags / not analyzed) and search text (all words,
         case-insensitive)"""
         D = self.D
         if D is None or not len(D):
@@ -830,10 +830,10 @@ class ResultsBrowser(QtWidgets.QWidget):
             return ["" if not math.isfinite(v) else format(v, fmt) for v in x]
         rows = list(zip(V["file"], num(V["channel"], ".0f"), V["label"], V["flags"], num(V["capture"], ".0f"),
                         num(V["nDetected"], ".0f"), V["status"], V["note"]))
-        grey = QtGui.QColor("#737373")
+        gray = QtGui.QColor("#737373")
         cell = {"check": QtGui.QColor("#f8c9c4"), "sensor": QtGui.QColor("#f9cf9e"), "quality": QtGui.QColor("#fbe8a6")}
         bg = [cell.get(lv) for lv in V["level"]]
-        fg = [None if st == "ok" else grey for st in V["indexStatus"]]
+        fg = [None if st == "ok" else gray for st in V["indexStatus"]]
         self.model.set_rows(rows, bg, fg)
         self.lc.setText(f"{len(V)} row(s), {V['file'].nunique()} recording(s)")
 
@@ -847,13 +847,13 @@ class ResultsBrowser(QtWidgets.QWidget):
             return False
         d = self.D.iloc[int(self.view[r])]
         file, c, win, pick = d["file"], d["channel"], None, None
-        if d["indexStatus"] == "parallel" and d["main"]:  # not analysed: the main file at its window
+        if d["indexStatus"] == "parallel" and d["main"]:  # not analyzed: the main file at its window
             file, c = d["main"], math.nan
             win = [d["a"], d["a"] + 120.0]
             if math.isfinite(d["b"]):
                 win[1] = min(win[1], d["b"])
         elif d["indexStatus"] != "ok":
-            self.lm.setText(f"{d['file']} was not analysed ({d['indexStatus']}): {d['note']}")
+            self.lm.setText(f"{d['file']} was not analyzed ({d['indexStatus']}): {d['note']}")
             return False
         elif math.isfinite(d["from"]) and math.isfinite(d["to"]):
             win = [d["from"], d["to"]]
@@ -1058,7 +1058,7 @@ def settings_guide_file():
 class AdvancedSettings(QtWidgets.QWidget):
     """advanced settings (2026-10-10): all parameters of the method that are based on assumptions or experience
     (options.py), one tab per part of the analysis; meaning: tooltips and the settings guide (button Guide).
-    Defaults = options(); Apply / OK analyse the window again (* = the window is read again). Save settings ... /
+    Defaults = options(); Apply / OK analyze the window again (* = the window is read again). Save settings ... /
     Load settings ...: settings file (settings.py; results of an analysis can be loaded as well)."""
 
     def __init__(self, win):
@@ -1191,7 +1191,7 @@ class AdvancedSettings(QtWidgets.QWidget):
             return None, str(e)
 
     def apply(self, close_it):
-        """options from the controls: checked (options()), then the window is analysed again"""
+        """options from the controls: checked (options()), then the window is analyzed again"""
         o, err = self.read()
         if o is None:
             self.lMsg.setText(err)
@@ -1323,7 +1323,7 @@ class RockerArtifactWindow(QtWidgets.QMainWindow):
             p.showGrid(x=False, y=False)
         self.p1.addLegend(offset=(-10, 10))
         c1 = self.p1.plot(self.tx, self.before, pen=pg.mkPen((179, 179, 179), width=1), name="before the rocker filter")
-        c2 = self.p1.plot(self.tx, self.after, pen=pg.mkPen("k", width=1), name="after (analysed)")
+        c2 = self.p1.plot(self.tx, self.after, pen=pg.mkPen("k", width=1), name="after (analyzed)")
         c3 = self.p2.plot(self.tx, self.art, pen=pg.mkPen(BLUE, width=1))
         for c in (c1, c2, c3):
             c.setDownsampling(auto=True, method="peak")
@@ -1379,16 +1379,16 @@ def help_text():
     P = PARAMETERS
     lines = [
         "Open ...: a recording (.mdd) or results of an analysis (.xlsx, <name>_info.csv, ...; see below). The folder "
-        "is remembered. A recording opens with its first 120 s loaded and analysed (From / To).",
+        "is remembered. A recording opens with its first 120 s loaded and analyzed (From / To).",
         "Results ...: results browser of a results folder of the watcher (mda_index.csv): one row per recording and "
         "channel with the flags of the watcher report (red = check the analysis, orange = sensor / chamber, yellow = "
-        "slice quality; list: all / with flags / red flags / orange flags / not analysed; search). Double-click a row "
+        "slice quality; list: all / with flags / red flags / orange flags / not analyzed; search). Double-click a row "
         "(or Open): the channel with the settings of its analysis (red flags: the window of the flags, otherwise the "
         "first 120 s). Compute flags: for results whose flags are missing or were made with older flag rules. The last "
         "folder opens again directly (Folder ... = another one).",
         "Main file (button next to the file name): the open file is a parallel recording (e.g. schedule file or "
         "snapshot started from the main recording); opens the main file at the window shown, same channel.",
-        "Flags (grey line above the table): flags of the watcher report for the analysed range of the channel: "
+        "Flags (gray line above the table): flags of the watcher report for the analyzed range of the channel: "
         + "; ".join(short_legend()) + ".", "",
         "Comments ...: searchable list of the comments in the log file (# = number in the force plot, date / time, "
         "time in the file, text; option: all log entries). Select a row: the comment is highlighted in the force plot; "
@@ -1399,15 +1399,15 @@ def help_text():
         "From/To and press Load). Mouse wheel: zoom (shift + wheel: move), double-click: whole file; the zoomed part "
         "is re-read in more detail. Right click: Select all (load the range shown, at most 4 h).", "",
         "Force plot: red = selected contractions, orange = uncertain contractions (high sensitivity: neither locked to "
-        "the stimuli nor large compared with the other contractions; not counted with high specificity), grey = "
+        "the stimuli nor large compared with the other contractions; not counted with high specificity), gray = "
         "excluded by the filters (rocker / stimulated only), x = "
         "excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16: pre-pulses, CCM "
         "pulses, ...), green rings = contractions elicited by an extra pulse, black diamonds = ambiguous stimulus "
-        "assignment, bar at the top = rocker state (green = at rest, grey = moving), yellow = analysed range(s).",
+        "assignment, bar at the top = rocker state (green = at rest, gray = moving), yellow = analyzed range(s).",
         "Advanced ...: all parameters of the method that are based on assumptions or experience, one tab per part "
         "(stimulus assignment / onset gate, detection, noise and artifact rules, rocker rules, signal and spike removal, "
         "rocker filter, export). Hover over a name for its meaning; Guide = settings guide (PDF) with figures; Defaults "
-        "= options(); Apply / OK analyse the window again (* = the window is read again). Save settings ... / Load "
+        "= options(); Apply / OK analyze the window again (* = the window is read again). Save settings ... / Load "
         "settings ...: settings file (.csv; also results of an analysis); the settings are saved with every export "
         "(info table). Changed settings: the button shows their number in red (e.g. Advanced (3 changed), shortened if "
         "it does not fit: Adv. (3 chgd)); its tool tip lists them with their defaults.",
@@ -1419,7 +1419,7 @@ def help_text():
         "range shown in the overview side by side, dashed lines = time gaps; load a window to return); zero force, "
         "reference beat, save / export.",
         "Arrow keys and the buttons under the force plot change the loaded window (= blue selection in the overview and "
-        "analysed range; read again): left / right = move it by half its length, shift + left / right (shift + click) "
+        "analyzed range; read again): left / right = move it by half its length, shift + left / right (shift + click) "
         "= extend it by half its length on that side, up / down (middle buttons) = zoom in / out (half / twice its "
         "length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed overview moves "
         "along. The mouse wheel zooms only the display.",
@@ -1428,23 +1428,23 @@ def help_text():
         "the nearest contraction; EP signal and stimulation). The plot under the pointer also shows the time and the "
         "time since the last stimulus.", "",
         "Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak, or "
-        "the time course of the analysed range (t = 0 at the first stimulus of each group). Press again (or Add "
+        "the time course of the analyzed range (t = 0 at the first stimulus of each group). Press again (or Add "
         "current selection in the overlay window) to add another selection as a new group; Channels (same range) ...: "
         "tick "
-        "channels to add them for the analysed range (same settings, threshold and zero force of each channel). Per "
-        "group (list): legend text, colour, line width, line style and a transparent band (mean +- SD, +- SEM or "
+        "channels to add them for the analyzed range (same settings, threshold and zero force of each channel). Per "
+        "group (list): legend text, color, line width, line style and a transparent band (mean +- SD, +- SEM or "
         "range). Title, axis labels and legend position are editable below the plot (empty = automatic); Edit figure "
         "... opens a copy as a matplotlib figure (toolbar: edit axes, curves and legend; save as .png / .pdf / .svg).",
         "",
         "Trend ...: rolling mean / median of a parameter over long periods and several files in a row (_0, _1, ...); "
         "sampling: all contractions, short windows or rocker stops. Channel list: one channel, or several channels ... "
-        "(checkboxes) = overlaid, one colour per channel (the file is read once for all of them).", "",
+        "(checkboxes) = overlaid, one color per channel (the file is read once for all of them).", "",
         "Save / Export (menu or right click on a plot): plots as .png / .jpg / .tif (300 dpi) / .pdf, plotted data "
         "(visible time range) as .xlsx / .csv / .txt; overview: picture only. Every data export contains the table info "
         "(version, recording, all settings, threshold and zero force of the channel, window and range).", "",
         "Open ... with a results file of MyoDishAnalysis, the watcher or an export of the GUI (.xlsx, "
         "<name>_info.csv, _summary.csv, _contractions.csv): the recording (path in the file; otherwise next to the "
-        "results file or asked for), the settings and the analysis window (channel, data window, analysed range; "
+        "results file or asked for), the settings and the analysis window (channel, data window, analyzed range; "
         "several: list) are restored, the contractions are detected again and compared with the file (status line; "
         "black o = contraction of the file not found again, e.g. other version). Contractions excluded by you in an "
         "export are excluded again.", "",
@@ -1472,11 +1472,11 @@ def help_text():
         "the alignment if marked CHECK. With an EP recording every contraction gets AP parameters (AP_dVdtMax, AP_RMP, "
         "AP_Vmax, APD25/50/90, AP_note).",
         "EP plots: drag up / down = y limits of that plot, double-click = automatic; right click: Set y limits ... / y "
-        "limits: automatic (restore view). remove stimulus artefact: the stimulus pulses and the artefact after them "
-        "(saturation, decay towards the RMP) are replaced by straight lines (grey) - display only, the AP parameters "
+        "limits: automatic (restore view). remove stimulus artifact: the stimulus pulses and the artifact after them "
+        "(saturation, decay towards the RMP) are replaced by straight lines (gray) - display only, the AP parameters "
         "are measured on the recorded signal.", "",
         "Remove rocker artifact: the periodic signal of the rocker (60 rpm = 1.21 Hz) is estimated per channel between "
-        "the contractions (+-60 s around the window) and subtracted; light grey = signal before. Not possible "
+        "the contractions (+-60 s around the window) and subtracted; light gray = signal before. Not possible "
         "(message): rocker frequency not found, no periodic artifact, too little time between the contractions. Rocker "
         "artifact ... (button, menu Save / Export, right click in the force plot): extra window with the signal before "
         "/ after the filter and the removed artifact (also if the filter is off); menu: save as figure, export the "

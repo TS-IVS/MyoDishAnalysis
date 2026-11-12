@@ -92,7 +92,7 @@ def time_ticks(xl, tmax):
 
 def nav_step(xl, key, ext, lim, min_span):
     """time axis after an arrow key ('left', 'right', 'up', 'down'): left / right = move by half the span, with ext
-    (shift) = extend by half the span on that side; up / down = zoom in / out around the centre (span / 2, x 2);
+    (shift) = extend by half the span on that side; up / down = zoom in / out around the center (span / 2, x 2);
     limited to lim and >= min_span (navStep of MyoDishAnalysisGUI.m)."""
     a, b = float(xl[0]), float(xl[1])
     w = b - a

@@ -15,13 +15,13 @@ function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 % concentrationUnit, daysInCulture, cultureStart, comment, analyst): button 'Labels ...' (editable table, load / save as .csv). A file
 % <name>_labels.csv next to the .mdd file is loaded automatically. The labels become columns of the exported tables.
 %
-% 0. 'Open ...': a recording (.mdd; its first 120 s are loaded and analysed right away) or results of an analysis
+% 0. 'Open ...': a recording (.mdd; its first 120 s are loaded and analyzed right away) or results of an analysis
 %    (see 3.); the folder is remembered (2026-10-14). 'Results ...': results browser of a results folder of the watcher
 %    (mda_index.csv, mda_flags.csv): one row per recording and channel with the flags of the watcher report (list:
-%    all / with flags / red flags / not analysed; search); double-click opens the channel with the settings of its
+%    all / with flags / red flags / not analyzed; search); double-click opens the channel with the settings of its
 %    analysis (red flags: the window of the flags, otherwise the first 120 s); 'Compute flags' for results of older
 %    watcher versions. 'Main file' (shown for a parallel recording, e.g. a schedule file): the main recording at the
-%    window shown. Grey line above the table: flags of the watcher report for the analysed range (mda_report).
+%    window shown. Gray line above the table: flags of the watcher report for the analyzed range (mda_report).
 %    'Comments ...': searchable list of the comments of the log file (number, date and time, time in the file, text);
 %    a selected row is highlighted in the force plot, double-click (or Go to) loads the data around the comment.
 %    Comments are numbered purple marks in the force plot (pointer: text; click: selected in the list).
@@ -31,17 +31,17 @@ function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 %    Mouse wheel over the overview or the force plot: zoom the time axis (shift + wheel: move); double-click:
 %    whole file / whole loaded window. The zoomed overview is re-read in more detail.
 %    Arrow keys (click into a plot first) and the buttons under the force plot change the loaded window (= the blue
-%    selection in the overview and the analysed range; read again): left / right = move it by half its length, shift
+%    selection in the overview and the analyzed range; read again): left / right = move it by half its length, shift
 %    + left / right (shift + click) = extend it by half its length on that side, up / down (middle buttons) = zoom in
 %    / out (half / twice its length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed
 %    overview moves along when the window leaves its visible part. The mouse wheel zooms only the display.
 % 2. The force plot shows the loaded window (force - zero force, if the zero force is known): detected contractions
-%    (red = selected, orange = uncertain (high sensitivity), grey = excluded by the filters, black x = excluded by
-%    you), stimuli (blue ticks), rocker state (thin bar at the top: green = at rest, grey = moving; 2026-10-14, before:
-%    grey background). The stimulus plot below shows the current of every
+%    (red = selected, orange = uncertain (high sensitivity), gray = excluded by the filters, black x = excluded by
+%    you), stimuli (blue ticks), rocker state (thin bar at the top: green = at rest, gray = moving; 2026-10-14, before:
+%    gray background). The stimulus plot below shows the current of every
 %    stimulus pulse (mA; green = extra pulse, x = current not reached) and the interval to the previous pulse of the
 %    channel (ms); numbers are written when 40 pulses or fewer are visible (zoom in).
-%    Cursor mode 'drag = select time range': drag in the force plot to choose the analysed range; shift + drag adds
+%    Cursor mode 'drag = select time range': drag in the force plot to choose the analyzed range; shift + drag adds
 %    another range (several ranges: the table and exports pool them, exports add one summary row per range;
 %    2026-10-14). Right click in the force plot: 'Zoom to the selection'; with 'only contractions with rocker at
 %    rest': 'Select all rocker stops of the overview range' reads every rocker stop (+-2 s) of the range shown in the
@@ -64,7 +64,7 @@ function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 %    gateTolerance, ambiguityWindow, rise phases, pre- / post-pulses; or 'peak' as in versions <= 1.0.0-beta.3) and
 %    stimulus source, detection and certainty, noise and artifact rules, rocker rules, signal (filters, spike
 %    removal), rocker filter, export. Guide: settings guide docs/MyoDishAnalysis_settings_guide.pdf (figures for every
-%    parameter and the markers of the force plot). Defaults restores mda_options(); Apply / OK analyse the window
+%    parameter and the markers of the force plot). Defaults restores mda_options(); Apply / OK analyze the window
 %    again. Save settings ... / Load settings ...: settings file (mda_settings; results of an analysis can be loaded,
 %    too). Changed settings (2026-10-14): the button shows their number in red ('Advanced (3 changed)', shortened if
 %    the text does not fit, e.g. 'Adv. (3 chgd)'); its tooltip lists them with their defaults. Force plot: legend of
@@ -76,7 +76,7 @@ function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 %    markers above the plot and a list below it (click a marker or a line of the list, or point at a marker, to
 %    highlight the comment; 2026-10-13).
 %    'Overlay contractions': mean beat of the selected contractions (aligned at the stimulus or the peak) or the time
-%    course of the range (t = 0 at the first stimulus); other channels of the same range by checkboxes; colour, line
+%    course of the range (t = 0 at the first stimulus); other channels of the same range by checkboxes; color, line
 %    width, line style and SD / SEM / range band per group; editable title, axis labels and legend; 'Edit figure ...'
 %    = copy with the MATLAB plot tools.
 %
@@ -86,8 +86,8 @@ function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 %    grows downwards). 'Remove EP recording' hides it. With an EP recording every contraction gets the parameters of
 %    its action potential (mda_analyzeAP: AP_dVdtMax, AP_RMP, AP_Vmax, APD25/50/90, AP_note; table, lower plot,
 %    exports); markers in the EP plot when <= 60 contractions are visible. EP plots: drag up / down = y limits,
-%    double-click = automatic, right click = type the y limits / automatic (restore view); 'remove stimulus artefact'
-%    replaces the pulses and the artefact after them by straight lines (grey; display only, mda_analyzeAP
+%    double-click = automatic, right click = type the y limits / automatic (restore view); 'remove stimulus artifact'
+%    replaces the pulses and the artifact after them by straight lines (gray; display only, mda_analyzeAP
 %    'removeArtefacts': the AP parameters are measured on the recorded signal).
 %    Mouse pointer over the force, stimulus, parameter or EP plots: a marker on the curve in every plot and the value at
 %    that time small in its top left corner (force, nearest stimulus pulse, parameter of the nearest contraction, EP
@@ -104,9 +104,9 @@ function figOut = MyoDishAnalysisGUI(mddFile, varargin)
 % Requires MATLAB R2019b or newer, no toolboxes.
 % Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-05 (EP recordings 2026-10-06, protocols 2026-10-07;
 % threshold per channel, arrow keys, overlay of channels / styles / bands 2026-10-07; navigation buttons, trend of several
-% channels, detection mode, open results, rocker artifact window, EP y limits / artefact removal, mouse pointer values
+% channels, detection mode, open results, rocker artifact window, EP y limits / artifact removal, mouse pointer values
 % 2026-10-09; advanced settings, settings files, legend of the force plot 2026-10-10; report, channel / window 2026-10-11;
-% colours 2026-10-13; first window loaded, results browser, parallel recordings, numbered comments, flags 2026-10-14)
+% colors 2026-10-13; first window loaded, results browser, parallel recordings, numbered comments, flags 2026-10-14)
 
 % MyoDishAnalysis (https://github.com/TS-IVS/MyoDishAnalysis)
 % Copyright (c) 2026 Thomas Seidel
@@ -130,7 +130,7 @@ end
 H = []; S = []; O = []; B = []; C = [];
 reportAll = false;                                 %analysis report with 'All channels -> file' (menu Save / Export)
 ch = 1;
-range = [nan nan];                 %analysed range(s): rows [from to] in s (several: shift + drag, 2026-10-14)
+range = [nan nan];                 %analyzed range(s): rows [from to] in s (several: shift + drag, 2026-10-14)
 sbs = [];                          %side-by-side rocker stops (2026-10-14): seg [fileFrom fileTo winFrom winTo], shift,
                                    %  breaks (window times of the dashed lines); [] = continuous window
 winReq = [nan nan];                %loaded window as requested from mda_readMdd (s; exports: open the results again)
@@ -156,7 +156,7 @@ hBrw = [];                         %results browser (uifigure and its controls; 
 statusText = '';                   %last message of the status line
 ovG = [];                          %overlay: one group per added selection (segments around the contractions)
 hOv = [];                          %overlay window and its controls
-ovNextColor = 0;                   %overlay: number of groups added (default colour of the next group)
+ovNextColor = 0;                   %overlay: number of groups added (default color of the next group)
 ovLineStyles = {'-', '--', ':', '-.'}; ovLineNames = {'solid', 'dashed', 'dotted', 'dash-dot'};
 ovBands = {'none', 'SD', 'SEM', 'range'};
 ovBandNames = {'no band', 'band: mean +- SD', 'band: mean +- SEM', 'band: range (min - max)'};
@@ -179,10 +179,10 @@ epFrac = 0;                        %fraction of the figure height used by the EP
 epBusy = false;                    %guard: redrawing the EP traces
 epFig0 = [];                       %figure size before / after showing the EP traces, layout factors
 epLis = [];                        %listener: redraw the EP traces when the time axis changes
-epMarks = [];                      %AP markers of the analysed window (mda_analyzeAP)
+epMarks = [];                      %AP markers of the analyzed window (mda_analyzeAP)
 epYLim = {[], []};                 %EP plots: y limits of the signal (V_m) and the stimulation ([] = automatic; 2026-10-09)
-epClean = false;                   %EP: stimulus artefacts removed in the signal plot (display, mda_analyzeAP removeArtefacts)
-epVc = []; epArtMask = [];         %  ... signal without the artefacts, replaced samples (EP recording shown)
+epClean = false;                   %EP: stimulus artifacts removed in the signal plot (display, mda_analyzeAP removeArtefacts)
+epVc = []; epArtMask = [];         %  ... signal without the artifacts, replaced samples (EP recording shown)
 hEPclean = gobjects(0);            %  ... checkbox
 dragY0 = [];                       %EP plots: drag = y limits
 hvF = []; hvS = [];                %mouse pointer: plotted force (t, y) and stimulus pulses (t, current, interval, ok)
@@ -211,7 +211,7 @@ hAdv = [];                         %advanced settings window (2026-10-10)
 advD = {}; advCtl = gobjects(0); advMsg = [];   %  ... its definitions, controls, message line
 advPending = struct();              %  ... settings of the main window loaded from a settings file (applied at Apply / OK)
 showLegend = false;                %legend of the markers in the force plot (menu View; 2026-10-10). Off by default
-try                                %since 2026-11-12: it covered the data; the title line explains the colours.
+try                                %since 2026-11-12: it covered the data; the title line explains the colors.
     showLegend = ispref('MyoDishAnalysis', 'showLegend') && isequal(getpref('MyoDishAnalysis', 'showLegend'), 'on');
 catch                              %The choice is remembered.
 end
@@ -266,7 +266,7 @@ nb = {'Style', 'pushbutton', 'Units', 'normalized', 'FontSize', 9, 'BackgroundCo
 hNavL = uicontrol(fig, nb{:}, 'String', char(9664), 'Position', [0.05 0.4485 0.022 0.026], 'Callback', guard(@(~,~) onNavButton('leftarrow')), ...
     'TooltipString', 'loaded window (selection): move it to the left by half its length (shift + click: extend it to the left; key: left arrow)');
 uicontrol(fig, nb{:}, 'String', 'Zoom in', 'Position', [0.35 0.4485 0.049 0.026], 'Callback', guard(@(~,~) onNavButton('uparrow')), ...
-    'TooltipString', 'loaded window (selection): zoom in to half its length around the centre (key: up arrow)');
+    'TooltipString', 'loaded window (selection): zoom in to half its length around the center (key: up arrow)');
 uicontrol(fig, nb{:}, 'String', 'Zoom out', 'Position', [0.401 0.4485 0.049 0.026], 'Callback', guard(@(~,~) onNavButton('downarrow')), ...
     'TooltipString', 'loaded window (selection): zoom out to twice its length (key: down arrow)');
 hNavR = uicontrol(fig, nb{:}, 'String', char(9654), 'Position', [0.728 0.4485 0.022 0.026], 'Callback', guard(@(~,~) onNavButton('rightarrow')), ...
@@ -323,7 +323,7 @@ for iAxMenu = 1:4                                    %(unique names: variables o
         uimenu(cmAxMenu, 'Text', 'Select all (load the range shown, at most 4 h)', 'MenuSelectedFcn', @(~,~) selectAll());
     end
     if iAxMenu == 2                                  %force plot: zero force = y value of the right click
-        uimenu(cmAxMenu, 'Text', 'Zoom to the selection (analysed range)', 'MenuSelectedFcn', @(~,~) zoomToSelection());
+        uimenu(cmAxMenu, 'Text', 'Zoom to the selection (analyzed range)', 'MenuSelectedFcn', @(~,~) zoomToSelection());
         uimenu(cmAxMenu, 'Text', 'Select all rocker stops of the overview range (side by side)', 'Tag', 'rockerStops', ...
             'MenuSelectedFcn', @(~,~) selectRockerStops());
         uimenu(cmAxMenu, 'Text', 'Shift + drag: add a range to the selection', 'Enable', 'off');
@@ -352,7 +352,7 @@ uicontrol(bg, dflt{:}, 'Style', 'radiobutton', 'String', 'click = exclude / incl
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Labels ...', 'Position', [0.03 0.835 0.46 0.04], 'Callback', guard(@onLabels), ...
     'TooltipString', 'labels per channel: setupID, sliceID, species, sampleID, groups, treatment, days in culture, analyst ...');
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Select everything loaded', 'Position', [0.51 0.835 0.46 0.04], 'Callback', guard(@onWholeWindow), ...
-    'TooltipString', 'the analysed range becomes the whole loaded window (From / To)');
+    'TooltipString', 'the analyzed range becomes the whole loaded window (From / To)');
 thrTip = ['minimum prominence of a contraction peak, per channel: auto or a manual value for the selected channel ' ...
     '(kept when you switch channels; also used for All channels, Protocols and Trend)'];
 uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', ['Detection threshold (' mu 'N)'], 'HorizontalAlignment', 'left', 'Position', [0.03 0.79 0.5 0.03], ...
@@ -374,7 +374,7 @@ hAdvBtn = uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Advanced ...
     'Callback', guard(@onAdvanced), 'TooltipString', advTip0);   %number of changed settings in red (advIndicator, 2026-10-14)
 hRF = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'remove rocker artifact', 'Position', [0.03 0.645 0.585 0.033], ...
     'Callback', guard(@onRockerFilter), 'TooltipString', ['subtracts the periodic signal of the rocker movement (estimated per channel ' ...
-    'between the contractions, +-60 s around the window); light grey in the force plot = signal before. See mda_rockerFilter']);
+    'between the contractions, +-60 s around the window); light gray in the force plot = signal before. See mda_rockerFilter']);
 hDet = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'all beats', 'certain only'}, ...
     'Position', [0.615 0.647 0.355 0.035], 'Callback', guard(@onDetection), 'TooltipString', ['uncertain contractions (orange: neither ' ...
     'locked to the stimuli nor large compared with the typical contraction and the noise before the stimuli), with the ' ...
@@ -388,7 +388,7 @@ uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Rocker artifact ...', 
 hCounts = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.03 0.49 0.94 0.118], 'FontSize', 9);
 hFlags = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.03 0.462 0.94 0.026], ...
     'FontSize', 9, 'ForegroundColor', [0.45 0.45 0.45]);   %flags of the analysis report for this range (2026-10-14), in
-                                                           %words on the colour of their group (2026-11-12)
+                                                           %words on the color of their group (2026-11-12)
 hTable = uitable(pnl, 'Units', 'normalized', 'Position', [0.03 0.215 0.94 0.245], 'RowName', [], ...
     'ColumnName', {'parameter','mean','median','SD','n','unit'}, 'ColumnWidth', {80, 46, 62, 40, 26, 34}, 'FontSize', 9);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Overlay contractions', 'Position', [0.03 0.165 0.46 0.04], 'Callback', guard(@onOverlay), ...
@@ -403,7 +403,7 @@ hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.
 
 % functions for scripts / tests: api = fig.UserData; api.setRange([t1 t2]); api.toggleAt(t);
 % [contractions, summary] = api.results();  api.epRecording(matFile) (show; '' = remove);  EP = api.epRecordingData();
-% api.overlayChannels([1 2 3]) (overlay of the analysed range in these channels); [groups, h] = api.overlay();
+% api.overlayChannels([1 2 3]) (overlay of the analyzed range in these channels); [groups, h] = api.overlay();
 % api.key('rightarrow', {'shift'}) (arrow key as typed in the force plot); api.navButton('rightarrow', true) (button under
 % the force plot, true = shift + click); R = api.trend([1 3]) (trend window: these channels calculated and overlaid)
 % api.openResults(file, k) (results file, analysis window k); h = api.rockerWindow() (rocker artifact window);
@@ -415,7 +415,7 @@ hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.
 % current options; h = the window); api.nextFile(file), then api.advanced('save') / api.advanced('load'): Save
 % settings ... / Load settings ... of the window; api.legend(tf) (legend of the force plot on / off)
 % Bw = api.browse(resultsFolder, k) (results browser of this folder, not remembered; k: open row k of the table as a
-% double-click; Bw: handles and rows of the browser); st = api.state() (file, channel, loaded window, analysed range,
+% double-click; Bw: handles and rows of the browser); st = api.state() (file, channel, loaded window, analyzed range,
 % comment numbers in the force plot, highlighted comment, flags line, status line, main recording); api.commentClick(k)
 % (comment mark k clicked); api.mainFile() (button Main file); api.setRange(r, true) (r added to the selection, as
 % shift + drag; r: one or several rows [from to]); api.rockerStops() / api.zoomToSelection() / api.selectAll() (context
@@ -545,11 +545,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 status('Results: labels not read.');
             end
         end
-        % data window of the analysis, analysed range, contractions excluded by the user (GUI exports)
+        % data window of the analysis, analyzed range, contractions excluded by the user (GUI exports)
         resInfo = '';
         segF = [];                                      %rocker stops side by side (GUI export, 2026-10-14)
         if isfield(R.extra, 'segments_s'), segF = parseRows(R.extra.segments_s); end
-        rgF = [w.from w.to];                            %analysed range(s), time in the file
+        rgF = [w.from w.to];                            %analyzed range(s), time in the file
         if guiMulti, rgF = [W.from W.to]; end
         if isempty(win) && size(segF, 1) > 1 && isempty(maxLen)
             if ~loadSegments(segF), return; end
@@ -642,7 +642,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function openFile(file, autoLoad)
-        % autoLoad (default true): the first window (From / To: 0 - 120 s) is loaded and analysed right away (2026-10-14)
+        % autoLoad (default true): the first window (From / To: 0 - 120 s) is loaded and analyzed right away (2026-10-14)
         if nargin < 2, autoLoad = true; end
         try
             H = mda_readMdd(file, [], [], opts);
@@ -712,7 +712,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function firstWindow()
-        % first window of a newly opened file (From / To: 0 - 120 s) loaded and analysed (2026-10-14); the notes of the
+        % first window of a newly opened file (From / To: 0 - 120 s) loaded and analyzed (2026-10-14); the notes of the
         % file stay visible after the message of the analysis
         onLoad();
         if isempty(S), return; end
@@ -746,7 +746,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % recordings and channels of a results folder of the watcher (mda_index.csv) with the flags of the analysis
         % report (mda_flags.csv). Double-click a row (or Open): the channel with the settings of its analysis (red
         % flags: the window of the flags, otherwise the first 120 s of its analysis); a parallel recording that was not
-        % analysed: its main file at its window. The last folder is opened again directly (Folder ... = another one).
+        % analyzed: its main file at its window. The last folder is opened again directly (Folder ... = another one).
         % remember (default true): the folder is remembered (MATLAB preferences; false: tests)
         if nargin < 1, res = ''; end
         if nargin < 2, remember = true; end
@@ -782,10 +782,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         ef = uieditfield(g, 'text', 'ValueChangedFcn', guard(@(~,~) browserFilter()));
         try ef.Placeholder = 'recording, label, status, flag text ... (several words: all must occur)'; catch, end
         dd = uidropdown(g, 'Items', {'all recordings', 'with flags', 'red flags (check the analysis)', ...
-            'orange flags (sensor / chamber)', 'not analysed'}, 'ValueChangedFcn', guard(@(~,~) browserFilter()));
+            'orange flags (sensor / chamber)', 'not analyzed'}, 'ValueChangedFcn', guard(@(~,~) browserFilter()));
         lc = uilabel(g, 'Text', '', 'HorizontalAlignment', 'right');
         bc = uibutton(g, 'Text', 'Compute flags', 'Enable', 'off', 'ButtonPushedFcn', @(~,~) browserCompute());
-        setTip(bc, ['recordings without current flags (analysed by an older version, or flags made with older rules): ' ...
+        setTip(bc, ['recordings without current flags (analyzed by an older version, or flags made with older rules): ' ...
             'computed from their result files, without a new analysis, and saved in mda_flags.csv']);
         bo = uibutton(g, 'Text', 'Open', 'ButtonPushedFcn', @(~,~) browserOpen(), 'BackgroundColor', uiBlue, ...
             'FontColor', [1 1 1], 'FontWeight', 'bold');
@@ -837,7 +837,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         browserFilter();
         hBrw.lm.Text = ['Double-click a row (or Open): the channel with the settings of its analysis (red flags: the ' ...
             'window of the flags, otherwise the first 120 s of its analysis); a parallel recording that was not ' ...
-            'analysed: its main file at that time. Flags (as in the watcher report): ' ...
+            'analyzed: its main file at that time. Flags (as in the watcher report): ' ...
             strjoin(mda_report('legend')', '; ') '; ? = not computed yet.'];
     end
 
@@ -857,7 +857,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function browserFilter()
-        % rows shown: list (all / with flags / red flags / orange flags / not analysed) and search text (all words,
+        % rows shown: list (all / with flags / red flags / orange flags / not analyzed) and search text (all words,
         % case-insensitive)
         if isempty(hBrw) || ~isvalid(hBrw.fig), return; end
         D = hBrw.D;
@@ -879,7 +879,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         V = D(hBrw.view, :);
         hBrw.ut.Data = [V.file, numText(V.channel, '%d'), V.label, V.flags, numText(V.capture, '%.0f'), ...
             numText(V.nDetected, '%d'), V.status, V.note];
-        try                                                %colours of the watcher report (R2019b+)
+        try                                                %colors of the watcher report (R2019b+)
             removeStyle(hBrw.ut);
             r = find(strcmp(V.level, 'check'));
             if ~isempty(r), addStyle(hBrw.ut, uistyle('BackgroundColor', [0.973 0.788 0.769]), 'row', r); end
@@ -917,12 +917,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         d = hBrw.D(hBrw.view(r), :);
         file = d.file{1}; c = d.channel(1); win = []; pick = []; maxLen = 120;
-        if strcmp(d.indexStatus{1}, 'parallel') && ~isempty(d.main{1})   %not analysed: the main file at its window
+        if strcmp(d.indexStatus{1}, 'parallel') && ~isempty(d.main{1})   %not analyzed: the main file at its window
             file = d.main{1}; c = nan;
             win = d.a(1) + [0 120];
             if isfinite(d.b(1)), win(2) = min(win(2), d.b(1)); end
         elseif ~strcmp(d.indexStatus{1}, 'ok')
-            hBrw.lm.Text = sprintf('%s was not analysed (%s): %s', d.file{1}, d.indexStatus{1}, d.note{1}); return;
+            hBrw.lm.Text = sprintf('%s was not analyzed (%s): %s', d.file{1}, d.indexStatus{1}, d.note{1}); return;
         elseif isfinite(d.from(1)) && isfinite(d.to(1))
             win = [d.from(1) d.to(1)];
         end
@@ -958,7 +958,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'mainButton', char(hMain.Visible));
         if ~isempty(H), st.file = H.file; end
         if ~isempty(S), st.window = [S.fromSeconds S.toSeconds]; end
-        st.rangeFile = w2f(range);                      %analysed range(s), time in the file (2026-10-14)
+        st.rangeFile = w2f(range);                      %analyzed range(s), time in the file (2026-10-14)
         st.segments = zeros(0, 2);                      %rocker stops side by side: the windows read (file time)
         if ~isempty(sbs), st.segments = sbs.seg(:, 1:2); end
         st.xlim = xlim(axMain);
@@ -1096,7 +1096,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function onAdvanced(~, ~)
         % advanced settings (2026-10-10): all parameters of the method that are based on assumptions or experience
         % (mda_options), one tab per part of the analysis; meaning: tooltips and the settings guide (button Guide).
-        % Apply / OK analyse the window again (options marked 'read again': the window is read again). Save settings
+        % Apply / OK analyze the window again (options marked 'read again': the window is read again). Save settings
         % ... / Load settings ...: settings file (mda_settings; results of an analysis can be loaded as well)
         if ~isempty(hAdv) && isvalid(hAdv), figure(hAdv); return; end
         advD = advancedDefs();
@@ -1224,7 +1224,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function ok = advApply(closeIt)
-        % options from the advanced settings window: checked (mda_options), then the window is analysed again
+        % options from the advanced settings window: checked (mda_options), then the window is analyzed again
         [o, err] = advRead();
         ok = isempty(err);
         if ~ok, advMsg.String = err; return; end
@@ -1432,7 +1432,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     % ---------------------------------------------------------------- overlay of contractions (several selections / channels)
     % 2026-10-07: other channels of the same range (checkboxes), time course of the range (t = 0 at the first stimulus),
-    % colour, line width, line style and band (SD / SEM / range) per group, editable title, axis labels and legend,
+    % color, line width, line style and band (SD / SEM / range) per group, editable title, axis labels and legend,
     % editable copy of the figure
     function onOverlay(~, ~)
         % opens the overlay window with the current selection, or adds the current selection as a new group
@@ -1459,7 +1459,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Add current selection', 'Position', [0.7 0.645 0.14 0.045], ...
             'Callback', guard(@(~,~) addAndDraw()), 'TooltipString', 'contractions selected in the main window (channel, range, filters, exclusions)');
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Channels (same range) ...', 'Position', [0.85 0.645 0.14 0.045], ...
-            'Callback', guard(@(~,~) chooseChannels()), 'TooltipString', ['channels for the analysed range of the main window (checkboxes): ' ...
+            'Callback', guard(@(~,~) chooseChannels()), 'TooltipString', ['channels for the analyzed range of the main window (checkboxes): ' ...
             'same settings and filters, threshold and zero force of each channel; manual exclusions only in the channel of the main window']);
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Remove group', 'Position', [0.7 0.595 0.14 0.045], 'Callback', guard(@(~,~) removeGroup()));
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Clear all', 'Position', [0.85 0.595 0.14 0.045], 'Callback', guard(@(~,~) clearGroups()));
@@ -1477,7 +1477,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         uicontrol(pG, d{:}, 'Style', 'text', 'String', 'legend', 'HorizontalAlignment', 'left', 'Position', [0.03 0.72 0.18 0.17]);
         gName = uicontrol(pG, d{:}, 'Style', 'edit', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.21 0.74 0.76 0.18], ...
             'Callback', guard(@(s,~) setGroupStyle('name', s.String)), 'TooltipString', 'legend text of the group (empty = automatic)');
-        uicontrol(pG, d{:}, 'Style', 'pushbutton', 'String', 'colour ...', 'Position', [0.03 0.51 0.26 0.18], 'Callback', guard(@(~,~) pickGroupColor()));
+        uicontrol(pG, d{:}, 'Style', 'pushbutton', 'String', 'color ...', 'Position', [0.03 0.51 0.26 0.18], 'Callback', guard(@(~,~) pickGroupColor()));
         uicontrol(pG, d{:}, 'Style', 'text', 'String', 'width', 'HorizontalAlignment', 'right', 'Position', [0.3 0.49 0.13 0.17]);
         gWidth = uicontrol(pG, d{:}, 'Style', 'edit', 'String', '2', 'Position', [0.44 0.51 0.13 0.18], ...
             'Callback', guard(@(s,~) setGroupStyle('width', str2double(s.String))), 'TooltipString', 'line width of the mean (points)');
@@ -1486,7 +1486,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         gBand = uicontrol(pG, d{:}, 'Style', 'popupmenu', 'String', ovBandNames, 'Position', [0.03 0.28 0.94 0.18], ...
             'Callback', guard(@(s,~) setGroupStyle('band', ovBands{s.Value})), 'TooltipString', 'transparent band around the mean (mean beat)');
         uicontrol(pG, d{:}, 'Style', 'pushbutton', 'String', 'line and band for all groups', 'Position', [0.03 0.05 0.94 0.18], ...
-            'Callback', guard(@(~,~) styleToAll()), 'TooltipString', 'width, line style and band of the selected group for all groups (colours and legends stay)');
+            'Callback', guard(@(~,~) styleToAll()), 'TooltipString', 'width, line style and band of the selected group for all groups (colors and legends stay)');
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [0.7 0.155 0.093 0.045], ...
             'Callback', guard(@(~,~) saveOverlayFigure()), 'TooltipString', '.png / .jpg / .tif / .fig');
         uicontrol(f2, d{:}, 'Style', 'pushbutton', 'String', 'Export data ...', 'Position', [0.798 0.155 0.093 0.045], ...
@@ -1529,7 +1529,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function ok = addGroupOf(Bx, Cx, chX, sel)
         % new overlay group of channel chX: segments of the filtered signal around the selected contractions
-        % (peak - 1 s ... peak + 1.6 s) and the force of the analysed range (time course, t = 0 at its first stimulus)
+        % (peak - 1 s ... peak + 1.6 s) and the force of the analyzed range (time course, t = 0 at its first stimulus)
         ok = true;
         key = sprintf('%d|%s|%d|%.6f', chX, mat2str(range, 8), numel(sel), sum(Bx.t_peak(sel)));
         if ~isempty(ovG) && any(strcmp({ovG.key}, key))
@@ -1570,7 +1570,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             end
         end
         G.label = lab;
-        ovNextColor = ovNextColor + 1;                     %default colours in the order of adding (stay when groups are removed)
+        ovNextColor = ovNextColor + 1;                     %default colors in the order of adding (stay when groups are removed)
         cols = lines(7);
         G.color = cols(mod(ovNextColor - 1, 7) + 1, :);
         G.width = 2; G.style = '-'; G.band = 'none'; G.name = '';
@@ -1579,7 +1579,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function chooseChannels()
-        % checkboxes: channels with a group for the analysed range of the main window (ticked = added, unticked = removed)
+        % checkboxes: channels with a group for the analyzed range of the main window (ticked = added, unticked = removed)
         if isempty(S) || isempty(H), status('Load a time window first.'); return; end
         chs = reshape(S.dataChannels, 1, []);
         nC = numel(chs);
@@ -1588,7 +1588,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         hrs = H.totalSeconds >= 3600;
         dlg = dialog('Name', 'Overlay: channels', 'Units', 'pixels', 'Position', [300 300 360 112 + 24 * nC]);
         uicontrol(dlg, 'Style', 'text', 'Units', 'pixels', 'Position', [10 62 + 24 * nC 340 42], 'HorizontalAlignment', 'left', ...
-            'String', sprintf('Channels for the analysed range %s - %s (same settings; manual exclusions only in channel %d):', ...
+            'String', sprintf('Channels for the analyzed range %s - %s (same settings; manual exclusions only in channel %d):', ...
             fmtClock(w2f(min(range(:,1))), hrs, true), fmtClock(w2f(max(range(:,2))), hrs, true), ch));
         cb = gobjects(1, nC);
         for k = 1:nC
@@ -1606,8 +1606,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function setOverlayChannels(want)
-        % groups of the analysed range of the main window: exactly the channels want (groups of other channels of this
-        % range removed); the channel of the main window with its selection, the others analysed with the same settings
+        % groups of the analyzed range of the main window: exactly the channels want (groups of other channels of this
+        % range removed); the channel of the main window with its selection, the others analyzed with the same settings
         if isempty(S) || isempty(B), status('Load a time window first.'); return; end
         if isempty(hOv) || ~isvalid(hOv.fig), ovG = []; ovNextColor = 0; end
         chs = reshape(S.dataChannels, 1, []);
@@ -1623,7 +1623,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 sel = find(selected());
                 Bx = B; Cx = C;
             else
-                status(sprintf('Overlay: analysing channel %d ...', c)); drawnow;
+                status(sprintf('Overlay: analyzing channel %d ...', c)); drawnow;
                 try
                     [Bx, Cx] = analyzeOther(c);
                 catch ME
@@ -1657,7 +1657,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function k = groupsOf(c)
-        % overlay groups of channel c for the analysed range of the main window
+        % overlay groups of channel c for the analyzed range of the main window
         k = [];
         if isempty(ovG), return; end
         k = find([ovG.ch] == c & arrayfun(@(G) isequal(size(G.range), size(range)) && all(abs(G.range(:) - range(:)) < 1e-6), ovG));
@@ -1719,7 +1719,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function pickGroupColor()
         if isempty(ovG) || isempty(hOv) || ~isvalid(hOv.fig), return; end
-        c = uisetcolor(ovG(selectedGroup()).color, 'Colour of the group');
+        c = uisetcolor(ovG(selectedGroup()).color, 'Color of the group');
         if numel(c) == 3, setGroupStyle('color', c); end
     end
 
@@ -1789,7 +1789,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             yl = ['force - zero force (' mu 'N)'];
         end
         if mode == 3
-            tt = 'force of the analysed range of each group';
+            tt = 'force of the analyzed range of each group';
         elseif hOv.single.Value
             tt = 'thick: mean of each group; thin: single contractions';
         else
@@ -2004,16 +2004,16 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         [itC, vC] = trChannelItems();
         pC = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', itC, 'Value', vC, 'Position', [x0+0.07 0.605 0.08 0.035], ...
             'Callback', guard(@(~,~) trChannel()), 'TooltipString', ['channel of the trend; ''several channels ...'' = several channels ' ...
-            'overlaid (one colour per channel)']);
+            'overlaid (one color per channel)']);
         pR = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', {'whole files', 'selected range (open file only)'}, 'Position', [x0+0.16 0.605 0.14 0.035]);
         uicontrol(f2, d{:}, 'Style', 'text', 'String', 'Sampling', 'HorizontalAlignment', 'left', 'Position', [x0 0.55 0.07 0.035]);
         pM = uicontrol(f2, d{:}, 'Style', 'popupmenu', 'String', {'all contractions', 'short windows (W s every T min)', ...
             'rocker stops only (log file)'}, 'Value', 2, 'Position', [x0+0.07 0.555 0.23 0.035], 'Callback', guard(@(~,~) trSamplingControls()), ...
-            'TooltipString', ['short windows: only W s every T min are read and analysed (much faster for 24-h files, the reading ' ...
+            'TooltipString', ['short windows: only W s every T min are read and analyzed (much faster for 24-h files, the reading ' ...
             'dominates); rocker stops: only the rocker stops of the log files (contractions with the rocker at rest)']);
         tW1 = uicontrol(f2, d{:}, 'Style', 'text', 'String', 'window W (s)', 'HorizontalAlignment', 'left', 'Position', [x0 0.5 0.09 0.035]);
         eWs = uicontrol(f2, d{:}, 'Style', 'edit', 'String', '30', 'Position', [x0+0.09 0.505 0.05 0.035], ...
-            'TooltipString', 'length of each analysed window (s)');
+            'TooltipString', 'length of each analyzed window (s)');
         tW2 = uicontrol(f2, d{:}, 'Style', 'text', 'String', 'every T (min)', 'HorizontalAlignment', 'left', 'Position', [x0+0.16 0.5 0.09 0.035]);
         eTm = uicontrol(f2, d{:}, 'Style', 'edit', 'String', '10', 'Position', [x0+0.25 0.505 0.05 0.035], ...
             'TooltipString', ['interval between the windows (min). Every window costs a separate read: from a network drive via VPN ' ...
@@ -2096,7 +2096,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         nC = numel(chs);
         dlg = dialog('Name', 'Trend: channels', 'Units', 'pixels', 'Position', [300 300 300 100 + 24 * nC]);
         uicontrol(dlg, 'Style', 'text', 'Units', 'pixels', 'Position', [10 58 + 24 * nC 280 34], 'HorizontalAlignment', 'left', ...
-            'String', 'Channels of the trend (several: overlaid, one colour per channel):');
+            'String', 'Channels of the trend (several: overlaid, one color per channel):');
         cb = gobjects(1, nC);
         for k = 1:nC
             cb(k) = uicontrol(dlg, 'Style', 'checkbox', 'Units', 'pixels', 'Position', [20 50 + 24 * (nC - k) 260 22], ...
@@ -2378,7 +2378,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function [tt, rr] = trRolling(t, v, wMin, useMedian)
-        % rolling mean / median (time window wMin minutes, centred) per file; NaN between the files
+        % rolling mean / median (time window wMin minutes, centered) per file; NaN between the files
         tt = []; rr = [];
         if isempty(t), return; end
         [t, o] = sort(t); v = v(o);
@@ -2397,7 +2397,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         hTr.cmtT = zeros(0, 1); hTr.cmtLab = {}; hTr.cmtLine = gobjects(0); hTr.cmtMk = gobjects(0); hTr.cmtNum = gobjects(0);
         if isempty(trFiles), title(hTr.axC, 'no file'); return; end
         k = hTr.pP.Value; pn = plotList{k,1}; unit = strrep(plotList{k,2}, 'u', mu);
-        % files (light background) and gaps (grey)
+        % files (light background) and gaps (gray)
         yl0 = [0 1];
         have = ~isempty(trData) && height(trData) > 0 && ismember(pn, trData.Properties.VariableNames);
         if have
@@ -2425,7 +2425,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         hp = gobjects(0); nmL = {};
         hTr.roll = zeros(0, 3);                              %channel, time since start, rolling mean / median
-        multi = numel(trChans) > 1;                          %several channels: overlaid, one colour per channel
+        multi = numel(trChans) > 1;                          %several channels: overlaid, one color per channel
         wMin = str2double(hTr.eW.String); if isnan(wMin) || wMin <= 0, wMin = 10; hTr.eW.String = '10'; end
         rollName = sprintf('rolling %s (%g min)', hTr.pS.String{hTr.pS.Value}, wMin);
         if have && any(I)
@@ -2825,7 +2825,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                     zz = mda_zeroForce(S, ch, zeroUser(ch), B.t_peak(J));
                     if ~any(isnan(zz)), y = y - zz(:); end
                     inR = inRng(B.t_peak); man = isManual(); sel = selected();
-                    st = repmat({'outside the analysed range'}, numel(J), 1);
+                    st = repmat({'outside the analyzed range'}, numel(J), 1);
                     st(inR(J) & ~B.included(J)) = {'excluded by filter'};
                     st(inR(J) & man(J)) = {'excluded by user'};
                     st(sel(J)) = {'selected'};
@@ -2943,7 +2943,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         plot(a2, tx, art, 'Color', uiBlue, 'LineWidth', 0.8);
         if hasZ, yu = ['force - zero force (' mu 'N)']; else, yu = ['force (' mu 'N, sensor signal)']; end
         ylabel(a1, yu); ylabel(a2, ['rocker artifact (' mu 'N)']); xlabel(a2, xlab);
-        legend(a1, {'rocker moving', 'before the rocker filter', 'after (analysed)'}, 'Location', 'northeast', 'Box', 'off');
+        legend(a1, {'rocker moving', 'before the rocker filter', 'after (analyzed)'}, 'Location', 'northeast', 'Box', 'off');
         [~, fn, fe] = fileparts(H.file);
         title(a1, sprintf('%s%s, channel %d (200 Hz signal before the median / mean filters)', fn, fe, ch), ...
             'Interpreter', 'none', 'FontWeight', 'normal', 'FontSize', 9);
@@ -3076,7 +3076,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         def = sprintf('%s_allChannels_%.0f-%.0fs.xlsx', n, Rf(1,1), Rf(end,2));
         [fn, pn] = uiputfile({'*.xlsx', 'Excel (*.xlsx)'; '*.csv', 'text (*.csv)'}, 'All channels', def);
         if isequal(fn, 0), return; end
-        status('Analysing all channels ...'); drawnow;
+        status('Analyzing all channels ...'); drawnow;
         try
             optsAll = opts;
             optsAll.zeroForce = zeroUser(H.dataChannels);    %NaN = Offset of the log file
@@ -3214,7 +3214,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function onKey(~, evt)
         % left / right arrow: move the loaded window by half its length; shift: extend it by half its length on that
         % side; up / down arrow: zoom in / out (half / twice its length). Mouse over the overview: the time axis of the
-        % overview; otherwise the loaded window (= selection in the overview, analysed range), read again
+        % overview; otherwise the loaded window (= selection in the overview, analyzed range), read again
         shiftDown = strcmp(evt.Key, 'shift') || any(strcmp(evt.Modifier, 'shift'));
         if isempty(H) || ~any(strcmp(evt.Key, {'leftarrow', 'rightarrow', 'uparrow', 'downarrow'})), return; end
         co = fig.CurrentObject;                            %arrow keys of edit fields and lists stay theirs
@@ -3245,8 +3245,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function navButton(key, ext)
         % arrow keys in the force plot and the buttons under it: change the loaded window (= selection in the overview
-        % and analysed range): left / right = move it by half its length (ext / shift: extend it on that side), up /
-        % down = zoom in / out (half / twice its length around the centre, at least 1 s); the window is read again
+        % and analyzed range): left / right = move it by half its length (ext / shift: extend it on that side), up /
+        % down = zoom in / out (half / twice its length around the center, at least 1 s); the window is read again
         if isempty(H) || isempty(S), status('Load a time window first.'); return; end
         if ~isempty(sbs)
             status(['Rocker stops side by side: load a window (From / To and Load, or drag in the overview) to return ' ...
@@ -3256,7 +3256,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function loadWindow(w)
-        % read the window w (s): From / To, a zoomed overview moves along; analysed range = the whole window
+        % read the window w (s): From / To, a zoomed overview moves along; analyzed range = the whole window
         w = [max(0, w(1)), min(H.totalSeconds, w(2))];
         if diff(w) > 4 * 3600, status('Window longer than 4 h: use the command line version (MyoDishAnalysis) for long ranges.'); return; end
         if abs(w(1) - S.fromSeconds) < 1e-6 && abs(w(2) - S.toSeconds) < 1e-6, return; end   %start / end of the file
@@ -3341,7 +3341,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         tRes = uitable(f4, 'Units', 'normalized', 'Position', [0.01 0.01 0.62 0.37], 'RowName', [], 'FontSize', 9);
         x0 = 0.645; w0 = 0.345;
         uicontrol(f4, dd{:}, 'Style', 'text', 'String', ['Protocols (comments ''start ... protocol'' / ''end ... protocol'' or schedule files in the log file). ' ...
-            'Tick the protocols to analyse; From / To and the grouping can be changed.'], 'HorizontalAlignment', 'left', ...
+            'Tick the protocols to analyze; From / To and the grouping can be changed.'], 'HorizontalAlignment', 'left', ...
             'Position', [x0 0.92 w0 0.06], 'FontSize', 9);
         tProt = uitable(f4, 'Units', 'normalized', 'Position', [x0 0.6 w0 0.32], 'RowName', [], 'FontSize', 9, ...
             'ColumnName', {'use', 'type', 'name', 'from (s)', 'to (s)', 'group by', 'note'}, ...
@@ -3378,7 +3378,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'Position', [x0+0.215 0.17 0.13 0.03], 'Callback', guard(@(~,~) prTable()), 'TooltipString', ['protocol results: ' ...
             'max. captured frequency, FFR ratios, current thresholds, refractory periods (no peak / no response), ' ...
             'PRP at 15 / 30 / 60 s, per protocol and channel']);
-        uicontrol(f4, dd{:}, mainBtn{:}, 'Style', 'pushbutton', 'String', 'Analyse', 'Position', [x0 0.11 w0 0.045], ...
+        uicontrol(f4, dd{:}, mainBtn{:}, 'Style', 'pushbutton', 'String', 'Analyze', 'Position', [x0 0.11 w0 0.045], ...
             'Callback', guard(@(~,~) prAnalyse()), 'TooltipString', ['contractions of the ticked protocols and channels, grouped (threshold, ' ...
             'filters, zero force, rocker filter and labels as in the main window)']);
         uicontrol(f4, dd{:}, 'Style', 'pushbutton', 'String', 'Save figure ...', 'Position', [x0 0.06 0.17 0.04], 'Callback', guard(@(~,~) prSaveFigure()));
@@ -3388,7 +3388,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'pPa', pPa, 'par', {prPar}, 'pSh', pSh, 'pSD', pSD, 'pTb', pTb, 'tx', tx);
         prRes = [];
         prFind();
-        try                                             %analysed at once (2026-11-12: the window opened empty)
+        try                                             %analyzed at once (2026-11-12: the window opened empty)
             if ~isempty(prP) && height(prP) > 0, prAnalyse(); end
         catch ME
             hPr.tx.String = ['Protocols: ' ME.message];
@@ -3451,7 +3451,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         prO = opts;
         prO.zeroForce = zeroUser(prChs);                %NaN = Offset of the log file
         prO.threshold = thrOf(prChs);                   %NaN = auto
-        hPr.tx.String = 'Analysing ...'; drawnow;
+        hPr.tx.String = 'Analyzing ...'; drawnow;
         try
             [prT, prS, prI] = MyoDishAnalysis(H.file, prChs, [], [], prO, 'protocol', prP, 'rocker', prRk{hPr.pRk.Value}, ...
                 'beats', prBt{hPr.cSt.Value + 1}, 'quiet', true, 'metadata', Lbl);
@@ -3577,7 +3577,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function prSaveFigure()
-        if isempty(prRes), hPr.tx.String = 'Press Analyse first.'; return; end
+        if isempty(prRes), hPr.tx.String = 'Press Analyze first.'; return; end
         file = askFile('image', 'protocols');
         if isempty(file), return; end
         f2 = figure('Visible', 'off', 'Color', 'w', 'Units', 'pixels', 'Position', [50 50 900 600]);
@@ -3595,7 +3595,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function prExport()
-        if isempty(prRes), hPr.tx.String = 'Press Analyse first.'; return; end
+        if isempty(prRes), hPr.tx.String = 'Press Analyze first.'; return; end
         file = askFile('data', 'protocols');
         if isempty(file), return; end
         [pp, nn, ee] = fileparts(file);
@@ -3881,7 +3881,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 if epClean && ~isempty(epVc), yv = epVc(k); rep = epArtMask(k); else, yv = EP.V(k); end
                 Hv(4).x = EP.t0 + (k - 1) * EP.dt; Hv(4).y = double(yv);
                 Hv(4).text = sprintf('%s %s', fmtNum(Hv(4).y, 4), EP.unitV);
-                if rep, Hv(4).text = [Hv(4).text ' (artefact removed)']; end
+                if rep, Hv(4).text = [Hv(4).text ' (artifact removed)']; end
                 Hv(5).x = Hv(4).x; Hv(5).y = double(EP.stim(k));
                 Hv(5).text = sprintf('%s %s', fmtNum(Hv(5).y, 4), EP.unitStim);
             end
@@ -4065,7 +4065,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function T = rangeTable(forExport)
-        % contractions of the analysed range(s); forExport: times in the file (side-by-side rocker stops) and with
+        % contractions of the analyzed range(s); forExport: times in the file (side-by-side rocker stops) and with
         % several ranges the column 'range' (number of the range, 2026-10-14)
         if nargin < 1, forExport = false; end
         inR = inRng(B.t_peak);
@@ -4108,7 +4108,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function Sm = summaryRow(R)
-        % summary of the selected contractions over the analysed range(s) (all together), or over the ranges R
+        % summary of the selected contractions over the analyzed range(s) (all together), or over the ranges R
         if nargin < 1, R = range; end
         Bs = B;
         Bs.included = selected();
@@ -4125,27 +4125,27 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
     end
 
-    % ---------------------------------------------------------------- several analysed ranges, rocker stops side by side (2026-10-14)
+    % ---------------------------------------------------------------- several analyzed ranges, rocker stops side by side (2026-10-14)
     function tf = inRng(t, R)
-        % t within one of the analysed ranges (rows [from to] of range, or of R)
+        % t within one of the analyzed ranges (rows [from to] of range, or of R)
         if nargin < 2, R = range; end
         tf = false(size(t));
         for r = 1:size(R, 1), tf = tf | (t >= R(r,1) & t <= R(r,2)); end
     end
 
     function k = rangeOf(t)
-        % number of the analysed range of each time t (0 = none)
+        % number of the analyzed range of each time t (0 = none)
         k = zeros(size(t));
         for r = size(range, 1):-1:1, k(t >= range(r,1) & t <= range(r,2)) = r; end
     end
 
     function sp = rngSpan()
-        % first start and last end of the analysed range(s)
+        % first start and last end of the analyzed range(s)
         sp = [min(range(:,1)) max(range(:,2))];
     end
 
     function txt = rangeText()
-        % analysed range(s) as text (times in the file)
+        % analyzed range(s) as text (times in the file)
         hrs = ~isempty(H) && H.totalSeconds >= 3600;
         tot = sum(diff(range, 1, 2));
         if size(range, 1) == 1 && isempty(sbs)
@@ -4229,7 +4229,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function zoomToSelection()
-        % context menu of the force plot: time axis = the analysed range(s)
+        % context menu of the force plot: time axis = the analyzed range(s)
         if isempty(S) || any(~isfinite(range(:))), status('Select a range first.'); return; end
         sp = rngSpan(); m = max(0.02 * diff(sp), 0.2);
         xlim(axMain, [max(S.fromSeconds, sp(1) - m), min(S.toSeconds, sp(2) + m)]);
@@ -4250,7 +4250,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function selectRockerStops()
         % context menu of the force plot ('only contractions with rocker at rest'): all rocker stops of the range shown in
-        % the overview are read (each +-2 s) and shown side by side, separated by dashed lines; analysed ranges = the
+        % the overview are read (each +-2 s) and shown side by side, separated by dashed lines; analyzed ranges = the
         % stops (2026-10-14)
         if isempty(H), return; end
         if ~hRocker.Value, status('Tick ''only contractions with rocker at rest'' first.'); return; end
@@ -4347,12 +4347,12 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         end
         yl(2) = yl(2) + 0.035 * diff(yl);                  %room for the rocker bar at the top (2026-10-14)
         barH = 0.025 * diff(yl);
-        % analysed range(s) (one face per range)
+        % analyzed range(s) (one face per range)
         R = range(all(isfinite(range), 2), :);
         if ~isempty(R)
             patch(axMain, R(:, [1 2 2 1])', repmat(yl([1 1 2 2])', 1, size(R, 1)), [1 0.96 0.75], 'EdgeColor', [0.85 0.7 0.2], 'HitTest', 'off');
         end
-        % rocker state: thin bar at the top, green = at rest, grey = moving (2026-10-14; before: grey background)
+        % rocker state: thin bar at the top, green = at rest, gray = moving (2026-10-14; before: gray background)
         rockerBar(axMain, S.t, S.rockerOn, yl(2) - barH, yl(2));
         if showRaw, plot(axMain, C.t, fRaw, 'Color', [0.72 0.72 0.72], 'LineWidth', 0.5, 'HitTest', 'off'); end
         plot(axMain, C.t, fy, 'k', 'LineWidth', 0.5, 'HitTest', 'off');
@@ -4453,8 +4453,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 'raw', showRaw));
             ttl = sprintf('Channel %d', ch);
         else
-            ttl = sprintf('Channel %d   (red = selected, orange = uncertain, grey = excluded by filter, x = by you, blue = stimuli, top bar: green = rocker at rest, purple = comments)', ch);
-            if showRaw, ttl = strrep(ttl, 'purple = comments)', 'purple = comments, light grey = before rocker filter)'); end
+            ttl = sprintf('Channel %d   (red = selected, orange = uncertain, gray = excluded by filter, x = by you, blue = stimuli, top bar: green = rocker at rest, purple = comments)', ch);
+            if showRaw, ttl = strrep(ttl, 'purple = comments)', 'purple = comments, light gray = before rocker filter)'); end
             if hasX, ttl = strrep(ttl, ')', ', green = extra pulses / elicited by one)'); end
             if hasAmb, ttl = strrep(ttl, ')', ', diamond = ambiguous stimulus)'); end
         end
@@ -4476,7 +4476,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function rockerBar(ax, t, on, y0, y1)
-        % rocker state as a thin bar from y0 to y1: green = at rest, grey = moving; gaps between side-by-side rocker
+        % rocker state as a thin bar from y0 to y1: green = at rest, gray = moving; gaps between side-by-side rocker
         % stops left empty (2026-10-14)
         if isempty(t), return; end
         st = double(on(:)'); 
@@ -4510,7 +4510,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'line', {'Marker', 'v', 'Color', [1 0.55 0], 'MarkerFaceColor', [1 0.55 0], 'MarkerSize', 6}, 'uncertain', true;
             'line', {'Marker', 'v', 'Color', [0.5 0.5 0.5], 'MarkerSize', 6}, 'excluded by filter', true;
             'line', {'Marker', 'x', 'Color', [0 0 0], 'MarkerSize', 10, 'LineWidth', 1.5}, 'excluded by you', true;
-            'line', {'Marker', '.', 'Color', [0.6 0.6 0.6]}, 'outside the analysed range', true;
+            'line', {'Marker', '.', 'Color', [0.6 0.6 0.6]}, 'outside the analyzed range', true;
             'line', {'Marker', 'o', 'Color', [0.9 0 0.9], 'MarkerSize', 11, 'LineWidth', 1.5}, 'deviating from the reference beat', has.dev;
             'line', {'Marker', 'o', 'Color', [0 0.6 0], 'MarkerSize', 13, 'LineWidth', 1.5}, 'elicited by an extra pulse', has.ex;
             'line', {'Marker', 'd', 'Color', [0 0 0], 'MarkerSize', 12, 'LineWidth', 0.8}, 'ambiguous stimulus assignment', has.amb;
@@ -4519,7 +4519,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'line', {'LineStyle', '-', 'Color', [0 0.6 0], 'LineWidth', 1.2}, 'extra pulse (status bit 16)', has.x;
             'patch', {[0.35 0.72 0.35], 'EdgeColor', 'none'}, 'rocker at rest (bar at the top)', true;
             'patch', {[0.62 0.62 0.62], 'EdgeColor', 'none'}, 'rocker moving (bar at the top)', true;
-            'patch', {[1 0.96 0.75], 'EdgeColor', [0.85 0.7 0.2]}, 'analysed range', true;
+            'patch', {[1 0.96 0.75], 'EdgeColor', [0.85 0.7 0.2]}, 'analyzed range', true;
             'line', {'LineStyle', ':', 'Color', [0.55 0 0.75]}, 'comment of the log file', has.com;
             'line', {'LineStyle', '-', 'Color', [0.72 0.72 0.72]}, 'before the rocker filter', has.raw};
         E = E([E{:, 4}], :);
@@ -4579,7 +4579,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         plot(axPar, B.t_peak(~sel), v(~sel), '.', 'Color', [0.7 0.7 0.7], 'MarkerSize', 8);
         plot(axPar, B.t_peak(sel & ~B.uncertain), v(sel & ~B.uncertain), '.', 'Color', [0.85 0 0], 'MarkerSize', 12);
         plot(axPar, B.t_peak(sel & B.uncertain), v(sel & B.uncertain), '.', 'Color', [1 0.55 0], 'MarkerSize', 12);
-        if any(sel)                                        %mean of the selected contractions over the analysed range
+        if any(sel)                                        %mean of the selected contractions over the analyzed range
             xm = [range(:, 1:2) nan(size(range, 1), 1)]'; %(one line per range)
             plot(axPar, xm(:), mean(v(sel), 'omitnan') * ones(numel(xm), 1), '--', 'Color', [0.85 0 0], 'LineWidth', 1, 'HitTest', 'off');
         end
@@ -4679,8 +4679,8 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function showFlags(Sm)
-        % flags of the analysis report for the analysed range of this channel (as in the watcher report; 2026-10-14):
-        % red = check the analysis, orange = sensor / chamber, dark yellow = slice quality, grey = none / too few
+        % flags of the analysis report for the analyzed range of this channel (as in the watcher report; 2026-10-14):
+        % red = check the analysis, orange = sensor / chamber, dark yellow = slice quality, gray = none / too few
         % contractions; descriptions as tooltip. An error is shown in the line and logged (2026-11-12: the line stayed
         % empty, so that flags that could not be computed looked like no flags)
         hFlags.String = ''; hFlags.TooltipString = ''; hFlags.BackgroundColor = 'w'; hFlags.FontWeight = 'normal';
@@ -4692,7 +4692,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             R = mda_report('flags', Sm, Tc, [], fl, LE);
             R = R(R.channel == ch, :);
             if isempty(R), return; end
-            switch R.level{1}                           %text and ground: the colours of the report
+            switch R.level{1}                           %text and ground: the colors of the report
                 case 'check', col = [0.55 0 0]; bg = [0.973 0.788 0.769];
                 case 'sensor', col = [0.50 0.20 0]; bg = [0.976 0.812 0.620];
                 case 'quality', col = [0.35 0.27 0]; bg = [0.984 0.910 0.651];
@@ -5229,7 +5229,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             status(['EP recording: ' ME.message]); return;
         end
         EP = EPnew;
-        epVc = []; epArtMask = []; epYLim = {[], []};     %artefacts removed / y limits: for this recording
+        epVc = []; epArtMask = []; epYLim = {[], []};     %artifacts removed / y limits: for this recording
         showEP(true);
         tEP = [EP.t0, EP.t0 + (numel(EP.V) - 1) * EP.dt];
         if isempty(S) || S.t(end) < tEP(1) || S.t(1) > tEP(2)   %no window or no overlap: load the recording's time range
@@ -5247,7 +5247,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function shown = drawAPMarks(xl)
-        % AP markers of the contractions in the visible range (at most 60): artefact, upstroke, peak, APD points
+        % AP markers of the contractions in the visible range (at most 60): artifact, upstroke, peak, APD points
         shown = false;
         if isempty(epMarks) || isempty(B) || ~ismember('t_AP', B.Properties.VariableNames), return; end
         tm = arrayfun(@(m) max([m.tOn, m.tAct]), epMarks);
@@ -5333,18 +5333,18 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             end
             hEPtxt = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'FontSize', 9, ...
                 'Position', [0.77, 70 * px, 0.225, (dH - 78) * px]);
-            hEPclean = uicontrol(fig, dflt{:}, 'Style', 'checkbox', 'String', 'remove stimulus artefact', 'Value', epClean, ...
+            hEPclean = uicontrol(fig, dflt{:}, 'Style', 'checkbox', 'String', 'remove stimulus artifact', 'Value', epClean, ...
                 'Position', [0.77, 42 * px, 0.225, 24 * px], 'Callback', guard(@(src,~) epSetClean(src.Value)), 'TooltipString', ...
-                ['signal plot: the stimulus pulses (stimulation channel) and the artefact after them replaced by straight ' ...
-                'lines (grey), display only: the AP parameters are measured on the recorded signal (mda_analyzeAP removeArtefacts)']);
+                ['signal plot: the stimulus pulses (stimulation channel) and the artifact after them replaced by straight ' ...
+                'lines (gray), display only: the AP parameters are measured on the recorded signal (mda_analyzeAP removeArtefacts)']);
             hEPclose = uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Remove EP recording', ...
                 'Position', [0.77, 8 * px, 0.12, 30 * px], 'Callback', guard(@onCloseEP));
-            % right click in the EP plots: y limits, artefacts (2026-10-09)
+            % right click in the EP plots: y limits, artifacts (2026-10-09)
             for iEP = 1:2
                 cmEP = uicontextmenu(fig);
                 uimenu(cmEP, 'Text', 'Set y limits ...', 'MenuSelectedFcn', @(~,~) epAskYLim(iEP));
                 uimenu(cmEP, 'Text', 'y limits: automatic (restore view)', 'MenuSelectedFcn', @(~,~) epSetYLim(iEP, []));
-                uimenu(cmEP, 'Text', 'Remove stimulus artefact', 'Separator', 'on', 'Tag', 'epClean', ...
+                uimenu(cmEP, 'Text', 'Remove stimulus artifact', 'Separator', 'on', 'Tag', 'epClean', ...
                     'MenuSelectedFcn', @(~,~) epToggleClean());
                 uimenu(cmEP, 'Text', 'Drag up / down in the plot: y limits; double-click: automatic', 'Separator', 'on', 'Enable', 'off');
                 try cmEP.ContextMenuOpeningFcn = @(src,~) epMenuOpening(src); catch, end   %R2020a+
@@ -5389,7 +5389,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             [tv, v, kv] = epSegment(Vs, xl);
             [ts, sv] = epSegment(EP.stim, xl);
             plot(axEPv, tv, v, 'Color', [0 0.3 0.75], 'LineWidth', 0.5, 'HitTest', 'off');
-            if epClean && ~isempty(kv) && ~isempty(epArtMask)  %replaced samples (straight lines): grey
+            if epClean && ~isempty(kv) && ~isempty(epArtMask)  %replaced samples (straight lines): gray
                 g = v; g(~epArtMask(kv)) = nan;
                 if any(~isnan(g)), plot(axEPv, tv, g, 'Color', [0.6 0.6 0.6], 'LineWidth', 1, 'HitTest', 'off'); end
             end
@@ -5399,7 +5399,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             ylabel(axEPv, sprintf('%s (%s)', EP.labelV, EP.unitV)); ylabel(axEPs, sprintf('%s (%s)', EP.labelStim, EP.unitStim));
             tt = {};
             if isempty(v), tt{end+1} = 'no EP data in this time range'; end
-            if epClean, tt{end+1} = 'stimulus artefacts removed (grey = straight lines; display only)'; end
+            if epClean, tt{end+1} = 'stimulus artifacts removed (gray = straight lines; display only)'; end
             if ~isempty(epYLim{1}) || ~isempty(epYLim{2}), tt{end+1} = 'fixed y limits (double-click in the plot: automatic)'; end
             title(axEPv, strjoin(tt, '   |   '), 'FontWeight', 'normal', 'FontSize', 9);
             info = EP.info;
@@ -5464,13 +5464,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function epSetClean(on)
-        % 'remove stimulus artefact': EP signal plot without the stimulus artefacts (display only; mda_analyzeAP
+        % 'remove stimulus artifact': EP signal plot without the stimulus artifacts (display only; mda_analyzeAP
         % 'removeArtefacts'). The AP parameters are measured on the recorded signal.
         epClean = logical(on);
         if ~isempty(hEPclean) && isgraphics(hEPclean), hEPclean.Value = epClean; end
         drawEP();
         if epClean && ~isempty(epArtMask)
-            status(sprintf(['%d stimulus artefacts removed in the plot (grey = straight lines). Display only: the AP ' ...
+            status(sprintf(['%d stimulus artifacts removed in the plot (gray = straight lines). Display only: the AP ' ...
                 'parameters are measured on the recorded signal.'], nnz(diff([false; epArtMask]) == 1)));
         end
     end
@@ -5485,7 +5485,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     end
 
     function epComputeClean()
-        % signal without the stimulus artefacts and the replaced samples (cache of the EP recording shown)
+        % signal without the stimulus artifacts and the replaced samples (cache of the EP recording shown)
         epVc = []; epArtMask = [];
         if isempty(EP), return; end
         [epVc, RA] = mda_analyzeAP('removeArtefacts', EP);
@@ -5736,8 +5736,8 @@ end
 
 
 function D = browserRows(X, T)
-% rows of the results browser: one per analysed recording and channel with flags (mda_flags.csv), one per recording
-% without (not analysed: status and message of the index; flags not computed yet: '?'); sorted by recording and
+% rows of the results browser: one per analyzed recording and channel with flags (mda_flags.csv), one per recording
+% without (not analyzed: status and message of the index; flags not computed yet: '?'); sorted by recording and
 % channel. Columns main, a, b: main file of a parallel recording (index message 'parallel recording of ...')
 [inX, loc] = ismember(T.file, X.file);
 T = T(inX, :); loc = loc(inX);
@@ -5749,7 +5749,7 @@ for q = 1:height(T)
 end
 has = ~cellfun(@isempty, note);
 [pm, pa, pb, ptxt] = parallelOf(X.message);
-isP = ~cellfun(@isempty, ptxt(loc));                   %analysed parallel recordings: marked in the note
+isP = ~cellfun(@isempty, ptxt(loc));                   %analyzed parallel recordings: marked in the note
 note(isP) = strcat(ptxt(loc(isP)), {'; '}, note(isP));
 note(isP & ~has) = ptxt(loc(isP & ~has));
 few = strcmp(T.level, 'few beats') & cellfun(@isempty, note);
@@ -5836,7 +5836,7 @@ end
 
 
 function c = trendColors()
-% colours of the channels in the trend window when several channels are overlaid (MATLAB default line colours + grey)
+% colors of the channels in the trend window when several channels are overlaid (MATLAB default line colors + gray)
 c = [0 0.447 0.741; 0.85 0.325 0.098; 0.929 0.694 0.125; 0.494 0.184 0.556; 0.466 0.674 0.188; 0.301 0.745 0.933; ...
     0.635 0.078 0.184; 0.35 0.35 0.35];
 end
@@ -5844,7 +5844,7 @@ end
 
 function xn = navStep(xl, key, ext, lim, minSpan)
 % time axis after an arrow key: left / right = move by half the span, with ext (shift) = extend by half the span on
-% that side; up / down = zoom in / out around the centre (span / 2, x 2); limited to lim and >= minSpan
+% that side; up / down = zoom in / out around the center (span / 2, x 2); limited to lim and >= minSpan
 w = diff(xl);
 switch key
     case 'leftarrow'
@@ -6068,29 +6068,29 @@ end
 
 function t = helpText()
 P = mda_parameters();
-t = [{'Open ...: a recording (.mdd) or results of an analysis (.xlsx, <name>_info.csv, ...; see below). The folder is remembered. A recording opens with its first 120 s loaded and analysed (From / To).', ...
-      'Results ...: results browser of a results folder of the watcher (mda_index.csv): one row per recording and channel with the flags of the watcher report (red = check the analysis, orange = sensor / chamber, yellow = slice quality; list: all / with flags / red flags / orange flags / not analysed; search). Double-click a row (or Open): the channel with the settings of its analysis (red flags: the window of the flags, otherwise the first 120 s). Compute flags: for results whose flags are missing or were made with older flag rules. The last folder opens again directly (Folder ... = another one).', ...
+t = [{'Open ...: a recording (.mdd) or results of an analysis (.xlsx, <name>_info.csv, ...; see below). The folder is remembered. A recording opens with its first 120 s loaded and analyzed (From / To).', ...
+      'Results ...: results browser of a results folder of the watcher (mda_index.csv): one row per recording and channel with the flags of the watcher report (red = check the analysis, orange = sensor / chamber, yellow = slice quality; list: all / with flags / red flags / orange flags / not analyzed; search). Double-click a row (or Open): the channel with the settings of its analysis (red flags: the window of the flags, otherwise the first 120 s). Compute flags: for results whose flags are missing or were made with older flag rules. The last folder opens again directly (Folder ... = another one).', ...
       'Main file (button next to the file name): the open file is a parallel recording (e.g. schedule file or snapshot started from the main recording); opens the main file at the window shown, same channel.', ...
-      ['Flags (grey line above the table): flags of the watcher report for the analysed range of the channel: ' strjoin(mda_report('legend')', '; ') '.'], ...
+      ['Flags (gray line above the table): flags of the watcher report for the analyzed range of the channel: ' strjoin(mda_report('legend')', '; ') '.'], ...
       '', ...
       'Comments ...: searchable list of the comments in the log file (# = number in the force plot, date / time, time in the file, text; option: all log entries). Select a row: the comment is highlighted in the force plot; double-click (or Go to): loads the data around it. Force plot: comments as numbered purple marks at the top (pointer on a mark: its text; click: highlighted and selected in the list).', ...
       '', ...
       'Overview: min/max of the selected channel over the whole recording (green = rocker at rest). Drag in it to load a time window (or type From/To and press Load).', ...
       '', ...
-      'Force plot: red = selected contractions, orange = uncertain contractions (high sensitivity: neither locked to the stimuli nor large compared with the other contractions; not counted with high specificity), grey = excluded by the filters (rocker / stimulated only), x = excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16: pre-pulses, CCM pulses, ...), green rings = contractions elicited by an extra pulse, black diamonds = ambiguous stimulus assignment, bar at the top = rocker state (green = at rest, grey = moving), yellow = analysed range(s).', ...
-      'Advanced ...: all parameters of the method that are based on assumptions or experience, one tab per part (stimulus assignment / onset gate, detection, noise and artifact rules, rocker rules, signal and spike removal, rocker filter, export). Hover over a name for its meaning; Guide = settings guide (PDF) with figures; Defaults = mda_options(); Apply / OK analyse the window again (* = the window is read again). Save settings ... / Load settings ...: settings file (.csv; also results of an analysis); the settings are saved with every export (info table). Changed settings: the button shows their number in red (e.g. Advanced (3 changed), shortened if it does not fit: Adv. (3 chgd)); its tooltip lists them with their defaults.', ...
+      'Force plot: red = selected contractions, orange = uncertain contractions (high sensitivity: neither locked to the stimuli nor large compared with the other contractions; not counted with high specificity), gray = excluded by the filters (rocker / stimulated only), x = excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16: pre-pulses, CCM pulses, ...), green rings = contractions elicited by an extra pulse, black diamonds = ambiguous stimulus assignment, bar at the top = rocker state (green = at rest, gray = moving), yellow = analyzed range(s).', ...
+      'Advanced ...: all parameters of the method that are based on assumptions or experience, one tab per part (stimulus assignment / onset gate, detection, noise and artifact rules, rocker rules, signal and spike removal, rocker filter, export). Hover over a name for its meaning; Guide = settings guide (PDF) with figures; Defaults = mda_options(); Apply / OK analyze the window again (* = the window is read again). Save settings ... / Load settings ...: settings file (.csv; also results of an analysis); the settings are saved with every export (info table). Changed settings: the button shows their number in red (e.g. Advanced (3 changed), shortened if it does not fit: Adv. (3 chgd)); its tooltip lists them with their defaults.', ...
       'Legend of the force plot: menu View or right click in the force plot (it can be dragged).', ...
       'Cursor in the force plot: "drag = select time range" (shift + drag: add a range; several ranges are pooled, exports add one row per range) or "click = exclude / include contraction". Zoom/pan: mouse wheel or figure toolbar (switch the tool off afterwards). Right click: Zoom to the selection; Select all rocker stops of the overview range (with "only contractions with rocker at rest"): every rocker stop of the range shown in the overview side by side (dashed lines = time gaps). Overview, right click: Select all (load the range shown, at most 4 h).', ...
       'Mouse pointer over the force, stimulus, parameter or EP plots: a dashed line and a marker on the curve; the value at that time is shown small in the top left corner of every plot (force; stimulus pulse nearest to it: current and interval; lower plot: parameter of the nearest contraction; EP signal and stimulation). The plot under the pointer also shows the time and the time since the last stimulus.', ...
-      'Arrow keys (click into a plot first) and the buttons under the force plot change the loaded window (= blue selection in the overview and analysed range; read again): left / right = move it by half its length, shift + left / right (shift + click) = extend it by half its length on that side, up / down (middle buttons) = zoom in / out (half / twice its length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed overview moves along. The mouse wheel zooms only the display.', ...
+      'Arrow keys (click into a plot first) and the buttons under the force plot change the loaded window (= blue selection in the overview and analyzed range; read again): left / right = move it by half its length, shift + left / right (shift + click) = extend it by half its length on that side, up / down (middle buttons) = zoom in / out (half / twice its length). Mouse pointer over the overview: the keys move its time axis instead; a zoomed overview moves along. The mouse wheel zooms only the display.', ...
       '', ...
-      'Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak, or the time course of the analysed range (t = 0 at the first stimulus of each group). Press again (or Add current selection in the overlay window) to add another selection as a new group; Channels (same range) ...: tick channels to add them for the analysed range (same settings, threshold and zero force of each channel). Per group (list): legend text, colour, line width, line style and a transparent band (mean +- SD, +- SEM or range). Title, axis labels and legend position are editable below the plot (empty = automatic); Edit figure ... opens a copy with the MATLAB plot tools.', ...
+      'Overlay contractions: selected contractions + mean, aligned at the stimulus (t = 0, default) or the peak, or the time course of the analyzed range (t = 0 at the first stimulus of each group). Press again (or Add current selection in the overlay window) to add another selection as a new group; Channels (same range) ...: tick channels to add them for the analyzed range (same settings, threshold and zero force of each channel). Per group (list): legend text, color, line width, line style and a transparent band (mean +- SD, +- SEM or range). Title, axis labels and legend position are editable below the plot (empty = automatic); Edit figure ... opens a copy with the MATLAB plot tools.', ...
       '', ...
-      'Trend ...: rolling mean / median of a parameter over long periods and several files in a row (_0, _1, ...); sampling: all contractions, short windows or rocker stops. Channel list: one channel, or several channels ... (checkboxes) = overlaid, one colour per channel (the file is read once for all of them).', ...
+      'Trend ...: rolling mean / median of a parameter over long periods and several files in a row (_0, _1, ...); sampling: all contractions, short windows or rocker stops. Channel list: one channel, or several channels ... (checkboxes) = overlaid, one color per channel (the file is read once for all of them).', ...
       '', ...
       'Save / Export (menu or right click on a plot): plots as .png / .jpg / .tif / .fig, plotted data (visible time range) as .xlsx / .csv / .txt; overview: picture only. Every data export contains the table info (version, recording, all settings, threshold and zero force of the channel, window and range).', ...
       '', ...
-      'Open ... with a results file of MyoDishAnalysis, the watcher or an export of the GUI (.xlsx, <name>_info.csv, _summary.csv, _contractions.csv): the recording (path in the file; otherwise next to the results file or asked for), the settings and the analysis window (channel, data window, analysed range; several: list) are restored, the contractions are detected again and compared with the file (status line; black o = contraction of the file not found again, e.g. other version). Contractions excluded by you in an export are excluded again.', ...
+      'Open ... with a results file of MyoDishAnalysis, the watcher or an export of the GUI (.xlsx, <name>_info.csv, _summary.csv, _contractions.csv): the recording (path in the file; otherwise next to the results file or asked for), the settings and the analysis window (channel, data window, analyzed range; several: list) are restored, the contractions are detected again and compared with the file (status line; black o = contraction of the file not found again, e.g. other version). Contractions excluded by you in an export are excluded again.', ...
       '', ...
       'Labels ...: labels per channel (setupID, sliceID, species, sampleID, sampleGroup, sliceGroup, tissue, treatment, concentration, concentrationUnit, daysInCulture, cultureStart, comment, analyst) - columns of the exported tables; saved as <name>_labels.csv next to the .mdd file and loaded automatically.', ...
       '', ...
@@ -6099,11 +6099,11 @@ t = [{'Open ...: a recording (.mdd) or results of an analysis (.xlsx, <name>_inf
       'Reference beat (right click in the force plot): the mean shape (+- SD) of the selected contractions becomes the reference of the channel. Every contraction is compared with it, aligned at the stimulus (default; a changed latency counts, contractions without stimulus at the 50 % upstroke) or at the 50 % upstroke (shape only; reference window): refCorrelation (shape correlation), refRMSDeviation_SD (overall) and refMaxDeviation_SD (largest local deviation) in SD of the reference, each also normalized (...Norm: both scaled to amplitude 1 = shape only). Deviating contractions (> x SD) are circled magenta, counted in the table and can be excluded (reference window). Save/load a reference to apply it to other files. Every parameter is also given relative to the mean of the reference contractions (column %ref in the table; <parameter>_pctRef in tables, lower plot, trend and exports; diastolic force: difference in uN, _dRef).', ...
       '', ...
       '+ EP recording ...: LabChart export (.mat) of an electrophysiological recording made in parallel, e.g. sharp electrode (voltage + stimulation channel; default: same name as the .mdd file). It is aligned to the stimuli of the .mdd file (stimulus pattern; on constant pacing also stimulus current and clock times; clock drift corrected) and shown below the plots with the same time axis. The text right of the traces gives the matched stimuli and the offset - check it if marked CHECK. Remove EP recording hides it.', ...
-      'EP plots: drag up / down = y limits of that plot, double-click = automatic; right click: Set y limits ... / y limits: automatic (restore view). remove stimulus artefact: the stimulus pulses and the artefact after them (saturation, decay towards the RMP) are replaced by straight lines (grey) - display only, the AP parameters are measured on the recorded signal.', ...
+      'EP plots: drag up / down = y limits of that plot, double-click = automatic; right click: Set y limits ... / y limits: automatic (restore view). remove stimulus artifact: the stimulus pulses and the artifact after them (saturation, decay towards the RMP) are replaced by straight lines (gray) - display only, the AP parameters are measured on the recorded signal.', ...
       '', ...
-      'AP parameters (EP recording, mda_analyzeAP), per contraction: AP_dVdtMax (V/s, max. upstroke velocity), AP_RMP (mV, median over 10 ms before the stimulus artefact), AP_Vmax (mV, peak), APD25/50/90 (ms, activation = time of dV/dt max --> 25/50/90 % repolarization). Stimulus artefact = pulse in the stimulation channel (biphasic pulse incl. pause = one pulse) until V_m is no longer saturated and |dV/dt| < 20 V/s; the stimulus onset is the stimulus time. If the upstroke lies within the artefact (foot of the upstroke not near RMP), dV/dt max, V_max, APD25 and APD50 are NaN and APD90 is measured from the stimulus onset (approximate, AP_note). Each AP is evaluated up to the next stimulus (fusion: NaN, note). Markers (<= 60 contractions visible): grey = artefact, green line = RMP, ^ upstroke, v V_max, o APD25/50/90.', ...
+      'AP parameters (EP recording, mda_analyzeAP), per contraction: AP_dVdtMax (V/s, max. upstroke velocity), AP_RMP (mV, median over 10 ms before the stimulus artifact), AP_Vmax (mV, peak), APD25/50/90 (ms, activation = time of dV/dt max --> 25/50/90 % repolarization). Stimulus artifact = pulse in the stimulation channel (biphasic pulse incl. pause = one pulse) until V_m is no longer saturated and |dV/dt| < 20 V/s; the stimulus onset is the stimulus time. If the upstroke lies within the artifact (foot of the upstroke not near RMP), dV/dt max, V_max, APD25 and APD50 are NaN and APD90 is measured from the stimulus onset (approximate, AP_note). Each AP is evaluated up to the next stimulus (fusion: NaN, note). Markers (<= 60 contractions visible): gray = artifact, green line = RMP, ^ upstroke, v V_max, o APD25/50/90.', ...
       '', ...
-      'Remove rocker artifact: while the rocker moves, each sensor shows a periodic signal (rocker frequency, 60 rpm = 1.21 Hz). It is estimated per channel between the contractions (+-60 s around the window) and subtracted; light grey = signal before. Not possible (message): rocker frequency not found, no periodic artifact, too little time between the contractions (fast pacing). The setting also applies to All channels, Trend and exports. Rocker artifact ... (button, menu Save / Export, right click in the force plot): extra window with the signal before / after the filter and the removed artifact (also if the filter is off); menu: save as figure, export the data of the visible time range.', ...
+      'Remove rocker artifact: while the rocker moves, each sensor shows a periodic signal (rocker frequency, 60 rpm = 1.21 Hz). It is estimated per channel between the contractions (+-60 s around the window) and subtracted; light gray = signal before. Not possible (message): rocker frequency not found, no periodic artifact, too little time between the contractions (fast pacing). The setting also applies to All channels, Trend and exports. Rocker artifact ... (button, menu Save / Export, right click in the force plot): extra window with the signal before / after the filter and the removed artifact (also if the filter is off); menu: save as figure, export the data of the visible time range.', ...
       '', 'Parameters:'}, ...
       cellfun(@(n, u, d) sprintf('%s (%s): %s', n, u, d), P(:,1)', P(:,2)', P(:,3)', 'UniformOutput', false)];
 end
@@ -6259,7 +6259,7 @@ D = {
         1000, 'ms', 'Detection', false;
     'lockWindow', 'lockWindow: stimulus locking', 'num', [], ...
         ['a peak is locked to the stimuli if its latency (time since the previous pulse) lies within ' ...
-        '+-lockWindow of the typical latency (centre of the densest window of 2 x lockWindow); certainty and ' ...
+        '+-lockWindow of the typical latency (center of the densest window of 2 x lockWindow); certainty and ' ...
         'rocker / artifact rules'], ...
         1000, 'ms', 'Detection', false;
     'lockWindowRel', 'lockWindowRel', 'num', [], ...
@@ -6307,7 +6307,7 @@ D = {
     'invertedMinCapture', 'invertedMinCapture', 'num', [], ...
         ['inverted signal confirmed: the normal detection in the negated signal finds certain stimulated ' ...
         'contractions for at least this fraction of the pulses; otherwise (e.g. rocker waves) the channel is ' ...
-        'analysed as it is'], ...
+        'analyzed as it is'], ...
         100, '% of pulses', 'Detection', false;
     'invertedSkip', 'invertedSkip', 'num', [], ...
         'inverted signal: the stimulus-triggered median starts this time after the pulse (stimulus artifact)', ...
@@ -6587,7 +6587,7 @@ D = {
     'arrhythmicChannels', 'Arrhythmically paced channels', 'vec', [], ...
         ['channels paced arrhythmically (e.g. 3 5; summary column arrhythmicPacing): the analysis report does not ' ...
         'flag their capture and amplitude CV and does not count their missed beats in the noise index (expected ' ...
-        'with arrhythmic pacing); the capture is still analysed'], ...
+        'with arrhythmic pacing); the capture is still analyzed'], ...
         1, 'channels', 'Protocols', false;
     'arrhythmicDetection', 'Detect arrhythmic pacing', 'check', [], ...
         ['channels are also detected as arrhythmically paced if the stim-to-stim variability exceeds ' ...
@@ -6600,7 +6600,7 @@ D = {
         100, '% (CV)', 'Protocols', false;
     'arrhythmicMinFraction', 'arrhythmicMinFraction', 'num', [], ...
         ['arrhythmic pacing: the variable windows make up more than this fraction of the paced time of the ' ...
-        'analysed ranges'], ...
+        'analyzed ranges'], ...
         100, '% of the paced time', 'Protocols', false;
     'arrhythmicWindow', 'arrhythmicWindow', 'num', [], ...
         ['arrhythmic pacing: length of the windows (from the start of each range; paced: at least 6 regular ' ...

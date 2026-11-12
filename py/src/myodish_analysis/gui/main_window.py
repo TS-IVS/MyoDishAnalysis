@@ -8,13 +8,13 @@
     mda-gui results.xlsx          results of myodish_analysis / watcher / GUI export (.xlsx, _info.csv): recording,
                                   settings and analysis window restored (read_results)
 
-0. Open ...: a recording (.mdd; its first 120 s are loaded and analysed right away) or results of an analysis (see 3.);
+0. Open ...: a recording (.mdd; its first 120 s are loaded and analyzed right away) or results of an analysis (see 3.);
    the folder is remembered (2026-10-14). Results ...: results browser of a results folder of the watcher
    (mda_index.csv, mda_flags.csv): one row per recording and channel with the flags of the watcher report (list: all /
-   with flags / red flags / not analysed; search); double-click opens the channel with the settings of its analysis
+   with flags / red flags / not analyzed; search); double-click opens the channel with the settings of its analysis
    (red flags: the window of the flags, otherwise the first 120 s); Compute flags for results whose flags are missing
    or were made with older flag rules (dialogs.ResultsBrowser). Main file (shown for a parallel recording, e.g. a schedule file): the main
-   recording at the window shown. Grey line above the table: flags of the watcher report for the analysed range.
+   recording at the window shown. Gray line above the table: flags of the watcher report for the analyzed range.
    Comments ...: searchable list of the comments of the log file (number, time, text); a selected row is highlighted
    in the force plot, double-click (or Go to) loads the data around it. Comments are numbered purple marks in the
    force plot (pointer: text; click: selected in the list).
@@ -24,10 +24,10 @@
    Arrow keys: left / right = move the time axis by half its length, shift + left / right = extend it on that side,
    up / down = zoom in / out; mouse over the overview: its time axis, otherwise the force plot (beyond the loaded
    window the loaded window follows and is read again; the zoomed overview moves along).
-2. Force plot: force - zero force; red = selected contractions, orange = uncertain (high sensitivity), grey = excluded
+2. Force plot: force - zero force; red = selected contractions, orange = uncertain (high sensitivity), gray = excluded
    by the filters, x = excluded by you, blue ticks = stimuli, green ticks = extra pulses (status channel bit 16), green
    rings = elicited by an extra pulse, black diamonds = ambiguous stimulus assignment, bar at the top = rocker state
-   (green = at rest, grey = moving; 2026-10-14, before: grey background), yellow = analysed range(s), purple = comments.
+   (green = at rest, gray = moving; 2026-10-14, before: gray background), yellow = analyzed range(s), purple = comments.
    Cursor mode 'drag = select time range' (shift + drag adds a range: several ranges are pooled, exports add one
    summary row per range) or 'click = exclude / include contraction'. Wheel = zoom the time axis, shift + wheel = move,
    double-click = whole loaded window. Right click: Zoom to the selection; Select all rocker stops of the overview range
@@ -41,17 +41,17 @@
    rocker filter and the removed artifact (save, export). Advanced ... (2026-10-10): all parameters of the method that
    are based on assumptions or experience, one tab per part (stimulus assignment / onset gate and stimulus source,
    detection, noise / artifact and rocker rules, signal and spike removal, rocker filter, export); Guide = settings
-   guide (PDF), Defaults = options(), Apply / OK analyse the window again, Save settings ... / Load settings ...:
+   guide (PDF), Defaults = options(), Apply / OK analyze the window again, Save settings ... / Load settings ...:
    settings file (settings.py); changed settings: the button shows their number in red ('Advanced (3 changed)',
    shortened if the text does not fit, e.g. 'Adv. (3 chgd)'), its tool tip lists them with their defaults
    (2026-10-14). Legend of the force plot: menu View (right click in the force plot). Every data export contains the
    table info (version, all settings); Open ... with a results file restores recording, settings and analysis window
    of a results file and compares the contractions. Overlay contractions: mean beat (stimulus / peak) or time course
-   of the range (t = 0 at the first stimulus), other channels of the same range by checkboxes, colour / width / line
+   of the range (t = 0 at the first stimulus), other channels of the same range by checkboxes, color / width / line
    style / SD-SEM-range band per group, editable title, axis labels and legend, editable matplotlib copy (overlay.py).
 4. + EP recording ...: LabChart .mat export aligned to the stimuli; AP parameters per contraction. EP plots: drag up /
    down = y limits, double-click = automatic, right click = type them / automatic (restore view); 'remove stimulus
-   artefact' = pulses and artefact replaced by straight lines (grey; display only, remove_artefacts).
+   artifact' = pulses and artifact replaced by straight lines (gray; display only, remove_artefacts).
    Mouse pointer over the force, stimulus, parameter or EP plots: marker and value at that time in every plot; time and
    time since the last stimulus in the plot under the pointer.
 5. Protocols ...: stimulation protocols found in the log file ('start ... protocol' / 'end ... protocol'): contractions
@@ -60,7 +60,7 @@
 See README.md of the MATLAB version for all details; results are the same as with MyoDishAnalysisGUI.
 
 Thomas Seidel (FAU Erlangen-Nuernberg / InVitroSys GmbH), 2026-10-06 (port of MyoDishAnalysisGUI.m; detection mode,
-open results, rocker artifact window, EP y limits / artefact removal, mouse pointer values 2026-10-09; first window
+open results, rocker artifact window, EP y limits / artifact removal, mouse pointer values 2026-10-09; first window
 loaded, results browser, parallel recordings, numbered comments, flags 2026-10-14)
 """
 from __future__ import annotations
@@ -299,7 +299,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # ---------------------------------------------------------------- state
         self.H = self.S = self.O = self.B = self.C = None
         self.ch = 1
-        self.range = np.array([[math.nan, math.nan]])  # analysed range(s): rows [from, to] (several: shift + drag)
+        self.range = np.array([[math.nan, math.nan]])  # analyzed range(s): rows [from, to] (several: shift + drag)
         self.sbs = None                     # rocker stops side by side (2026-10-14): seg, shift, breaks (side_by_side)
         self._drag_add = False              # drag in the force plot with shift: the range is added to the selection
         self.win_req = [math.nan, math.nan]  # loaded window as requested from read_mdd (exports: open the results again)
@@ -322,8 +322,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.EP = None
         self.ep_marks = None
         self.ep_ylim = [None, None]         # EP plots: y limits of the signal / stimulation (None = automatic; 2026-10-09)
-        self.ep_clean = False               # EP: stimulus artefacts removed in the signal plot (display only)
-        self.ep_vc = None                   # ... signal without the artefacts
+        self.ep_clean = False               # EP: stimulus artifacts removed in the signal plot (display only)
+        self.ep_vc = None                   # ... signal without the artifacts
         self.ep_art_mask = None             # ... replaced samples
         self._hv = {}                       # mouse pointer: line, marker and text per plot
         self._hv_shown = False
@@ -505,9 +505,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lEP.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.lEP.setFixedWidth(330)
         ev.addWidget(self.lEP, 1)
-        self.cbEPclean = QtWidgets.QCheckBox("remove stimulus artefact")
-        self.cbEPclean.setToolTip("signal plot: the stimulus pulses (stimulation channel) and the artefact after them "
-                                  "replaced by straight lines (grey), display only: the AP parameters are measured on "
+        self.cbEPclean = QtWidgets.QCheckBox("remove stimulus artifact")
+        self.cbEPclean.setToolTip("signal plot: the stimulus pulses (stimulation channel) and the artifact after them "
+                                  "replaced by straight lines (gray), display only: the AP parameters are measured on "
                                   "the recorded signal (analyze_ap.remove_artefacts)")
         self.cbEPclean.toggled.connect(self.ep_set_clean)
         ev.addWidget(self.cbEPclean)
@@ -559,7 +559,7 @@ class MainWindow(QtWidgets.QMainWindow):
         h.addWidget(btn("Labels ...", self.on_labels, "labels per channel: setupID, sliceID, species, sampleID, groups, "
                         "treatment, days in culture, analyst ..."))
         h.addWidget(btn("Select everything loaded", self.on_whole_window,
-                        "the analysed range becomes the whole loaded window (From / To)"))
+                        "the analyzed range becomes the whole loaded window (From / To)"))
         pv.addLayout(h)
         g = QtWidgets.QGridLayout()
         thr_tip = ("minimum prominence of a contraction peak, per channel: auto or a manual value for the selected "
@@ -595,7 +595,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cbStim = QtWidgets.QCheckBox("only stimulated contractions")
         self.cbRF = QtWidgets.QCheckBox("remove rocker artifact")
         self.cbRF.setToolTip("subtracts the periodic signal of the rocker movement (estimated per channel between the "
-                             "contractions, +-60 s around the window); light grey in the force plot = signal before. See "
+                             "contractions, +-60 s around the window); light gray in the force plot = signal before. See "
                              "rocker_filter")
         self.cbRel = QtWidgets.QCheckBox("time 0 = window start")
         self.cbRel.setToolTip("time axis: 0 = start of the loaded window (display only; From/To, tables and exports keep "
@@ -695,7 +695,7 @@ class MainWindow(QtWidgets.QMainWindow):
         vm = self.menuBar().addMenu("View")  # 2026-10-10
         self.aLegend = vm.addAction("Legend of the force plot")
         self.aLegend.setCheckable(True)
-        # off by default since 2026-11-12: it covered the data, and the title line explains the colours; the choice is
+        # off by default since 2026-11-12: it covered the data, and the title line explains the colors; the choice is
         # remembered
         try:
             on = QtCore.QSettings("MyoDishAnalysis", "MyoDishAnalysis").value("showLegend", "off") == "on"
@@ -766,7 +766,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.open_results(fn)
 
     def open_file(self, file, autoload=True):
-        """autoload: the first window (From / To: 0 - 120 s) is loaded and analysed right away (2026-10-14)"""
+        """autoload: the first window (From / To: 0 - 120 s) is loaded and analyzed right away (2026-10-14)"""
         try:
             H = read_mdd(file, None, None, self.opts)
         except Exception as e:  # noqa: BLE001
@@ -850,7 +850,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.first_window()
 
     def first_window(self):
-        """first window of a newly opened file (From / To: 0 - 120 s) loaded and analysed (2026-10-14); the notes of the
+        """first window of a newly opened file (From / To: 0 - 120 s) loaded and analyzed (2026-10-14); the notes of the
         file stay visible after the message of the analysis"""
         self.on_load()
         if self.S is None:
@@ -1045,7 +1045,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def on_advanced(self, *_):
         """advanced settings (2026-10-10): stimulus assignment (onset gate), stimulus source, detection, filters, pulse
-        table; Apply / OK analyse the window again (spike removal: the window is read again)"""
+        table; Apply / OK analyze the window again (spike removal: the window is read again)"""
         from .dialogs import AdvancedSettings
         if getattr(self, "adv_win", None) is None:
             self.adv_win = AdvancedSettings(self)
@@ -1058,7 +1058,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def apply_advanced(self, o):
         """options o of the advanced settings window (checked; with settings of the main window loaded from a settings
-        file): the window is analysed again (options marked reread: read again); returns a message"""
+        file): the window is analyzed again (options marked reread: read again); returns a message"""
         from ..options import options as make_options
         reread = any(not _same(o[k], self.opts[k]) for k in REREAD_NAMES)  # applied when the data are read
         header = not _same(o.rockerSource, self.opts.rockerSource) or \
@@ -1299,7 +1299,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------- several ranges, rocker stops side by side (2026-10-14)
     def in_rng(self, t, R=None):
-        """t within one of the analysed ranges (rows [from, to] of self.range, or of R)"""
+        """t within one of the analyzed ranges (rows [from, to] of self.range, or of R)"""
         t = np.asarray(t, float)
         out = np.zeros(t.shape, bool)
         for a, b in np.asarray(self.range if R is None else R, float).reshape(-1, 2):
@@ -1307,7 +1307,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return out
 
     def range_of(self, t):
-        """number of the analysed range of each time t (0 = none)"""
+        """number of the analyzed range of each time t (0 = none)"""
         t = np.asarray(t, float)
         k = np.zeros(t.shape, int)
         for r in range(len(self.range) - 1, -1, -1):
@@ -1315,11 +1315,11 @@ class MainWindow(QtWidgets.QMainWindow):
         return k
 
     def rng_span(self):
-        """first start and last end of the analysed range(s)"""
+        """first start and last end of the analyzed range(s)"""
         return [float(np.min(self.range[:, 0])), float(np.max(self.range[:, 1]))]
 
     def range_text(self):
-        """analysed range(s) as text (times in the file)"""
+        """analyzed range(s) as text (times in the file)"""
         R = self.range
         hrs = self.H is not None and self.H.totalSeconds >= 3600
         if len(R) == 1 and self.sbs is None:
@@ -1410,7 +1410,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return B, C
 
     def zoom_to_selection(self):
-        """context menu of the force plot: time axis = the analysed range(s)"""
+        """context menu of the force plot: time axis = the analyzed range(s)"""
         if self.S is None or not np.all(np.isfinite(self.range)):
             self.status("Select a range first.")
             return
@@ -1433,7 +1433,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def select_rocker_stops(self):
         """context menu of the force plot ('only contractions with rocker at rest'): all rocker stops of the range shown
-        in the overview are read (each +-2 s) and shown side by side, separated by dashed lines; analysed ranges = the
+        in the overview are read (each +-2 s) and shown side by side, separated by dashed lines; analyzed ranges = the
         stops (2026-10-14)"""
         if self.H is None:
             return
@@ -1550,7 +1550,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return sel
 
     def range_table(self, for_export=False):
-        """contractions of the analysed range(s); for_export: times in the file (rocker stops side by side) and with
+        """contractions of the analyzed range(s); for_export: times in the file (rocker stops side by side) and with
         several ranges the column 'range' (number of the range, 2026-10-14)"""
         inR = self.in_range()
         man = self.is_manual()
@@ -1582,7 +1582,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return float(np.median(v)) if v.size else math.nan
 
     def summary_row(self, R=None):
-        """summary of the selected contractions over the analysed range(s) (all together), or over the ranges R"""
+        """summary of the selected contractions over the analyzed range(s) (all together), or over the ranges R"""
         Bs = self.B.copy()
         Bs["included"] = self.selected()
         Sm = arrhythmic_pacing(summarize(Bs, self.C, self.range if R is None else R, self.opts), self.opts)
@@ -1769,7 +1769,7 @@ class MainWindow(QtWidgets.QMainWindow):
               True),
              ("scatter", dict(symbol="t", size=8, pen=pg.mkPen((128, 128, 128)), brush=None), "excluded by filter", True),
              ("scatter", dict(symbol="x", size=11, pen=pg.mkPen("k", width=1.5), brush="k"), "excluded by you", True),
-             ("scatter", dict(symbol="o", size=4, pen=None, brush=(153, 153, 153)), "outside the analysed range", True),
+             ("scatter", dict(symbol="o", size=4, pen=None, brush=(153, 153, 153)), "outside the analyzed range", True),
              ("scatter", dict(symbol="o", size=12, pen=pg.mkPen(MAGENTA, width=1.5), brush=None),
               "deviating from the reference beat", has["dev"]),
              ("scatter", dict(symbol="o", size=13, pen=pg.mkPen(GREEN, width=1.5), brush=None),
@@ -1785,7 +1785,7 @@ class MainWindow(QtWidgets.QMainWindow):
              ("scatter", dict(symbol="s", size=10, pen=None, brush=(158, 158, 158)), "rocker moving (bar at the top)",
               True),
              ("scatter", dict(symbol="s", size=10, pen=pg.mkPen((217, 179, 51)), brush=(255, 245, 191)),
-              "analysed range", True),
+              "analyzed range", True),
              ("line", pg.mkPen(PURPLE, width=1, style=QtCore.Qt.PenStyle.DotLine), "comment of the log file",
               has["com"]),
              ("line", pg.mkPen((184, 184, 184), width=1), "before the rocker filter", has["raw"])]
@@ -1837,7 +1837,7 @@ class MainWindow(QtWidgets.QMainWindow):
         R = self.range[np.all(np.isfinite(self.range), axis=1)]
         if len(R):
             rects(p, R[:, 0], R[:, 1], yl[0], yl[1], (255, 245, 191), pen=(217, 179, 51), z=-20)
-        self.rocker_bar(p, S.t, S.rockerOn, yl[1] - bar_h, yl[1])  # green = at rest, grey = moving (2026-10-14)
+        self.rocker_bar(p, S.t, S.rockerOn, yl[1] - bar_h, yl[1])  # green = at rest, gray = moving (2026-10-14)
         if show_raw:
             c = p.plot(C.t, f_raw, pen=pg.mkPen((184, 184, 184), width=1))
             c.setDownsampling(auto=True, method="peak")
@@ -1947,9 +1947,9 @@ class MainWindow(QtWidgets.QMainWindow):
                                        raw=bool(show_raw)))
             set_title(p, f"Channel {self.ch}{sb}")
             return
-        ttl = (f"Channel {self.ch}{sb}   (red = selected, orange = uncertain, grey = excluded by filter, x = by you, "
+        ttl = (f"Channel {self.ch}{sb}   (red = selected, orange = uncertain, gray = excluded by filter, x = by you, "
                "blue = stimuli, top bar: green = rocker at rest, purple = comments")
-        ttl += ", light grey = before rocker filter" if show_raw else ""
+        ttl += ", light gray = before rocker filter" if show_raw else ""
         ttl += ", green = extra pulses / elicited by one" if has_x else ""
         ttl += ", diamond = ambiguous stimulus" if has_amb else ""
         set_title(p, ttl + ")")
@@ -1967,7 +1967,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return t[cm], np.cumsum(isc)[cm].astype(int), np.flatnonzero(cm)
 
     def rocker_bar(self, p, t, on, y0, y1):
-        """rocker state as a thin bar from y0 to y1: green = at rest, grey = moving; gaps between rocker stops side
+        """rocker state as a thin bar from y0 to y1: green = at rest, gray = moving; gaps between rocker stops side
         by side left empty (2026-10-14)"""
         t = np.asarray(t, float)
         if t.size == 0:
@@ -2118,8 +2118,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show_flags()
 
     def show_flags(self):
-        """flags of the analysis report for the analysed range of this channel (as in the watcher report; 2026-10-14):
-        red = check the analysis, orange = sensor / chamber, dark yellow = slice quality, grey = none / too few
+        """flags of the analysis report for the analyzed range of this channel (as in the watcher report; 2026-10-14):
+        red = check the analysis, orange = sensor / chamber, dark yellow = slice quality, gray = none / too few
         contractions; descriptions as tool tip. An error is shown in the line (2026-11-12: the line stayed empty, so
         that flags that could not be computed looked like no flags)"""
         self.lFlags.setText("")
@@ -2137,7 +2137,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if not len(R):
                 return
             r = R.iloc[0]
-            # in words on the colour of their group (the colours of the report; 2026-11-12)
+            # in words on the color of their group (the colors of the report; 2026-11-12)
             col, bg = {"check": ("#8c0000", "#f8c9c4"), "sensor": ("#803300", "#f9cf9e"),
                        "quality": ("#594500", "#fbe8a6")}.get(str(r["level"]), ("#737373", "transparent"))
             det = ""
@@ -2432,7 +2432,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 ("left", "\u25C0", "loaded window (selection): move it to the left by half its length (shift + "
                                     "click: extend it to the left; key: left arrow)"),
                 (None, None, None),
-                ("up", "Zoom in", "loaded window (selection): zoom in to half its length around the centre "
+                ("up", "Zoom in", "loaded window (selection): zoom in to half its length around the center "
                                          "(key: up arrow)"),
                 ("down", "Zoom out", "loaded window (selection): zoom out to twice its length (key: down arrow)"),
                 (None, None, None),
@@ -2463,8 +2463,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def nav_window(self, key, ext):
         """arrow keys in the force plot and the buttons under it: change the loaded window (= selection in the overview
-        and analysed range): left / right = move it by half its length (ext / shift: extend it on that side), up / down
-        = zoom in / out (half / twice its length around the centre, at least 1 s); the window is read again"""
+        and analyzed range): left / right = move it by half its length (ext / shift: extend it on that side), up / down
+        = zoom in / out (half / twice its length around the center, at least 1 s); the window is read again"""
         if self.H is None or self.S is None:
             self.status("Load a time window first.")
             return
@@ -2478,7 +2478,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_key(self, key, ext):
         """left / right arrow: move the loaded window by half its length; ext (shift): extend it by half its length
         on that side; up / down: zoom in / out (half / twice its length). Mouse over the overview: the time axis of the
-        overview; otherwise the loaded window (= selection in the overview, analysed range), read again. Returns True
+        overview; otherwise the loaded window (= selection in the overview, analyzed range), read again. Returns True
         if the key was used."""
         if self.H is None:
             return False
@@ -2495,7 +2495,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return True
 
     def load_window(self, w):
-        """read the window w (s): From / To, a zoomed overview moves along; analysed range = the whole window"""
+        """read the window w (s): From / To, a zoomed overview moves along; analyzed range = the whole window"""
         w = [max(0.0, float(w[0])), min(float(self.H.totalSeconds), float(w[1]))]
         if w[1] - w[0] > 4 * 3600:
             self.status("Window longer than 4 h: use the command line version (mda) for long ranges.")
@@ -2680,7 +2680,7 @@ class MainWindow(QtWidgets.QMainWindow):
             m.addAction("Select all (load the range shown, at most 4 h)", self.select_all)
             m.addSeparator()
         if name == "force":
-            m.addAction("Zoom to the selection (analysed range)", self.zoom_to_selection)
+            m.addAction("Zoom to the selection (analyzed range)", self.zoom_to_selection)
             a = m.addAction("Select all rocker stops of the overview range (side by side)", self.select_rocker_stops)
             a.setEnabled(self.cbRocker.isChecked())  # only with 'only contractions with rocker at rest'
             m.addAction("Shift + drag: add a range to the selection").setEnabled(False)
@@ -2699,12 +2699,12 @@ class MainWindow(QtWidgets.QMainWindow):
             m.addAction("Show rocker artifact (removed signal) ...", self.on_rocker_window)
             m.addAction("Show / hide legend", self.aLegend.trigger)
             m.addSeparator()
-        if name in ("ep_v", "ep_s"):  # EP plots: y limits, stimulus artefacts (2026-10-09)
+        if name in ("ep_v", "ep_s"):  # EP plots: y limits, stimulus artifacts (2026-10-09)
             k = 1 if name == "ep_v" else 2
             m.addAction("Set y limits ...", lambda: self.ep_ask_ylim(k))
             m.addAction("y limits: automatic (restore view)", lambda: self.ep_set_ylim(k, None))
             m.addSeparator()
-            a = m.addAction("Remove stimulus artefact", lambda: self.ep_set_clean(not self.ep_clean))
+            a = m.addAction("Remove stimulus artifact", lambda: self.ep_set_clean(not self.ep_clean))
             a.setCheckable(True)
             a.setChecked(self.ep_clean)
             m.addSeparator()
@@ -2795,7 +2795,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.win_overlay.draw()
 
     def overlay_channels(self, chs):
-        """overlay of the analysed range in channels chs (opens the overlay window; scripts / tests)"""
+        """overlay of the analyzed range in channels chs (opens the overlay window; scripts / tests)"""
         from .overlay import OverlayWindow
         if self.win_overlay is None or not self.win_overlay.isVisible():
             self.win_overlay = OverlayWindow(self)
@@ -2846,7 +2846,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.win_protocols.close()
         self.win_protocols = ProtocolWindow(self)
         self.win_protocols.show()
-        try:                                            # analysed at once (2026-11-12: the window opened empty)
+        try:                                            # analyzed at once (2026-11-12: the window opened empty)
             if self.win_protocols.tp.rowCount() > 0:
                 self.win_protocols.analyse()
         except Exception as e:  # noqa: BLE001
@@ -3040,10 +3040,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.Lbl = make_labels(R["labels"], self.H.dataChannels)
             except Exception:  # noqa: BLE001
                 self.status("Results: labels not read.")
-        # data window of the analysis, analysed range, contractions excluded by the user (GUI exports)
+        # data window of the analysis, analyzed range, contractions excluded by the user (GUI exports)
         self.res_info = ""
         segF = parse_rows(R["extra"].get("segments_s", ""))  # rocker stops side by side (GUI export, 2026-10-14)
-        rgF = np.array([[float(w["from"]), float(w["to"])]])  # analysed range(s), time in the file
+        rgF = np.array([[float(w["from"]), float(w["to"])]])  # analyzed range(s), time in the file
         if gui_multi:
             rgF = W[["from", "to"]].to_numpy(float)
         if window is None and len(segF) > 1 and max_len is None:
@@ -3240,7 +3240,7 @@ class MainWindow(QtWidgets.QMainWindow):
         fn, _ = QtWidgets.QFileDialog.getSaveFileName(self, "All channels", d, "Excel (*.xlsx);;text (*.csv)")
         if not fn:
             return
-        self.status("Analysing all channels ...")
+        self.status("Analyzing all channels ...")
         try:
             o = dict(self.opts)
             o["zeroForce"] = [self.zero_of(int(c)) for c in self.H.dataChannels]  # NaN = Offset of the log file
@@ -3327,7 +3327,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._err("EP recording: ", e)
             return
         self.EP = EP
-        self.ep_vc = self.ep_art_mask = None  # artefacts removed / y limits: for this recording
+        self.ep_vc = self.ep_art_mask = None  # artifacts removed / y limits: for this recording
         self.ep_ylim = [None, None]
         self.show_ep(True)
         tEP = (EP.t0, EP.t0 + (EP.V.size - 1) * EP.dt)
@@ -3410,7 +3410,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if v.size == 0:
             tt.append("no EP data in this time range")
         if self.ep_clean:
-            tt.append("stimulus artefacts removed (grey = straight lines; display only)")
+            tt.append("stimulus artifacts removed (gray = straight lines; display only)")
         if self.ep_ylim[0] is not None or self.ep_ylim[1] is not None:
             tt.append("fixed y limits (double-click in the plot: automatic)")
         set_title(self.pEPv, "   |   ".join(tt), 9)
@@ -3487,7 +3487,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ep_set_ylim(k, v)
 
     def ep_set_clean(self, on):
-        """'remove stimulus artefact': EP signal plot without the stimulus artefacts (display only;
+        """'remove stimulus artifact': EP signal plot without the stimulus artifacts (display only;
         analyze_ap.remove_artefacts). The AP parameters are measured on the recorded signal."""
         self.ep_clean = bool(on)
         if self.cbEPclean.isChecked() != self.ep_clean:
@@ -3497,11 +3497,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.draw_ep()
         if self.ep_clean and self.ep_art_mask is not None:
             n = int(np.sum(np.diff(np.r_[False, self.ep_art_mask].astype(int)) == 1))
-            self.status(f"{n} stimulus artefacts removed in the plot (grey = straight lines). Display only: the AP "
+            self.status(f"{n} stimulus artifacts removed in the plot (gray = straight lines). Display only: the AP "
                         "parameters are measured on the recorded signal.")
 
     def _ep_compute_clean(self):
-        """signal without the stimulus artefacts and the replaced samples (cache of the EP recording shown)"""
+        """signal without the stimulus artifacts and the replaced samples (cache of the EP recording shown)"""
         self.ep_vc = self.ep_art_mask = None
         if self.EP is None:
             return
@@ -3603,7 +3603,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 else:
                     yv = float(EP.V[k])
                 tk = EP.t0 + k * EP.dt
-                Hv[3].update(x=tk, y=yv, text=f"{fmt_num(yv, 4)} {EP.unitV}" + (" (artefact removed)" if rep_ else ""))
+                Hv[3].update(x=tk, y=yv, text=f"{fmt_num(yv, 4)} {EP.unitV}" + (" (artifact removed)" if rep_ else ""))
                 ys = float(EP.stim[k])
                 Hv[4].update(x=tk, y=ys, text=f"{fmt_num(ys, 4)} {EP.unitStim}")
         tz = self.S.fromSeconds if self.rel_time else 0.0

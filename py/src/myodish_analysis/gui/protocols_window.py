@@ -68,7 +68,7 @@ class ProtocolWindow(QtWidgets.QWidget):
         v = QtWidgets.QVBoxLayout()
         h.addLayout(v, 2)
         lab = QtWidgets.QLabel("Protocols (comments 'start ... protocol' / 'end ... protocol' or schedule files in the "
-                               "log file). Tick the protocols to analyse; From / To and the grouping can be changed.")
+                               "log file). Tick the protocols to analyze; From / To and the grouping can be changed.")
         lab.setWordWrap(True)
         v.addWidget(lab)
         self.tp = QtWidgets.QTableWidget(0, 7)
@@ -133,7 +133,7 @@ class ProtocolWindow(QtWidgets.QWidget):
         self.cTab.currentIndexChanged.connect(lambda *_: self.fill_table())
         g.addWidget(self.cTab, 6, 1)
         v.addLayout(g)
-        b = primary(QtWidgets.QPushButton("Analyse"))
+        b = primary(QtWidgets.QPushButton("Analyze"))
         b.setToolTip("contractions of the ticked protocols and channels, grouped (threshold, filters, zero force, rocker "
                      "filter and labels as in the main window)")
         b.clicked.connect(self.analyse)
@@ -237,7 +237,7 @@ class ProtocolWindow(QtWidgets.QWidget):
         if len(P) == 0 or not chs:
             self.tx.setText("Tick at least one protocol and one channel.")
             return
-        self.tx.setText("Analysing ...")
+        self.tx.setText("Analyzing ...")
         QtWidgets.QApplication.processEvents()
         o = dict(win.opts)
         for k in ("rocker", "beats", "zeroForce", "threshold"):
@@ -370,7 +370,7 @@ class ProtocolWindow(QtWidgets.QWidget):
     def save_figure(self):
         from .dialogs import ask_file, save_items
         if self.S is None:
-            self.tx.setText("Press Analyse first.")
+            self.tx.setText("Press Analyze first.")
             return
         file = ask_file(self.win, "image", "protocols")
         if not file:
@@ -384,7 +384,7 @@ class ProtocolWindow(QtWidgets.QWidget):
     def export(self):
         from .dialogs import ask_file
         if self.S is None:
-            self.tx.setText("Press Analyse first.")
+            self.tx.setText("Press Analyze first.")
             return
         file = ask_file(self.win, "data", "protocols")
         if not file:

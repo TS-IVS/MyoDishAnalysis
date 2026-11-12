@@ -586,6 +586,10 @@ MATLAB and Python versions have the same version number and give the same result
   - **Show table**: the results first, the label columns (the same in every row) last.
   - **Protocols and Trend compute when the window opens** (Trend: with the window sampling, or for recordings up
     to 2 h); before, both opened empty.
+  - **American spelling in the texts of both GUIs** (analyze, artifact, color, center, gray; e.g. the button
+    *Analyze* of the protocols window and the list entry *not analyzed* of the results browser). Option names
+    (`removeArtefacts`, ...), column names of the result files (`analysedRange_s`, ...) and the messages of the
+    analysis itself (index, notes, report) keep their spelling: they are part of saved settings and results.
   - Tests: `mda_test` (groups of flags), `mda_testAll` (GUI smoke test), `test_mda.py`, `test_gui_smoke.py`.
 - **GUI, Protocols ...**: protocols are preselected if they have a stimulation quantity (groupBy not `none`; before:
   type not `other` / `unknown`), so that the new types without grouping are not preselected.

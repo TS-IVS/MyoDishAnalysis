@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Additional terms (GPL-3.0 section 7): see the file NOTICE
 """Overlay of contractions: one group per added selection (channel, range, filters, exclusions) or per channel of the
-analysed range (checkboxes), mean beat aligned at the stimulus (t = 0) or at the peak, or the time course of the range
-(t = 0 at the first stimulus of each group); colour, line width, line style and band (SD / SEM / range) per group;
+analyzed range (checkboxes), mean beat aligned at the stimulus (t = 0) or at the peak, or the time course of the range
+(t = 0 at the first stimulus of each group); color, line width, line style and band (SD / SEM / range) per group;
 editable title, axis labels and legend; editable copy of the figure (matplotlib); export. Port of the overlay part of
 MyoDishAnalysisGUI.m.
 
@@ -126,7 +126,7 @@ class OverlayWindow(QtWidgets.QWidget):
         b.clicked.connect(self._add_draw)
         hh.addWidget(b)
         b = QtWidgets.QPushButton("Channels (same range) ...")
-        b.setToolTip("channels for the analysed range of the main window (checkboxes): same settings and filters, "
+        b.setToolTip("channels for the analyzed range of the main window (checkboxes): same settings and filters, "
                      "threshold and zero force of each channel; manual exclusions only in the channel of the main "
                      "window")
         b.clicked.connect(self.choose_channels)
@@ -161,7 +161,7 @@ class OverlayWindow(QtWidgets.QWidget):
         self.gName.setToolTip("legend text of the group (empty = automatic)")
         self.gName.editingFinished.connect(lambda: self.set_group_style("name", self.gName.text()))
         gg.addWidget(self.gName, 0, 1, 1, 3)
-        b = QtWidgets.QPushButton("colour ...")
+        b = QtWidgets.QPushButton("color ...")
         b.clicked.connect(self.pick_color)
         gg.addWidget(b, 1, 0)
         gg.addWidget(QtWidgets.QLabel("width"), 1, 1)
@@ -180,7 +180,7 @@ class OverlayWindow(QtWidgets.QWidget):
         self.gBand.activated.connect(lambda i: self.set_group_style("band", BANDS[i]))
         gg.addWidget(self.gBand, 2, 0, 1, 4)
         b = QtWidgets.QPushButton("line and band for all groups")
-        b.setToolTip("width, line style and band of the selected group for all groups (colours and legends stay)")
+        b.setToolTip("width, line style and band of the selected group for all groups (colors and legends stay)")
         b.clicked.connect(self.style_to_all)
         gg.addWidget(b, 3, 0, 1, 4)
         v.addWidget(box)
@@ -222,7 +222,7 @@ class OverlayWindow(QtWidgets.QWidget):
 
     def add_group_of(self, B, C, ch, sel):
         """new overlay group of channel ch: segments of the filtered signal around the selected contractions (peak - 1 s
-        ... peak + 1.6 s) and the force of the analysed range (time course, t = 0 at its first stimulus)."""
+        ... peak + 1.6 s) and the force of the analyzed range (time course, t = 0 at its first stimulus)."""
         w = self.win
         S = w.S
         R = np.asarray(w.range, float).reshape(-1, 2)  # one or several ranges (2026-10-14)
@@ -261,7 +261,7 @@ class OverlayWindow(QtWidgets.QWidget):
         inR = (t >= rng[0]) & (t <= rng[1])  # time course: outside the range(s) NaN
         trY = np.asarray(C.f, float)[inR].copy()
         trY[~w.in_rng(t[inR])] = np.nan
-        self.next_color += 1  # default colours in the order of adding (stay when groups are removed)
+        self.next_color += 1  # default colors in the order of adding (stay when groups are removed)
         G = dict(key=key, seg=seg, dt=S.dt, pre=pre,
                  stimRel=B["t_stim"].to_numpy(float)[sel] - np.asarray(C.peakTimes)[loc],
                  dia=B["diastolicSignal"].to_numpy(float)[sel], amp=B["amplitude"].to_numpy(float)[sel],
@@ -274,13 +274,13 @@ class OverlayWindow(QtWidgets.QWidget):
         return True
 
     def groups_of(self, ch):
-        """overlay groups of channel ch for the analysed range of the main window."""
+        """overlay groups of channel ch for the analyzed range of the main window."""
         R = np.asarray(self.win.range, float).reshape(-1, 2)
         return [k for k, G in enumerate(self.groups)
                 if G["ch"] == ch and G["ranges"].shape == R.shape and np.all(np.abs(G["ranges"] - R) < 1e-6)]
 
     def choose_channels(self):
-        """checkboxes: channels with a group for the analysed range of the main window (ticked = added, unticked =
+        """checkboxes: channels with a group for the analyzed range of the main window (ticked = added, unticked =
         removed)."""
         w = self.win
         if w.S is None or w.H is None:
@@ -292,7 +292,7 @@ class OverlayWindow(QtWidgets.QWidget):
         d.setWindowTitle("Overlay: channels")
         lay = QtWidgets.QVBoxLayout(d)
         sp = w.w2f(np.array(w.rng_span()))
-        lab = QtWidgets.QLabel(f"Channels for the analysed range {fmt_clock(sp[0], hrs, True)} - "
+        lab = QtWidgets.QLabel(f"Channels for the analyzed range {fmt_clock(sp[0], hrs, True)} - "
                                f"{fmt_clock(sp[1], hrs, True)} (same settings; manual exclusions only in channel "
                                f"{w.ch}):")
         lab.setWordWrap(True)
@@ -313,8 +313,8 @@ class OverlayWindow(QtWidgets.QWidget):
         self.set_channels([c for c, cb in zip(chs, cbs) if cb.isChecked()])
 
     def set_channels(self, want):
-        """groups of the analysed range of the main window: exactly the channels want (groups of other channels of this
-        range removed); the channel of the main window with its selection, the others analysed with the same
+        """groups of the analyzed range of the main window: exactly the channels want (groups of other channels of this
+        range removed); the channel of the main window with its selection, the others analyzed with the same
         settings."""
         w = self.win
         if w.S is None or w.B is None:
@@ -334,7 +334,7 @@ class OverlayWindow(QtWidgets.QWidget):
                 Bx, Cx = w.B, w.C
                 sel = np.flatnonzero(w.selected())
             else:
-                w.status(f"Overlay: analysing channel {c} ...")
+                w.status(f"Overlay: analyzing channel {c} ...")
                 try:
                     Bx, Cx = w.analyze_other(c)
                 except Exception as e:  # noqa: BLE001
@@ -417,7 +417,7 @@ class OverlayWindow(QtWidgets.QWidget):
         if not self.groups:
             return
         G = self.groups[self.selected_group()]
-        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(*G["color"]), self, "Colour of the group")
+        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(*G["color"]), self, "Color of the group")
         if c.isValid():
             self.set_group_style("color", (c.red(), c.green(), c.blue()))
 
@@ -483,7 +483,7 @@ class OverlayWindow(QtWidgets.QWidget):
         else:
             yl = f"force - zero force ({MU}N)"
         if mode == 2:
-            tt = "force of the analysed range of each group"
+            tt = "force of the analyzed range of each group"
         elif self.cSingle.isChecked():
             tt = "thick: mean of each group; thin: single contractions"
         else:

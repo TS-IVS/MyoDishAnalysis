@@ -126,7 +126,7 @@ ROWS = (
      1000, "ms", "Detection", False),
     ("lockWindow", "lockWindow: stimulus locking", "num", None,
      "a peak is locked to the stimuli if its latency (time since the previous pulse) lies within +-lockWindow "
-     "of the typical latency (centre of the densest window of 2 x lockWindow); certainty and rocker / artifact"
+     "of the typical latency (center of the densest window of 2 x lockWindow); certainty and rocker / artifact"
      " rules",
      1000, "ms", "Detection", False),
     ("lockWindowRel", "lockWindowRel", "num", None,
@@ -171,7 +171,7 @@ ROWS = (
      1000, "ms", "Detection", False),
     ("invertedMinCapture", "invertedMinCapture", "num", None,
      "inverted signal confirmed: the normal detection in the negated signal finds certain stimulated contractions for "
-     "at least this fraction of the pulses; otherwise (e.g. rocker waves) the channel is analysed as it is",
+     "at least this fraction of the pulses; otherwise (e.g. rocker waves) the channel is analyzed as it is",
      100, "% of pulses", "Detection", False),
     ("invertedSkip", "invertedSkip", "num", None,
      "inverted signal: the stimulus-triggered median starts this time after the pulse (stimulus artifact)",
@@ -446,7 +446,7 @@ ROWS = (
     ("arrhythmicChannels", "Arrhythmically paced channels", "vec", None,
      "channels paced arrhythmically (e.g. 3 5; summary column arrhythmicPacing): the analysis report does not flag "
      "their capture and amplitude CV and does not count their missed beats in the noise index (expected with "
-     "arrhythmic pacing); the capture is still analysed",
+     "arrhythmic pacing); the capture is still analyzed",
      1, "channels", "Protocols", False),
     ("arrhythmicDetection", "Detect arrhythmic pacing", "check", None,
      "channels are also detected as arrhythmically paced if the stim-to-stim variability exceeds "
@@ -458,7 +458,7 @@ ROWS = (
      "stimulus intervals exceeds this value (regular pacing: < 1 %)",
      100, "% (CV)", "Protocols", False),
     ("arrhythmicMinFraction", "arrhythmicMinFraction", "num", None,
-     "arrhythmic pacing: the variable windows make up more than this fraction of the paced time of the analysed "
+     "arrhythmic pacing: the variable windows make up more than this fraction of the paced time of the analyzed "
      "ranges",
      100, "% of the paced time", "Protocols", False),
     ("arrhythmicWindow", "arrhythmicWindow", "num", None,

@@ -1092,7 +1092,7 @@ def test_gui_ep_ylim_artefacts_mouse_pointer(tmp_path):
         assert w.cbEPclean.isChecked() and m.sum() == sum(round((b - a) / EP.dt) + 1 for a, b in RA)
         assert np.array_equal(Vc[~m], EP.V[~m]) and np.array_equal(w.ep_vc, Vc)
         Hv, _ = w.hover(st + 0.005, "signal")
-        assert Hv[3]["text"].endswith("(artefact removed)") and Hv[3]["y"] == pytest.approx(float(Vc[k]))
+        assert Hv[3]["text"].endswith("(artifact removed)") and Hv[3]["y"] == pytest.approx(float(Vc[k]))
         lo, hi = w.pEPv.vb.viewRange()[1]
         assert lo > -100 and hi < 40  # without the saturated artefact (+-102 mV)
         # y limits: fixed, kept when the time axis changes, automatic again (double-click / restore view)
