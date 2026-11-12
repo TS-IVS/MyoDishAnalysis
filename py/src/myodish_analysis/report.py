@@ -9,6 +9,8 @@ Port of mda_report.m (same flags and pages).
     FLAG_RULES                                            version of the flag rules (column rules of mda_flags.csv;
                                                           flags of an older version are computed again; 2026-11-12)
     short_legend()                                        the flags in three lines (red, orange, yellow), for the GUI
+    FLAG_NAMES, flag_words(flags)                         the flags in words: (letter, group, name), and the flags of
+                                                          a channel as text, e.g. 'Sensor at its limit (+ Weak)'
     R = write_report(recordings, 'report.pdf', title=..., subtitle=[...], notice=[...], image=png, **flags)
     f = trend_image('trend.png', D)                       trend image of one channel (watcher, slice register;
                                                           2026-10-14): one panel per parameter, see trend_image
@@ -141,6 +143,30 @@ _GREEN, _ORANGE, _BLUE, _RED, _GREY = "#2e7d32", "#e65100", "#1565c0", "#c62828"
 _A4 = (8.27, 11.69)
 _ROWS_PER_PAGE = 48
 _LINES_PER_PAGE = 78
+
+
+# the flags in words (2026-11-12): what a user reads in the GUI instead of the letters, which stay in the result files
+# and in the overview table of the report. (letter, group, name), in the order of the groups.
+FLAG_NAMES = (("I", "check", "Signal upside down"), ("N", "check", "Noise counted as beats"),
+              ("S", "check", "Large extra beats"), ("D", "check", "Late response"), ("F", "check", "Pacing too fast"),
+              ("R", "check", "Controller restart or update"), ("L", "sensor", "Sensor at its limit"),
+              ("M", "sensor", "Sensor near its limit"), ("W", "sensor", "Chamber out of position"),
+              ("C", "quality", "Does not follow every pulse"), ("X", "quality", "Beats on its own"),
+              ("A", "quality", "Weak"), ("V", "quality", "Unsteady"))
+
+
+def flag_words(flags):
+    """the flags of a channel (letters, column flags) in words: the names of its most severe group and, in brackets,
+    those of the others, e.g. 'Sensor at its limit (+ Weak)'; '' without flags (flag field of the GUI)"""
+    flags = str(flags or "")
+    parts = []
+    for g in ("check", "sensor", "quality"):
+        names = [n for c, grp, n in FLAG_NAMES if grp == g and c in flags]
+        if names:
+            parts.append(", ".join(names))
+    if not parts:
+        return ""
+    return parts[0] + (" (+ %s)" % ", ".join(parts[1:]) if len(parts) > 1 else "")
 
 
 def short_legend():

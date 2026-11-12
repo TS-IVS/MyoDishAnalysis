@@ -12,6 +12,10 @@ function varargout = mda_report(varargin)
 %                                       table of the recording (mda_logEntries / <name>_events.csv): red flag R,
 %                                       sensor flags M, L, W
 %   L = mda_report('legend')            the flags in three lines (cellstr: red, orange, yellow), for the GUI
+%   N = mda_report('names')             table letter, group ('check', 'sensor', 'quality'), name: the flags in words
+%   s = mda_report('words', flags)      the flags of a channel (letters, column flags) in words: the names of its
+%                                       most severe group and, in brackets, those of the others, e.g. 'Sensor at
+%                                       its limit (+ Weak)'; '' without flags (flag field of the GUI; 2026-11-12)
 %   v = mda_report('rules')             version of the flag rules (number, column rules of mda_flags.csv; flags
 %                                       computed with an older version are computed again; 2026-11-12)
 %                                       'controller restart suspected' (warning of the control software 2.2, code
@@ -146,6 +150,10 @@ if ischar(varargin{1}) || isstring(varargin{1})
             varargout{1} = rulesVersion();
         case 'legend'
             varargout{1} = shortLegend();
+        case 'names'
+            varargout{1} = flagNames();
+        case 'words'
+            varargout{1} = flagWords(varargin{2});
         case 'window'
             [varargout{1}, varargout{2}] = reportWindow(varargin{2:5});
         case 'commands'
@@ -198,6 +206,43 @@ function v = rulesVersion()
 % mda_flags.csv are computed again (MyoDishAnalysisWatch, column rules). 2: 2026-11-12 (group sensor / chamber with
 % M, L, W; protocol rule of L and flag T removed; no W without an Offset). 1: everything before (no column).
 v = 2;
+end
+
+
+function N = flagNames()
+% the flags in words (2026-11-12): what a user reads in the GUI instead of the letters, which stay in the result
+% files and in the overview table of the report. One row per flag, in the order of the groups.
+N = cell2table({
+    'I', 'check', 'Signal upside down'
+    'N', 'check', 'Noise counted as beats'
+    'S', 'check', 'Large extra beats'
+    'D', 'check', 'Late response'
+    'F', 'check', 'Pacing too fast'
+    'R', 'check', 'Controller restart or update'
+    'L', 'sensor', 'Sensor at its limit'
+    'M', 'sensor', 'Sensor near its limit'
+    'W', 'sensor', 'Chamber out of position'
+    'C', 'quality', 'Does not follow every pulse'
+    'X', 'quality', 'Beats on its own'
+    'A', 'quality', 'Weak'
+    'V', 'quality', 'Unsteady'}, 'VariableNames', {'letter', 'group', 'name'});
+end
+
+
+function s = flagWords(flags)
+% names of the flags of the most severe group, the others in brackets
+s = '';
+flags = char(flags);
+if isempty(flags), return; end
+N = flagNames();
+parts = {};
+for g = {'check', 'sensor', 'quality'}
+    k = strcmp(N.group, g{1}) & ismember(N.letter, cellstr(flags(:)));
+    if any(k), parts{end+1} = strjoin(N.name(k)', ', '); end %#ok<AGROW>
+end
+if isempty(parts), return; end
+s = parts{1};
+if numel(parts) > 1, s = sprintf('%s (+ %s)', s, strjoin(parts(2:end), ', ')); end
 end
 
 

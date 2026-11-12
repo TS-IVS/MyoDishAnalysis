@@ -566,6 +566,27 @@ MATLAB and Python versions have the same version number and give the same result
   later events (`slice`, `doc`, `protocolRun`, `scheduleRun`) and ISO times inside structured lines.
 
 ### Changed
+- **Both desktop GUIs: clearer words, nothing covered, fewer clicks** (2026-11-12, the small points of the review of
+  2026-11-11; the large ones - start page, settings in basics and expert, help, watcher - go into a browser front
+  end, after which the desktop GUIs get only corrections).
+  - **Flags in words**: the flag line shows the names of the flags of the most severe group on the colour of that
+    group, the others in brackets, e.g. *Flags: Sensor at its limit (+ Weak)*; letters, numbers and the legend as
+    tooltip. One source for the names: `mda_report('names')`, `mda_report('words', flags)` / `report.FLAG_NAMES`,
+    `report.flag_words(flags)`.
+  - **Words instead of signs**: *Zoom in* / *Zoom out* (were two arrows each), *Select everything loaded* (was
+    *Range = loaded window*), *Detection threshold* (was *Threshold, this ch.*), *all beats* / *certain only* (was
+    *high sensitivity* / *high specificity*, cut off in the list), *Export all channels ...* (was *All channels ->
+    file ...*); a current that was not reached is marked `*` (was ` ?!`). MATLAB: table header no longer cut off;
+    the whole status text as tooltip (both).
+  - **The legend no longer covers the data**: off by default, the title line of the force plot explains the
+    colours; menu *View* or right click shows it, and the choice is remembered.
+  - **Menu Tools**: the functions of the right-click menus (selection, zoom, zero force from the log, reference
+    beat, rocker artifact), so that a right click is not the only way to them; *Add an EP recording* moved there
+    from the top bar.
+  - **Show table**: the results first, the label columns (the same in every row) last.
+  - **Protocols and Trend compute when the window opens** (Trend: with the window sampling, or for recordings up
+    to 2 h); before, both opened empty.
+  - Tests: `mda_test` (groups of flags), `mda_testAll` (GUI smoke test), `test_mda.py`, `test_gui_smoke.py`.
 - **GUI, Protocols ...**: protocols are preselected if they have a stimulation quantity (groupBy not `none`; before:
   type not `other` / `unknown`), so that the new types without grouping are not preselected.
 - **`mda_timepoints`: paced windows use the stimulated contractions only** (2026-10-18): when a window contains

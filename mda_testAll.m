@@ -116,7 +116,7 @@ for i = 1:numel(d)
             feval(btn(k).Callback, btn(k), []); drawnow;
         end
         st = findall(gf, 'Style', 'text');
-        tx = arrayfun(@(b) strjoin(cellstr(b.String), ' '), st, 'UniformOutput', false);
+        tx = strtrim(arrayfun(@(b) strjoin(cellstr(b.String), ' '), st, 'UniformOutput', false));
         fl = tx(startsWith(tx, 'Flags'));
         good = ~isempty(fl) && ~any(contains(fl, 'could not be computed'));
         if ~good, pass = false; end

@@ -405,9 +405,7 @@ class MainWindow(QtWidgets.QMainWindow):
         bar.addWidget(btn("Open ...", self.on_open, "a recording (.mdd) or results of an analysis (.xlsx, _info.csv, "
                           "...: recording, settings and analysis window are restored, the contractions detected again "
                           "and compared with the file); the folder is remembered"))
-        bar.addWidget(btn("+ EP recording ...", self.on_open_ep, "add an electrophysiological recording (LabChart .mat "
-                          "export, e.g. sharp electrode: voltage + stimulation) aligned to the stimuli of the open .mdd "
-                          "file"))
+        # (the EP recording, a rare special case, is in the menu Tools since 2026-11-12)
         bar.addWidget(btn("Results ...", self.on_browse, "results browser: the recordings and channels of a results "
                           "folder of the watcher with the flags of the analysis report; double-click opens them"))
         self.lFile = ElidedLabel("no file")
@@ -560,12 +558,13 @@ class MainWindow(QtWidgets.QMainWindow):
         h = QtWidgets.QHBoxLayout()
         h.addWidget(btn("Labels ...", self.on_labels, "labels per channel: setupID, sliceID, species, sampleID, groups, "
                         "treatment, days in culture, analyst ..."))
-        h.addWidget(btn("Range = loaded window", self.on_whole_window))
+        h.addWidget(btn("Select everything loaded", self.on_whole_window,
+                        "the analysed range becomes the whole loaded window (From / To)"))
         pv.addLayout(h)
         g = QtWidgets.QGridLayout()
         thr_tip = ("minimum prominence of a contraction peak, per channel: auto or a manual value for the selected "
                    "channel (kept when you switch channels; also used for All channels, Protocols and Trend)")
-        lt = QtWidgets.QLabel(f"Threshold, this ch. ({MU}N)")
+        lt = QtWidgets.QLabel(f"Detection threshold ({MU}N)")
         lt.setToolTip(thr_tip)
         g.addWidget(lt, 0, 0)
         self.cThr = QtWidgets.QComboBox()
@@ -616,8 +615,10 @@ class MainWindow(QtWidgets.QMainWindow):
         pv.addLayout(hs)
         self.cbRF.toggled.connect(self.on_rocker_filter)
         self.cDet = QtWidgets.QComboBox()
-        self.cDet.addItems(["high sensitivity", "high specificity"])
-        self.cDet.setToolTip("auto threshold: high sensitivity counts all contractions and marks the uncertain ones "
+        self.cDet.addItems(["all beats", "certain only"])
+        self.cDet.setToolTip("uncertain contractions, with the automatic threshold: all beats = counted and marked "
+                             "(high sensitivity), certain only = not counted (high specificity; option detection). "
+                             "High sensitivity counts all contractions and marks the uncertain ones "
                              "(orange: neither locked to the stimuli nor large compared with the other contractions); "
                              "high specificity does not count them")
         self.cDet.activated.connect(self.on_detection)
@@ -659,7 +660,7 @@ class MainWindow(QtWidgets.QMainWindow):
                            "new group; other channels of the same range: Channels ... in the overlay window"), 0, 0)
         grid.addWidget(btn("Show table", self.on_show_table), 0, 1)
         grid.addWidget(btn("Export this channel ...", self.on_export), 1, 0)
-        grid.addWidget(btn("All channels -> file ...", self.on_all_channels), 1, 1)
+        grid.addWidget(btn("Export all channels ...", self.on_all_channels), 1, 1)
         grid.addWidget(btn("Copy summary", self.on_copy), 2, 0)
         grid.addWidget(btn("Help", self.on_help), 2, 1)
         pv.addLayout(grid)
@@ -694,14 +695,40 @@ class MainWindow(QtWidgets.QMainWindow):
         vm = self.menuBar().addMenu("View")  # 2026-10-10
         self.aLegend = vm.addAction("Legend of the force plot")
         self.aLegend.setCheckable(True)
-        self.aLegend.setChecked(True)
+        # off by default since 2026-11-12: it covered the data, and the title line explains the colours; the choice is
+        # remembered
+        try:
+            on = QtCore.QSettings("MyoDishAnalysis", "MyoDishAnalysis").value("showLegend", "off") == "on"
+        except Exception:  # noqa: BLE001
+            on = False
+        self.aLegend.setChecked(on)
         self.aLegend.toggled.connect(self.on_legend)
+        self.aLegend.triggered.connect(                   # (a click of the user, not a call of on_legend)
+            lambda: pref_set("showLegend", "on" if self.aLegend.isChecked() else "off"))
+        # menu Tools (2026-11-12): the functions of the right-click menus of the plots, so that a right click is not
+        # the only way to them, and the EP recording
+        tm = self.menuBar().addMenu("Tools")
+        tm.addAction("Select everything loaded", self.on_whole_window)
+        tm.addAction("Select all of the range shown in the overview (loads it, at most 4 h)", self.select_all)
+        tm.addAction("Select all rocker stops of the overview range (side by side)", self.select_rocker_stops)
+        tm.addAction("Zoom to the selection", self.zoom_to_selection)
+        tm.addSeparator()
+        tm.addAction("Zero force from the log file (Offset)", self.reset_zero)
+        tm.addSeparator()
+        tm.addAction("Reference beat: mean shape of the selected contractions", self.set_reference)
+        tm.addAction("Reference beat: show it and the deviating contractions ...", self.show_reference)
+        tm.addAction("Reference beat: remove it for this channel", self.clear_reference)
+        tm.addSeparator()
+        tm.addAction("Rocker artifact (removed signal) ...", self.on_rocker_window)
+        tm.addSeparator()
+        tm.addAction("Add an EP recording (LabChart .mat) ...", self.on_open_ep)
         hm = self.menuBar().addMenu("Help")
         hm.addAction("Help ...", self.on_help)
 
     # =================================================================================================== helpers
     def status(self, msg):
         self.lStatus.setText(msg)
+        self.lStatus.setToolTip(str(msg))                # the whole text, also where the field cuts it off
         QtWidgets.QApplication.processEvents()
 
     def zero_of(self, ch=None):
@@ -1738,7 +1765,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _force_legend(self, p, has):
         """legend of the markers of the force plot (items without data), the order of the settings guide"""
         E = [("scatter", dict(symbol="t", size=8, pen=pg.mkPen(RED), brush=RED), "selected contraction", True),
-             ("scatter", dict(symbol="t", size=8, pen=pg.mkPen(ORANGE), brush=ORANGE), "uncertain (high sensitivity)",
+             ("scatter", dict(symbol="t", size=8, pen=pg.mkPen(ORANGE), brush=ORANGE), "uncertain",
               True),
              ("scatter", dict(symbol="t", size=8, pen=pg.mkPen((128, 128, 128)), brush=None), "excluded by filter", True),
              ("scatter", dict(symbol="x", size=11, pen=pg.mkPen("k", width=1.5), brush="k"), "excluded by you", True),
@@ -1920,8 +1947,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                        raw=bool(show_raw)))
             set_title(p, f"Channel {self.ch}{sb}")
             return
-        ttl = (f"Channel {self.ch}{sb}   (red = selected, orange = uncertain, grey = excluded by filter, x = excluded "
-               "by you, blue = stimuli, bar at the top: green = rocker at rest, grey = moving, purple = comments")
+        ttl = (f"Channel {self.ch}{sb}   (red = selected, orange = uncertain, grey = excluded by filter, x = by you, "
+               "blue = stimuli, top bar: green = rocker at rest, purple = comments")
         ttl += ", light grey = before rocker filter" if show_raw else ""
         ttl += ", green = extra pulses / elicited by one" if has_x else ""
         ttl += ", diamond = ambiguous stimulus" if has_amb else ""
@@ -2098,7 +2125,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lFlags.setText("")
         self.lFlags.setToolTip("")
         try:
-            from ..report import FLAG_DEFAULTS, report_flags, short_legend
+            from ..report import FLAG_DEFAULTS, flag_words, report_flags, short_legend
             Sm = self.summary_row()
             Tc = self.range_table()
             if "channel" not in Sm.columns:
@@ -2110,17 +2137,22 @@ class MainWindow(QtWidgets.QMainWindow):
             if not len(R):
                 return
             r = R.iloc[0]
-            col = {"check": "#bf0000", "sensor": "#d95e00", "quality": "#997800"}.get(str(r["level"]), "#737373")
+            # in words on the colour of their group (the colours of the report; 2026-11-12)
+            col, bg = {"check": ("#8c0000", "#f8c9c4"), "sensor": ("#803300", "#f9cf9e"),
+                       "quality": ("#594500", "#fbe8a6")}.get(str(r["level"]), ("#737373", "transparent"))
+            det = ""
             if not r["flags"]:
                 txt = (f"Flags: - (fewer than {FLAG_DEFAULTS['min_beats']} contractions)"
                        if r["nDetected"] < FLAG_DEFAULTS["min_beats"] else "Flags: none")
             else:
-                txt = f"Flags {r['flags']}: " + "; ".join(
-                    x for x in (str(r["red"]), str(r["sensor"]), str(r["yellow"])) if x)
+                txt = "Flags: " + flag_words(r["flags"])
+                det = f"{r['flags']}: " + "; ".join(
+                    x for x in (str(r["red"]), str(r["sensor"]), str(r["yellow"])) if x) + "\n"
             self.lFlags.setText(txt)
-            self.lFlags.setStyleSheet(f"color: {col}")
-            self.lFlags.setToolTip("flags of the analysis report for this range (watcher report, report.py):\n"
-                                   + "\n".join(short_legend()) + f"\n{txt}")
+            self.lFlags.setStyleSheet(f"color: {col}; background-color: {bg}; padding: 2px 4px;"
+                                      + (" font-weight: bold;" if r["flags"] else ""))
+            self.lFlags.setToolTip(det + "flags of the analysis report for this range (watcher report, report.py):\n"
+                                   + "\n".join(short_legend()))
         except Exception as err:  # noqa: BLE001 - shown in the line: no flags and no result must not look alike
             self.lFlags.setText("Flags: could not be computed (error, see the tool tip)")
             self.lFlags.setStyleSheet("color: #bf0000")
@@ -2227,8 +2259,8 @@ class MainWindow(QtWidgets.QMainWindow):
             set_title(p, "external trigger pulses (external stimulator; red bars), interval to the previous pulse "
                       "(blue, ms)", 8)
         else:
-            set_title(p, f"stimuli channel {self.C.stimChannel}: current (red bars, mA; green = extra pulse, x = "
-                      "current not reached), interval to the previous pulse (blue, ms)", 8)
+            set_title(p, f"stimuli channel {self.C.stimChannel}: current (red bars, mA; green = extra pulse, x and "
+                      "* = current not reached), interval to the previous pulse (blue, ms)", 8)
         if target is None:
             self.stim_labels()
         else:
@@ -2259,7 +2291,7 @@ class MainWindow(QtWidgets.QMainWindow):
         f = QtGui.QFont()
         f.setPointSize(7)
         for k in v:
-            lab = "ext" if self.C.stimChannel == 0 else f"{cur[k]:g}" + (" ?!" if ok[k] == 0 else "")
+            lab = "ext" if self.C.stimChannel == 0 else f"{cur[k]:g}" + ("*" if ok[k] == 0 else "")
             t = pg.TextItem(lab, color=RED, anchor=(0.5, 1))
             t.setFont(f)
             t.setPos(tS[k], min(cur[k] + 0.04 * (ylL[1] - ylL[0]), ylL[1]))
@@ -2400,9 +2432,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 ("left", "\u25C0", "loaded window (selection): move it to the left by half its length (shift + "
                                     "click: extend it to the left; key: left arrow)"),
                 (None, None, None),
-                ("up", "\u2192\u2190", "loaded window (selection): zoom in to half its length around the centre "
+                ("up", "Zoom in", "loaded window (selection): zoom in to half its length around the centre "
                                          "(key: up arrow)"),
-                ("down", "\u2190\u2192", "loaded window (selection): zoom out to twice its length (key: down arrow)"),
+                ("down", "Zoom out", "loaded window (selection): zoom out to twice its length (key: down arrow)"),
                 (None, None, None),
                 ("right", "\u25B6", "loaded window (selection): move it to the right by half its length (shift + "
                                      "click: extend it to the right; key: right arrow)")):
@@ -2665,7 +2697,7 @@ class MainWindow(QtWidgets.QMainWindow):
             m.addAction("Remove reference beat of this channel", self.clear_reference)
             m.addSeparator()
             m.addAction("Show rocker artifact (removed signal) ...", self.on_rocker_window)
-            m.addAction("Show / hide legend", lambda: self.aLegend.setChecked(not self.aLegend.isChecked()))
+            m.addAction("Show / hide legend", self.aLegend.trigger)
             m.addSeparator()
         if name in ("ep_v", "ep_s"):  # EP plots: y limits, stimulus artefacts (2026-10-09)
             k = 1 if name == "ep_v" else 2
@@ -2792,6 +2824,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.win_trend = TrendWindow(self)
         self.win_trend.show()
+        # calculated at once (2026-11-12: the window opened empty), unless that means reading a long recording as a
+        # whole (sampling 'all contractions' or 'rocker stops' of more than 2 h): then Calculate, as before
+        try:
+            w = self.win_trend
+            if w.pM.currentIndex() == 1 or sum(float(f.dur) for f in w.files) <= 7200:
+                w.calc()
+        except Exception as e:  # noqa: BLE001
+            self._err("Trend: ", e)
 
     def on_protocols(self):
         if self.H is None:
@@ -2806,6 +2846,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.win_protocols.close()
         self.win_protocols = ProtocolWindow(self)
         self.win_protocols.show()
+        try:                                            # analysed at once (2026-11-12: the window opened empty)
+            if self.win_protocols.tp.rowCount() > 0:
+                self.win_protocols.analyse()
+        except Exception as e:  # noqa: BLE001
+            self._err("Protocols: ", e)
 
     def on_comments(self):
         if self.H is None:
@@ -2855,6 +2900,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         from .dialogs import TableWindow
         T = self.range_table()
+        if self.Lbl is not None:                        # the results first, the labels (the same in every row) last
+            lab = [c for c in T.columns if c in self.Lbl.columns and c != "channel"]
+            first = [c for c in ("contraction", "t_peak", "clockTime") if c in T.columns]
+            T = T[first + [c for c in T.columns if c not in first and c not in lab] + lab]
         w = TableWindow(T, f"Channel {self.ch}: contractions, {self.range_text()}", self)
         self._tables = [t for t in getattr(self, "_tables", []) if t.isVisible()] + [w]  # keep a reference
         w.show()

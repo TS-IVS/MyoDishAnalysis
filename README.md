@@ -78,9 +78,10 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    without a new analysis, and saved in `mda_flags.csv`).
    **Main file** (button next to the file name, shown for a parallel recording such as a schedule file or snapshot
    started from the main recording; see "Watcher"): opens the main recording at the window shown, same channel.
-   **Flags** (grey line above the table): the flags of the analysis report for the analysed range of the channel
-   (red = check the analysis, orange = sensor / chamber, dark yellow = slice quality; the pointer shows the codes;
-   an error is shown in the line).
+   **Flags** (line above the table): the flags of the analysis report for the analysed range of the channel, in
+   words on the colour of their group (red = check the analysis, orange = sensor / chamber, yellow = slice quality),
+   e.g. *Flags: Sensor at its limit (+ Weak)*; the pointer shows the letters, the numbers and the legend; an error
+   is shown in the line. The names: `mda_report('names')` / `report.FLAG_NAMES`.
    **Comments ...**: searchable list of the comments in the log file (# = number in the force plot, date and time,
    time in the file, text; option "all log entries" adds events and settings). Search: all typed words must occur.
    Select a row: the comment is highlighted in the force plot; double-click a row (or select it and press **Go to**)
@@ -106,8 +107,12 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    pre-pulses, CCM pulses, ...), green rings = contractions elicited by an extra pulse, black diamonds = ambiguous
    stimulus assignment (see "Stimulus assignment"), thin bar at the top = rocker state (green = at rest, grey =
    moving), yellow = analysed range(s).
-   **Legend** of these markers in the force plot (menu *View → Legend of the force plot* or right click in the force
-   plot; draggable; entries that do not occur in the window are left out).
+   The title line of the force plot explains the colours. **Legend** of the markers inside the plot: menu *View →
+   Legend of the force plot* or right click in the force plot (off by default since 2026-11-12, because it covered
+   the data; the choice is remembered; draggable; entries that do not occur in the window are left out).
+   Menu **Tools** (2026-11-12): what the right-click menus of the plots offer (select everything loaded, select the
+   range of the overview, rocker stops, zoom to the selection, zero force from the log, reference beat, rocker
+   artifact) and *Add an EP recording*.
    Panel *Cursor in the force plot*: *drag = select time range* or *click = exclude / include contraction*.
    **Several ranges** (2026-10-14): **shift + drag** adds a range to the selection (overlapping ranges are merged).
    The contractions and stimuli of all ranges are pooled (table, parameter plot with the mean per range, overlay,
@@ -150,9 +155,9 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    Checkbox **remove rocker artifact**: see "Rocker artifact" below; light grey = signal before the
    correction; the result (artifact size, rocker frequency, or why it was not possible) is shown below the
    checkboxes and in the status line. The setting also applies to All channels, Trend and the exports.
-   List **high sensitivity / high specificity** (next to it; auto threshold): *high sensitivity* (default) counts all
-   contractions and marks the uncertain ones orange (status line: number of uncertain contractions); *high
-   specificity* does not count them. Switching shows the result at once (see "Signal processing and detection").
+   List **all beats / certain only** (next to it; auto threshold): *all beats* (default; high sensitivity) counts all
+   contractions and marks the uncertain ones orange (status line: number of uncertain contractions); *certain only*
+   (high specificity) does not count them. Switching shows the result at once (see "Signal processing and detection").
    **Rocker artifact ...** (button next to *time 0 = window start*; also menu *Save / Export* and right click in the
    force plot): extra window with the signal of the loaded window before (grey) and after (black) the rocker filter
    and the removed periodic artifact (blue; grey background = rocker moving), estimated for the selected channel as
@@ -238,7 +243,7 @@ and rocker speed protocols) and a sharp-electrode recording with its LabChart ex
    position (or off). **Edit figure ...** opens a copy of the plot for free editing (MATLAB: normal figure with the
    plot tools, e.g. double-click a text or line; Python: matplotlib window, toolbar button *Edit axis, curve and image
    parameters*) and saving in other formats.
-7. **+ EP recording ...**: an electrophysiological recording made in parallel with LabChart (`.mat` export; e.g.
+7. **Tools → Add an EP recording ...** (a button until 2026-11-12): an electrophysiological recording made in parallel with LabChart (`.mat` export; e.g.
    sharp electrode: voltage channel + stimulation channel; default file: same name as the `.mdd` file) is aligned to
    the stimuli of the `.mdd` file and shown below the plots with the same time axis (the window grows downwards;
    on small screens the plots above are compressed). The text right of the traces gives the matched stimuli,

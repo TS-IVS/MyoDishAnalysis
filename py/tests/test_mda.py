@@ -936,6 +936,7 @@ def test_gui_threshold_keys_overlay():
         assert not w.cbRF.isChecked() and not w.opts.rockerFilter
         w.adv_win.defaults()
         w.adv_win.apply(True)
+        w.on_legend(True)                    # (off by default since 2026-11-12: the title line explains the colours)
         leg = w.pMain._mda_legend
         assert leg is not None and "selected contraction" in [it[1].text for it in leg.items]
         w.on_legend(False)
@@ -1994,6 +1995,12 @@ def test_flag_groups():
     assert report.FLAG_RULES == 2 and len(report.short_legend()) == 3 and " T " not in L
     assert all(f" {c} " in L for c in "INSDFRMLWCXAV")
     assert set(dict(report.RED_CODES + report.SENSOR_CODES + report.YELLOW_CODES).values()) == set("INSDFRMLWCXAV")
+    # the flags in words (flag field of the GUI)
+    assert sorted(c for c, _, _ in report.FLAG_NAMES) == sorted("INSDFRMLWCXAV")
+    assert report.flag_words("DLWC") == ("Late response (+ Sensor at its limit, Chamber out of position, "
+                                         "Does not follow every pulse)")
+    assert report.flag_words("MV") == "Sensor near its limit (+ Unsteady)"
+    assert report.flag_words("CV") == "Does not follow every pulse, Unsteady" and report.flag_words("") == ""
 
 
 def test_zero_force_and_the_unit_of_the_offset_entry():

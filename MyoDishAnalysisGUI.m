@@ -210,7 +210,11 @@ shiftDown = false;                 %shift key held (shift + click on the arrow b
 hAdv = [];                         %advanced settings window (2026-10-10)
 advD = {}; advCtl = gobjects(0); advMsg = [];   %  ... its definitions, controls, message line
 advPending = struct();              %  ... settings of the main window loaded from a settings file (applied at Apply / OK)
-showLegend = true;                 %legend of the markers in the force plot (menu View; 2026-10-10)
+showLegend = false;                %legend of the markers in the force plot (menu View; 2026-10-10). Off by default
+try                                %since 2026-11-12: it covered the data; the title line explains the colours.
+    showLegend = ispref('MyoDishAnalysis', 'showLegend') && isequal(getpref('MyoDishAnalysis', 'showLegend'), 'on');
+catch                              %The choice is remembered.
+end
 uiBlue = [29 114 185] / 255;       %accent colors of the user interface (2026-10-13; as widgets.py): main buttons,
 uiBlueDark = [21 90 148] / 255;    %  panel titles, stimulus pulses and the loaded window; status texts;
 uiBlueLight = [187 212 234] / 255; %  panel borders
@@ -229,12 +233,11 @@ dflt = {'Units', 'normalized', 'FontSize', 10, 'BackgroundColor', 'w'};
 uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Open ...', 'Position', [0.005 0.955 0.065 0.035], 'Callback', guard(@onOpen), ...
     'TooltipString', ['a recording (.mdd) or results of an analysis (.xlsx, _info.csv, ...: recording, settings and ' ...
     'analysis window are restored, the contractions detected again and compared with the file); the folder is remembered']);
-uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Results ...', 'Position', [0.156 0.955 0.07 0.035], 'Callback', guard(@(~,~) onBrowse()), ...
+uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Results ...', 'Position', [0.072 0.955 0.07 0.035], 'Callback', guard(@(~,~) onBrowse()), ...
     'TooltipString', ['results browser: the recordings and channels of a results folder of the watcher with the flags of ' ...
     'the analysis report; double-click opens them']);
-uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', '+ EP recording ...', 'Position', [0.072 0.955 0.08 0.035], 'Callback', guard(@onOpenEP), ...
-    'TooltipString', 'add an electrophysiological recording (LabChart .mat export, e.g. sharp electrode: voltage + stimulation) aligned to the stimuli of the open .mdd file');
-hFile = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'no file', 'HorizontalAlignment', 'left', 'Position', [0.229 0.952 0.131 0.03]);
+% (the EP recording, a rare special case, is in the menu Tools since 2026-11-12)
+hFile = uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'no file', 'HorizontalAlignment', 'left', 'Position', [0.146 0.952 0.214 0.03]);
 hMain = uicontrol(fig, dflt{:}, 'Style', 'pushbutton', 'String', 'Main file', 'Position', [0.318 0.955 0.042 0.035], ...
     'Visible', 'off', 'Callback', guard(@(~,~) onMainFile()));   %parallel recording: opens the main file at this window
 uicontrol(fig, dflt{:}, 'Style', 'text', 'String', 'Channel', 'HorizontalAlignment', 'right', 'Position', [0.36 0.952 0.04 0.03]);
@@ -262,9 +265,9 @@ axPar = axes(fig, 'Position', [0.05 0.07 0.70 0.2], 'FontSize', 10);
 nb = {'Style', 'pushbutton', 'Units', 'normalized', 'FontSize', 9, 'BackgroundColor', 'w'};
 hNavL = uicontrol(fig, nb{:}, 'String', char(9664), 'Position', [0.05 0.4485 0.022 0.026], 'Callback', guard(@(~,~) onNavButton('leftarrow')), ...
     'TooltipString', 'loaded window (selection): move it to the left by half its length (shift + click: extend it to the left; key: left arrow)');
-uicontrol(fig, nb{:}, 'String', char([8594 8592]), 'Position', [0.373 0.4485 0.026 0.026], 'Callback', guard(@(~,~) onNavButton('uparrow')), ...
+uicontrol(fig, nb{:}, 'String', 'Zoom in', 'Position', [0.35 0.4485 0.049 0.026], 'Callback', guard(@(~,~) onNavButton('uparrow')), ...
     'TooltipString', 'loaded window (selection): zoom in to half its length around the centre (key: up arrow)');
-uicontrol(fig, nb{:}, 'String', char([8592 8594]), 'Position', [0.401 0.4485 0.026 0.026], 'Callback', guard(@(~,~) onNavButton('downarrow')), ...
+uicontrol(fig, nb{:}, 'String', 'Zoom out', 'Position', [0.401 0.4485 0.049 0.026], 'Callback', guard(@(~,~) onNavButton('downarrow')), ...
     'TooltipString', 'loaded window (selection): zoom out to twice its length (key: down arrow)');
 hNavR = uicontrol(fig, nb{:}, 'String', char(9654), 'Position', [0.728 0.4485 0.022 0.026], 'Callback', guard(@(~,~) onNavButton('rightarrow')), ...
     'TooltipString', 'loaded window (selection): move it to the right by half its length (shift + click: extend it to the right; key: right arrow)');
@@ -297,7 +300,21 @@ uimenu(mExp, 'Text', 'Rocker artifact (removed signal) ...', 'Separator', 'on', 
 hRepMenu = uimenu(mExp, 'Text', 'Analysis report (PDF) with ''All channels -> file''', 'Separator', 'on', ...
     'Checked', 'off', 'MenuSelectedFcn', @(~,~) toggleReport());
 mView = uimenu(fig, 'Text', 'View');
-hLegMenu = uimenu(mView, 'Text', 'Legend of the force plot', 'Checked', 'on', 'MenuSelectedFcn', @(~,~) toggleLegend());
+hLegMenu = uimenu(mView, 'Text', 'Legend of the force plot', 'Checked', 'off', 'MenuSelectedFcn', @(~,~) toggleLegend());
+if showLegend, hLegMenu.Checked = 'on'; end
+% menu Tools (2026-11-12): the functions of the right-click menus of the plots, so that a right click is not the only
+% way to them, and the EP recording
+mTools = uimenu(fig, 'Text', 'Tools');
+uimenu(mTools, 'Text', 'Select everything loaded', 'MenuSelectedFcn', guard(@(~,~) onWholeWindow()));
+uimenu(mTools, 'Text', 'Select all of the range shown in the overview (loads it, at most 4 h)', 'MenuSelectedFcn', guard(@(~,~) selectAll()));
+uimenu(mTools, 'Text', 'Select all rocker stops of the overview range (side by side)', 'MenuSelectedFcn', guard(@(~,~) selectRockerStops()));
+uimenu(mTools, 'Text', 'Zoom to the selection', 'MenuSelectedFcn', guard(@(~,~) zoomToSelection()));
+uimenu(mTools, 'Text', 'Zero force from the log file (Offset)', 'Separator', 'on', 'MenuSelectedFcn', guard(@(~,~) resetZero()));
+uimenu(mTools, 'Text', 'Reference beat: mean shape of the selected contractions', 'Separator', 'on', 'MenuSelectedFcn', guard(@(~,~) setReference()));
+uimenu(mTools, 'Text', 'Reference beat: show it and the deviating contractions ...', 'MenuSelectedFcn', guard(@(~,~) showReference()));
+uimenu(mTools, 'Text', 'Reference beat: remove it for this channel', 'MenuSelectedFcn', guard(@(~,~) clearReference()));
+uimenu(mTools, 'Text', 'Rocker artifact (removed signal) ...', 'Separator', 'on', 'MenuSelectedFcn', guard(@(~,~) onRockerWindow()));
+uimenu(mTools, 'Text', 'Add an EP recording (LabChart .mat) ...', 'Separator', 'on', 'MenuSelectedFcn', guard(@onOpenEP));
 axNames = {'overview', 'force', 'stimuli', 'parameter'};
 axList = [axOv axMain axStim axPar];
 for iAxMenu = 1:4                                    %(unique names: variables of the main function are shared with the nested functions)
@@ -334,10 +351,11 @@ rbRange = uicontrol(bg, dflt{:}, 'Style', 'radiobutton', 'String', 'drag = selec
 uicontrol(bg, dflt{:}, 'Style', 'radiobutton', 'String', 'click = exclude / include contraction', 'Position', [0.03 0.06 0.94 0.42]);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Labels ...', 'Position', [0.03 0.835 0.46 0.04], 'Callback', guard(@onLabels), ...
     'TooltipString', 'labels per channel: setupID, sliceID, species, sampleID, groups, treatment, days in culture, analyst ...');
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Range = loaded window', 'Position', [0.51 0.835 0.46 0.04], 'Callback', guard(@onWholeWindow));
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Select everything loaded', 'Position', [0.51 0.835 0.46 0.04], 'Callback', guard(@onWholeWindow), ...
+    'TooltipString', 'the analysed range becomes the whole loaded window (From / To)');
 thrTip = ['minimum prominence of a contraction peak, per channel: auto or a manual value for the selected channel ' ...
     '(kept when you switch channels; also used for All channels, Protocols and Trend)'];
-uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', ['Threshold, this ch. (' mu 'N)'], 'HorizontalAlignment', 'left', 'Position', [0.03 0.79 0.5 0.03], ...
+uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', ['Detection threshold (' mu 'N)'], 'HorizontalAlignment', 'left', 'Position', [0.03 0.79 0.5 0.03], ...
     'TooltipString', thrTip);
 hThrMode = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'auto','manual'}, 'Position', [0.52 0.795 0.22 0.035], 'Callback', guard(@onThreshold), ...
     'TooltipString', thrTip);
@@ -357,10 +375,11 @@ hAdvBtn = uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Advanced ...
 hRF = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'remove rocker artifact', 'Position', [0.03 0.645 0.585 0.033], ...
     'Callback', guard(@onRockerFilter), 'TooltipString', ['subtracts the periodic signal of the rocker movement (estimated per channel ' ...
     'between the contractions, +-60 s around the window); light grey in the force plot = signal before. See mda_rockerFilter']);
-hDet = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'high sensitivity', 'high specificity'}, ...
-    'Position', [0.615 0.647 0.355 0.035], 'Callback', guard(@onDetection), 'TooltipString', ['auto threshold: high sensitivity counts ' ...
-    'all contractions and marks the uncertain ones (orange: neither locked to the stimuli nor large compared with the ' ...
-    'typical contraction and the noise before the stimuli); high specificity does not count them (option detection)']);
+hDet = uicontrol(pnl, dflt{:}, 'Style', 'popupmenu', 'String', {'all beats', 'certain only'}, ...
+    'Position', [0.615 0.647 0.355 0.035], 'Callback', guard(@onDetection), 'TooltipString', ['uncertain contractions (orange: neither ' ...
+    'locked to the stimuli nor large compared with the typical contraction and the noise before the stimuli), with the ' ...
+    'automatic threshold: all beats = counted and marked (high sensitivity), certain only = not counted (high specificity; option ' ...
+    'detection)']);
 hRel = uicontrol(pnl, dflt{:}, 'Style', 'checkbox', 'String', 'time 0 = window start', 'Position', [0.03 0.61 0.585 0.033], ...
     'Callback', guard(@onRelTime), 'TooltipString', 'time axis: 0 = start of the loaded window (display only; From/To, tables and exports keep the time in the file, s)');
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Rocker artifact ...', 'Position', [0.615 0.609 0.355 0.035], ...
@@ -368,15 +387,16 @@ uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Rocker artifact ...', 
     'removes (estimated for this channel and window, also if the filter is off): extra window, save as figure, export data']);
 hCounts = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.03 0.49 0.94 0.118], 'FontSize', 9);
 hFlags = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', '', 'HorizontalAlignment', 'left', 'Position', [0.03 0.462 0.94 0.026], ...
-    'FontSize', 9, 'ForegroundColor', [0.45 0.45 0.45]);   %flags of the analysis report for this range (2026-10-14)
+    'FontSize', 9, 'ForegroundColor', [0.45 0.45 0.45]);   %flags of the analysis report for this range (2026-10-14), in
+                                                           %words on the colour of their group (2026-11-12)
 hTable = uitable(pnl, 'Units', 'normalized', 'Position', [0.03 0.215 0.94 0.245], 'RowName', [], ...
-    'ColumnName', {'parameter','mean','median','SD','n','unit'}, 'ColumnWidth', {96, 58, 58, 52, 32, 40}, 'FontSize', 9);
+    'ColumnName', {'parameter','mean','median','SD','n','unit'}, 'ColumnWidth', {80, 46, 62, 40, 26, 34}, 'FontSize', 9);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Overlay contractions', 'Position', [0.03 0.165 0.46 0.04], 'Callback', guard(@onOverlay), ...
     'TooltipString', ['overlay of the selected contractions (mean beat or time course); press again (or Add in the overlay window) to add ' ...
     'another selection as a new group; other channels of the same range: Channels ... in the overlay window']);
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Show table', 'Position', [0.51 0.165 0.46 0.04], 'Callback', guard(@onShowTable));
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Export this channel ...', 'Position', [0.03 0.12 0.46 0.04], 'Callback', guard(@onExport));
-uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'All channels -> file ...', 'Position', [0.51 0.12 0.46 0.04], 'Callback', guard(@onAllChannels));
+uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Export all channels ...', 'Position', [0.51 0.12 0.46 0.04], 'Callback', guard(@onAllChannels));
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Copy summary', 'Position', [0.03 0.075 0.46 0.04], 'Callback', guard(@onCopy));
 uicontrol(pnl, dflt{:}, 'Style', 'pushbutton', 'String', 'Help', 'Position', [0.51 0.075 0.46 0.04], 'Callback', guard(@(~,~) lightTheme(helpdlg(helpText(), 'MyoDishAnalysis'))));
 hStatus = uicontrol(pnl, dflt{:}, 'Style', 'text', 'String', 'Open an .mdd file.', 'HorizontalAlignment', 'left', 'Position', [0.03 0.003 0.94 0.068], 'FontSize', 9, 'ForegroundColor', uiBlueDark);
@@ -680,10 +700,10 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         catch
         end
         if isempty(mainRec)
-            hMain.Visible = 'off'; hFile.Position(3) = 0.131;
+            hMain.Visible = 'off'; hFile.Position(3) = 0.214;
         else
             hMain.TooltipString = [parallelText() ': opens the main file at the window shown here'];
-            hMain.Visible = 'on'; hFile.Position(3) = 0.088;
+            hMain.Visible = 'on'; hFile.Position(3) = 0.170;
             msg = sprintf('%s This is a %s (button Main file).', msg, parallelText());
         end
         status(msg);
@@ -2030,6 +2050,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         trSamplingControls();
         addlistener(axT, 'XLim', 'PostSet', @(~,~) trTicks());
         trListFiles(); drawTrend();
+        % calculated at once (2026-11-12: the window opened empty), unless that means reading a long recording as a
+        % whole (sampling 'all contractions' or 'rocker stops' of more than 2 h): then Calculate, as before
+        try
+            if hTr.pM.Value == 2 || sum([trFiles.dur]) <= 7200, calcTrend(); end
+        catch ME
+            status(['Trend: ' ME.message]);
+        end
     end
 
     function clearTrend()
@@ -2986,6 +3013,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
     function onShowTable(~, ~)
         if isempty(B), return; end
         T = rangeTable();
+        if ~isempty(Lbl) && istable(Lbl)                %the results first, the labels (the same in every row) last
+            lab = intersect(T.Properties.VariableNames, setdiff(Lbl.Properties.VariableNames, {'channel'}), 'stable');
+            first = intersect({'contraction', 't_peak', 'clockTime'}, T.Properties.VariableNames, 'stable');
+            T = T(:, [first, setdiff(T.Properties.VariableNames, [first, lab], 'stable'), lab]);
+        end
         c = table2cell(T);
         for k = 1:numel(c)
             if isdatetime(c{k}), c{k} = char(c{k}); end
@@ -3356,6 +3388,11 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             'pPa', pPa, 'par', {prPar}, 'pSh', pSh, 'pSD', pSD, 'pTb', pTb, 'tx', tx);
         prRes = [];
         prFind();
+        try                                             %analysed at once (2026-11-12: the window opened empty)
+            if ~isempty(prP) && height(prP) > 0, prAnalyse(); end
+        catch ME
+            hPr.tx.String = ['Protocols: ' ME.message];
+        end
     end
 
     function clearProtocols()
@@ -4416,7 +4453,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
                 'raw', showRaw));
             ttl = sprintf('Channel %d', ch);
         else
-            ttl = sprintf('Channel %d   (red = selected, orange = uncertain, grey = excluded by filter, x = excluded by you, blue = stimuli, bar at the top: green = rocker at rest, grey = moving, purple = comments)', ch);
+            ttl = sprintf('Channel %d   (red = selected, orange = uncertain, grey = excluded by filter, x = by you, blue = stimuli, top bar: green = rocker at rest, purple = comments)', ch);
             if showRaw, ttl = strrep(ttl, 'purple = comments)', 'purple = comments, light grey = before rocker filter)'); end
             if hasX, ttl = strrep(ttl, ')', ', green = extra pulses / elicited by one)'); end
             if hasAmb, ttl = strrep(ttl, ')', ', diamond = ambiguous stimulus)'); end
@@ -4470,7 +4507,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % legend of the markers of the force plot: objects without data (NaN), the order of the settings guide
         E = {
             'line', {'Marker', 'v', 'Color', [0.85 0 0], 'MarkerFaceColor', [0.85 0 0], 'MarkerSize', 6}, 'selected contraction', true;
-            'line', {'Marker', 'v', 'Color', [1 0.55 0], 'MarkerFaceColor', [1 0.55 0], 'MarkerSize', 6}, 'uncertain (high sensitivity)', true;
+            'line', {'Marker', 'v', 'Color', [1 0.55 0], 'MarkerFaceColor', [1 0.55 0], 'MarkerSize', 6}, 'uncertain', true;
             'line', {'Marker', 'v', 'Color', [0.5 0.5 0.5], 'MarkerSize', 6}, 'excluded by filter', true;
             'line', {'Marker', 'x', 'Color', [0 0 0], 'MarkerSize', 10, 'LineWidth', 1.5}, 'excluded by you', true;
             'line', {'Marker', '.', 'Color', [0.6 0.6 0.6]}, 'outside the analysed range', true;
@@ -4505,7 +4542,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function lg = apiLegend(tf)
         % tests / scripts: legend of the force plot on / off (no input: the legend object, [] if none)
-        if nargin > 0 && logical(tf) ~= showLegend, toggleLegend(); end
+        if nargin > 0 && logical(tf) ~= showLegend, toggleLegend(false); end
         lg = findobj(fig, 'Type', 'Legend', 'Tag', 'mdaForceLegend');
     end
 
@@ -4515,9 +4552,13 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         if reportAll, hRepMenu.Checked = 'on'; else, hRepMenu.Checked = 'off'; end
     end
 
-    function toggleLegend()
+    function toggleLegend(remember)
+        % remember (default true: a choice of the user in a menu): kept for the next session (2026-11-12)
         showLegend = ~showLegend;
         if showLegend, hLegMenu.Checked = 'on'; else, hLegMenu.Checked = 'off'; legend(axMain, 'off'); end
+        if nargin < 1 || remember
+            try setpref('MyoDishAnalysis', 'showLegend', char(hLegMenu.Checked)); catch, end
+        end
         if ~isempty(C), plotMain(false); end
     end
 
@@ -4642,7 +4683,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         % red = check the analysis, orange = sensor / chamber, dark yellow = slice quality, grey = none / too few
         % contractions; descriptions as tooltip. An error is shown in the line and logged (2026-11-12: the line stayed
         % empty, so that flags that could not be computed looked like no flags)
-        hFlags.String = ''; hFlags.TooltipString = '';
+        hFlags.String = ''; hFlags.TooltipString = ''; hFlags.BackgroundColor = 'w'; hFlags.FontWeight = 'normal';
         try
             fl = mda_report('defaults');
             Tc = rangeTable();
@@ -4651,22 +4692,25 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             R = mda_report('flags', Sm, Tc, [], fl, LE);
             R = R(R.channel == ch, :);
             if isempty(R), return; end
-            switch R.level{1}
-                case 'check', col = [0.75 0 0];
-                case 'sensor', col = [0.85 0.37 0];
-                case 'quality', col = [0.60 0.47 0];
-                otherwise, col = [0.45 0.45 0.45];
+            switch R.level{1}                           %text and ground: the colours of the report
+                case 'check', col = [0.55 0 0]; bg = [0.973 0.788 0.769];
+                case 'sensor', col = [0.50 0.20 0]; bg = [0.976 0.812 0.620];
+                case 'quality', col = [0.35 0.27 0]; bg = [0.984 0.910 0.651];
+                otherwise, col = [0.45 0.45 0.45]; bg = [1 1 1];
             end
+            det = '';
             if isempty(R.flags{1})
                 if R.nDetected(1) < fl.minBeats, txt = sprintf('Flags: - (fewer than %d contractions)', fl.minBeats);
                 else, txt = 'Flags: none'; end
             else
                 parts = [R.red(1), R.sensor(1), R.yellow(1)];
-                txt = sprintf('Flags %s: %s', R.flags{1}, strjoin(parts(~cellfun(@isempty, parts)), '; '));
+                txt = [' Flags: ' mda_report('words', R.flags{1})];
+                det = sprintf('%s: %s\n', R.flags{1}, strjoin(parts(~cellfun(@isempty, parts)), '; '));
+                hFlags.FontWeight = 'bold';
             end
-            hFlags.String = txt; hFlags.ForegroundColor = col;
-            hFlags.TooltipString = sprintf('flags of the analysis report for this range (watcher report, mda_report):\n%s\n%s', ...
-                strjoin(mda_report('legend')', newline), txt);
+            hFlags.String = txt; hFlags.ForegroundColor = col; hFlags.BackgroundColor = bg;
+            hFlags.TooltipString = sprintf('%sflags of the analysis report for this range (watcher report, mda_report):\n%s', ...
+                det, strjoin(mda_report('legend')', newline));
         catch ME
             hFlags.String = 'Flags: could not be computed (error, see the tooltip)'; hFlags.ForegroundColor = [0.75 0 0];
             hFlags.TooltipString = ME.message;
@@ -4936,7 +4980,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
             title(axT, 'external trigger pulses (external stimulator; red bars), interval to the previous pulse (blue, ms)', ...
                 'FontWeight', 'normal', 'FontSize', 8);
         else
-            title(axT, sprintf(['stimuli channel %d: current (red bars, mA; green = extra pulse, x = current not reached), ' ...
+            title(axT, sprintf(['stimuli channel %d: current (red bars, mA; green = extra pulse, x and * = current not reached), ' ...
                 'interval to the previous pulse (blue, ms)'], C.stimChannel), 'FontWeight', 'normal', 'FontSize', 8);
         end
     end
@@ -4972,7 +5016,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
         yyaxis(axT, 'left'); ylL = ylim(axT);
         lab = arrayfun(@(k) sprintf('%g', cur(k)), v, 'UniformOutput', false);
         if C.stimChannel == 0, lab(:) = {'ext'}; end
-        lab(ok(v) == 0) = strcat(lab(ok(v) == 0), ' ?!');
+        lab(ok(v) == 0) = strcat(lab(ok(v) == 0), '*');     %current not reached (the title says so; was ' ?!')
         h = text(axT, tS(v), min(cur(v) + 0.04 * diff(ylL), ylL(2)), lab, 'Color', [0.85 0 0], ...
             'FontSize', 7, 'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', 'HitTest', 'off');
         w = v(~isnan(iv(v)));
@@ -5491,6 +5535,7 @@ if nargout > 0, figOut = fig; end          %(clearing 'fig' would clear it for t
 
     function status(msg)
         hStatus.String = msg;
+        hStatus.TooltipString = char(msg);                 %the whole text, also where the field cuts it off (2026-11-12)
         statusText = msg;
         hStatus.ForegroundColor = uiBlueDark;
     end
