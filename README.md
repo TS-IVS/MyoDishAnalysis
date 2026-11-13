@@ -673,7 +673,10 @@ nothing but the Python package (standard library, one HTML page, nothing loaded 
   settings and settings files*: `mda-watch ... --settings FILE` and `MyoDishAnalysisWatch(..., 'settings', FILE)` read
   it). *Take the settings of the newest analysis* fills the page from the results of the recording analyzed last, so
   that an experiment goes on with the settings it began with; the page says when they differ. Settings of one
-  recording (threshold by hand, zero force, reference beat, calibration) stay in the desktop GUI.
+  recording (threshold by hand, zero force, reference beat, calibration) stay in the desktop GUI. The group *What
+  the automatic analysis writes* holds the options of the watcher for these passes (time bins, protocols, table of
+  the single contractions, course and its images, tables of the log entries and of the periods without signal, slice
+  register, report); they are kept in `mda_web_watcher.json` in the results folder.
 * **Help**: first steps, the meaning of the colored notes with the thresholds in use, the automatic analysis, and the
   guides (PDF).
 * **Who can reach it**: this computer only (`127.0.0.1`). `--host 0.0.0.0` lets every computer that reaches this one

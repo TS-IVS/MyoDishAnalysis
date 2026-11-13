@@ -165,6 +165,15 @@ MATLAB and Python versions have the same version number and give the same result
     `<experiment>/timepoints/<label>_<time>/`) and pools of them (`timepoints_pooled/<name>/`) are listed below the
     studies and shown with their images, files and tables (sheet *summary* of a treatment; *treatments*,
     *statistics*, *excluded* of a pool).
+  - **What the automatic analysis writes** (2026-11-13): a group of the page *Settings* with the options of the
+    watcher for the passes started from the page: length of a time bin (`bin_minutes`), protocols inside the bins
+    and the margin after a protocol (`include_protocols`, `protocol_margin_seconds`), analysis of the protocols
+    (`protocols`), table of the single contractions (`contractions` all / thinned / none, `thin_factor`,
+    `thin_mode`), course (`overview_seconds`), images of the course (`trends`), tables of the log entries and of
+    the periods without signal (`events`, `gaps`), slice register (`register`), report and notes (`report`). Saved
+    in `<results>/mda_web_watcher.json` (only what differs from the defaults); compared with the newest analysis as
+    the other settings (from the options in the index). The thresholds of the flags, the result format and the
+    folder layout are not on the page.
   - **Which recordings a pass takes** (2026-11-12): below the raw folder of the page *Automatic analysis*: analyze
     what is new (standard), also what was analyzed with another version or other settings (`reanalyze` outdated),
     or everything again; recordings with an error again (`retry_errors`); only / not (`include`, `exclude`); changed

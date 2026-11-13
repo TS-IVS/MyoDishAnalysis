@@ -568,6 +568,7 @@ const sameVal = (a, b) => {
   return x === y;
 };
 const isChanged = (f) => !sameVal(vals[f.name], f.default);
+const optName = (f) => f.name.replace(/^watch:/, "");   // the options of the watcher are "watch:<keyword>"
 const toPanel = (id) => { if (window.innerWidth <= 760) $(id).scrollIntoView({ block: "start" }); };   // narrow window: the list is above the panel
 const sentence = (t) => /^[a-z]+[\s,:]/.test(t) ? t.charAt(0).toUpperCase() + t.slice(1) : t;   // not for names of options (gateMax ...)
 const unitText = (f) => (f.unit || "").replace(/\buN\b/g, "\u00b5N");
@@ -588,7 +589,7 @@ async function loadSettings() {
 }
 function control(f, row, withName) {
   const box = el("div", "ctl"); let inp;
-  if (withName) box.append(el("span", "lab", f.name));
+  if (withName) box.append(el("span", "lab", optName(f)));
   if (f.kind === "check") {
     inp = el("input"); inp.type = "checkbox"; inp.checked = !!vals[f.name];
     inp.addEventListener("change", () => setVal(f, inp.checked, row));
@@ -625,7 +626,7 @@ function fieldRow(title, text, fields) {
   const row = el("div", "set"), left = el("div"), right = el("div", "c");
   left.append(el("div", "t", title));
   if (text) left.append(el("div", "d", text));
-  left.append(el("div", "o", fields.map((f) => f.name).join(", ")));
+  left.append(el("div", "o", fields.map(optName).join(", ")));
   row._fields = fields; row._def = el("div", "def");
   for (const f of fields) right.append(control(f, row, fields.length > 1));
   right.append(row._def); row.append(left, right); mark(row);
@@ -641,6 +642,7 @@ function drawSide() {
     side.append(b);
   };
   item("basics", "Basics");
+  { const fs = S.fields.filter((f) => f.tab === S.watch.name), n = fs.filter(isChanged).length; item(S.watch.name, S.watch.title, n ? n + " changed" : String(fs.length)); }
   side.append(el("div", "cap", "Expert"));
   for (const t of S.tabs) {
     const fs = S.fields.filter((f) => f.tab === t.name), n = fs.filter(isChanged).length;
@@ -652,6 +654,7 @@ function drawSettings() {
   const words = $("setSearch").value.toLowerCase().split(/\s+/).filter(Boolean), by = {};
   for (const f of S.fields) by[f.name] = f;
   const titles = {}; for (const t of S.tabs) titles[t.name] = t.title;
+  titles[S.watch.name] = S.watch.title;
   drawSide();
   const p = $("setPanel"); p.textContent = "";
   if (words.length) {
@@ -665,9 +668,10 @@ function drawSettings() {
     for (const b of S.basics) p.append(fieldRow(b.title, b.text, b.names.map((n) => by[n]).filter(Boolean)));
   } else {
     p.append(el("h3", "", titles[setTab] || setTab));
+    if (setTab === S.watch.name) p.append(el("p", "msg", "Which tables and images an analysis started from this page writes. A changed setting holds for the recordings analyzed from then on; earlier results stay as they are. The gray name is the keyword of the watcher in scripts."));
     for (const f of S.fields.filter((x) => x.tab === setTab)) p.append(fieldRow(f.label, sentence(f.text), [f]));
   }
-  $("setSub").textContent = "For the analyses started from this page. Saved in " + S.file + ".";
+  $("setSub").textContent = "For the analyses started from this page. Saved in " + S.file + (S.changed.some((n) => n.startsWith("watch:")) ? " and " + S.watch.file : "") + ".";
   const note = $("setNote"); note.textContent = "";
   if (S.source !== "saved" && S.source !== "standard") note.append(el("p", "", "Shown: the settings of " + S.source + ". They are used once you save them."));
   if (S.notOnPage.length) note.append(el("p", "", "Not taken over, because they belong to one recording and not to a folder: " + S.notOnPage.join(", ") + "."));
@@ -682,7 +686,7 @@ function drawSettings() {
 }
 function footer() {
   const ch = S.fields.filter(isChanged);
-  let t = ch.length ? ch.length + " setting" + (ch.length === 1 ? " differs" : "s differ") + " from the standard: " + ch.slice(0, 8).map((f) => f.name).join(", ") + (ch.length > 8 ? ", ..." : "") + "." : "All settings are standard.";
+  let t = ch.length ? ch.length + " setting" + (ch.length === 1 ? " differs" : "s differ") + " from the standard: " + ch.slice(0, 8).map(optName).join(", ") + (ch.length > 8 ? ", ..." : "") + "." : "All settings are standard.";
   if (setDirty) t += " Not saved yet.";
   $("setState").textContent = t;
   $("setSave").disabled = !setDirty; $("setStd").disabled = !ch.length;

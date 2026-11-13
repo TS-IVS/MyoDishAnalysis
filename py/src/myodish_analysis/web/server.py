@@ -33,8 +33,9 @@ Interface (JSON unless noted):
                                     analyzes recordings again (code "again", again)
     GET  /api/settings              the settings page: fields (value as shown, default), basics, what differs
     POST /api/settings              {"values": {option: value as shown}, "base": "standard" | ""}: saves them in
-                                    <results>/mda_web_settings.csv (settings.save_settings); passes started from the
-                                    page use this file
+                                    <results>/mda_web_settings.csv (settings.save_settings) and the options of the
+                                    watcher ("watch:<keyword>": what the automatic analysis writes) in
+                                    <results>/mda_web_watcher.json; passes started from the page use both
     POST /api/settings/last         the page filled with the settings of the newest analysis (not saved)
     POST /api/settings/file         {"text": content of a settings file .csv, "name"}: the page filled with them
     GET  /api/help                  flags with the thresholds in use, guides at hand
@@ -127,6 +128,48 @@ _BASICS = (
      "numbers, e.g. 1 3 5)", ("arrhythmicChannels",)),
     ("Protocols: beats per frequency step", "How many beats at the end of a step are the steady state",
      ("steadyStateBeats",)),
+)
+# what the automatic analysis writes: options of the watcher (keywords of watch) for the passes started from the page,
+# kept in <results>/mda_web_watcher.json (only what differs from WATCH_DEFAULTS). Same columns as advanced.ROWS; the
+# name on the page is "watch:<keyword>". text = key of the option in the options text of the index ('' = not in it).
+WATCHER_NAME = "mda_web_watcher.json"
+_WATCH_TAB = "watch"
+_WATCH_TITLE = "What the automatic analysis writes"
+_WATCH_ROWS = (
+    ("bin_minutes", "Length of a time bin", "num", None,
+     "the summary has one row per channel and time bin (without the periods of the stimulation protocols, unless "
+     "they are kept in the bins)", 1, "min", "binminutes"),
+    ("include_protocols", "Stimulation protocols inside the time bins", "check", None,
+     "off (standard): the periods of the stimulation protocols are left out of the time bins", 1, "",
+     "includeprotocols"),
+    ("protocol_margin_seconds", "Left out after the end of a protocol", "num", None,
+     "the time bins also leave out this time after the end of a stimulation protocol (not used when the protocols "
+     "are kept in the bins)", 1, "s", "protocolmarginseconds"),
+    ("protocols", "Analyze the stimulation protocols", "check", None,
+     "the stimulation protocols found in the log file are analyzed per value of their stimulation quantity", 1, "",
+     "protocols"),
+    ("contractions", "Table of the single contractions", "popup",
+     (("all contractions", "all"), ("thinned", "thinned"), ("none", "none")),
+     "thinned: one of n contractions per channel (below); extra beats are always kept", 1, "", "contractions"),
+    ("thin_factor", "Thinned: one of", "int", None, "only for the thinned table of contractions", 1, "contractions",
+     "thinfactor"),
+    ("thin_mode", "Thinned: which", "popup",
+     (("every n-th contraction", "nth"), ("the median of n contractions", "median")),
+     "only for the thinned table of contractions", 1, "", "thinmode"),
+    ("overview_seconds", "Course: one value per", "num", None,
+     "medians of all contractions per window (the course over a recording and the images of it); 0 = none", 1, "s",
+     "overviewseconds"),
+    ("trends", "Images of the course per channel", "check", None, "one image per channel and recording; they need "
+     "the course above", 1, "", ""),
+    ("events", "Table of the entries of the log file", "check", None,
+     "comments, stimulation and rocker settings, recording, warnings", 1, "", "events"),
+    ("gaps", "Periods without signal", "check", None,
+     "chamber taken out, sensor board failures, empty channels: tables and the columns noSignal_s, nChamberOut", 1,
+     "", "gaps"),
+    ("register", "Slice register", "check", None, "one row per slice: start, end, end status, last amplitude, days",
+     1, "", ""),
+    ("report", "Report of the experiment and notes", "check", None,
+     "the PDF report per experiment and the notes of the results page (mda_flags.csv)", 1, "", ""),
 )
 _DOCS = (("MyoDishAnalysis_quickstart_watcher.pdf", "Quick start: the automatic analysis (1 page)"),
          ("MyoDishAnalysis_quickstart_GUI.pdf", "Quick start: the desktop program (2 pages)"),
@@ -228,18 +271,44 @@ class App:
             return options(load_settings(f))
         return options()
 
-    def pass_keywords(self):
-        """keywords of watch for a pass started from the page (the settings file of the page, if there is one)"""
-        return dict(settings=self.settings_file()) if os.path.isfile(self.settings_file()) else {}
+    def watcher_file(self):
+        return os.path.join(self.results, WATCHER_NAME)
 
-    def settings(self, opts=None, source=None):
+    def watcher_options(self):
+        """the options of the watcher saved by the page that differ from its defaults ({} without the file)"""
+        from ..watch import WATCH_DEFAULTS
+        try:
+            with open(self.watcher_file(), encoding="utf-8") as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            return {}
+        known = {r[0] for r in _WATCH_ROWS}
+        return {k: v for k, v in d.items() if k in known and v != WATCH_DEFAULTS[k]} if isinstance(d, dict) else {}
+
+    def pass_keywords(self):
+        """keywords of watch for a pass started from the page: the settings file of the page, if there is one, and
+        the options of the watcher saved by the page"""
+        kw = dict(settings=self.settings_file()) if os.path.isfile(self.settings_file()) else {}
+        kw.update(self.watcher_options())
+        return kw
+
+    def pass_options_text(self, wopts=None):
+        """the text of the options that a pass started from the page records in the index (watch.options_text)"""
+        from ..watch import WATCH_DEFAULTS, _expand_settings, options_text
+        kw = self.pass_keywords()
+        w = {k: kw.pop(k) for k in list(kw) if k in WATCH_DEFAULTS}
+        return options_text(_expand_settings(kw), w if wopts is None else wopts)
+
+    def settings(self, opts=None, source=None, wopts=None):
         """the settings page: every field with its value as shown (option x scale) and its default, the basics, what
         differs from the defaults and from the newest analysis. opts: options to show instead of the saved ones
-        (loaded from a file or from the newest analysis, not saved yet)"""
+        (loaded from a file or from the newest analysis, not saved yet); wopts: the same for the options of the
+        watcher"""
         from .. import advanced
         from ..options import options
-        from ..watch import _expand_settings, _value_text, options_text
+        from ..watch import WATCH_DEFAULTS, _value_text
         D = options()
+        W = dict(WATCH_DEFAULTS, **(self.watcher_options() if wopts is None else wopts))
         saved = os.path.isfile(self.settings_file())
         if opts is None:
             opts, source = self._options_now(), "saved" if saved else "standard"
@@ -250,23 +319,33 @@ class App:
                                text=text, unit=unit, tab=tab, value=_shown(opts[name], kind, scale),
                                default=_shown(D[name], kind, scale)))
         changed = [n for n in D if n != "referenceBeat" and _value_text(opts[n]) != _value_text(D[n])]
+        for name, label, kind, items, text, scale, unit, _ in _WATCH_ROWS:
+            fields.append(dict(name="watch:" + name, label=label, kind=kind, text=text, unit=unit, tab=_WATCH_TAB,
+                               items=[[str(a), b] for a, b in items or ()], value=_shown(W[name], kind, scale),
+                               default=_shown(WATCH_DEFAULTS[name], kind, scale)))
+            if W[name] != WATCH_DEFAULTS[name]:
+                changed.append("watch:" + name)
         last = self.last_analysis()
         diff = []
         if last:
-            mine = _text_dict(options_text(_expand_settings(self.pass_keywords())))
+            mine = _text_dict(self.pass_options_text())
             theirs = _text_dict(last[1])
             low = {r[0].lower(): r for r in _EXTRA_ROWS + tuple(advanced.ROWS)}
+            low.update({r[7]: (r[1],) + tuple(r[1:7]) for r in _WATCH_ROWS if r[7]})   # named by their label
 
             def show(k, d):   # the value as the page shows it; an option that is not named has its standard value
                 row = low.get(k)
                 if k in d:
                     return _canon_shown(row, d[k]) if row else d[k]
-                return _canon_shown(row, _value_text(D[row[0]])) + " (standard)" if row else "standard"
+                if row and row[0] in D:
+                    return _canon_shown(row, _value_text(D[row[0]])) + " (standard)"
+                return "standard"
             diff = [dict(name=low[k][0] if k in low else k, last=show(k, theirs), page=show(k, mine))
                     for k in sorted(set(mine) | set(theirs)) if mine.get(k) != theirs.get(k)]
         return dict(file=self.settings_file(), saved=saved, source=source, fields=fields, changed=changed,
-                    notOnPage=[n for n in changed if n not in on_page],
+                    notOnPage=[n for n in changed if n not in on_page and not n.startswith("watch:")],
                     tabs=[dict(name=t, title=_TAB_TITLES.get(t, t)) for t in advanced.TABS],
+                    watch=dict(name=_WATCH_TAB, title=_WATCH_TITLE, file=self.watcher_file()),
                     basics=[dict(title=a, text=b, names=list(c)) for a, b, c in _BASICS],
                     download=self._url(self.settings_file()) if saved else "",
                     last=dict(file=last[0], canLoad=bool(last[2]), differs=diff) if last else None)
@@ -277,10 +356,21 @@ class App:
         from .. import advanced
         from ..options import options
         from ..settings import save_settings
+        from ..watch import WATCH_DEFAULTS
         cur = options() if base == "standard" else self._options_now()
         rows = {r[0]: r for r in _EXTRA_ROWS + tuple(advanced.ROWS)}
+        wrows = {r[0]: r for r in _WATCH_ROWS}
+        W = dict(WATCH_DEFAULTS, **({} if base == "standard" else self.watcher_options()))
         changes = {}
         for name, v in dict(values or {}).items():
+            if name.startswith("watch:") and name[6:] in wrows:
+                _, label, kind, items, _, scale = wrows[name[6:]][:6]
+                if not _same_shown(v, _shown(W[name[6:]], kind, scale)):
+                    try:
+                        W[name[6:]] = _parse(v, kind, scale, items)
+                    except ValueError as e:
+                        raise ValueError(f"{label}: {e}") from None
+                continue
             if name not in rows:
                 raise ValueError(f"unknown setting: {name}")
             _, label, kind, items, _, scale = rows[name][:6]
@@ -291,8 +381,19 @@ class App:
             except ValueError as e:
                 raise ValueError(f"{label}: {e}") from None
         opts = options(cur, **changes)
+        if not (math.isfinite(W["bin_minutes"]) and W["bin_minutes"] > 0):
+            raise ValueError("Length of a time bin: minutes above 0 expected")
+        if not (math.isfinite(W["thin_factor"]) and W["thin_factor"] >= 1):
+            raise ValueError("Thinned: one of: a whole number from 1 on expected")
+        for k, label in (("overview_seconds", "Course: one value per"),
+                         ("protocol_margin_seconds", "Left out after the end of a protocol")):
+            if not (math.isfinite(W[k]) and W[k] >= 0):
+                raise ValueError(label + ": seconds from 0 on expected")
+        W["thin_factor"] = int(W["thin_factor"])
         os.makedirs(self.results, exist_ok=True)
         save_settings(self.settings_file(), opts)
+        with open(self.watcher_file(), "w", encoding="utf-8") as fh:   # only what differs from the defaults
+            json.dump({k: W[k] for k in wrows if W[k] != WATCH_DEFAULTS[k]}, fh, indent=1)
         return self.settings()
 
     def last_analysis(self):
@@ -314,7 +415,17 @@ class App:
         last = self.last_analysis()
         if not last or not last[2]:
             raise ValueError("no analyzed recording with its settings in this results folder")
-        return self.settings(options(load_settings(last[2])), "the newest analysis (" + last[0] + ")")
+        from ..watch import WATCH_DEFAULTS
+        W, theirs = {}, _text_dict(last[1])   # the options of the watcher of that analysis: from the index
+        for name, _, kind, items, _, _, _, key in _WATCH_ROWS:
+            if key in theirs:
+                try:
+                    W[name] = (theirs[key] in ("1", "true")) if kind == "check" else _parse(theirs[key], kind, 1, items)
+                except ValueError:
+                    pass
+            else:
+                W[name] = self.watcher_options().get(name, WATCH_DEFAULTS[name])   # not in the index: as saved
+        return self.settings(options(load_settings(last[2])), "the newest analysis (" + last[0] + ")", W)
 
     def settings_of_text(self, text, name=""):
         """the settings page filled with the settings of a settings file (.csv) given as text (not saved)"""
@@ -366,7 +477,8 @@ class App:
         D, O = options(), self._options_now()
         return dict(recordings=int(len(X)), counts=counts, lastAnalyzed=last, locked=bool(busy), reports=reports,
                     raw=self.raw or self.raw_of_last_report(), lastRaw=self.raw_of_last_report(), run=run,
-                    settingsChanged=[n for n in D if n != "referenceBeat" and _value_text(O[n]) != _value_text(D[n])])
+                    settingsChanged=[n for n in D if n != "referenceBeat" and _value_text(O[n]) != _value_text(D[n])]
+                    + sorted(self.watcher_options()))
 
     def raw_of_last_report(self):
         """raw folder named in the newest pass report ('' if there is none)"""

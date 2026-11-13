@@ -149,8 +149,9 @@ def test_settings_page_save_and_use(site):
     code, s = _json(url + "/api/settings")
     assert code == 200 and s["source"] == "standard" and not s["saved"] and s["changed"] == [] and s["file"] == file
     names = [f["name"] for f in s["fields"]]
-    D, tabs = options(), {t["name"] for t in s["tabs"]}
-    assert len(names) == len(set(names)) and all(n in D for n in names) and all(f["tab"] in tabs for f in s["fields"])
+    D, tabs = options(), {t["name"] for t in s["tabs"]} | {s["watch"]["name"]}
+    assert len(names) == len(set(names)) and all(f["tab"] in tabs for f in s["fields"])
+    assert all(n in D for n in names if not n.startswith("watch:"))   # watch: the options of the watcher
     assert all(n in names for b in s["basics"] for n in b["names"])   # every basic setting is a field of the page
     assert s["last"]["canLoad"] and s["last"]["differs"] == []       # the analysis of the fixture: standard settings
     # sent back unchanged: nothing differs from the defaults (no rounding by the way through the page)
@@ -179,7 +180,7 @@ def test_settings_page_save_and_use(site):
             break
         time.sleep(0.1)
     assert w["run"]["error"] == "" and "recording(s) to analyse" in w["run"]["output"]
-    text = W.options_text(W._expand_settings(app.pass_keywords()))   # the options such a pass records in the index
+    text = app.pass_options_text()   # the options such a pass records in the index
     assert "gatemax=0.12" in text and "rockerfilter=1" in text and "detection=specific" in text
     # what is not a value is refused with the name of the setting, and nothing is saved
     before = open(file, encoding="utf-8").read()
@@ -416,3 +417,57 @@ def test_single_treatments_and_pools_outside_a_study(tmp_path):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_what_the_automatic_analysis_writes(site):
+    """the options of the watcher on the settings page (time bins, table of contractions, course, tables, report):
+    saved in mda_web_watcher.json, used by the passes started from the page, compared with the newest analysis"""
+    url, raw, res, app = site
+    file = os.path.join(res, "mda_web_watcher.json")
+    code, s = _json(url + "/api/settings")
+    f = {x["name"]: x for x in s["fields"]}
+    assert code == 200 and s["watch"] == dict(name="watch", title="What the automatic analysis writes", file=file)
+    assert f["watch:bin_minutes"]["value"] == 60 and f["watch:bin_minutes"]["tab"] == "watch"
+    assert f["watch:contractions"]["value"] == "all" and f["watch:trends"]["value"] is True
+    assert not [n for n in s["changed"] if n.startswith("watch:")] and app.watcher_options() == {}
+    new = {"watch:bin_minutes": 30, "watch:contractions": "thinned", "watch:thin_factor": "5", "watch:trends": False}
+    code, s = _json(url + "/api/settings", {"values": new})
+    assert code == 200 and sorted(n for n in s["changed"] if n.startswith("watch:")) == sorted(new)
+    with open(file, encoding="utf-8") as fh:
+        assert json.load(fh) == {"bin_minutes": 30.0, "contractions": "thinned", "thin_factor": 5, "trends": False}
+    kw = app.pass_keywords()
+    assert kw["bin_minutes"] == 30 and kw["contractions"] == "thinned" and kw["trends"] is False and "settings" in kw
+    text = app.pass_options_text()
+    assert "binminutes=30;" in text and "contractions=thinned" in text and "thinfactor=5" in text
+    d = {x["name"]: x for x in s["last"]["differs"]}   # the newest analysis: the defaults
+    assert d["Length of a time bin"] == dict(name="Length of a time bin", last="60 min", page="30 min")
+    assert d["Table of the single contractions"]["page"] == "thinned"
+    code, w = _json(url + "/api/watcher")
+    assert {"bin_minutes", "contractions", "thin_factor", "trends"} <= set(w["settingsChanged"])
+    for bad, word in (({"watch:bin_minutes": 0}, "minutes above 0"), ({"watch:thin_factor": 0}, "from 1 on"),
+                      ({"watch:contractions": "some"}, "one of these"), ({"watch:overview_seconds": -1}, "from 0 on"),
+                      ({"watch:nope": 1}, "unknown setting"), ({"watch:trends": "no"}, "on or off")):
+        code, j = _json(url + "/api/settings", {"values": bad})
+        assert code == 400 and word in j["error"], bad
+    with open(file, encoding="utf-8") as fh:
+        assert json.load(fh)["bin_minutes"] == 30.0   # nothing saved by the refused requests
+    # the settings of the newest analysis (made with the defaults) fill the page again, nothing is saved
+    code, s4 = _json(url + "/api/settings/last", {})
+    f = {x["name"]: x for x in s4["fields"]}
+    assert code == 200 and f["watch:bin_minutes"]["value"] == 60 and f["watch:contractions"]["value"] == "all"
+    assert f["watch:trends"]["value"] is False   # not in the index: stays as saved
+    # one real pass from the page writes with them: the index records the options
+    code, j = _json(url + "/api/watcher/run", {"options": {"reanalyze": "all", "min_file_age_minutes": 0},
+                                               "again": True})
+    assert code == 200
+    w = _wait_pass(url)
+    X = W.read_index(res)
+    assert w["run"]["error"] == "" and "binminutes=30;" in X["options"][0] and "thinfactor=5" in X["options"][0]
+    code, s5 = _json(url + "/api/settings")
+    assert s5["last"]["differs"] == []   # the newest analysis now has the settings of the page
+    # back to the standard: the file stays, empty
+    code, s6 = _json(url + "/api/settings", {"values": {}, "base": "standard"})
+    assert code == 200 and s6["changed"] == [] and app.watcher_options() == {}
+    with open(file, encoding="utf-8") as fh:
+        assert json.load(fh) == {}
+    assert "bin_minutes" not in app.pass_keywords()
