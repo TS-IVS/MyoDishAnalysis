@@ -455,11 +455,13 @@ def _expand_settings(kw):
     return out
 
 
-def code_fingerprint():
+def code_fingerprint(folder=None):
     """adler32 (hex) of the core modules (all modules of the package except command line, self test, watcher, slice
-    register, GUI)."""
-    p = os.path.dirname(os.path.abspath(__file__))
-    files = sorted(f for f in os.listdir(p) if f.endswith(".py")
+    register, GUI). Files whose name starts with a dot are not code and are left out: on a volume without extended
+    attributes (exFAT, some network drives) macOS puts a file ._<name>.py beside every module, and the same code
+    would count as other code there (2026-11-13). folder: another folder than the package (tests)."""
+    p = folder or os.path.dirname(os.path.abspath(__file__))
+    files = sorted(f for f in os.listdir(p) if f.endswith(".py") and not f.startswith(".")
                    and f not in ("cli.py", "selftest.py", "watch.py", "slice_register.py"))
     a = 1
     for f in files:

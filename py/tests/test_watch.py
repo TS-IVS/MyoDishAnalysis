@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import tempfile
 import time
 
 import numpy as np
@@ -392,6 +393,23 @@ def test_helpers():
     assert W.event_category("comment", "note: MX1.6-1.8 Dexa100nM") == "comment"
     assert W.mda_version() == "1.0.0-beta.5" or "-" not in mda.__version__
     assert len(W.code_fingerprint()) == 8
+    # files beside the modules whose name starts with a dot are not code (._<name>.py of macOS on exFAT volumes)
+    d = tempfile.mkdtemp()
+    for name, text in (("analysis.py", "a = 1\n"), ("options.py", "b = 2\n"), ("watch.py", "w = 0\n")):
+        with open(os.path.join(d, name), "w") as fh:
+            fh.write(text)
+    c0 = W.code_fingerprint(d)
+    for name in ("._analysis.py", "._options.py", ".hidden.py"):
+        with open(os.path.join(d, name), "wb") as fh:
+            fh.write(b"\x00\x05\x16\x07 Mac OS X")
+    assert W.code_fingerprint(d) == c0 and len(c0) == 8
+    with open(os.path.join(d, "options.py"), "w") as fh:   # a changed module is other code, the watcher itself is not
+        fh.write("b = 3\n")
+    c1 = W.code_fingerprint(d)
+    with open(os.path.join(d, "watch.py"), "w") as fh:
+        fh.write("w = 1\n")
+    assert c1 != c0 and W.code_fingerprint(d) == c1
+    shutil.rmtree(d)
     for f in ("example1_rabbitVentricle", "example9_ratVentricle"):
         assert mda.read_header(os.path.join(EX, f + ".mdd")).recordingStopped is True
 

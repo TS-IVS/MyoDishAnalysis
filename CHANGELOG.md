@@ -5,6 +5,12 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
+- **Python watcher: the same code counted as other code when it ran from an exFAT volume** (2026-11-13). On volumes
+  without extended attributes macOS puts a file `._<name>.py` beside every module; `code_fingerprint` included these
+  files, so the index column `code` differed from that of the same code on another disk, and every recording counted
+  as analysed by other code (notice of the watcher, `--reanalyze outdated` would analyse all again). Files whose name
+  starts with a dot are now left out. The fingerprint of a normal folder does not change. MATLAB was not affected
+  (it lists `mda_*.m`). Test: `test_watch.py`.
 - **MATLAB GUI: numbers of two axes could not be read** (2026-11-12). Lower plot: the exponent of the y axis
   (x 10^4) sat hidden under the list *Lower plot*, so an amplitude of 11000 µN read 1.1; the axis now shows the full
   numbers. Stimulus plot: the tick labels of the right axis (interval to the previous pulse, ms) ran under the panel
