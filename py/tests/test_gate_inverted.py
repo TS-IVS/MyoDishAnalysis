@@ -324,6 +324,14 @@ def test_report_arrhythmic_pacing_and_stimulus_frequency():
     R = report_flags(S, uncertain=20, irregular=1)
     assert R.loc[1, "red"] == "noise index 1 (uncertain 30 %, extra 2 %, arrhythmic pacing)"
     assert list(report_flags(S, stim_frequency=60)["flags"]) == ["NCV", "", "NCV", ""]
+    # columns without any value (recording without stimuli; an empty column of the results .xlsx): flags computed
+    E = S.iloc[:2].copy()
+    E["nStimuli"] = 0; E["nMissedBeats"] = 0
+    E["stimFrequency"] = pd.Series([None, None], dtype=object); E["amplitude_CV"] = float("nan")
+    R = report_flags(E)
+    assert R["stimFrequency_Hz"].isna().all() and R["amplitudeCV_percent"].isna().all()
+    assert R["capture_percent"].isna().all()
+    assert list(R["flags"]) == ["N", "N"] and R.loc[0, "red"] == "noise index 30 (uncertain 30 %, unpaced)"
 
 
 def write_fast_stimulation(f):

@@ -353,7 +353,7 @@ au = NaN; board = ''; ext = false;
 if isempty(cc) || height(cc) == 0, return; end
 if ~all(ismember({'amplitude', 'diastolicSignal', 'beatType'}, cc.Properties.VariableNames)), return; end
 if ~isempty(s) && height(s) > 0 && ismember('repeatedSamples_percent', s.Properties.VariableNames)
-    rp = median(double(s.repeatedSamples_percent), 'omitnan');       %sensor board of the channel
+    rp = median(numCol(s.repeatedSamples_percent), 'omitnan');       %sensor board of the channel
     if ~isnan(rp)
         if rp < 20, board = 'old'; elseif rp > 35, board = 'MMC5983'; end
     end
@@ -369,7 +369,7 @@ if ~any(ok), return; end
 k = calibrationFactorOf(E, channel, ext, fl);
 if isnan(k) || k == 0, return; end
 if ~isempty(s) && height(s) > 0 && ismember('zeroForce', s.Properties.VariableNames)   %cross-check, see above
-    zero = median(double(s.zeroForce), 'omitnan'); off = offsetOf(E, channel);
+    zero = median(numCol(s.zeroForce), 'omitnan'); off = offsetOf(E, channel);
     if ~isnan(zero) && ~isnan(off) && off ~= 0
         kZero = zero / off;                              %uN per count of the Offset entry's own output mode
         okCal = abs(kZero / k - 1) <= 0.02;
@@ -497,7 +497,15 @@ end
 
 function v = colSum(s, name)
 v = 0;
-if ~isempty(s) && ismember(name, s.Properties.VariableNames), v = sum(double(s.(name)), 'omitnan'); end
+if ~isempty(s) && ismember(name, s.Properties.VariableNames), v = sum(numCol(s.(name)), 'omitnan'); end
+end
+
+
+function v = numCol(x)
+% numbers of a table column. A column without any value in a sheet of the results .xlsx is read as text (a csv file
+% gives NaN): NaN (2026-11-13; before, a recording without any stimulus got no flags from its .xlsx)
+if iscell(x) || isstring(x) || ischar(x), v = str2double(string(x)); else, v = double(x); end
+v = v(:);
 end
 
 
@@ -599,8 +607,8 @@ for k = 1:n
     if ~isempty(s) && height(s) > 0 && ismember('arrhythmicPacing', s.Properties.VariableNames)
         R.arrhythmicPacing(k) = any(truthy(s.arrhythmicPacing));
     end
-    if ~isempty(s) && ismember('stimFrequency', s.Properties.VariableNames) && any(~isnan(double(s.stimFrequency)))
-        R.stimFrequency_Hz(k) = max(double(s.stimFrequency), [], 'omitnan');
+    if ~isempty(s) && ismember('stimFrequency', s.Properties.VariableNames) && any(~isnan(numCol(s.stimFrequency)))
+        R.stimFrequency_Hz(k) = max(numCol(s.stimFrequency), [], 'omitnan');
     end
     arr = R.arrhythmicPacing(k);
     if nDet > 0                 %noise index: uncertain contractions in a channel that does not follow the pacing
@@ -621,7 +629,7 @@ for k = 1:n
         end
     end
     if ~isempty(s) && ismember('amplitude_CV', s.Properties.VariableNames)
-        cv = double(s.amplitude_CV); cv = cv(~isnan(cv));
+        cv = numCol(s.amplitude_CV); cv = cv(~isnan(cv));
         if ~isempty(cv), R.amplitudeCV_percent(k) = 100 * median(cv); end
     end
     nInv = 0;

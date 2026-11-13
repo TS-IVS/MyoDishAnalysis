@@ -5,6 +5,14 @@ MATLAB and Python versions have the same version number and give the same result
 
 ## [Unreleased]
 ### Fixed
+- **MATLAB: no flags for a recording without any stimulus** (2026-11-13). A column without any value in a sheet of
+  the results `.xlsx` is read as text; `mda_report('flags', ...)` (new since the red flag F) stopped at the empty
+  column `stimFrequency` of such a recording with *Conversion to double from cell is not possible*. The watcher then
+  wrote `flags: ...` into its report and no flags for the whole pass, the experiment reports had no detail pages,
+  and `MyoDishAnalysisWatch('flags', results, true)` left these recordings without flags. The analysis and its
+  result files were not affected. The columns of the summary are now read as numbers either way (also the sums,
+  `amplitude_CV`, `repeatedSamples_percent`, `zeroForce`). Results as csv files and the Python version were not
+  affected. Tests: `mda_testGateInverted`, `mda_testWatch`; `test_gate_inverted.py` (same case, passed before).
 - **Python watcher: the same code counted as other code when it ran from an exFAT volume** (2026-11-13). On volumes
   without extended attributes macOS puts a file `._<name>.py` beside every module; `code_fingerprint` included these
   files, so the index column `code` differed from that of the same code on another disk, and every recording counted

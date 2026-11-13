@@ -61,6 +61,18 @@ pass = isequal(D, {'A_report.pdf', 'A_slices.csv', n9}) && isequal(D9, {[n9 '.xl
     strcmp(X.outputs{1}, sprintf('%s.xlsx; %s_contractions.csv.gz; %s_pulses.csv.gz; %s_overview.csv.gz; %s_ch*.png (1)', ...
     n9, n9, n9, n9, n9)) && strcmp(MyoDishAnalysisWatch('resultFolder', res, ['A/' n9 '.mdd']), A9);
 ok = check(ok, pass, 'results in A/<name>/: <name>.xlsx (sheets), contractions / pulses / overview as .csv.gz, protocols');
+% recording without any stimulus (2026-11-13): its stimulus frequency is empty in the sheet summary and is read as
+% text from the .xlsx; the flags are computed all the same (copy of the results, flags from the result files)
+rN = fullfile(root, 'resNoStim'); copyfile(res, rN);
+xN = fullfile(rN, 'A', n9, [n9 '.xlsx']);
+SN = readSheet(xN, 'summary'); SN.stimFrequency = nan(height(SN), 1);
+writetable(SN, xN, 'Sheet', 'summary', 'WriteMode', 'overwritesheet');
+oN = detectImportOptions(xN, 'Sheet', 'summary');
+delete(fullfile(rN, 'mda_flags.csv'));
+[TN, missingN] = MyoDishAnalysisWatch('flags', rN, true);
+ok = check(ok, strcmp(oN.VariableTypes{strcmp(oN.VariableNames, 'stimFrequency')}, 'char') && ...
+    ~any(strcmp(missingN, ['A/' n9 '.mdd'])) && any(strcmp(TN.file, ['A/' n9 '.mdd'])), ...
+    'summary without stimulus frequency (.xlsx, read as text): flags computed');
 T = dir(fullfile(A9, '*.png'));
 ok = check(ok, numel(T) == 1 && strcmp(T(1).name, [n9 '_ch1.png']) && T(1).bytes > 20000, ...
     sprintf('trend image per channel: %s', strjoin({T.name}, ', ')));
