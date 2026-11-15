@@ -103,6 +103,19 @@ def test_watcher_state_reports_and_a_pass(site):
     code, w = _json(url + "/api/watcher")
     assert code == 200 and w["recordings"] == 1 and w["counts"] == {"ok": 1} and w["raw"] == os.path.abspath(raw)
     assert len(w["reports"]) == 1 and not w["run"]["running"] and not w["locked"] and w["lastAnalyzed"]
+    assert w["lock"] is None
+    lock = os.path.join(res, W.LOCK_NAME)  # lock file of a watcher elsewhere (2026-11-15): since, minutes to wait
+    with open(lock, "w") as fh:
+        fh.write("1\n")
+    t = time.time() - 15 * 60
+    os.utime(lock, (t, t))
+    code, w = _json(url + "/api/watcher")
+    assert w["locked"] and w["lock"]["wait_min"] == 45 and w["lock"]["age_min"] == 15
+    with open(lock, "w") as fh:  # left by a process of this computer that no longer runs: not locked (taken over)
+        fh.write(f"999999999 {W._host()} 2026-11-15 08:00:00\n")
+    code, w = _json(url + "/api/watcher")
+    assert not w["locked"] and w["lock"]["stale"] and w["lock"]["this_computer"]
+    os.remove(lock)
     code, j = _json(url + "/api/report?name=" + w["reports"][0])
     assert code == 200 and "watcher report" in j["text"] and "raw folder:" in j["text"]
     for bad in ("../mda_index.csv", "mda_index.csv", ""):

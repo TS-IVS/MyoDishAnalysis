@@ -461,12 +461,11 @@ class App:
         return dict(rows=int(len(T)), missing=list(missing))
 
     def watcher(self):
-        from ..watch import LOCK_HOURS, LOCK_NAME, read_index
+        from ..watch import lock_state, read_index
         X = read_index(self.results)
         counts = {str(k): int(v) for k, v in X["status"].value_counts().items()}
         last = max((a for a in X["analyzed"].astype(str) if a), default="")
-        lock = os.path.join(self.results, LOCK_NAME)
-        busy = os.path.isfile(lock) and (_dt.datetime.now().timestamp() - os.path.getmtime(lock)) < LOCK_HOURS * 3600
+        busy = lock_state(self.results)  # lock file of a watcher (2026-11-15): who, since, stale, wait_min
         d = os.path.join(self.results, "reports")
         reports = sorted((f for f in os.listdir(d) if _REPORT_RX.match(f)), reverse=True)[:30] \
             if os.path.isdir(d) else []
@@ -475,7 +474,8 @@ class App:
         from ..options import options
         from ..watch import _value_text
         D, O = options(), self._options_now()
-        return dict(recordings=int(len(X)), counts=counts, lastAnalyzed=last, locked=bool(busy), reports=reports,
+        return dict(recordings=int(len(X)), counts=counts, lastAnalyzed=last, reports=reports, lock=busy,
+                    locked=bool(busy) and not busy["stale"],
                     raw=self.raw or self.raw_of_last_report(), lastRaw=self.raw_of_last_report(), run=run,
                     settingsChanged=[n for n in D if n != "referenceBeat" and _value_text(O[n]) != _value_text(D[n])]
                     + sorted(self.watcher_options()))

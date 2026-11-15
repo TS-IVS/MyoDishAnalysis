@@ -524,7 +524,9 @@ async function loadWatcher() {
     $("run").disabled = $("dry").disabled = busy;
     let msg = "";
     if (w.run.running) msg = "A pass started here at " + w.run.started + " is running" + (w.run.dry_run ? " (list only)" : "") + " ...";
-    else if (w.locked) msg = "A watcher is running in this results folder right now (started elsewhere).";
+    else if (w.locked && w.lock.this_computer && w.lock.running) msg = "Another analysis is running in this results folder on this computer (last sign of life at " + w.lock.since + "). Start again when it has finished.";
+    else if (w.locked) msg = "Another analysis is using this results folder (" + (w.lock.host ? "computer " + w.lock.host + ", " : "") + "last sign of life at " + w.lock.since + "). If it stopped without clearing its lock (for example because the disk was disconnected), you can start again in " + w.lock.wait_min + " min.";
+    else if (w.lock && w.lock.stale) msg = "The analysis that last used this results folder stopped without clearing its lock (for example because the disk was disconnected). It no longer runs: a new analysis takes the folder over.";
     else if (w.run.error) msg = "The last pass started here failed: " + w.run.error;
     else if (w.run.finished) msg = (w.run.dry_run ? "List made at " : "Pass finished at ") + w.run.finished + ".";
     $("runMsg").textContent = msg; $("runMsg").className = "msg" + (w.run.error ? " err" : "");

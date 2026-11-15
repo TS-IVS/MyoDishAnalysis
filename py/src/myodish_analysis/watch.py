@@ -180,7 +180,11 @@ Errors are retried when the file, the version, the options or the code change, o
 is written after every analysed recording and once at the end of the pass.
 Lock file (2026-10-14): results_folder/mda_watch.lock exists while a pass runs; a second watcher on the same results
 folder (Python, MATLAB, another computer) skips its pass. It is refreshed after every recording and during long steps;
-a lock file that was not refreshed for 1 h (watcher crashed) is ignored.
+a lock file that was not refreshed for 1 h (watcher crashed) is ignored. Since 2026-11-15 it names the process and
+the computer: a lock file of this computer whose process no longer runs (or of this process while no pass runs) is
+taken over at once; the message of a skipped pass says who holds the lock, since when, and in how many minutes a pass
+can start if that watcher stopped. If the raw or the results folder goes away during a pass (e.g. its disk was
+disconnected), the pass stops without error rows and the recordings analysed until then are kept.
 
 Schedule (schedule='...', 2026-10-12; runs until Ctrl+C, in a terminal or as a background process):
     'daily 10:00'           every day at 10:00 (first pass at the next 10:00)
@@ -227,6 +231,7 @@ import math
 import os
 import re
 import shutil
+import socket
 import time
 import warnings
 import zlib
@@ -253,6 +258,7 @@ LOCK_NAME = "mda_watch.lock"
 LOCK_HOURS = 1.0  # a lock file not refreshed for this time is ignored (watcher crashed; refreshed after every
 #                  recording, 2026-10-14; before: 12 h after its creation)
 _LOCK_TOUCHED = [0.0]  # time of the last heartbeat of the lock file (_touch_lock)
+_PASS_RUNNING = [False]  # a pass runs in this process: a lock file of this process is its own (2026-11-15)
 ROBOCOPY_TIME = _dt.datetime(1990, 1, 1).timestamp()  # earlier file times: copy not finished (robocopy: 1980)
 WATCH_DEFAULTS = dict(interval=0.0, schedule=None, reanalyze="new", retry_errors=False, from_date=None, filter=None,
                       include=None, exclude=None, case_sensitive=False, parallel="skip",
@@ -557,30 +563,145 @@ def _touch_lock(lock, force=False):
     _LOCK_TOUCHED[0] = time.time()
     try:
         with open(lock, "w") as fh:
-            fh.write(f"{os.getpid()} {_dt.datetime.now():{_TIME_FMT}}\n")
+            fh.write(f"{os.getpid()} {_host()} {_dt.datetime.now():{_TIME_FMT}}\n")  # host since 2026-11-15
     except OSError:
         pass
 
 
+def _host():
+    """name of this computer as written in lock files (2026-11-15): without the domain, lower case (as MATLAB)"""
+    try:
+        h = socket.gethostname()
+    except OSError:
+        h = ""
+    h = re.sub(r"\s", "_", h.split(".")[0].strip().lower())
+    return h or "unknown"
+
+
+def _pid_running(pid):
+    """True if a process with this number runs on this computer, False if surely not, None if unknown (2026-11-15)"""
+    if pid <= 0:
+        return None
+    if os.name == "nt":
+        try:
+            import ctypes
+            k = ctypes.WinDLL("kernel32", use_last_error=True)
+            h = k.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return False if ctypes.get_last_error() == 87 else None  # ERROR_INVALID_PARAMETER: no such process
+            try:
+                code = ctypes.c_ulong()
+                if not k.GetExitCodeProcess(h, ctypes.byref(code)):
+                    return None
+                return code.value == 259  # STILL_ACTIVE
+            finally:
+                k.CloseHandle(h)
+        except Exception:  # noqa: BLE001 - unknown
+            return None
+    try:
+        os.kill(int(pid), 0)  # signal 0: only checks (POSIX)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # runs, under another user
+    except OSError:
+        return None
+    return True
+
+
+def lock_state(results_folder):
+    """lock file of a watcher in results_folder (2026-11-15): None if there is none or it was not refreshed for
+    LOCK_HOURS (ignored), else dict(path, pid, host (None: written before 2026-11-15), this_computer, running (True /
+    False / None = unknown), stale (of this computer and its process does not run, or of this process while no pass
+    runs: the next pass takes it over), since = clock time of the last refresh (HH:MM), age_min, wait_min = minutes
+    until it is ignored)"""
+    lock = os.path.join(results_folder, LOCK_NAME)
+    try:
+        t = os.path.getmtime(lock)
+        with open(lock, encoding="utf-8", errors="replace") as fh:
+            tok = fh.read(300).split()
+    except OSError:
+        return None
+    age = max(0.0, (time.time() - t) / 60)
+    if age >= LOCK_HOURS * 60:
+        return None
+    pid = int(tok[0]) if tok and tok[0].isdigit() else 0
+    host = tok[1].lower() if len(tok) >= 4 else None  # "pid host date time"; before 2026-11-15 "pid date time"
+    here = host is not None and host == _host()
+    running = None
+    if here:
+        running = _PASS_RUNNING[0] if pid == os.getpid() else _pid_running(pid)
+    return dict(path=lock, pid=pid, host=host, this_computer=here, running=running, stale=here and running is False,
+                since=_dt.datetime.fromtimestamp(t).strftime("%H:%M"), age_min=int(age),
+                wait_min=max(1, math.ceil(LOCK_HOURS * 60 - age)))
+
+
+def lock_message(st):
+    """message of a pass skipped because of a lock file (lock_state, 2026-11-15): who holds it, since when, and when
+    a pass can start"""
+    who = f"process {st['pid']}" if st["pid"] else "a watcher"
+    if st["this_computer"] and st["running"]:
+        return (f"another watcher is running on this computer ({who}, last refreshed at {st['since']}): pass skipped. "
+                f"Start again when it has finished.")
+    if st["host"]:
+        who += f" on {st['host']}"
+    return (f"another watcher is using this results folder ({who}, last refreshed at {st['since']}, {st['age_min']} "
+            f"min ago): pass skipped. If it stopped without removing its lock file (e.g. the disk was disconnected), "
+            f"start again in {st['wait_min']} min (the lock file is then ignored) or delete the lock file "
+            f"{st['path']}.")
+
+
+def lock_taken_over(st):
+    """note of a pass that takes over the lock file of a pass that no longer runs (2026-11-15)"""
+    return (f"lock file left by a pass that no longer runs (process {st['pid']} on this computer, last refreshed at "
+            f"{st['since']}): taken over")
+
+
+def _no_pass(res, o, msg):
+    """a pass that did not run or stopped (lock file, folder not reachable): (index, message)"""
+    if not o["quiet"]:
+        print(msg)
+    return read_index(res), msg
+
+
 def _one_pass(raw, res, o, aopts):
-    os.makedirs(res, exist_ok=True)
+    if not os.path.isdir(raw):  # e.g. its disk was disconnected (scheduled watcher; 2026-11-15)
+        return _no_pass(res, o, f"raw folder not reachable (disk disconnected?): {raw}: pass skipped")
+    try:
+        os.makedirs(res, exist_ok=True)
+    except OSError as ex:
+        return _no_pass(res, o, f"results folder not reachable ({_clean(str(ex))}): pass skipped")
     lock = os.path.join(res, LOCK_NAME)
-    if os.path.isfile(lock) and time.time() - os.path.getmtime(lock) < LOCK_HOURS * 3600:
-        msg = f"another watcher is running (lock file {lock}, refreshed within the last hour): pass skipped"
-        if not o["quiet"]:
-            print(msg)
-        return read_index(res), msg
+    st = lock_state(res)
+    note = ""
+    if st and st["stale"]:  # left by a pass that no longer runs on this computer (2026-11-15)
+        if not o["dry_run"]:  # (a dry run takes no lock)
+            note = lock_taken_over(st)
+            if not o["quiet"]:
+                print(note)
+    elif st:
+        return _no_pass(res, o, lock_message(st))
     if not o["dry_run"]:
         _touch_lock(lock, force=True)
+        _PASS_RUNNING[0] = True
     try:
-        return _scan_and_analyse(raw, res, o, aopts, None if o["dry_run"] else lock)
+        index, report = _scan_and_analyse(raw, res, o, aopts, None if o["dry_run"] else lock)
+    except OSError:
+        if os.path.isdir(res) and os.path.isdir(raw):
+            raise
+        kind, f = ("results", res) if not os.path.isdir(res) else ("raw", raw)  # e.g. disk disconnected (2026-11-15)
+        return _no_pass(res, o, f"{kind} folder not reachable any more (disk disconnected?): {f}: pass stopped. The "
+                                f"recordings analysed until then are kept; start again when the folder is back.")
     finally:
-        if not o["dry_run"] and os.path.isfile(lock):
-            try:
-                os.remove(lock)
-            except OSError as ex:
-                print(f"warning: lock file {lock} could not be deleted ({ex}); delete it, otherwise the next "
-                      f"passes are skipped for {LOCK_HOURS:g} h")
+        if not o["dry_run"]:
+            _PASS_RUNNING[0] = False
+            if os.path.isfile(lock):
+                try:
+                    os.remove(lock)
+                except OSError as ex:
+                    print(f"warning: lock file {lock} could not be deleted ({ex}); delete it, otherwise passes on "
+                          f"other computers are skipped for {LOCK_HOURS:g} h")
+    return index, (note + "\n" + report if note else report)
 
 
 def _scan_and_analyse(raw, res, o, aopts, lock=None):
@@ -664,6 +785,8 @@ def _scan_and_analyse(raw, res, o, aopts, lock=None):
 
     def store(row, block):
         nonlocal X
+        if row["status"] == "error" and not os.path.isdir(raw):  # raw folder gone (disk disconnected): no error row,
+            raise FileNotFoundError(f"raw folder not reachable: {raw}")  # the pass stops (_one_pass; 2026-11-15)
         if row["status"] in ("ok", "error"):
             blocks.append(block or f"{row['file']}\n  {row['status']}: {row['message']}\n")
             done.append(dict(row))
@@ -695,8 +818,12 @@ def _scan_and_analyse(raw, res, o, aopts, lock=None):
         # 'spawn' on all systems (default on macOS and Windows; fork in a multi-threaded process can deadlock)
         with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn")) as ex:
             futs = [ex.submit(_process, j) for j in jobs]
-            for fu in as_completed(futs):
-                store(*fu.result())
+            try:
+                for fu in as_completed(futs):
+                    store(*fu.result())
+            except BaseException:  # e.g. disk disconnected, Ctrl+C: recordings not started yet are not analysed
+                ex.shutdown(wait=False, cancel_futures=True)  # (before, all of them ran; 2026-11-15)
+                raise
     else:
         for j in jobs:
             store(*_process(j))

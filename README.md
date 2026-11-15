@@ -616,7 +616,11 @@ watcher only calls `MyoDishAnalysis`, `mda_readMdd` and `mda_protocols`.
   A lock file (`mda_watch.lock`) prevents two watchers on the same results folder (MATLAB, Python, another
   computer): a second watcher skips its pass. The running watcher refreshes it after every recording and during long
   steps (2026-10-14); a lock file not refreshed for 1 h (watcher crashed) is ignored (before: 12 h after its
-  creation). The index is written after every analysed recording and once at the end of the pass.
+  creation). Since 2026-11-15 the lock file names the process and the computer: one of this computer whose process no
+  longer runs is taken over at once, and the message of a skipped pass says who holds the lock, since when and in how
+  many minutes a pass can start. If the raw or the results folder goes away during a pass (e.g. the disk was
+  disconnected), the pass stops cleanly; the recordings analysed until then are kept, and the next pass goes on. The
+  index is written after every analysed recording and once at the end of the pass.
 * **Daily without an open MATLAB / terminal**: the scheduler of the operating system (cron / launchd / Windows task
   scheduler) with `mda-watch ...` or `matlab -batch "MyoDishAnalysisWatch(...)"`.
 * **Selecting recordings** (2026-10-13): `'include'` / `'exclude'` (Python `--include` / `--exclude`) take wildcard

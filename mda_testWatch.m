@@ -336,11 +336,61 @@ ok = check(ok, pass, 'include / exclude wildcard patterns, caseSensitive (dry ru
 fid = fopen(fullfile(root, 'res4', 'mda_watch.lock'), 'w'); fprintf(fid, '1\n'); fclose(fid);
 [X, msg] = MyoDishAnalysisWatch(raw, fullfile(root, 'res4'), q{:}, 'protocols', false);
 ok = check(ok, contains(msg, 'another watcher') && height(X) == 1, 'lock file of another watcher: pass skipped');
+ageFiles({fullfile(root, 'res4', 'mda_watch.lock')}, 2400);        %refreshed 40 min ago: 20 min to wait (2026-11-15)
+[X, msg] = MyoDishAnalysisWatch(raw, fullfile(root, 'res4'), q{:}, 'protocols', false);
+ok = check(ok, contains(msg, 'start again in 20 min') && contains(msg, ', 40 min ago)') && ...
+    contains(msg, 'disk was disconnected') && height(X) == 1, 'lock file: message says why and when to start again');
 % heartbeat (2026-10-14): a lock file not refreshed for 1 h is ignored (watcher crashed) and removed after the pass
 ageFiles({fullfile(root, 'res4', 'mda_watch.lock')}, 2 * 3600);
 [X, msg] = MyoDishAnalysisWatch(raw, fullfile(root, 'res4'), q{:}, 'protocols', false, 'report', false);
 ok = check(ok, ~contains(msg, 'another watcher') && height(X) == 2 && ~isfile(fullfile(root, 'res4', 'mda_watch.lock')), ...
     'lock file not refreshed for 1 h: ignored and removed after the pass');
+% lock file with process and computer (2026-11-15): of this MATLAB session while no pass runs, or of this computer
+% whose process no longer runs: taken over; of a running process: respected; of another computer: who, minutes to wait
+rL = fullfile(root, 'resLock'); mkdir(rL); lk = fullfile(rL, 'mda_watch.lock');
+writeLock(lk, feature('getpid'), thisHost());
+[X, msg] = MyoDishAnalysisWatch(raw, rL, q{:}, 'protocols', false, 'report', false);
+ok = check(ok, startsWith(msg, 'lock file left by a pass that no longer runs') && height(X) == 2 && ~isfile(lk), ...
+    'lock file of this MATLAB session while no pass runs: taken over');
+writeLock(lk, 1, 'othercomputer'); ageFiles({lk}, 2400);
+[X, msg] = MyoDishAnalysisWatch(raw, rL, q{:}, 'protocols', false, 'report', false);
+ok = check(ok, contains(msg, 'process 1 on othercomputer') && contains(msg, 'start again in 20 min') && ...
+    isfile(lk) && height(X) == 2, 'lock file of another computer: who, since when, minutes to wait');
+if ~ispc                                               %processes and folders going away (POSIX shell)
+    pf = [tempname '.pid'];
+    system(sprintf('sh -c ''echo $$ > "%s"''', pf)); deadPid = str2double(strtrim(fileread(pf)));
+    writeLock(lk, deadPid, upper(thisHost()));
+    [~, msg] = MyoDishAnalysisWatch(raw, rL, q{:}, 'protocols', false, 'report', false);
+    pass = contains(msg, 'taken over') && ~isfile(lk);
+    system(sprintf('sleep 60 > /dev/null 2>&1 & echo $! > "%s"', pf)); livePid = str2double(strtrim(fileread(pf)));
+    writeLock(lk, livePid, thisHost());
+    [~, msg] = MyoDishAnalysisWatch(raw, rL, q{:}, 'protocols', false, 'report', false);
+    system(sprintf('kill %d > /dev/null 2>&1', livePid)); delete(pf);
+    ok = check(ok, pass && contains(msg, 'running on this computer') && isfile(lk), ...
+        'lock file of this computer: process gone -> taken over, process running -> pass skipped');
+    delete(lk);
+    % results folder or raw folder gone during a pass (disk disconnected; the results folder cannot be made again):
+    % the pass stops without error rows; the recordings analysed until then are kept; the next pass goes on
+    rawG = fullfile(root, 'rawGone'); vol = fullfile(root, 'volume'); resG = fullfile(vol, 'res');
+    for k = 1:8, namedCopy(ex, fullfile(rawG, 'G'), sprintf('rec%d', k), [], 7200); end
+    mkdir(vol);
+    system(sprintf('(sleep 1; mv "%s" "%s_away"; chmod a-w "%s") > /dev/null 2>&1 &', resG, resG, vol));
+    [X, msg] = MyoDishAnalysisWatch(rawG, resG, q{:}, 'protocols', false, 'report', false);
+    pause(1.5);
+    pass = contains(msg, 'results folder not reachable any more') && height(X) == 0 && ...
+        isfile(fullfile([resG '_away'], 'mda_watch.lock'));
+    system(sprintf('chmod u+w "%s"', vol)); movefile([resG '_away'], resG);
+    [X, msg] = MyoDishAnalysisWatch(rawG, resG, q{:}, 'protocols', false, 'report', false);
+    ok = check(ok, pass && contains(msg, 'taken over') && height(X) == 8 && all(strcmp(X.status, 'ok')), ...
+        'results folder gone during a pass: pass stopped; when it is back, the next pass takes over and goes on');
+    resR = fullfile(root, 'resRawGone');
+    system(sprintf('(sleep 1; mv "%s" "%s_away") > /dev/null 2>&1 &', rawG, rawG));
+    [X, msg] = MyoDishAnalysisWatch(rawG, resR, q{:}, 'protocols', false, 'report', false);
+    pause(1.5); movefile([rawG '_away'], rawG);
+    ok = check(ok, contains(msg, 'raw folder not reachable any more') && height(X) < 8 && ...
+        ~any(strcmp(X.status, 'error')) && ~isfile(fullfile(resR, 'mda_watch.lock')), ...
+        'raw folder gone during a pass: pass stopped, no error rows');
+end
 
 % protocol periods excluded (default) or included (example 2: PD 67-327 s, ST 512-658 s)
 raw3 = fullfile(root, 'raw3');
@@ -607,6 +657,20 @@ ok = check(ok, pass, 'treatment without concentration in the labels: trend image
 if ok, disp('mda_testWatch: all tests passed.'); else, warning('mda_testWatch: TEST FAILED.'); end
 end
 
+
+function writeLock(f, pid, host)
+% lock file as a watcher writes it (2026-11-15: process, computer, time)
+fid = fopen(f, 'w'); fprintf(fid, '%d %s %s\n', pid, host, datestr(now, 'yyyy-mm-dd HH:MM:SS')); fclose(fid);
+end
+
+function h = thisHost()
+% name of this computer as in lock files (as MyoDishAnalysisWatch: without the domain, lower case)
+h = getenv('COMPUTERNAME');
+if isempty(h) && ~ispc
+    f = [tempname '.txt']; system(['hostname > "' f '"']); h = strtrim(fileread(f)); delete(f);
+end
+h = lower(strtok(strtrim(h), '.'));
+end
 
 function ok = check(ok, pass, txt)
 if pass, s = 'ok'; else, s = 'FAILED'; end

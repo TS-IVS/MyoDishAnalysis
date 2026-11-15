@@ -642,6 +642,17 @@ MATLAB and Python versions have the same version number and give the same result
   later events (`slice`, `doc`, `protocolRun`, `scheduleRun`) and ISO times inside structured lines.
 
 ### Changed
+- **Watcher: a lock file left behind no longer blocks the same computer for 1 h; a disk that goes away stops the
+  pass cleanly** (2026-11-15, MATLAB, Python and the browser page). The lock file of the results folder now names the
+  process and the computer. A lock file of this computer whose process no longer runs (or of this MATLAB session or
+  Python process while no pass runs) is taken over at once, with a note; one of a running process or of another
+  computer is respected as before (ignored when not refreshed for 1 h). The message of a skipped pass says who holds
+  the lock, since when, and in how many minutes a pass can start if that watcher stopped (before: only *another
+  watcher is running*). When the raw or the results folder goes away during a pass (e.g. its disk was disconnected),
+  the pass stops with a message instead of an exception: no error rows for the recordings that could not be read, the
+  recordings analysed until then are kept, and with several workers the recordings not started yet are no longer
+  run (before, all of them ran after the exception, without being entered in the index). A scheduled watcher whose
+  folder is not there skips the pass and goes on. Tests: `mda_testWatch`, `test_watch.py`, `test_web.py`.
 - **Both desktop GUIs: clearer words, nothing covered, fewer clicks** (2026-11-12, the small points of the review of
   2026-11-11; the large ones - start page, settings in basics and expert, help, watcher - go into a browser front
   end, after which the desktop GUIs get only corrections).

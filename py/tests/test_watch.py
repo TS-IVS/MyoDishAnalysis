@@ -340,6 +340,13 @@ def test_dry_run_filter_from_date_and_lock(raw, tmp_path, capsys):
         fh.write("1\n")
     X, msg = _wcsv(raw, res, quiet=True, protocols=False)
     assert "another watcher" in msg and len(X) == 1
+    # the message gives the reasons and in how many minutes a pass can start again (2026-11-15)
+    assert "disk was disconnected" in msg and any(f"start again in {k} min" in msg for k in (59, 60))
+    _age([lock], 40 * 60)  # refreshed 40 min ago: 20 min to wait
+    X, msg = _wcsv(raw, res, quiet=True, protocols=False)
+    assert "start again in 20 min" in msg and ", 40 min ago)" in msg and len(X) == 1
+    st = W.lock_state(res)
+    assert st["wait_min"] == 20 and st["age_min"] == 40 and len(st["since"]) == 5
     # heartbeat (2026-10-14): rewritten at most once a minute unless forced; a lock file not refreshed for 1 h is
     # ignored (watcher crashed) and removed at the end of the pass
     W._LOCK_TOUCHED[0] = 0.0
@@ -353,6 +360,83 @@ def test_dry_run_filter_from_date_and_lock(raw, tmp_path, capsys):
     _age([lock], 2 * 3600)
     X, msg = _wcsv(raw, res, quiet=True, protocols=False, report=False)
     assert "another watcher" not in str(msg) and len(X) == 2 and not os.path.isfile(lock)
+
+
+
+def test_lock_of_this_computer_and_folders_that_go_away(raw, tmp_path, monkeypatch):
+    """lock file with process and computer (2026-11-15): one of this computer whose process no longer runs, or of this
+    process while no pass runs, is taken over; one of a running process or of another computer is respected (message:
+    who, since when, minutes to wait). A raw or results folder that goes away during a pass (disk disconnected) stops
+    the pass without error rows; the recordings analysed until then are kept, the next pass goes on"""
+    import subprocess
+    res = str(tmp_path / "res")
+    os.makedirs(res)
+    lock = os.path.join(res, W.LOCK_NAME)
+
+    def write_lock(folder, pid, host):
+        with open(os.path.join(folder, W.LOCK_NAME), "w") as fh:
+            fh.write(f"{pid} {host} 2026-11-15 08:00:00\n")
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    write_lock(res, p.pid, W._host())  # its process no longer runs
+    X, msg = _wcsv(raw, res, quiet=True, protocols=False, report=False)
+    assert msg.startswith("lock file left by a pass that no longer runs") and len(X) == 2 and not os.path.isfile(lock)
+    write_lock(res, os.getpid(), W._host())  # this process, no pass running
+    X, msg = _wcsv(raw, res, quiet=True, protocols=False, report=False)
+    assert "taken over" in msg and not os.path.isfile(lock)
+    q = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        write_lock(res, q.pid, W._host().upper())  # a running process of this computer (name in other case)
+        st = W.lock_state(res)
+        assert st["this_computer"] and st["running"] and not st["stale"] and st["pid"] == q.pid
+        X, msg = _wcsv(raw, res, quiet=True, protocols=False, report=False)
+        assert "running on this computer" in msg and "Start again when it has finished" in msg and os.path.isfile(lock)
+    finally:
+        q.kill()
+        q.wait()
+    write_lock(res, 1, "othercomputer")  # another computer, refreshed 40 min ago
+    _age([lock], 40 * 60)
+    X, msg = _wcsv(raw, res, quiet=True, protocols=False, report=False)
+    assert "on othercomputer" in msg and "start again in 20 min" in msg and os.path.isfile(lock)
+    assert W.lock_state(res)["running"] is None
+    o = dict(W.WATCH_DEFAULTS, quiet=True)
+    X, msg = W._one_pass(str(tmp_path / "not_there"), res, o, {})  # scheduled watcher, disk not there
+    assert msg.startswith("raw folder not reachable") and len(X) == 2
+    # results folder gone when the first recording is stored (one and two workers): the pass stops, no exception
+    orig = W._write_index
+
+    def disconnect(r, X):
+        if os.path.basename(r).startswith("gone") and os.path.isdir(r):
+            shutil.move(r, r + "_away")
+        return orig(r, X)
+    monkeypatch.setattr(W, "_write_index", disconnect)
+    for workers in (1, 2):
+        r = str(tmp_path / f"gone{workers}")
+        t0 = time.time()
+        X, msg = _wcsv(raw, r, quiet=True, protocols=False, report=False, workers=workers)
+        assert "results folder not reachable any more" in msg and "pass stopped" in msg and len(X) == 0, workers
+        assert os.path.isfile(os.path.join(r + "_away", W.LOCK_NAME)) and time.time() - t0 < 120
+        monkeypatch.setattr(W, "_write_index", orig)
+        shutil.move(r + "_away", r)  # the disk is back: the lock file of this process is taken over, the pass goes on
+        X, msg = _wcsv(raw, r, quiet=True, protocols=False, report=False, workers=workers)
+        assert "taken over" in msg and list(X["status"]) == ["ok", "ok"]
+        assert not os.path.isfile(os.path.join(r, W.LOCK_NAME))
+        monkeypatch.setattr(W, "_write_index", disconnect)
+    monkeypatch.setattr(W, "_write_index", orig)
+    # raw folder gone before the second recording: no error row for it, the pass stops
+    orig_p, n = W._process, []
+
+    def raw_gone(job):
+        n.append(1)
+        if len(n) == 2:
+            shutil.move(raw, raw + "_away")
+        return orig_p(job)
+    monkeypatch.setattr(W, "_process", raw_gone)
+    r = str(tmp_path / "res_raw_gone")
+    X, msg = _wcsv(raw, r, quiet=True, protocols=False, report=False)
+    shutil.move(raw + "_away", raw)
+    assert "raw folder not reachable any more" in msg and list(W.read_index(r)["status"]) == ["ok"]
+    assert not os.path.isfile(os.path.join(r, W.LOCK_NAME))
 
 
 def test_command_line(raw, tmp_path):

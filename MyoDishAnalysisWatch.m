@@ -190,7 +190,12 @@ function [index, report] = MyoDishAnalysisWatch(rawFolder, resultsFolder, vararg
 %
 % LOCK FILE (2026-10-14): resultsFolder/mda_watch.lock exists while a pass runs; a second watcher on the same results
 %   folder (MATLAB timer, Python, another computer) skips its pass. It is refreshed after every recording and during
-%   long steps; a lock file that was not refreshed for 1 h (watcher crashed) is ignored.
+%   long steps; a lock file that was not refreshed for 1 h (watcher crashed) is ignored. Since 2026-11-15 it names
+%   the process and the computer: a lock file of this computer whose process no longer runs (or of this MATLAB session
+%   while no pass runs) is taken over at once; the message of a skipped pass says who holds the lock, since when, and
+%   in how many minutes a pass can start if that watcher stopped. If the raw or the results folder goes away during a
+%   pass (e.g. its disk was disconnected), the pass stops without error rows; the recordings analysed until then are
+%   kept.
 %
 % OPTIONS (name/value pairs)
 %   'schedule', s            passes on a schedule in the background (see SCHEDULE; default '' = one pass)
@@ -392,14 +397,28 @@ end
 
 % =====================================================================================================
 function [X, report, nDone] = onePass(raw, res, W, args)
-if ~isfolder(res), mkdir(res); end
-lock = fullfile(res, 'mda_watch.lock');
 nDone = 0;
-d = dir(lock);
-if ~isempty(d) && (now - d.datenum) * 24 < lockStaleHours()
-    report = sprintf('another watcher is running (lock file %s, refreshed within the last hour): pass skipped', lock);
-    if ~W.quiet, fprintf('%s\n', report); end
-    X = readIndex(res);
+if ~isfolder(raw)                                      %e.g. its disk was disconnected (scheduled watcher; 2026-11-15)
+    [X, report] = noPass(res, W, sprintf('raw folder not reachable (disk disconnected?): %s: pass skipped', raw));
+    return;
+end
+if ~isfolder(res)
+    [okDir, msgDir] = mkdir(res);
+    if ~okDir
+        [X, report] = noPass(res, W, sprintf('results folder not reachable (%s): pass skipped', msgDir));
+        return;
+    end
+end
+lock = fullfile(res, 'mda_watch.lock');
+L = lockState(res);
+note = '';
+if ~isempty(L) && L.stale                              %left by a pass that no longer runs on this computer
+    if ~W.dryRun                                       %(a dry run takes no lock)
+        note = lockTakenOver(L);
+        if ~W.quiet, fprintf('%s\n', note); end
+    end
+elseif ~isempty(L)
+    [X, report] = noPass(res, W, lockMessage(L));
     return;
 end
 W.lockFile = '';
@@ -407,8 +426,26 @@ if ~W.dryRun
     W.lockFile = lock;
     touchLock(lock, true);
     cleanup = onCleanup(@() deleteIfExists(lock)); %#ok<NASGU>
+    passRunning(true);
+    running = onCleanup(@() passRunning(false)); %#ok<NASGU>
 end
-[X, report, nDone] = scanAndAnalyse(raw, res, W, args);
+try
+    [X, report, nDone] = scanAndAnalyse(raw, res, W, args);
+catch ME
+    if isfolder(res) && isfolder(raw), rethrow(ME); end
+    if ~isfolder(res), kind = 'results'; f = res; else, kind = 'raw'; f = raw; end   %e.g. disk disconnected
+    [X, report] = noPass(res, W, sprintf(['%s folder not reachable any more (disk disconnected?): %s: pass ' ...
+        'stopped. The recordings analysed until then are kept; start again when the folder is back.'], kind, f));
+    nDone = 0;
+end
+if ~isempty(note), report = sprintf('%s\n%s', note, report); end
+end
+
+
+function [X, report] = noPass(res, W, report)
+% a pass that did not run or stopped (lock file, folder not reachable): index and message
+if ~W.quiet, fprintf('%s\n', report); end
+X = readIndex(res);
 end
 
 
@@ -540,6 +577,9 @@ for k = 1:size(todo,1)
         if isempty(row.message), row.message = mark; else, row.message = [mark ' | ' row.message]; end
     end
     row.seconds = round(toc(tic0) * 10) / 10;
+    if strcmp(row.status, 'error') && ~isfolder(raw)  %raw folder gone (disk disconnected): no error row, the pass stops
+        error('MyoDishAnalysisWatch:folderGone', 'raw folder not reachable: %s', raw);   %(onePass; 2026-11-15)
+    end
     if any(strcmp(row.status, {'ok', 'error'}))
         if isempty(block), block = sprintf('%s\n  %s: %s\n', rel, row.status, row.message); end
         blocks{end+1} = block; %#ok<AGROW>
@@ -952,7 +992,8 @@ st = tm.UserData;
 if now < st.next, return; end
 try
     [~, rep, n] = onePass(st.raw, st.res, st.W, st.args);
-    if startsWith(rep, 'another watcher'), st.lastText = rep; else, st.lastText = sprintf('%d recording(s) analysed', n); end
+    if startsWith(rep, 'another watcher') || contains(rep, 'not reachable'), st.lastText = rep;
+    else, st.lastText = sprintf('%d recording(s) analysed', n); end
 catch ME
     st.lastText = clean(['error: ' ME.message]);
     if ~st.W.quiet, fprintf(2, 'MyoDishAnalysisWatch: %s\n', st.lastText); end
@@ -2447,7 +2488,8 @@ if ~isfile(f), return; end
 try
     delete(f);
 catch ME
-    warning('MyoDishAnalysisWatch: lock file %s could not be deleted (%s); delete it, otherwise the next passes are skipped for 1 h.', f, ME.message);
+    warning(['MyoDishAnalysisWatch: lock file %s could not be deleted (%s); delete it, otherwise passes on ' ...
+        'other computers are skipped for 1 h.'], f, ME.message);
 end
 end
 
@@ -2463,8 +2505,107 @@ if ~force && ~isempty(last) && (now - last) * 86400 < 60, return; end
 last = now;
 fid = fopen(lock, 'w');
 if fid < 0, return; end
-fprintf(fid, '%d %s\n', feature('getpid'), datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+fprintf(fid, '%d %s %s\n', feature('getpid'), hostName(), datestr(now, 'yyyy-mm-dd HH:MM:SS'));   %host: 2026-11-15
 fclose(fid);
+end
+
+
+function L = lockState(res)
+% lock file of a watcher in the results folder (2026-11-15): [] if there is none or it was not refreshed for
+% lockStaleHours() (ignored), else a struct: path, pid, host ('' = written before 2026-11-15), here (this computer),
+% running (1 / 0 / NaN = unknown), stale (of this computer and its process does not run, or of this MATLAB session while
+% no pass runs: the next pass takes it over), since (clock time of the last refresh, HH:MM), ageMin, waitMin (minutes
+% until it is ignored)
+L = [];
+lock = fullfile(res, 'mda_watch.lock');
+d = dir(lock);
+if isempty(d), return; end
+age = max(0, (now - d.datenum) * 24 * 60);
+if age >= lockStaleHours() * 60, return; end
+tok = {};
+try
+    tok = strsplit(strtrim(fileread(lock)));
+catch
+end
+pid = 0; host = '';
+if ~isempty(tok) && ~isempty(regexp(tok{1}, '^\d+$', 'once')), pid = str2double(tok{1}); end
+if numel(tok) >= 4, host = lower(tok{2}); end           %'pid host date time'; before 2026-11-15 'pid date time'
+here = ~isempty(host) && strcmp(host, hostName());
+running = NaN;
+if here
+    if pid == feature('getpid'), running = double(passRunning()); else, running = pidRunning(pid); end
+end
+L = struct('path', lock, 'pid', pid, 'host', host, 'here', here, 'running', running, 'stale', here && running == 0, ...
+    'since', datestr(d.datenum, 'HH:MM'), 'ageMin', floor(age), 'waitMin', max(1, ceil(lockStaleHours() * 60 - age)));
+end
+
+
+function s = lockMessage(L)
+% message of a pass skipped because of a lock file (lockState, 2026-11-15): who holds it, since when, and when a pass
+% can start
+if L.pid > 0, who = sprintf('process %d', L.pid); else, who = 'a watcher'; end
+if L.here && L.running == 1
+    s = sprintf(['another watcher is running on this computer (%s, last refreshed at %s): pass skipped. Start ' ...
+        'again when it has finished.'], who, L.since);
+    return;
+end
+if ~isempty(L.host), who = sprintf('%s on %s', who, L.host); end
+s = sprintf(['another watcher is using this results folder (%s, last refreshed at %s, %d min ago): pass skipped. ' ...
+    'If it stopped without removing its lock file (e.g. the disk was disconnected), start again in %d min (the ' ...
+    'lock file is then ignored) or delete the lock file %s.'], who, L.since, L.ageMin, L.waitMin, L.path);
+end
+
+
+function s = lockTakenOver(L)
+% note of a pass that takes over the lock file of a pass that no longer runs (2026-11-15)
+s = sprintf(['lock file left by a pass that no longer runs (process %d on this computer, last refreshed at %s): ' ...
+    'taken over'], L.pid, L.since);
+end
+
+
+function r = passRunning(v)
+% a pass runs in this MATLAB session (2026-11-15): a lock file of this session is its own only while one runs
+persistent running
+if isempty(running), running = false; end
+if nargin > 0, running = logical(v); end
+r = running;
+end
+
+
+function h = hostName()
+% name of this computer as written in lock files (2026-11-15): without the domain, lower case (as Python's
+% socket.gethostname); the command hostname writes to a file (no output captured)
+persistent name
+if isempty(name)
+    name = getenv('COMPUTERNAME');
+    if isempty(name) && ~ispc
+        f = [tempname '.txt'];
+        try
+            if system(['hostname > "' f '" 2> /dev/null']) == 0 && isfile(f), name = strtrim(fileread(f)); end
+        catch
+        end
+        if isfile(f), delete(f); end
+    end
+    name = regexprep(lower(strtok(strtrim(name), '.')), '\s', '_');
+    if isempty(name), name = 'unknown'; end
+end
+h = name;
+end
+
+
+function r = pidRunning(pid)
+% 1 if a process with this number runs on this computer, 0 if it surely does not, NaN if unknown (2026-11-15)
+r = NaN;
+if ~(pid > 0), return; end
+try
+    if ispc
+        st = system(sprintf('tasklist /FI "PID eq %d" /NH | find " %d " > NUL 2>&1', pid, pid));
+    else
+        st = system(sprintf('ps -p %d > /dev/null 2>&1', pid));
+    end
+    r = double(st == 0);
+catch
+end
 end
 
 
